@@ -1370,7 +1370,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
                 page = page_html(p, viewed(cached(p, self.sess["name"]), access(self.sess, p)))
             else:
                 page = page_of(p).read_text()
-            self.reply(200, page.replace(KEY_SLOT, key, 1).replace(ME_SLOT, json.dumps(me), 1).encode(), "text/html; charset=utf-8")
+            self.reply(200, page.replace(KEY_SLOT, key, 1).replace(ME_SLOT, json.dumps(me).replace("</", "<\\/"), 1).encode(), "text/html; charset=utf-8")
 
         def post(self):
             raw = self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 64 << 20)) or b"{}"

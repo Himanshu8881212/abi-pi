@@ -62,6 +62,7 @@ a{color:var(--ink);text-underline-offset:3px}.empty{color:var(--mute);font-style
 
 JS = r"""
 const tip=document.querySelector('.tip');
+const E=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));  // text into HTML
 function showTip(e,t){tip.textContent=t;tip.style.display='block';tip.style.left=(e.clientX+12)+'px';tip.style.top=(e.clientY+12)+'px'}
 function hideTip(){tip.style.display='none'}
 function fmt(v,f){if(v===null||v===undefined)return'—';if(typeof v!=='number')return String(v);f=f||{};
@@ -77,7 +78,7 @@ function table(box,d){const t=document.createElement('table');const cols=d.colum
   rows.forEach(r=>{const tr=t.insertRow();r.forEach((v,i)=>{const td=tr.insertCell();td.textContent=fmt(v,d.format[cols[i]]);if(typeof v==='number')td.className='n'})})}
  draw();const s=document.createElement('div');s.className='scroll';s.appendChild(t);box.appendChild(s)}
 function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;const ms=d.columns.slice(nd);const type=d.type;
- if(type==='kpi'||(nd===0&&d.rows.length===1)){box.innerHTML='';ms.forEach(m=>{const k=document.createElement('div');k.className='kpi';k.innerHTML=`<div class="v">${fmt(d.rows[0]?.[d.columns.indexOf(m)],d.format[m])}</div><div class="l">${d.measures[m]||m}</div>`;box.appendChild(k)});return}
+ if(type==='kpi'||(nd===0&&d.rows.length===1)){box.innerHTML='';ms.forEach(m=>{const k=document.createElement('div');k.className='kpi';k.innerHTML=`<div class="v">${E(fmt(d.rows[0]?.[d.columns.indexOf(m)],d.format[m]))}</div><div class="l">${E(d.measures[m]||m)}</div>`;box.appendChild(k)});return}
  if(nd!==1||!['bar','line','pie','combo','funnel','treemap','waterfall','scatter','map'].includes(type)){table(box,d);return}
  const W=box.clientWidth||600,H=260,L=60,B=40,svg=el('svg',{viewBox:`0 0 ${W} ${H}`,width:'100%'},box);
  const rows=d.rows.filter(r=>ms.some((m,i)=>typeof r[nd+i]==='number'));const vals=rows.flatMap(r=>ms.map((m,i)=>r[nd+i]||0));
@@ -94,8 +95,8 @@ function csv(d){const q=v=>v===null?'':/[",\n]/.test(String(v))?'"'+String(v).re
 function render(R){const tabs=document.querySelector('nav.tabs'),grid=document.querySelector('.grid');
  function page(p){grid.innerHTML='';[...tabs.children].forEach(b=>b.classList.toggle('on',b.dataset.id===p.id));
   p.visuals.slice().sort((a,b)=>(a.layout.y-b.layout.y)||(a.layout.x-b.layout.x)).forEach(v=>{const c=document.createElement('div');c.className='card';c.style.gridColumn=`span ${Math.min(12,v.layout.w||6)}`;
-   c.innerHTML=`<h3><span>${v.title||v.id}</span><span class="tools"><button data-a="t">table</button><button data-a="c">csv</button><button data-a="h">how</button></span></h3><div class="body"></div><pre class="how" hidden></pre>`;grid.appendChild(c);
-   const body=c.querySelector('.body');if(v.text!==undefined){c.querySelector('.tools').remove();body.textContent=v.text;body.style.whiteSpace='pre-wrap';return}if(v.error){body.innerHTML=`<div class="bad">${v.error}</div>`;return}
+   c.innerHTML=`<h3><span>${E(v.title||v.id)}</span><span class="tools"><button data-a="t">table</button><button data-a="c">csv</button><button data-a="h">how</button></span></h3><div class="body"></div><pre class="how" hidden></pre>`;grid.appendChild(c);
+   const body=c.querySelector('.body');if(v.text!==undefined){c.querySelector('.tools').remove();body.textContent=v.text;body.style.whiteSpace='pre-wrap';return}if(v.error){body.innerHTML=`<div class="bad">${E(v.error)}</div>`;return}
    let asTable=false;const draw=()=>{body.innerHTML='';asTable?table(body,v.data):chart(body,v.data)};requestAnimationFrame(draw);
    c.querySelector('[data-a=t]').onclick=()=>{asTable=!asTable;draw()};c.querySelector('[data-a=c]').onclick=()=>csv(v.data);
    c.querySelector('[data-a=h]').onclick=()=>{const h=c.querySelector('.how');h.hidden=!h.hidden;h.textContent=v.how}})}

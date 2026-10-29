@@ -306,3 +306,12 @@ def test_people_sign_in_with_their_abi_account_and_get_only_their_access():
             assert "You have no project yet" in page and "window.APP" not in page
     finally:
         s.shutdown()
+
+
+def test_no_html_template_puts_text_in_unescaped():
+    """Measure names, titles and errors come from projects (anyone with Editor): into HTML only through E()."""
+    import render
+    src = app.JS + render.JS
+    bad = [m.group(0)[:80] for m in re.finditer(r"(?:innerHTML|outerHTML|insertAdjacentHTML\([^,]+,)\s*=?\s*`[^`]*", src)
+           if re.search(r"\$\{(?!E\()", m.group(0))]
+    assert not bad, bad
