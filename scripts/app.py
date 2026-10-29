@@ -186,7 +186,10 @@ JS = r"""
 const D=window.APP, KEY='__ABI_APP_KEY__', LIVE=location.protocol.startsWith('http')&&!KEY.startsWith('__');
 const MOBILE=matchMedia('(max-width: 820px), (pointer: coarse) and (max-width: 1100px)').matches;
 let CID='';try{CID=localStorage.getItem('abi-client')||'';if(!CID){CID=Math.random().toString(36).slice(2,12);localStorage.setItem('abi-client',CID)}}catch(e){CID=Math.random().toString(36).slice(2,12)}
-{const f0=window.fetch.bind(window);window.fetch=(u,o={})=>{if(typeof u==='string'&&u.startsWith('/')){o.headers={...(o.headers||{}),'X-Abi-Client':CID,'X-Abi-Mobile':MOBILE?'1':'0','X-Abi-Project':D.project}}return f0(u,o)}}
+{const f0=window.fetch.bind(window);window.fetch=(u,o={})=>{if(typeof u==='string'&&u.startsWith('/')){o.headers={...(o.headers||{}),'X-Abi-Client':CID,'X-Abi-Mobile':MOBILE?'1':'0','X-Abi-Project':D.project}}
+ return f0(u,o).then(r=>{if(r.status===403)r.clone().json().then(b=>{if(b.error==='forbidden')stale()}).catch(()=>{});return r})}}
+// the app restarted (new page key) or the session ended: say so once, instead of 'forbidden' everywhere
+function stale(){if(window.__stale)return;window.__stale=1;const b=document.createElement('div');b.className='toast';b.style.cssText='position:fixed;top:64px;bottom:auto;left:50%;right:auto;height:auto;width:max-content;max-width:calc(100vw - 32px);transform:translateX(-50%);z-index:30;display:flex;gap:12px;align-items:center';b.textContent='The app restarted or your session ended. ';const a=document.createElement('button');a.className='btn pri';a.textContent='Reload';a.onclick=()=>location.reload();b.append(a);document.body.append(b)}
 if(MOBILE)document.documentElement.classList.add('mobile');
 const $=(s,r=document)=>r.querySelector(s), h=(t,c,x)=>{const e=document.createElement(t);if(c)e.className=c;if(x!==undefined)e.textContent=x;return e};
 const wait=ms=>new Promise(z=>setTimeout(z,ms));
@@ -293,7 +296,7 @@ function datasets(box){const g=h('div','cards');const bar=h('div','row bar top')
 
 // ---------- Model ----------
 // Edits: ABI's write-back on the gold tables (edit_cells; history, undo, proposals, input tables)
-function editsPage(box){const T=D.model?.tables||{},keyed=Object.keys(T).filter(t=>(T[t].key||[]).length&&!t.startsWith('ml_')).sort();
+function editsPage(box){const T=D.model?.tables||{},keyed=Object.keys(T).filter(t=>(T[t].key||[]).length&&!t.startsWith('ml_')&&t!==(D.model?.date_table?.table||'calendar')).sort();  // ABI makes the date table: nothing to edit
  const top=h('div','row'),sel=h('select','f');keyed.forEach(t=>sel.append(new Option(`${t} (${T[t].kind||''})`,t)));top.append(h('label','l','Table'),sel);box.append(top);
  const grid=card('Rows','the edited table, as every query sees it'),hist=card('Edit history','who changed what; undo a batch'),prop=card('Waiting for approval','edits the agent proposed'),g=h('div','cards');
  grid.style.gridColumn=hist.style.gridColumn='1/-1';g.append(grid,prop,hist);box.append(g);let off=0,staged=[];
@@ -792,6 +795,7 @@ async function sendChat(){const t=inp.value.trim();if(!t)return;if(!LIVE){bubble
 $('#chat .send').onclick=sendChat;inp.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChat()}};
 $('#chat .stop').onclick=()=>fetch('/chat/stop',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'});
 if(LIVE){const es=new EventSource('/events?k='+encodeURIComponent(KEY)+'&c='+CID+'&m='+(MOBILE?1:0)+'&p='+encodeURIComponent(D.project));
+ es.onerror=()=>{if(es.readyState===2)stale()};  // the stream was refused: a restart or an ended session
  es.onmessage=async ev=>{const e=JSON.parse(ev.data);
   if(e.type==='show'){PENDING.filters=e.filters||null;if(e.page==='explore'&&e.query){const q={measures:e.query.measures||[],dimensions:(e.query.dimensions||[]).slice(0,1),filters:e.query.filters||[]};PENDING.explore={...q,chart:e.chart};MINE.unshift({name:'Agent: '+q.measures.join(', ')+(q.dimensions[0]?' by '+q.dimensions[0]:''),q,type:e.chart||'bar',at:new Date().toISOString().slice(0,16).replace('T',' ')});saveMine();sidebar()}const nv=h('div','m nav','→ '+(e.page==='report'?'report '+e.report:e.page)+(e.note?' · '+e.note:''));nv.onclick=()=>show(e.page==='report'?'rep:'+e.report:e.page);log.append(nv);log.scrollTop=log.scrollHeight;const wasFull=chatBox.classList.contains('full');const k=e.page==='report'?'rep:'+e.report:e.page;show(k);if(wasFull)openChat(true);setTimeout(()=>highlight(e.item),400);if(e.note)toast('Agent: '+e.note)}
   else if(e.type==='data'){Object.assign(D,e.data);const k=CUR;sidebar();show(k);vc()}
