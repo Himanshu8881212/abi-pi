@@ -186,9 +186,10 @@ Before hosting on the local infrastructure:
 - [x] Tests pass (`.venv/bin/python -m pytest -q tests`).
 - [ ] Put the app behind an HTTPS reverse proxy (it speaks HTTP; the proxy should send `X-Forwarded-Proto: https`) and run it with `--open` only behind that proxy.
 - [ ] Configure ABI's email delivery so Users & access invitations and flow emails reach people.
-- [ ] Update the ABI preview to a build with MULTI-EXPORT (PPTX and several pages in one file) and the line-chart clipping fix in its PDF renderer.
+- [x] ABI preview updated on 29 Oct 2026 (owner's approval) from 87018dff to fcc3aa35 with ABI's own `preview.sh` (backup first: Postgres dump and the old UI in `~/abi-preview-backups/`): PPTX (16:9, a slide per page, speaker notes say how each number is calculated) and several pages in one PDF work, also from the app's Export.
+- [ ] ABI's PDF renderer still clips line charts on the right (ABI's code; use PPTX for board material until ABI fixes it).
 - [x] Remotion's licence (video export): the owner confirmed on 29 Oct 2026 that they qualify for Remotion's free licence (individuals and companies up to 3 people). A larger company needs Remotion's company licence.
-- [ ] Lower ABI's snapshot retention (`ABI_SNAPSHOT_RETENTION_DAYS`) or watch the disk: each refresh keeps DuckLake snapshots for 30 days.
+- [x] ABI's worker runs with `ABI_SNAPSHOT_RETENTION_DAYS=7` (was 30): the nightly purge (03:17) keeps a week. A restart of the preview by `preview.sh` needs the variable again.
 
 End-to-end, stress and edge cases (from round 14): `tests/test_e2e.py` drives a real app server on the throwaway project `demo/pi_app_test` through the page's own routes: measures, glossary, queries and reports created, queried and removed; exports (PDF, CSV, project zip) and the import check; commit and undo; odd input (unicode, a 5000-character name, nulls, a bad expression, a bad ID); 40 parallel requests from 7 browsers; rapid mode flips; an unknown project in the header; a 65 MB body. Steps ABI confirms are left for a person.
 
