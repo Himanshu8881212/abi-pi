@@ -153,6 +153,13 @@ def test_viewer_mode_is_read_only_on_the_server(srv):
         post(port, "/mode", {"mode": "developer"}, key)
 
 
+def test_an_agent_only_reaches_its_own_browser(srv):
+    port, key, _ = srv
+    assert app.HUBS[HUB.hid] is HUB, "the chat agent is told the id its hub is stored under"
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/agent/mode", b"{}", {"X-Abi-Agent": HUB.agent_key, "X-Abi-Client": "someone/else"})
+    assert json.loads(urllib.request.urlopen(req).read())["mode"] == "viewer", "an unknown browser fails closed, never another's Developer"
+
+
 def test_switcher_lists_workspaces_and_their_projects(srv):
     port, key, _ = srv
     _, r = post(port, "/projects", {}, key)
@@ -258,6 +265,15 @@ def test_people_sign_in_with_their_abi_account_and_get_only_their_access():
         req = urllib.request.Request(f"http://127.0.0.1:{port}/admin/users", b"{}", {"Cookie": sid, "X-Abi-App": key, "Content-Type": "application/json"})
         users = json.loads(urllib.request.urlopen(req).read())["result"]["users"]
         assert any(u["name"] == "himanshu" for u in users)
+        tok = next(x.token for x in s.hubs.values() if x.user == "himanshu")
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
+        c.request("POST", "/signout", "", {"Cookie": sid})
+        assert c.getresponse().status == 303
+        page = urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{port}/", headers={"Cookie": sid})).read().decode()
+        assert "Sign in with your ABI account" in page, "signed out: the old cookie opens nothing"
+        with pytest.raises(abi.ActionError) as e2, abi.as_user(tok):
+            abi.call("list_projects")
+        assert e2.value.status == 401, "sign-out ends the ABI session too"
         req = urllib.request.Request(f"http://127.0.0.1:{port}/api/semantic_model", json.dumps({"project": P}).encode(), {"X-Abi-App": key, "Content-Type": "application/json"})
         with pytest.raises(urllib.error.HTTPError) as e:
             urllib.request.urlopen(req)

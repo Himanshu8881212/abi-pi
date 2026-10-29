@@ -143,3 +143,12 @@ explorer tab in a throwaway project: glossary, dataset, ML, flow, tool + agent, 
 and tracked-file hand edits, every tab renders). All pass; two live tests were fixed on the way (an invented-number
 check whose prompt contained the number, which ABI's D-75 rightly grounds; a role check that asserted "not tried"
 instead of "not changed").
+
+## Release loop
+
+Each round attacks one area like a reviewer and a pentester, fixes the root cause with a test, and is committed.
+
+| # | Area | Finding | Fix |
+|---|---|---|---|
+| 1 | Sessions / agent | The chat agent named its browser by the raw id while hubs are keyed `person/browser`: the lookup missed and fell back to every Developer page, so one person's agent could steer others' pages, and the Viewer guard could read another browser's Developer mode (an editor in Viewer could get changes made). | The agent gets its hub's own id (`Hub.hid`); an id the server doesn't know answers `viewer` (fail closed). Test: `test_an_agent_only_reaches_its_own_browser`. |
+| 2 | Sessions | Sign-out and the 12 h expiry only forgot the session in the app; the ABI session (token) stayed valid. A session ABI revoked kept the person in a half-working app. | Sign-out and expiry call ABI's `/api/logout`; a 401 from ABI ends the app session (back to sign-in). Test: sign-out makes the token 401. |

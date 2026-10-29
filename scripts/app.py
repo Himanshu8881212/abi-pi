@@ -963,6 +963,7 @@ class Hub:
     def __init__(self, project: str, url: str, agent_key: str, cid: str = "", mobile: bool = False, user: str = "", token: str | None = None):
         self.project, self.url, self.agent_key, self.cid, self.mobile = project, url, agent_key, cid, mobile
         self.user, self.token, self.view = user, token, lambda d: d  # view: the person's sections and reports only
+        self.hid = f"{user}/{cid}" if user else cid  # the key in HUBS; the chat agent steers this hub only
         self.clients: list = []
         self.lock = threading.Lock()
         self.pi = None
@@ -1043,7 +1044,7 @@ class Hub:
             self.chat_switch(None)
         if not self.pi or self.pi.poll() is not None:
             env = {**os.environ, "ABI_TOKEN": self.token or abi.token(), "ABI_APP_URL": self.url, "ABI_APP_PROJECT": self.project,
-                   "ABI_APP_AGENT_KEY": self.agent_key, "ABI_APP_CLIENT": self.cid}
+                   "ABI_APP_AGENT_KEY": self.agent_key, "ABI_APP_CLIENT": self.hid}
             session = str(self.chats_dir / f"{self.chat_id}.session.jsonl")  # Pi's own transcript: this chat's context
             self.pi = subprocess.Popen(["pi", "--mode", "rpc", "--session", session], cwd=abi.ROOT, env=env, text=True, bufsize=1,
                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
@@ -1193,8 +1194,10 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
         try:
             with abi.as_user(sess["token"]):
                 r = abi._open("GET", f"/api/projects/{p}/me")[1].get("role")
-        except abi.ActionError:
+        except abi.ActionError as e:
             r = None
+            if e.status == 401:  # ABI ended the session (signed out elsewhere, account removed): sign in again
+                sess["dead"] = True
         sess["roles"][p] = (r, time.time())
         return r
 
@@ -1235,7 +1238,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
 
     def hub_for(cid: str, mobile: bool = False, want: str | None = None, sess: dict | None = None) -> Hub:
         cid = re.sub(r"[^\w-]", "", cid)[:40] or "default"
-        hid = f"{sess['name']}/{cid}" if sess else cid  # a browser's hub is its signed-in person's, never another's
+        hid = f"{sess['name']}/{cid}" if sess else cid  # a browser's hub is its signed-in person's, never another's (Hub.hid)
         h = HUBS.get(hid)
         if not h:
             first = default if role_of(sess, default) else next(iter(mine(sess)), default)
@@ -1272,8 +1275,9 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
         def session(self) -> dict | None:
             c = re.search(r"abi_u=([\w-]+)", self.headers.get("Cookie", ""))
             s = people.get(c.group(1)) if c else None
-            if s and time.time() - s["t"] > 12 * 3600:
+            if s and (s.get("dead") or time.time() - s["t"] > 12 * 3600):
                 people.pop(c.group(1), None)
+                abi.logout(s["token"])
                 return None
             return s
 
@@ -1386,6 +1390,8 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
             if self.path == "/signout" and signin:
                 c = re.search(r"abi_u=([\w-]+)", self.headers.get("Cookie", ""))
                 gone = people.pop(c.group(1), None) if c else None
+                if gone:
+                    abi.logout(gone["token"])
                 for hid in [k for k, h in HUBS.items() if gone and h.user == gone["name"]]:
                     if HUBS[hid].pi and HUBS[hid].pi.poll() is None:
                         HUBS[hid].pi.terminate()
@@ -1415,10 +1421,12 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
                 if self.client_address[0] != "127.0.0.1" or not secrets.compare_digest(self.headers.get("X-Abi-Agent", ""), agent_key):
                     return self.reply(403, b'{"error":"forbidden"}')
                 cid = self.headers.get("X-Abi-Client", "")
-                targets = [HUBS[cid]] if cid in HUBS else [h for h in HUBS.values() if h.mode == "developer"]
+                # the app's chat agent names its hub; a terminal agent names none and steers the Developer pages
+                targets = [HUBS[cid]] if cid in HUBS else [] if cid else [h for h in HUBS.values() if h.mode == "developer"]
                 if self.path == "/agent/mode":
                     h0 = targets[0] if targets else None
-                    return self.reply(200, json.dumps({"mode": h0.mode if h0 else "developer", "project": h0.current() if h0 else default}).encode())
+                    mode = h0.mode if h0 else "viewer" if cid else "developer"  # an unknown browser fails closed
+                    return self.reply(200, json.dumps({"mode": mode, "project": h0.current() if h0 else default}).encode())
                 if self.path == "/agent/show":
                     for h0 in [h for h in targets if body.get("project") in (h.project, pub_id(h.project))]:
                         h0.emit({"type": "show", **{k: body.get(k) for k in ("page", "report", "filters", "item", "note", "query", "chart")}})

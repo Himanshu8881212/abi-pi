@@ -79,6 +79,12 @@ def login(name: str, password: str, code: str | None = None) -> tuple[int, dict]
         return e.code, {"message": "Sign-in failed."}  # never ABI's other bodies: a 422 repeats the password
 
 
+def logout(tok: str) -> None:
+    """Ends that ABI session, so its token stops working (a failure is fine: it may be gone already)."""
+    with contextlib.suppress(OSError, ValueError, ActionError), as_user(tok):
+        _open("POST", "/api/logout", {})
+
+
 def token() -> str:
     if t := getattr(_ME, "token", None):
         return t
