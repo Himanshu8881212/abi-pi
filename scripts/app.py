@@ -1277,6 +1277,12 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
         def log_message(self, *a):  # no request log: bodies may carry business values
             pass
 
+        def end_headers(self):  # every answer: never inside another site's frame (clickjacking), no sniffing, no referrer
+            for k, v in (("X-Frame-Options", "DENY"), ("Content-Security-Policy", "frame-ancestors 'none'"),
+                         ("X-Content-Type-Options", "nosniff"), ("Referrer-Policy", "no-referrer")):
+                self.send_header(k, v)
+            super().end_headers()
+
         def reply(self, code: int, body: bytes, kind="application/json"):
             self.send_response(code)
             self.send_header("Content-Type", kind)

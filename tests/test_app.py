@@ -322,3 +322,10 @@ def test_chats_are_each_persons_own():
     assert a.chats_dir != b.chats_dir and a.chats_dir.name == "ann" and b.chats_dir.name == "bob"
     assert app.Hub(P, "", "k", "c1").chats_dir.name == "chats", "one person on this machine: as before"
     assert app.Hub(P, "", "k", "c1", user="../../x").chats_dir.parent.name == "chats", "a name can't climb out"
+
+
+def test_pages_cannot_be_framed_or_sniffed(srv):
+    port, _, _ = srv
+    h = urllib.request.urlopen(f"http://127.0.0.1:{port}/").headers
+    assert h["X-Frame-Options"] == "DENY" and "frame-ancestors 'none'" in h["Content-Security-Policy"]
+    assert h["X-Content-Type-Options"] == "nosniff" and h["Referrer-Policy"] == "no-referrer"
