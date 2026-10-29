@@ -391,7 +391,7 @@ async function runSingleAgent(
 					// If its process doesn't exit (a hung final model reply), end it so the Lead isn't left waiting.
 					const m: any = event.message;
 					const body = JSON.stringify(m.content ?? "");
-					if (m.toolName === "abi_handoff" && /\\"result\\":\s*\\"passed\\"/.test(body) && !handoffTimer) {
+					if (m.toolName === "abi_handoff" && /\\*"result\\*"\s*:\s*\\*"passed/.test(body) && !handoffTimer) {
 						handoffTimer = setTimeout(() => { if (!proc.killed) proc.kill("SIGTERM"); }, 90000);
 					}
 				}
@@ -408,11 +408,17 @@ async function runSingleAgent(
 				currentResult.stderr += data.toString();
 			});
 
-			proc.on("close", (code) => {
+			let settled = false;
+			const finish = (code: number | null) => {
+				if (settled) return;
+				settled = true;
 				if (handoffTimer) clearTimeout(handoffTimer);
 				if (buffer.trim()) processLine(buffer);
 				resolve(code ?? 0);
-			});
+			};
+			proc.on("close", finish);
+			// the child exited but something still holds its pipes (a server it started): don't wait for them
+			proc.on("exit", (code) => setTimeout(() => finish(code), 5000));
 
 			proc.on("error", () => {
 				resolve(1);

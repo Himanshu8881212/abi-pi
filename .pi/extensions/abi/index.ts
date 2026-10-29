@@ -226,7 +226,8 @@ export default async function abi(pi: ExtensionAPI) {
 		apps.set(process.env.ABI_APP_PROJECT, { url: process.env.ABI_APP_URL, key: process.env.ABI_APP_AGENT_KEY });
 	async function appFor(project: string, start: boolean): Promise<{ url: string; key: string } | undefined> {
 		const known = apps.get(project);
-		if (known || !start) return known;
+		// a specialist never starts an app: its process must be able to exit when its task is done
+		if (known || !start || process.env.ABI_PI_AGENT) return known;
 		const key = execFileSync("python3", ["-c", "import secrets;print(secrets.token_urlsafe(24))"], { encoding: "utf8" }).trim();
 		const { spawn } = await import("node:child_process");
 		const child = spawn(PY, [path.join(ROOT, "scripts", "app.py"), project, "0"], { cwd: ROOT, detached: false,
@@ -238,6 +239,11 @@ export default async function abi(pi: ExtensionAPI) {
 			child.on("exit", () => { clearTimeout(t); resolve(undefined); });
 		});
 		if (!url) return undefined;
+		// let go of the server: an open pipe or child would keep this agent's process from ever exiting
+		child.stdout!.removeAllListeners("data");
+		child.stdout!.destroy();
+		child.unref();
+		process.once("exit", () => { try { child.kill(); } catch {} });
 		apps.set(project, { url, key });
 		return apps.get(project);
 	}
