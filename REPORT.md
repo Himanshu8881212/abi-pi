@@ -172,3 +172,20 @@ Correctness sweep (round 8): every one of the 32 pages opened in Developer and i
 | 18 | Data leak | Home loads the team's status, whose journal and brief quote figures from every report: a person the admin limited to some reports still received the others' figures. | A restricted person gets the plan and what waits, not the journal or brief (`team_view`). Test included. |
 | 19 | Sessions | Behind an HTTPS reverse proxy (the likely hosting) the session cookie had no `Secure` flag. | `Secure` is added when the proxy says `X-Forwarded-Proto: https`. |
 | 20 | Resources | Every browser's chat started an agent process that never stopped (memory and an open ABI session each); a sign-in older than 12 h ended only if its browser came back, so its ABI token stayed valid. | The watch loop (every 30 s) stops chat agents idle for 30 min (the next message restarts them from their session file) and ends expired sign-ins, in ABI too. Test: `test_idle_chat_agents_and_old_sessions_are_swept`. |
+
+### Release checklist
+
+Before hosting on the local infrastructure:
+
+- [x] Everyone signs in with their own ABI account; the app acts as them (roles, row-level security, reports). `--single` refuses the network.
+- [x] Admins (ABI workspace owners) manage people in Govern › Users & access; sections and reports per person are enforced by the server, not just hidden.
+- [x] Sessions: HttpOnly, SameSite=Strict, `Secure` behind HTTPS; sign-out and the 12 h expiry end the ABI session too.
+- [x] Every request answers (400 for bad input, 500 without details); security headers on every response; no figures in logs.
+- [x] Chats, board packs and the team journal are per person or limited to who may see them.
+- [x] Import refuses zip bombs and never brings waiting steps; pack file names are safe IDs.
+- [x] Tests pass (`.venv/bin/python -m pytest -q tests`).
+- [ ] Put the app behind an HTTPS reverse proxy (it speaks HTTP; the proxy should send `X-Forwarded-Proto: https`) and run it with `--open` only behind that proxy.
+- [ ] Configure ABI's email delivery so Users & access invitations and flow emails reach people.
+- [ ] Update the ABI preview to a build with MULTI-EXPORT (PPTX and several pages in one file) and the line-chart clipping fix in its PDF renderer.
+- [ ] Remotion's licence: free for individuals and companies up to 3 people; a company licence otherwise (video export).
+- [ ] Lower ABI's snapshot retention (`ABI_SNAPSHOT_RETENTION_DAYS`) or watch the disk: each refresh keeps DuckLake snapshots for 30 days.
