@@ -14,3 +14,11 @@ bench
 data
 workspaces.old-abi
 engine/backend/static
+tests
+bench
+converters
+PROMPT.md
+DEMO.md
+REPORT.md
+scripts/bench.py
+scripts/build_cms.py

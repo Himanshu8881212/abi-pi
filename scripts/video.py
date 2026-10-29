@@ -10,6 +10,7 @@ its own ({view id: text}); every number in them must appear in that view's rows,
 Licence: Remotion is free for individuals and companies up to 3 people; larger companies need its company licence.
 """
 import json
+import os
 import re
 import subprocess
 import sys
@@ -122,7 +123,8 @@ def render(props: dict, out: Path) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
         json.dump(props, f)
-    subprocess.run(["npx", "remotion", "render", "src/index.ts", "Deck", str(out.resolve()), f"--props={f.name}", "--log=error"],
+    chrome = [f"--browser-executable={b}"] if (b := os.environ.get("REMOTION_BROWSER")) else []  # the image: the engine's Chrome
+    subprocess.run(["npx", "remotion", "render", "src/index.ts", "Deck", str(out.resolve()), f"--props={f.name}", "--log=error", *chrome],
                    cwd=HERE / "video", check=True)
     return out
 
