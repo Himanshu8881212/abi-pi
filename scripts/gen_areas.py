@@ -36,6 +36,26 @@ AREAS = {
     "admin": ("users, roles, tenants, sign-in providers, LLM providers, usage, secrets list", ("abi.security", "abi.agent.llm")),
 }
 PREFIX = {p: a for a, (_, ps) in AREAS.items() for p in ps}
+# ABI's question keyword stems per area (agent.AREAS third field), matched with \b(...) case-insensitively (D-71)
+WORDS = {
+    "data": ("load|upload|file|csv|parquet|excel|json|source|connect|database|postgres|mysql|clickhouse|s3|step|clean|"
+             "transform|dedup|rename|column|refresh|reload|table|import|fresh|quality|restore"),
+    "model": ("model|measure|relationship|join|glossary|term|dataset|date table|calendar|currency|rate|key|row-level|rls|"
+              "define|definition|formula|kpi|metric|margin|build"),
+    "reports": "report|page|visual|chart|dashboard|export|download|share|sharing|embed|link|pdf|png|snapshot|show me",
+    "writeback": ("edit|write-back|writeback|write back|budget|plan|input table|proposal|propose|approve|adjust|raise|"
+                  "lower|increase|decrease|change the value|sync"),
+    "tools": "tool",
+    "agents": "agent|assistant|bot|eval|memory|remember|forget|convention|notification",
+    "flows": ("flow|task|schedul|every|daily|weekly|monthly|hourly|monday|tuesday|wednesday|thursday|friday|morning|email|"
+              "e-mail|mail|send|post(?!gres)|message|inbox|slack|teams|webhook|alert|subscri|notify|condition|trigger|run"),
+    "ml": ("forecast|predict|churn|classif|cluster|segment|anomal|unusual|outlier|train|score|machine learning|ml|"
+           "next (year|quarter|month|week)|future"),
+    "docs": "doc|describ|description|explain|what does|meaning",
+    "project": ("project|commit|undo|revert|history|diff|change|branch|push|pull|git|remote|environment|production|"
+                "promote|locale|time zone|rename"),
+    "admin": "user|role|permission|access|invite|tenant|provider|llm|sso|oidc|sign-in|usage|secret|admin|owner",
+}
 DEF = re.compile(r"^@action\([^\n]*\n(?:@[^\n]*\n)*def (\w+)\(", re.M)
 
 
@@ -55,7 +75,7 @@ def main() -> None:
                 continue
             (groups[a] if (a := area(module, name)) else other).append(name)
     out = {"core": CORE, "unclassified": sorted(other),
-           "areas": {a: {"about": AREAS[a][0], "tools": sorted(t)} for a, t in groups.items()}}
+           "areas": {a: {"about": AREAS[a][0], "words": WORDS[a], "tools": sorted(t)} for a, t in groups.items()}}
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(json.dumps(out, indent=2) + "\n")
     n = len(CORE) + len(other) + sum(map(len, groups.values()))

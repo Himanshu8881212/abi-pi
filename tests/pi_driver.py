@@ -1,6 +1,7 @@
 """Drive the harness like a person at the terminal: `pi --mode rpc` in this folder, one prompt, confirmations answered
 by `confirm` (and recorded), until the agent settles. Used by the live tests and scripts/bench.py."""
 import json
+import os
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -23,10 +24,12 @@ class Run:
         return [t for t in self.tools if t[0].endswith(name)]
 
 
-def ask(prompt: str, confirm: bool = False, timeout: float = 1200, session: str | None = None) -> Run:
+def ask(prompt: str, confirm: bool = False, timeout: float = 1200, session: str | None = None, extra: list | None = None,
+        env: dict | None = None) -> Run:
     """One prompt; `session` keeps context across calls (a session file path), else ephemeral."""
-    args = ["pi", "--mode", "rpc"] + (["--session", session] if session else ["--no-session"])
-    p = subprocess.Popen(args, cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
+    args = ["pi", "--mode", "rpc", *(extra or [])] + (["--session", session] if session else ["--no-session"])
+    p = subprocess.Popen(args, cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1,
+                         env={**os.environ, **(env or {})})
     run, t0, started = Run(prompt), time.time(), {}
     p.stdin.write(json.dumps({"id": "p1", "type": "prompt", "message": prompt}) + "\n")
     p.stdin.flush()

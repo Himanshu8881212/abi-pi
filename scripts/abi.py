@@ -240,7 +240,7 @@ def load(ws: str, project: str, paths: list[str]) -> dict:
                 if not csv:
                     raise
                 r = upload(project, t, f)
-            log["loaded"].append({"table": t, "file": f.name, "rows": r.get("rows"), "seconds": round(time.time() - t0, 1)})
+            log["loaded"].append({"table": t, "file": f.name, "snapshot": r.get("snapshot"), "seconds": round(time.time() - t0, 1)})
         except ActionError as e:
             log["failed"].append({"table": t, "file": f.name, "error": e.body.get("message")})
     if not log["loaded"]:
@@ -279,7 +279,8 @@ def load(ws: str, project: str, paths: list[str]) -> dict:
 def starter_report(project: str) -> str:
     """One overview page: a KPI per measure (up to 4), a bar by the first text dimension, a line by day if dated."""
     sm = call("semantic_model", project=project)
-    measures = [m["id"] for m in sm.get("measures", []) if isinstance(m, dict)][:4]
+    names = {m["id"]: m.get("name") or m["id"] for m in sm.get("measures", []) if isinstance(m, dict)}
+    measures = list(names)[:4]
     if not measures:
         raise ActionError(400, {"message": "No measures to report."})
     cols, kinds = sm.get("columns") or {}, {t: i.get("kind") for t, i in (sm.get("tables") or {}).items()}
@@ -289,17 +290,18 @@ def starter_report(project: str) -> str:
                    if (typ == "VARCHAR" and not re.search(r"(^|_)(id|key|link|url|description|tags|title|time|date)$", c.lower()))
                    or (re.search(good, c, re.I) and re.match(r"(BIG|SMALL|TINY)?INT", typ))),
                   key=lambda d: (kinds.get(d.split(".")[0]) != "dimension", not re.search(good, d, re.I), d))
-    visuals = [{"id": f"kpi-{m}", "type": "kpi", "title": m.replace("_", " ").title(),
+    visuals = [{"id": f"kpi-{m}", "type": "kpi", "title": names[m],
                 "query": {"measures": [m], "dimensions": []}, "layout": {"x": 3 * i, "y": 0, "w": 3, "h": 3}}
                for i, m in enumerate(measures)]
+    main = next((m for m in measures if not m.endswith("_rows")), measures[0])  # a sum reads better than a count
     if dims:
-        visuals.append({"id": "by-dim", "type": "bar", "title": f"{measures[0]} by {dims[0].split('.')[1]}",
-                        "query": {"measures": [measures[0]], "dimensions": [dims[0]], "limit": 20,
-                                  "order_by": [{"field": measures[0], "desc": True}]},
+        visuals.append({"id": "by-dim", "type": "bar", "title": f"{names[main]} by {dims[0].split('.')[1].replace('_', ' ')}",
+                        "query": {"measures": [main], "dimensions": [dims[0]], "limit": 20,
+                                  "order_by": [{"field": main, "desc": True}]},
                         "layout": {"x": 0, "y": 3, "w": 6, "h": 5}})
     if day:
-        visuals.append({"id": "by-day", "type": "line", "title": f"{measures[0]} per day",
-                        "query": {"measures": [measures[0]], "dimensions": [day]}, "layout": {"x": 6, "y": 3, "w": 6, "h": 5}})
+        visuals.append({"id": "by-day", "type": "line", "title": f"{names[main]} per day",
+                        "query": {"measures": [main], "dimensions": [day]}, "layout": {"x": 6, "y": 3, "w": 6, "h": 5}})
     report = {"id": "overview", "name": "Overview", "pages": [{"id": "overview", "name": "Overview", "visuals": visuals}]}
     try:
         call("save_report", project=project, report=report)

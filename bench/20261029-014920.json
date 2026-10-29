@@ -1,0 +1,125 @@
+[
+ {
+  "variant": "baseline",
+  "task": "ask",
+  "run": 0,
+  "ok": true,
+  "seconds": 9.9,
+  "turns": 2,
+  "tools": 1,
+  "tool_errors": 0,
+  "input": 9873,
+  "cached": 9472,
+  "output": 134,
+  "masked": false,
+  "tool_names": [
+   "mcp__abi__semantic_query"
+  ]
+ },
+ {
+  "variant": "baseline",
+  "task": "ask",
+  "run": 1,
+  "ok": true,
+  "seconds": 10.2,
+  "turns": 2,
+  "tools": 1,
+  "tool_errors": 0,
+  "input": 19345,
+  "cached": 0,
+  "output": 144,
+  "masked": false,
+  "tool_names": [
+   "mcp__abi__semantic_query"
+  ]
+ },
+ {
+  "variant": "baseline",
+  "task": "why",
+  "run": 0,
+  "ok": false,
+  "seconds": 82.7,
+  "turns": 7,
+  "tools": 11,
+  "tool_errors": 2,
+  "input": 24268,
+  "cached": 60800,
+  "output": 1941,
+  "masked": true,
+  "tool_names": [
+   "mcp__abi__semantic_query",
+   "mcp__abi__semantic_query",
+   "mcp__abi__semantic_model",
+   "mcp__abi__semantic_query",
+   "mcp__abi__semantic_query",
+   "mcp__abi__semantic_query",
+   "mcp__abi__semantic_query",
+   "mcp__abi__semantic_query",
+   "mcp__abi__semantic_query",
+   "mcp__abi__semantic_query",
+   "mcp__abi__semantic_query"
+  ]
+ },
+ {
+  "variant": "baseline",
+  "task": "why",
+  "run": 1,
+  "ok": true,
+  "seconds": 66.9,
+  "turns": 6,
+  "tools": 6,
+  "tool_errors": 0,
+  "input": 25722,
+  "cached": 49792,
+  "output": 1663,
+  "masked": false,
+  "tool_names": [
+   "mcp__abi__semantic_query",
+   "mcp__abi__semantic_model",
+   "mcp__abi__semantic_query",
+   "mcp__abi__semantic_query",
+   "mcp__abi__semantic_query",
+   "mcp__abi__semantic_query"
+  ]
+ },
+ {
+  "variant": "baseline",
+  "task": "report",
+  "run": 0,
+  "ok": true,
+  "seconds": 30.6,
+  "turns": 5,
+  "tools": 4,
+  "tool_errors": 0,
+  "input": 21593,
+  "cached": 31616,
+  "output": 368,
+  "masked": false,
+  "tool_names": [
+   "tool_search",
+   "mcp__abi__save_report",
+   "mcp__abi__list_reports",
+   "abi_sync"
+  ]
+ },
+ {
+  "variant": "baseline",
+  "task": "report",
+  "run": 1,
+  "ok": true,
+  "seconds": 38.4,
+  "turns": 5,
+  "tools": 4,
+  "tool_errors": 0,
+  "input": 21621,
+  "cached": 31616,
+  "output": 354,
+  "masked": false,
+  "tool_names": [
+   "tool_search",
+   "mcp__abi__save_report",
+   "mcp__abi__list_reports",
+   "abi_sync"
+  ]
+ }
+]

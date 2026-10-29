@@ -21,6 +21,7 @@
   "areas": {
     "data": {
       "about": "load, connect, transform, refresh and delete sources and tables",
+      "words": "load|upload|file|csv|parquet|excel|json|source|connect|database|postgres|mysql|clickhouse|s3|step|clean|transform|dedup|rename|column|refresh|reload|table|import|fresh|quality|restore",
       "tools": [
         "add_data",
         "delete_source",
@@ -34,6 +35,7 @@
     },
     "model": {
       "about": "semantic model: tables, keys, relationships, measures, glossary, datasets, date/rates tables, row-level rules",
+      "words": "model|measure|relationship|join|glossary|term|dataset|date table|calendar|currency|rate|key|row-level|rls|define|definition|formula|kpi|metric|margin|build",
       "tools": [
         "add_relationship",
         "build_model",
@@ -57,6 +59,7 @@
     },
     "reports": {
       "about": "reports, visuals, snapshots, exports, sharing, share links and embeds",
+      "words": "report|page|visual|chart|dashboard|export|download|share|sharing|embed|link|pdf|png|snapshot|show me",
       "tools": [
         "create_embed_key",
         "create_share_link",
@@ -76,6 +79,7 @@
     },
     "writeback": {
       "about": "write-back: edit cells and totals, input tables, proposals and approvals, edit history, sync to sources",
+      "words": "edit|write-back|writeback|write back|budget|plan|input table|proposal|propose|approve|adjust|raise|lower|increase|decrease|change the value|sync",
       "tools": [
         "approve_edit",
         "create_input_table",
@@ -91,6 +95,7 @@
     },
     "tools": {
       "about": "custom tools: save, test, publish, run",
+      "words": "tool",
       "tools": [
         "delete_tool",
         "publish_tool",
@@ -101,6 +106,7 @@
     },
     "agents": {
       "about": "custom agents (save, test, publish, run) and project memory",
+      "words": "agent|assistant|bot|eval|memory|remember|forget|convention|notification",
       "tools": [
         "agent_runs",
         "chat_history",
@@ -123,6 +129,7 @@
     },
     "flows": {
       "about": "flows and tasks, schedules, conditions and subscriptions, email/message sends, inbox, inbound messages",
+      "words": "flow|task|schedul|every|daily|weekly|monthly|hourly|monday|tuesday|wednesday|thursday|friday|morning|email|e-mail|mail|send|post(?!gres)|message|inbox|slack|teams|webhook|alert|subscri|notify|condition|trigger|run",
       "tools": [
         "approve_flow_run",
         "approve_inbound_action",
@@ -153,6 +160,7 @@
     },
     "ml": {
       "about": "ML models: forecast, classify, predict, cluster, anomalies; train, score, pre-fill",
+      "words": "forecast|predict|churn|classif|cluster|segment|anomal|unusual|outlier|train|score|machine learning|ml|next (year|quarter|month|week)|future",
       "tools": [
         "delete_ml_model",
         "ml_history",
@@ -165,6 +173,7 @@
     },
     "docs": {
       "about": "documentation: generate, draft and review descriptions",
+      "words": "doc|describ|description|explain|what does|meaning",
       "tools": [
         "draft_descriptions",
         "generate_docs",
@@ -174,6 +183,7 @@
     },
     "project": {
       "about": "projects, project JSON import, commits, undo, revert, history, diffs, remotes, push/pull, environments, locale",
+      "words": "project|commit|undo|revert|history|diff|change|branch|push|pull|git|remote|environment|production|promote|locale|time zone|rename",
       "tools": [
         "commit",
         "create_project",
@@ -197,6 +207,7 @@
     },
     "admin": {
       "about": "users, roles, tenants, sign-in providers, LLM providers, usage, secrets list",
+      "words": "user|role|permission|access|invite|tenant|provider|llm|sso|oidc|sign-in|usage|secret|admin|owner",
       "tools": [
         "confirm_mfa",
         "create_tenant",

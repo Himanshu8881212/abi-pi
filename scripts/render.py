@@ -61,19 +61,19 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
  const rows=d.rows.filter(r=>ms.some((m,i)=>typeof r[nd+i]==='number'));const vals=rows.flatMap(r=>ms.map((m,i)=>r[nd+i]||0));
  const max=Math.max(0,...vals),min=Math.min(0,...vals),y=v=>H-B-(v-min)/((max-min)||1)*(H-B-10);
  for(let g=0;g<=4;g++){const v=min+(max-min)*g/4;el('line',{x1:L,x2:W-8,y1:y(v),y2:y(v),stroke:'var(--line)'},svg);el('text',{x:L-6,y:y(v)+4,'text-anchor':'end'},svg).textContent=fmt(v,{compact:true,decimals:1})}
- const n=rows.length,step=(W-L-8)/Math.max(n,1),lab=Math.ceil(n/12);
- rows.forEach((r,i)=>{if(i%lab===0)el('text',{x:L+step*i+step/2,y:H-B+14,'text-anchor':'middle'},svg).textContent=String(r[0]??'—').slice(0,12)});
+ const n=rows.length,step=(W-L-8)/Math.max(n,1),lab=Math.max(1,Math.ceil(n/Math.max(1,Math.floor((W-L)/80))));
+ rows.forEach((r,i)=>{if(i%lab===0){const s=String(r[0]??'—');el('text',{x:L+step*i+step/2,y:H-B+14,'text-anchor':'middle'},svg).textContent=s.length>11?s.slice(0,10)+'…':s}});
  if(type==='line'){ms.forEach((m,j)=>{const pts=rows.map((r,i)=>[L+step*i+step/2,y(r[nd+j]||0)]);el('polyline',{points:pts.map(p=>p.join(',')).join(' '),fill:'none',stroke:COL[j%6],'stroke-width':2},svg);
-   pts.forEach((p,i)=>{const c=el('circle',{cx:p[0],cy:p[1],r:Math.max(2,Math.min(4,step/3)),fill:COL[j%6],opacity:.01},svg);c.onmousemove=e=>{c.setAttribute('opacity',1);showTip(e,`${rows[i][0]} · ${d.measures[m]||m}: ${fmt(rows[i][nd+j],d.format[m])}`)};c.onmouseleave=()=>{c.setAttribute('opacity',.01);hideTip()}})});return}
+   pts.forEach((p,i)=>{const c=el('circle',{cx:p[0],cy:p[1],r:Math.max(2,Math.min(4,step/3)),fill:COL[j%6],opacity:.01},svg);c.onmousemove=e=>{c.setAttribute('opacity',1);showTip(e,`${rows[i][0]} · ${d.measures[m]||m}: ${fmt(rows[i][nd+j],{...d.format[m],compact:false})}`)};c.onmouseleave=()=>{c.setAttribute('opacity',.01);hideTip()}})});return}
  const bw=step/ms.length*.8;rows.forEach((r,i)=>ms.forEach((m,j)=>{const v=r[nd+j]||0;const b=el('rect',{x:L+step*i+step*.1+bw*j,y:Math.min(y(v),y(0)),width:Math.max(bw,1),height:Math.abs(y(v)-y(0)),fill:COL[j%6],rx:2},svg);
-  b.onmousemove=e=>{b.setAttribute('opacity',.7);showTip(e,`${r[0]} · ${d.measures[m]||m}: ${fmt(v,d.format[m])}`)};b.onmouseleave=()=>{b.setAttribute('opacity',1);hideTip()}}))}
+  b.onmousemove=e=>{b.setAttribute('opacity',.7);showTip(e,`${r[0]} · ${d.measures[m]||m}: ${fmt(v,{...d.format[m],compact:false})}`)};b.onmouseleave=()=>{b.setAttribute('opacity',1);hideTip()}}))}
 function csv(d){const q=v=>v===null?'':/[",\n]/.test(String(v))?'"'+String(v).replace(/"/g,'""')+'"':String(v);
  const blob=new Blob([[d.columns.join(','),...d.rows.map(r=>r.map(q).join(','))].join('\n')],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=d.id+'.csv';a.click()}
 function render(R){const tabs=document.querySelector('nav.tabs'),grid=document.querySelector('.grid');
  function page(p){grid.innerHTML='';[...tabs.children].forEach(b=>b.classList.toggle('on',b.dataset.id===p.id));
   p.visuals.slice().sort((a,b)=>(a.layout.y-b.layout.y)||(a.layout.x-b.layout.x)).forEach(v=>{const c=document.createElement('div');c.className='card';c.style.gridColumn=`span ${Math.min(12,v.layout.w||6)}`;
    c.innerHTML=`<h3><span>${v.title||v.id}</span><span class="tools"><button data-a="t">table</button><button data-a="c">csv</button><button data-a="h">how</button></span></h3><div class="body"></div><pre class="how" hidden></pre>`;grid.appendChild(c);
-   const body=c.querySelector('.body');if(v.error){body.innerHTML=`<div class="bad">${v.error}</div>`;return}
+   const body=c.querySelector('.body');if(v.text!==undefined){c.querySelector('.tools').remove();body.textContent=v.text;body.style.whiteSpace='pre-wrap';return}if(v.error){body.innerHTML=`<div class="bad">${v.error}</div>`;return}
    let asTable=false;const draw=()=>{body.innerHTML='';asTable?table(body,v.data):chart(body,v.data)};requestAnimationFrame(draw);
    c.querySelector('[data-a=t]').onclick=()=>{asTable=!asTable;draw()};c.querySelector('[data-a=c]').onclick=()=>csv(v.data);
    c.querySelector('[data-a=h]').onclick=()=>{const h=c.querySelector('.how');h.hidden=!h.hidden;h.textContent=v.how}})}
@@ -110,6 +110,10 @@ def report_html(dest: Path, project: str, rid: str, rep: dict, measures: dict) -
             how += f"\nby {', '.join(q.get('dimensions', [])) or '—'}" + (f"\nfilters {json.dumps(q['filters'])}" if q.get("filters") else "")
             how += f"\nfile reports/{rid}.json, page {p['id']}, visual {v['id']}"
             item = {"id": v["id"], "title": v.get("title"), "layout": v.get("layout") or {"x": 0, "y": 0, "w": 6}, "how": how}
+            if v.get("type") == "text":  # Markdown written by a person or the agent: no numbers from data
+                item["text"] = v.get("text") or ""
+                vs.append(item)
+                continue
             try:
                 item["data"] = abi.call("visual_data", project=project, report=rid, page=p["id"], visual=v["id"])
             except abi.ActionError as e:
@@ -175,7 +179,7 @@ def index_html(dest: Path, project: str, reports: list[str]) -> str:
     g = lambda d: sorted(f for f in (dest / d).glob("*.json"))  # noqa: E731
     sec = {
         "Sources": cards(g("sources"), dest, lambda f, x: f"<h3>{esc(x.get('id'))}</h3><code>{esc(x.get('location'))}</code> · refresh {esc(x.get('refresh'))}"),
-        "Tables": cards(g("tables"), dest, lambda f, x: f"<h3>{esc(f.stem)}</h3>{steps(x)}"),
+        "Tables": cards(g("tables"), dest, lambda f, x: f"<h3>{esc(f.stem)}</h3>{steps(x)}") if g("tables") else "",
         "Model": f"<div class=card>{diagram(model, kinds)}<div class=file>edit: model/model.json · date table: {esc(json.dumps(model.get('date_table')))}</div></div>",
         "Measures": ("<div class=card><input class=search placeholder='filter measures' oninput=\"for(const r of this.parentNode.querySelectorAll('tr.m'))r.hidden=!r.textContent.toLowerCase().includes(this.value.toLowerCase())\">"
                      "<table><tr><th>ID</th><th>Name</th><th>MEL</th><th>Description</th></tr>"
@@ -196,6 +200,11 @@ def index_html(dest: Path, project: str, reports: list[str]) -> str:
         "History": "<div class=card><table>" + "".join(f"<tr><td><code>{esc(a)}</code></td><td>{esc(b)}</td><td>{esc(c)}</td><td>{esc(d)}</td></tr>"
                                                     for a, b, c, d in (l.split("|", 3) for l in log.splitlines() if l.count("|") >= 3)) + "</table></div>",
     }
+    plain = [t for t in kinds if not (dest / "tables" / f"{t}.json").exists()]
+    if plain:  # ABI writes tables/<id>.json only once a table has steps; a file loaded as-is has none yet
+        sec["Tables"] = (sec["Tables"] if g("tables") else "") + "<div class=card>" + "".join(f"<span class=chip>{esc(t)} · {esc(kinds[t] or '')}</span>" for t in plain) + \
+            "<div class=file>loaded as is (no transform steps); steps go to tables/&lt;id&gt;.json through set_steps</div></div>"
+    sec["Tables"] = sec["Tables"] or "<p class=empty>None yet.</p>"
     nav = "<nav class=tabs>" + "".join(f"<button onclick=\"document.getElementById('{k}').scrollIntoView({{behavior:'smooth'}})\">{k}</button>" for k in sec) + "</nav>"
     body = nav + "".join(f"<section id='{k}'><h2>{k}</h2>{v}</section>" for k, v in sec.items())
     body += ("<section><h2>Edit</h2><div class=card>Every card names its JSON file in <code>" + esc(dest) + "</code>. Edit it, then send it through ABI's import"
