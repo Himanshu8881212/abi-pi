@@ -24,7 +24,7 @@ RUN useradd --create-home --uid 10001 abi && mkdir -p /app /data && chown abi:ab
 WORKDIR /app
 USER abi
 COPY --chown=abi:abi scripts/video/package.json scripts/video/package-lock.json* scripts/video/
-RUN cd scripts/video && npm ci --no-audit --no-fund
+RUN cd scripts/video && npm ci --no-audit --no-fund && npx remotion browser ensure  # its headless Chrome: no download at the first video
 COPY --chown=abi:abi . .
 # Pi loads a project's own extensions only from a trusted folder: the app's folder is this image's own
 RUN mkdir -p /home/abi/.pi/agent && echo '{"/app": true}' > /home/abi/.pi/agent/trust.json
