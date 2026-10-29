@@ -1913,7 +1913,7 @@ def main(argv: list[str]) -> int:
     argv = [a for a in argv if a not in ("--tailnet", "--open", "--single")]
     try:
         s = serve(argv[0], int(argv[1]) if len(argv) > 1 else 8790, open_browser=not (remote or tailnet), remote=remote, tailnet=tailnet, signin=signin)
-    except urllib.error.URLError:
+    except (urllib.error.URLError, subprocess.CalledProcessError):  # no ABI to talk to, or to sign in with
         raise SystemExit(f"Can't reach ABI at {abi.URL}: start ABI (or set ABI_URL) and try again.") from None
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     atexit.register(lambda: [h.pi.terminate() for h in HUBS.values() if h.pi and h.pi.poll() is None])  # the chats' agents stop with the app
