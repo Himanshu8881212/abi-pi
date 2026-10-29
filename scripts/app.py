@@ -197,6 +197,17 @@ function act(c,label,fn,pri){const m=c.querySelector(':scope>.msg')||c.appendChi
  r.append(btn(label,async()=>{try{const t=await fn(m);if(t)say(m,t)}catch(e){say(m,e.message,1)}},pri));return m}
 
 // ---------- Overview ----------
+// the agent team on Home: one progress line while a plan is open, and each step a specialist left for the person's yes
+async function answer(id,decision){const post=(u,b)=>fetch(u,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json());
+ let r=await post('/team/answer',{id,decision});if(r.confirm){if(!await ask(r.confirm))throw new Error('You declined in ABI\'s confirmation. Nothing changed; the step still waits.');r=await post('/confirm/'+r.confirm.id)}
+ if(r.error)throw new Error(r.error);return r.result}
+async function team(at,al){let T;try{T=(await fetch('/team',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(r=>r.json())).result}catch(e){return}
+ const ts=T?.tasks||[],ok=ts.filter(t=>t.status==='passed').length,run=ts.filter(t=>t.status==='running').map(t=>t.id);
+ if(ts.length&&ok<ts.length){const e=al.querySelector('li.ok');if(e)e.remove();al.append(h('li','',`Agent team: ${ok} of ${ts.length} tasks passed${run.length?', running: '+run.join(', '):''}.`))}
+ (T?.pending||[]).forEach(p=>{const e=al.querySelector('li.ok');if(e)e.remove();const li=h('li','bad'),m=h('div','msg');
+  li.append(h('div','',`Waiting for your yes: ${p.action.replace('mcp__abi__','')} ${p.args?.id||p.args?.message||''}`),h('div','file',`${p.why||''} (from ${p.agent}, task ${p.task})`));
+  const r=h('div','row');r.append(btn('Approve',async()=>{try{await answer(p.id,'approve');say(m,'Done through ABI.');li.className='ok'}catch(e){say(m,e.message,1)}},1),
+   btn('Decline',async()=>{try{await answer(p.id,'decline');say(m,'Declined; the team will see it.');li.className=''}catch(e){say(m,e.message,1)}}));li.append(r,m);al.append(li)})}
 function home(box){const rd=D.readiness||{},q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),rowsQ=q.rows||[];
  const last=rowsQ.map(r=>r[ix('last_load')]).filter(Boolean).sort().pop(),problems=rowsQ.flatMap(r=>(r[ix('problems')]||[]).map(p=>`${r[ix('table')]}: ${p}`));
  // status strip: the four things to know before anything else
@@ -212,6 +223,7 @@ function home(box){const rd=D.readiness||{},q=D.quality||{},ix=c=>(q.columns||[]
  if(D.reports[0])act(kp,'Open the report',()=>show('rep:'+D.reports[0].id));g.append(kp);
  // what needs attention
  const at=card('Needs attention');const al=h('ul','list');[...(rd.missing||[]).map(x=>typeof x==='string'?x:JSON.stringify(x)),...problems].forEach(t=>al.append(h('li','bad',t)));
+ if(MODE==='developer'&&LIVE)team(at,al);
  if(!al.children.length)al.append(h('li','ok','Nothing: the model is ready and the data is fresh.'));at.append(al);
  act(at,'Check again',async()=>{D.quality=await api('data_quality',{});D.readiness=await api('readiness',{});show('home')});g.append(at);
  // what is in the project, as links
@@ -542,26 +554,9 @@ function vaultPage(box){if(!LIVE){box.append(h('p','empty','The vault opens with
   act(c,'Remove',async()=>{if(await ask({message:`Remove ${d.name} from the vault?`,preview:''})){await vpost('rm',{name:d.name})}});g.append(c)})}
 
 // ---------- Knowledge: the agent team ----------
-async function teamPage(box){if(!LIVE){box.append(h('p','empty','The team view opens with the live app.'));return}
- const r=await fetch('/team',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(r=>r.json());
- if(r.error||!r.result){box.append(h('p','empty',r.error||'No plan yet: ask the agent for a job and it plans it with the team.'));return}
- const T=r.result,g=h('div','cards');box.append(g);
- const pl=card('Plan',T.goal||'');const tb=h('table');const hr=tb.insertRow();['task','agent','area','status','tries','after'].forEach(x=>{const th=document.createElement('th');th.textContent=x;hr.append(th)});
- (T.tasks||[]).forEach(t=>{const r0=tb.insertRow();[t.id,t.agent,t.area,t.status,t.attempts||0,(t.depends_on||[]).join(', ')].forEach((v,i)=>{const c=r0.insertCell();c.textContent=v;if(i===3)c.className=v==='passed'?'ok':v==='failed'?'bad':''})});
- if(!(T.tasks||[]).length)pl.append(h('p','empty','No tasks.'));else pl.append(tb);pl.classList.add('wide');g.append(pl);
- const pe=card('Waiting for your yes','steps specialists could not run');if(!(T.pending||[]).length)pe.append(h('p','empty','Nothing waiting.'));
- (T.pending||[]).forEach(p=>pe.append(h('div','kv'),h('div','',`${p.id} · ${p.action} · ${p.why||''} (from ${p.agent}, task ${p.task}). Ask the agent to run the pending steps.`)));g.append(pe);
- if(T.brief){const b=card('Brief');b.append(h('pre','',T.brief));g.append(b)}
- const jc=card('Journal','newest first');jc.classList.add('wide');const list=h('div','hits');
- (T.journal||[]).slice().reverse().forEach(e=>{const d=h('div','hit');const head=`${cell(e.t)} · ${e.kind} · ${e.agent||''}${e.task?' · '+e.task:''}${e.result?' · '+e.result:''}`;d.append(h('div','file',head));
-  if(e.kind==='handoff'){const hh=e.handoff||{};d.append(h('div','',hh.summary||''));(e.checks||[]).forEach(c=>d.append(h('div',c.passed?'ok':'bad',`${c.passed?'✓':'✗'} ${c.check}${c.problems?.length?': '+c.problems.join('; '):''}`)));
-   if(hh.decisions?.length)d.append(h('div','file','decisions: '+hh.decisions.join('; ')));if(hh.open_issues?.length)d.append(h('div','file','open: '+hh.open_issues.join('; ')))}
-  else if(e.kind==='plan')d.append(h('div','',(e.tasks||[]).map(t=>`${t.id} → ${t.agent}`).join(', ')));list.append(d)});
- if(!list.children.length)list.append(h('p','empty','Nothing yet.'));jc.append(list);g.append(jc)}
-
 // ---------- sidebar ----------
 const PENDING={filters:null,explore:null};
-const LEDE={team:'The agent team: the Lead\'s plan, who works on what, every handoff and the checks the harness ran on it, and the steps waiting for your yes.',vault:'Your business documents: definitions, finance rules, KPI specs. The agents search them before they define or check a measure.',home:'Is the model ready, is the data fresh, and what changed last.',datasets:'Saved questions to the model (measures by dimensions, with filters). Each run returns a fresh table; nothing is stored. Reports, flows and ML reuse them. Preview their rows.',
+const LEDE={vault:'Your business documents: definitions, finance rules, KPI specs. The agents search them before they define or check a measure.',home:'Is the model ready, is the data fresh, and what changed last.',datasets:'Saved questions to the model (measures by dimensions, with filters). Each run returns a fresh table; nothing is stored. Reports, flows and ML reuse them. Preview their rows.',
  measures:'The business numbers. Edit a formula and ABI checks it before it saves; Test shows the total.',model:'Tables and how they join. Facts are black, dimensions are outlined.',
  reports:'The saved reports of this project. Open one to filter it and click through.',monitor:'Is anything wrong right now: data freshness, model readiness, ML runs and flows. Reports show the business; this shows the system.',explore:'Your own analysis: pick measures, a dimension and a filter; the numbers come from the model, so they match the reports. Keep the ones you want; nothing in the project changes.',glossary:'What the business words mean and which measures implement them.',sources:'Bronze: the data as it landed, one source per file or bucket folder. Reload, add or delete a source.',
  staged:'Silver: the cleaned and combined tables between the sources and the final tables. Hidden from the model; edit their steps here.',tables:'Gold: the final business tables the model and measures are built on. Edit kind, key, description and steps.',flows:'Automations. Run one now and follow its steps, or switch it on or off.',
@@ -574,7 +569,7 @@ function nav(){return [['Start',[['home','Home',home]]],
  ['glossary','Glossary',glossary,D.glossary.length],['datasets','Queries',datasets,D.datasets.length]]],
  ['Visualizations',[['reports','Reports',reportsPage,D.reports.length],['monitor','Monitor',monitorPage],['explore','Explore',explore,MINE.length||'']]],
  ['Automate',[['flows','Flows',flows,D.flows.length],['ml','ML models',ml,D.ml.length],['tools','Tools',tools,D.tools.length],['agents','Agents',agents,D.agents.length]]],
- ['Knowledge',[['team','Team',teamPage],['vault','Vault',vaultPage,(VAULT||[]).length],['docs','Docs',docs]]],
+ ['Knowledge',[['vault','Vault',vaultPage,(VAULT||[]).length],['docs','Docs',docs]]],
  ['Govern',[['security','Security',security],['environments','Environments',b=>b.insertAdjacentHTML('beforeend',D.sections.Environments)],['history','History',commits,(D.history||[]).length]]]]}
 let MODE='developer',VAULT=[];
 let FOLD={};try{FOLD=JSON.parse(localStorage.getItem('abi-fold')||'{}')}catch(e){}
@@ -1112,6 +1107,21 @@ def serve(project: str, port: int = 8790, open_browser: bool = True, remote: str
                         out = {"error": str(e.body.get("message") if isinstance(e.body, dict) else e.body)}
                 changed(project)
                 return self.reply(200, json.dumps(out, default=str).encode())
+            if self.path == "/team/answer":  # the person's Approve/Decline on Home: the step runs through ABI (and its confirmation)
+                import team  # noqa: PLC0415 (sibling script)
+                if hub.mode == "viewer":
+                    return self.reply(403, json.dumps({"error": "Viewer mode is read-only. Switch to Developer to answer the team."}).encode())
+                item = next((p for p in team.pending(project) if p["id"] == body.get("id")), None)
+                if not item:
+                    return self.reply(410, json.dumps({"error": "That step is no longer waiting."}).encode())
+                if body.get("decision") != "approve":
+                    team.pending_done(project, item["id"], "declined")
+                    return self.reply(200, json.dumps({"result": "declined"}).encode())
+                action = item["action"].removeprefix("mcp__abi__")
+                if action not in ALLOWED:
+                    return self.reply(403, json.dumps({"error": f"'{action}' is a step for ABI's own app."}).encode())
+                return self.reply(200, json.dumps(run(action, {**item["args"], "project": project}, None,
+                                                      lambda: team.pending_done(project, item["id"], "ok") or "done"), default=str).encode())
             if self.path == "/team":
                 import team  # noqa: PLC0415 (sibling script)
                 try:

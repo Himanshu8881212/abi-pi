@@ -140,12 +140,18 @@ def test_viewer_mode_is_read_only_on_the_server(srv):
         assert code == 403 and "Viewer" in r["error"]
         assert post(port, "/api/run_flow", {"project": P, "flow": "x"}, key)[0] == 403
         assert post(port, "/vault/add", {"name": "x.md", "data": ""}, key)[0] == 403
+        assert post(port, "/team/answer", {"id": "p1", "decision": "approve"}, key)[0] == 403, "no approvals in Viewer"
         code, r = post(port, "/api/semantic_model", {"project": P}, key)
         assert code == 200 and "result" in r, "reads still work"
         req = urllib.request.Request(f"http://127.0.0.1:{port}/agent/mode", b"{}", {"X-Abi-Agent": HUB.agent_key, "X-Abi-Client": "default"})
         assert json.loads(urllib.request.urlopen(req).read())["mode"] == "viewer", "the harness reads the same switch"
     finally:
         post(port, "/mode", {"mode": "developer"}, key)
+
+
+def test_team_answer_only_for_a_waiting_step(srv):
+    port, key, _ = srv
+    assert post(port, "/team/answer", {"id": "no_such_step", "decision": "approve"}, key)[0] == 410
 
 
 def test_vault_add_search_remove(srv):

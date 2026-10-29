@@ -317,7 +317,7 @@ def handoff(project: str, agent: str, h: dict) -> dict:
         return {"accepted": False, "errors": errs}
     pend = read(project, "pending.json", [])
     for p in h.get("pending_confirmations") or []:
-        pend.append({"id": f"p{len(pend) + 1}", "task": t["id"], "agent": agent, "action": p.get("action"),
+        pend.append({"id": f"p{len(pend) + 1}", "task": t["id"], "agent": agent, "action": str(p.get("action") or "").removeprefix("mcp__abi__"),
                      "args": p.get("args") or {}, "why": p.get("why", ""), "status": "waiting", "t": now()})
     write(project, "pending.json", pend)
     results = [check(project, c, h.get("done") or [], h) for c in AGENTS[agent]["checks"]]
