@@ -141,6 +141,8 @@ def _numbers(text: str, ids: set[str], lists: bool = False) -> list[tuple[tuple[
         if tok and "_" in tok and re.search("[A-Za-z]", tok):
             continue  # LLM-2-fix-7: digits in an identifier ("llm23_dev"); "5x", "$3B", "FY2023", "7kg" stay figures
         a, b = m.span("n")
+        if m["n"] and b - a == 2 and re.search(r"\d:$", text[:a]) and not re.match(r"[\d.,]", text[b:b + 1]):
+            continue  # the minutes of a clock time ("08:00"): the hour is checked, ":00" is no figure
         if (m[0].strip() == m["n"] and m["n"].isdigit() and len(m["n"]) >= 7 and any(i.startswith(m["n"]) for i in ids)
                 and (text[a - 1:a] == text[b:b + 1] == "`" or ID_LABEL.search(text[:a]) and ID_AFTER.match(text, b))):
             continue

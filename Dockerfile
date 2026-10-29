@@ -18,7 +18,7 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && ln -s ../
 
 # postgresql: the engine's database; libgomp1: LightGBM; git: project copies; the rest: the headless Chrome Remotion uses
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      postgresql libgomp1 git ca-certificates curl procps \
+      postgresql libgomp1 git ca-certificates curl procps tini \
       libnss3 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
       libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 fonts-dejavu-core fonts-liberation \
     && rm -rf /var/lib/apt/lists/* \
@@ -59,4 +59,5 @@ ENV ABI_PI_DATA=/data ABI_PI_WORKSPACES=/data/workspaces ABI_PROJECTS_PATH=/data
 VOLUME ["/data"]
 EXPOSE 8790
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 CMD curl -fsS -o /dev/null http://127.0.0.1:8790/ || exit 1
-ENTRYPOINT ["docker/entrypoint.sh"]
+# tini as PID 1 reaps the engine's exited children (else a stopped worker stays a zombie that looks alive)
+ENTRYPOINT ["tini", "--", "docker/entrypoint.sh"]

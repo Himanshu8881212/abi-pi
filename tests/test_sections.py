@@ -14,7 +14,7 @@ from pi_driver import ROOT, ask
 
 pytestmark = pytest.mark.live
 P = os.environ.get("ABI_PI_SEC_PROJECT") or f"sec_{time.strftime('%m%d%H%M')}"  # set it to rerun on one project
-TABS = ["Sources", "Tables", "Model", "Measures", "Glossary", "Datasets", "Reports", "ML models", "Flows", "Agents", "Tools",
+TABS = ["Sources", "Tables", "Model", "Measures", "Glossary", "Queries", "Reports", "ML models", "Flows", "Agents", "Tools",
         "Security", "Environments", "History"]
 
 
@@ -75,7 +75,9 @@ def test_tool_and_agent(project):
     r = ask(f"In project {P}: create a tool region_summary (input: region; returns revenue and units for that region) with "
             "one test, test it and publish it. Then create a custom agent sales_helper that answers questions about one "
             "region with that tool, with one evaluation case, test it and publish it.", confirm=True)
-    assert r.called("save_tool") and r.called("save_agent"), [t[0] for t in r.tools]
+    # the Lead may hand both to a specialist (its calls aren't in r.tools): what counts is what ABI holds
+    assert {t["id"] for t in abi.call("list_tools", project=P)["tools"]} >= {"region_summary"}, [t[0] for t in r.tools]
+    assert {a["id"] for a in abi.call("list_agents", project=P)["agents"]} >= {"sales_helper"}, [t[0] for t in r.tools]
     assert "region_summary.json" in files("tools")
     assert "sales_helper.json" in files("agents")
 

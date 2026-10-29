@@ -30,3 +30,9 @@ def test_cli_skips_answers_without_numbers():
     assert run({"answer": "Atlantis is great.", "results": []}) == {"numbers": [], "names": []}
     out = run({"answer": "We have 42 videos.", "results": []})
     assert out["numbers"] == ["42"] and "42" not in out["masked"]
+
+
+def test_clock_minutes_are_no_figure():
+    """'every Monday at 8' became 'at 08:[not verified]': the minutes of a time were checked as a figure (REPORT #43)."""
+    assert ground.check("The flow runs every Monday at 08:00 UTC.", ROWS, asked="every Monday at 8") == {"numbers": [], "names": []}
+    assert ground.check("The flow runs every Monday at 09:00 UTC.", ROWS, asked="every Monday at 8")["numbers"] == ["09"]

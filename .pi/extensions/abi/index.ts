@@ -219,32 +219,13 @@ export default async function abi(pi: ExtensionAPI) {
 		Type.Object({ command: Type.String({ enum: ["validate", "diff"] }), project: Type.String() }), (p) => ["cli", p.command, p.project]);
 
 	// ---------- the app (scripts/app.py): the agent steers the person's open page, and the page follows its changes ----------
-	// One local app server per project. Started by the app (chat panel: ABI_APP_URL/ABI_APP_AGENT_KEY in this process's
-	// env) or here on the first abi_show; its agent key lives in memory only.
+	// The app that started this agent (chat panel: ABI_APP_URL/ABI_APP_AGENT_KEY in this process's env). Without one (a
+	// terminal Pi) there is no page to steer: starting a second app here switched the project to manual commits behind the
+	// terminal's back, so its changes never reached the folder.
 	const apps = new Map<string, { url: string; key: string }>();
 	if (process.env.ABI_APP_URL && process.env.ABI_APP_PROJECT && process.env.ABI_APP_AGENT_KEY)
 		apps.set(process.env.ABI_APP_PROJECT, { url: process.env.ABI_APP_URL, key: process.env.ABI_APP_AGENT_KEY });
-	async function appFor(project: string, start: boolean): Promise<{ url: string; key: string } | undefined> {
-		const known = apps.get(project);
-		// a specialist never starts an app: its process must be able to exit when its task is done
-		if (known || !start || process.env.ABI_PI_AGENT) return known;
-		const key = execFileSync("python3", ["-c", "import secrets;print(secrets.token_urlsafe(24))"], { encoding: "utf8" }).trim();
-		const { spawn } = await import("node:child_process");
-		const child = spawn(PY, [path.join(ROOT, "scripts", "app.py"), project, "0"], { cwd: ROOT, detached: false,
-			env: { ...process.env, ABI_TOKEN: token(), ABI_APP_AGENT_KEY: key }, stdio: ["ignore", "pipe", "ignore"] });
-		const url = await new Promise<string | undefined>((resolve) => {
-			let buf = "";
-			const t = setTimeout(() => resolve(undefined), 120000);
-			child.stdout!.on("data", (d) => { buf += d; const m = buf.match(/live at (http:\/\/127\.0\.0\.1:\d+)\//); if (m) { clearTimeout(t); resolve(m[1]); } });
-			child.on("exit", () => { clearTimeout(t); resolve(undefined); });
-		});
-		if (!url) return undefined;
-		// let go of the server: an open pipe or child would keep this agent's process from ever exiting
-		child.stdout!.removeAllListeners("data");
-		child.stdout!.destroy();
-		child.unref();
-		process.once("exit", () => { try { child.kill(); } catch {} });
-		apps.set(project, { url, key });
+	async function appFor(project: string, _start?: boolean): Promise<{ url: string; key: string } | undefined> {
 		return apps.get(project);
 	}
 	async function appPost(project: string, route: string, body: unknown, start = false): Promise<boolean> {

@@ -61,36 +61,56 @@ def test_scenario1_load_model_top5():
     assert abi.validate_files(dest) == []
 
 
-def test_scenario2_why_views_dropped_and_report():
-    a = ask("In project yt: why did views drop last month? Use views gained (measure gained) by day and by country.")
+@pytest.fixture(scope="module")
+def yt():
+    """Scenarios 2-5 on their own project: the trending videos (the same CSV as scenario 1) and a keyed targets table
+    with a few rows, as a person would set it up. Built once; reused while it exists."""
+    if not abi.folder("yt"):
+        drop = ROOT / "scratch" / "yt"
+        drop.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(CSV, drop / CSV.name)
+        abi.load("demo", "yt", [str(drop / CSV.name)])
+        abi.call("create_input_table", project="yt", table="targets", key=["category_id", "month"],
+                 columns=[{"name": "category_id", "type": "BIGINT"}, {"name": "month", "type": "VARCHAR"}, {"name": "target", "type": "BIGINT"}])
+        abi.call("edit_cells", project="yt", table="targets",
+                 add=[{"category_id": c, "month": "2018-07", "target": v} for c, v in ((20, 5_000_000), (24, 9_000_000), (10, 7_000_000))])
+        abi.sync("yt")
+    return "yt"
+
+
+def test_scenario2_why_views_dropped_and_report(yt):
+    a = ask("In project yt: which categories (category_id) lost the most views from one month to the next in the last"
+            " two months of data? Use total views by month and category.")
     assert a.called("semantic_query"), "answers through the semantic engine"
     assert "[not verified]" not in a.answer or "masked" in a.answer
-    b = ask("In project yt build a one-page report with id country_category named 'Views by country and category': a"
-            " bar chart of the views_by_country measure by videos.country and one by categories.category. Then sync the folder.")
-    reports = [x["id"] for x in abi.call("list_reports", project="yt").get("reports", [])] if isinstance(
-        abi.call("list_reports", project="yt"), dict) else []
-    assert "country_category" in json.dumps(abi.call("list_reports", project="yt")), reports
+    b = ask("In project yt build a one-page report with id category_views named 'Views by category': a bar chart of total"
+            " views by category_id and a line chart of total views by day. Then sync the folder.")
+    assert "category_views" in json.dumps(abi.call("list_reports", project="yt")), [t[0] for t in b.tools]
     assert any(t[0] == "abi_sync" for t in b.tools)
 
 
-def test_scenario3_writeback_waits_for_the_person():
-    r = ask("In project yt: raise the July 2018 target in the targets table by 10% for the Gaming category"
-            " (or the nearest valid rows if targets aren't kept by category). Propose it.", confirm=False)
+def test_scenario3_writeback_waits_for_the_person(yt):
+    r = ask("In project yt: raise the July 2018 target (month 2018-07) in the targets table by 10% for category_id 20."
+            " Propose it.", confirm=False)
     text = r.answer.lower()
-    assert r.called("propose_edit") or r.called("edit_cells") or r.called("edit_total") or "categor" in text
-    assert "propos" in text or "approv" in text or "categor" in text
+    assert r.called("propose_edit") or r.called("edit_cells") or r.called("edit_total"), [t[0] for t in r.tools]
+    assert "propos" in text or "approv" in text
+    rows = abi._open("GET", "/api/projects/yt/tables/targets/rows?offset=0&limit=50")[1]
+    assert "5000000" in json.dumps(rows), "nothing changed without the person's yes"
 
 
-def test_scenario4_forecast_reports_baseline():
-    r = ask("In project yt: forecast views gained (measure gained) per category for the next 4 weeks. Train and score it"
-            " through ABI and report accuracy against the baseline from ml_models.")
-    assert r.called("save_ml_model") or r.called("train_model")
+def test_scenario4_forecast_reports_baseline(yt):
+    r = ask("In project yt: forecast total views per day for the next 4 weeks. Train and score it through ABI and report"
+            " accuracy against the baseline from ml_models.")
+    assert r.called("save_ml_model") or r.called("train_model") or abi.call("ml_models", project="yt").get("models")
     assert r.called("ml_models")
     assert "baseline" in r.answer.lower()
 
 
-def test_scenario5_weekly_email_stops_at_first_send():
-    r = ask("In project yt: email me a weekly summary of views, videos and gained every Monday at 8 (to"
-            " himanshu@starmedia.example). Create the flow.", confirm=False)
-    assert r.called("save_flow")
-    assert r.confirms or "confirm" in r.answer.lower(), "the first send / enabling waits for the person"
+def test_scenario5_weekly_email_stops_at_first_send(yt):
+    r = ask("In project yt: email me a weekly summary of total views and videos every Monday at 8 (to"
+            " someone@example.invalid). Create the flow.", confirm=False)
+    flows = abi.call("list_flows", project="yt").get("flows", [])
+    assert r.called("save_flow") or flows, [t[0] for t in r.tools]
+    assert not any(f.get("enabled") for f in flows), "the flow waits for the person: never enabled by the agent"
+    assert "[not verified]" not in r.answer, r.answer

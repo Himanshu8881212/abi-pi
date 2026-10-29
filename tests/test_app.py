@@ -130,7 +130,7 @@ def test_chat_in_the_page_answers_and_steers_it(srv):
     assert "show" in seen and "answer" in seen, f"within 5 min: {sorted(seen)}"
     assert seen["show"]["page"] == "report" and seen["show"]["filters"], seen["show"]
     top = max(abi.call("semantic_query", project=P, measures=[m["id"] for m in abi.call("semantic_model", project=P)["measures"]
-                                                              if "amount" in m["expression"]][:1], dimensions=["orders.region"])["rows"],
+                                                              if m["expression"].startswith("SUM(orders.amount")][:1], dimensions=["orders.region"])["rows"],
               key=lambda r: r[1])
     assert top[0] in seen["answer"]["text"] and "[not verified]" not in seen["answer"]["text"]
 

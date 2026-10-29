@@ -3,7 +3,7 @@
     "abi": {
       "url": "http://127.0.0.1:8780/api/mcp",
       "headers": {
-        "Authorization": "!python3 /Users/himanshu/Work/Working/abi-pi/scripts/creds.py abi-bearer"
+        "Authorization": "!python3 scripts/creds.py abi-bearer"
       },
       "description": "ABI, the Agentic Open BI platform: every data read and change goes through these actions.",
       "exposure": "deferred",
