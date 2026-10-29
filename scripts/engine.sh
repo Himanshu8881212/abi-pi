@@ -51,12 +51,12 @@ if ! "$PGBIN/pg_ctl" -D "$D/pg" status >/dev/null 2>&1; then
 fi
 "$PGBIN/psql" -d postgres -Atqc "SELECT 1 FROM pg_database WHERE datname = 'abi'" | grep -q 1 || "$PGBIN/createdb" abi
 cd "$ROOT/engine/backend"
-"$BIN/python" -c "import abi.ops, abi.db; abi.ops.setup(); abi.db.init(queue=True)"
+HOME=${ENGINE_HOME:-$HOME} "$BIN/python" -c "import abi.ops, abi.db; abi.ops.setup(); abi.db.init(queue=True)"
 if ! alive worker; then
-  nohup "$BIN/procrastinate" --app=abi.worker.app worker > "$D/logs/worker.log" 2>&1 & echo $! > "$D/run/worker.pid"
+  HOME=${ENGINE_HOME:-$HOME} nohup "$BIN/procrastinate" --app=abi.worker.app worker > "$D/logs/worker.log" 2>&1 & echo $! > "$D/run/worker.pid"
 fi
 if ! alive app; then
-  nohup "$BIN/uvicorn" abi.app:app --host 127.0.0.1 --port "$PORT" --log-config abi/logging.json > "$D/logs/engine.log" 2>&1 &
+  HOME=${ENGINE_HOME:-$HOME} nohup "$BIN/uvicorn" abi.app:app --host 127.0.0.1 --port "$PORT" --log-config abi/logging.json > "$D/logs/engine.log" 2>&1 &
   echo $! > "$D/run/app.pid"
 fi
 n=0

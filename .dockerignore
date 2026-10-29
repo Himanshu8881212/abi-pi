@@ -10,3 +10,7 @@ bench
 .env
 *.zip
 *.mp4
+**/.venv
+data
+workspaces.old-abi
+engine/backend/static
