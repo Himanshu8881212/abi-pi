@@ -436,6 +436,8 @@ export default async function abi(pi: ExtensionAPI) {
 			const why = !real ? `${p} is outside the harness folder ${ROOT}`
 				: DATA_FILE.test(real) ? `${p} is a data file; read data only through ABI (semantic_query)`
 				: /[\\/](scratch|\.venv|logs)([\\/]|$)/.test(path.relative(ROOT, real).replace(/^/, "/")) ? `${p} is not a definitions folder`
+				// the admin's API keys and everyone's chats: never through the agent's file tools
+				: /[\\/]workspaces[\\/](_settings|[^\\/]+[\\/]_views)([\\/]|$)|secret\.key$/.test(real) ? `${p} holds keys or other people's chats`
 				: (name === "write" || name === "edit") && /[\\/]workspaces[\\/][^\\/]+[\\/][a-z][a-z0-9_]*[\\/]/.test(real)
 					? `${p} is in a project folder; ABI is the source of truth, change it through ABI actions` : null;
 			if (why) return { block: true, reason: `Refused: ${why}.` };

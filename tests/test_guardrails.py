@@ -73,3 +73,14 @@ def test_no_token_or_password_in_transcripts_logs_or_git():
         assert not hits, f"a secret appears in {hits[:3]}"  # never print the secret itself
     log = subprocess.run(["git", "-C", str(ROOT), "log", "-p", "--all"], capture_output=True, text=True).stdout
     assert not any(s in log for s in _secrets())
+
+
+def test_the_agents_file_tools_refuse_keys_and_chats():
+    import re
+    src = (Path(__file__).resolve().parent.parent / ".pi/extensions/abi/index.ts").read_text()
+    m = re.search(r"/(\[\\\\/\]workspaces\[\\\\/\]\(_settings\|.*?secret\\\.key\$)/\.test\(real\)", src)
+    assert m, "the guard names the settings folder, the chats and key files"
+    rx = re.compile(m.group(1).replace("\\\\", "\\"))
+    for bad in ("/x/workspaces/_settings/settings.json", "/x/workspaces/_settings/secret.key", "/x/workspaces/youtube/_views/yt_cms/chats/ann/a.json"):
+        assert rx.search(bad), bad
+    assert not rx.search("/x/workspaces/youtube/yt_cms/model/model.json")
