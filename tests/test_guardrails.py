@@ -85,3 +85,16 @@ def test_the_agents_file_tools_refuse_keys_and_chats():
                 "/x/workspaces/youtube/_team/yt_cms/journal.jsonl", "/x/workspaces/youtube/_app/yt_cms/packs/p1/01-r-v.csv"):
         assert rx.search(bad), bad
     assert not rx.search("/x/workspaces/youtube/yt_cms/model/model.json") and not rx.search("/x/workspaces/youtube/_vault/yt_cms/files/d.md")
+
+
+def test_the_agents_file_tools_and_uploads_refuse_the_engines_data():
+    src = (ROOT / ".pi/extensions/abi/index.ts").read_text()
+    m = re.search(r"/(\^\[\\\\/\]\(scratch\|.*?\)\(\[\\\\/\]\|\$\))/\.test\(path\.relative", src)
+    assert m, "the guard names the folders that aren't definitions"
+    rx = re.compile(m.group(1).replace("\\\\", "\\"))
+    for bad in ("/data/pg/base/1", "/data/accounts.txt", "/data/lake/x.parquet", "/engine/backend/abi/app.py", "/logs/a.log"):
+        assert rx.search(bad), bad
+    assert not rx.search("/workspaces/demo/p/model/model.json") and not rx.search("/harness/team.json")
+    for bad in (ROOT / "data/accounts.txt", ROOT / "data/lake/orders.parquet", ROOT / "engine/backend/abi/app.py"):
+        with pytest.raises(SystemExit):
+            abi.guard(bad)
