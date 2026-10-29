@@ -11,6 +11,18 @@ set -eu
 export ABI_URL="${ABI_URL:-http://host.docker.internal:8770}"
 WS="${ABI_PI_WORKSPACE:-main}"
 cd /app
+if ! curl -fsS -m 10 -o /dev/null "$ABI_URL/api/health"; then
+  echo "Can't reach ABI at $ABI_URL (set ABI_URL to ABI's address as this container sees it)." >&2
+  exit 1
+fi
+if [ ! -d "$ABI_PROJECTS_PATH" ] || [ -z "$(ls -A "$ABI_PROJECTS_PATH" 2>/dev/null)" ]; then
+  echo "ABI's projects folder isn't mounted at $ABI_PROJECTS_PATH (mount it read-only: ABI_PROJECTS_DIR in .env)." >&2
+  exit 1
+fi
+if [ -z "${ABI_TOKEN:-}" ] && { [ -z "${ABI_USER:-}" ] || [ -z "${ABI_PASSWORD:-}" ]; }; then
+  echo "Set ABI_USER and ABI_PASSWORD (a service account) so the app can sync project copies." >&2
+  exit 1
+fi
 mkdir -p "$ABI_PI_WORKSPACES" /data/logs
 [ -e logs ] || ln -s /data/logs logs
 # the agent's MCP server is ABI's, wherever it runs

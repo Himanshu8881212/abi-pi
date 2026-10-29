@@ -197,3 +197,12 @@ End-to-end, stress and edge cases (from round 14): `tests/test_e2e.py` drives a 
 | 21 | Errors (E2E) | When ABI refused a request's shape (422) the page said "Invalid input. None": the field ABI named was lost. | ABI's field errors are shown as `field: reason` (e.g. `report: Field required`). Test: `test_abis_refusal_names_the_field`. |
 | 22 | Import (E2E) | Checking a zip compares it with the project as it is now: uncommitted work showed as changes, and Apply would replace it without saying so. | The check says how many uncommitted changes Apply replaces, and to commit first to keep them. |
 | — | Invite | Inviting the owner's email was refused by ABI: account email is off in the preview (needs `ABI_PUBLIC_URL` and `set_account_mail`). Nothing was sent. | Release checklist item: set up ABI's account mail. |
+
+The release is now the ABI-PI container (self-hosted like n8n). Container checks (round 15): missing project, unreachable ABI, no projects folder and no service account each stop with one clear line; a fresh volume starts healthy as user `abi`; a restart keeps the data without attaching again; no secret in the image history.
+
+| # | Area | Finding | Fix |
+|---|---|---|---|
+| 23 | Settings (SSRF) | A provider's base URL could be a cloud metadata or link-local address: Test connection would send the API key there and read internal answers. | Metadata names, link-local, unspecified and multicast addresses are refused when saving and again when testing; local endpoints (Ollama, LM Studio) stay allowed. Test: `test_a_provider_url_cannot_point_at_metadata_or_nowhere`. |
+| 24 | Container | Everything ran as root. | A `abi` user (uid 10001) owns only `/app` and `/data` and runs the app. |
+| 25 | Container | No health check: Docker and orchestrators couldn't tell a stuck container. | `HEALTHCHECK` on the app's page (start period 120 s). |
+| 26 | Container | An unreachable ABI, an unmounted projects folder or a missing service account failed later with a traceback. | The entrypoint checks each first and says what to set. |

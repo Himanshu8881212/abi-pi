@@ -13,13 +13,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN npm install -g --no-audit --no-fund @earendil-works/pi-coding-agent@1.3.0
 RUN pip install --no-cache-dir duckdb jsonschema "cryptography>=44,<47"
 
+# an unprivileged user runs everything; it owns only the app's folder and the data volume
+RUN useradd --create-home --uid 10001 abi && mkdir -p /app /data && chown abi:abi /app /data
 WORKDIR /app
-COPY scripts/video/package.json scripts/video/package-lock.json* scripts/video/
+USER abi
+COPY --chown=abi:abi scripts/video/package.json scripts/video/package-lock.json* scripts/video/
 RUN cd scripts/video && npm ci --no-audit --no-fund
-COPY . .
+COPY --chown=abi:abi . .
 
 # the app's data (project copies, vault, chats, packs) lives in a volume, never in the image
 ENV ABI_PI_WORKSPACES=/data/workspaces ABI_PROJECTS_PATH=/abi-projects PYTHONUNBUFFERED=1
 VOLUME ["/data"]
 EXPOSE 8790
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 CMD curl -fsS -o /dev/null http://127.0.0.1:8790/ || exit 1
 ENTRYPOINT ["docker/entrypoint.sh"]

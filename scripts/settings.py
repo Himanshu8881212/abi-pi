@@ -60,12 +60,33 @@ def public() -> dict:
                           for p in s["providers"]]}
 
 
+def safe_url(base: str) -> bool:
+    """A provider is a model API: never a cloud metadata service, a link-local or an unspecified address (a test
+    connection would send the key there). Local endpoints (Ollama, LM Studio) stay allowed."""
+    import ipaddress  # noqa: PLC0415
+    import socket  # noqa: PLC0415
+    import urllib.parse  # noqa: PLC0415
+    host = (urllib.parse.urlsplit(base).hostname or "").lower()
+    if not host or host in ("metadata.google.internal", "metadata", "instance-data") or host.endswith(".internal") and "metadata" in host:
+        return False
+    try:
+        addrs = {ipaddress.ip_address(host)}
+    except ValueError:
+        try:
+            addrs = {ipaddress.ip_address(a[4][0].split("%")[0]) for a in socket.getaddrinfo(host, None)}
+        except OSError:
+            return True  # not resolvable here (yet): the test connection will say so
+    return not any(a.is_link_local or a.is_unspecified or a.is_multicast for a in addrs)
+
+
 def save_provider(p: dict, key: str | None = None) -> dict:
     """Add or change a provider; a key given replaces the stored one, none keeps it."""
     pid, api, base = str(p.get("id", "")), p.get("api"), str(p.get("base_url", "")).rstrip("/")
     models = [m for m in (p.get("models") or []) if isinstance(m, str) and m.strip()]
     if not PID.match(pid) or api not in APIS or not re.match(r"^https?://[^\s]+$", base) or not models or not all(MID.match(m) for m in models):
         raise ValueError("A provider needs an ID (lowercase letters, digits, -), an API type, an http(s) base URL and at least one model ID.")
+    if not safe_url(base):
+        raise ValueError("That address is a metadata, link-local or unspecified address, not a model API.")
     s = load()
     old = next((x for x in s["providers"] if x["id"] == pid), {})
     rec = {"id": pid, "name": str(p.get("name") or pid)[:80], "api": api, "base_url": base, "models": models[:40],
@@ -110,6 +131,8 @@ def test(pid: str) -> dict:
     if not p:
         return {"ok": False, "message": "No such provider."}
     key, base = key_of(pid), p["base_url"]
+    if not safe_url(base):  # checked again: a name can resolve elsewhere later
+        return {"ok": False, "message": "That address is not allowed for a model API."}
     if p["api"] == "anthropic-messages":
         req = urllib.request.Request(f"{base}/v1/models", headers={"x-api-key": key, "anthropic-version": "2023-06-01"})
     elif p["api"] == "google-generative-ai":
