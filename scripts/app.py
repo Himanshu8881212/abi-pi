@@ -1,24 +1,26 @@
 #!/usr/bin/env python3
-"""One HTML file per project, inside its folder: <workspace>/<project>/app.html (git-excluded; never sent to ABI).
+"""ABI's app on this machine: every workspace and project, one sidebar in pipeline order.
 
-A sidebar with everything, by category:
-  Overview   Home (readiness, data quality, latest changes)
-  Analyze    every report (pages; filters; click a bar or point to cross-filter), Queries (preview rows)
-  Model      Measures (edit, test, add, delete), Model (diagram), Glossary (edit, add, delete)
-  Data       Sources and Tables (refresh, data quality)
-  Automate   Flows (run now with the trace, enable/disable), ML models (train, score, latest run), Tools (test, run),
-             Agents (evaluation set, ask a question)
-  Govern     Docs (ABI's generated documentation), Security, Environments, History
-Opened from disk it is a snapshot; served by
+  Start           Home (ask, what needs attention, where things stand), Chat (the agent; it also navigates)
+  Data            Sources (bronze), Staged (silver), Tables (gold), Edits (ABI's write-back on the gold tables)
+  Data Model      Diagram, Measures, Glossary, Queries
+  Visualizations  Reports, Monitor (freshness, readiness, ML runs, flows), Explore (your own analysis)
+  Export          Board pack, Documents, One-pager, Data, Video, Project (the whole project as one zip)
+  Automate        ML models, Tools, Agents, Flows
+  Knowledge       Vault, Docs
+  Govern          Security, Environments, History, Users & access (workspace owners)
 
-    python scripts/app.py <project> [port]        # http://127.0.0.1:<port>/ (default 8790)
+    python scripts/app.py <project> [port] [--single] [--tailnet|--open]   # http://127.0.0.1:<port>/ (default 8790)
 
-it works live: every click is an ABI action as the signed-in person (REST), so ABI's checks and confirmations apply.
-The session token stays in this process; a confirm token stays here too: the page gets ABI's message and preview and
-the person's click redeems it. Only the actions in ALLOWED pass; requests need the per-start key and a local Host.
-Roles, users, secrets and remotes stay in ABI's app.
+Everyone signs in with their own ABI account (ABI checks the password and MFA; the app keeps only the session, in
+memory) and the app acts as them: their project roles, row-level security and reports; Developer only for editors and
+owners; Viewer reads the published copy. Workspace owners get Users & access: ABI's invite_user, set_role and
+remove_role, plus which sections and reports each person sees (the app's routes refuse the rest). --single: no
+sign-in, this process's own ABI session (one person on this machine). A confirm token stays in this process: the page
+gets ABI's message and preview and the person's click redeems it. Only the actions in ALLOWED pass.
 """
 import atexit
+import html
 import json
 import os
 import re
@@ -48,6 +50,7 @@ ALLOWED = {"semantic_model", "semantic_query", "readiness", "rls_rules", "data_q
            "save_tool", "publish_tool", "delete_tool", "save_agent", "publish_agent", "delete_agent", "preview_steps", "set_steps",
            "edit_cells", "edit_history", "edit_proposals", "approve_edit", "reject_edit", "undo_edits", "create_input_table", "report_snapshot", "export_visual"}
 KEY_SLOT = "__ABI_APP_KEY__"
+ME_SLOT = "null/*__ABI_ME__*/"
 READS_ONLY = {"run_flow", "run_agent"}  # not changes to the project, but they act (send, call tools): Developer only
 WRITES = {"set_measure", "delete_measure", "set_glossary_term", "delete_glossary_term", "enable_flow", "train_model", "score_model", "refresh",
           "commit", "undo", "add_data", "delete_source", "delete_table", "set_table", "add_relationship", "remove_relationship",
@@ -100,7 +103,7 @@ dialog{border:2px solid var(--ink);background:var(--sheet);color:var(--ink);max-
 dialog h3{margin:0 0 12px;font:700 18px var(--display);text-transform:uppercase}dialog .row{margin-top:18px}dialog pre{white-space:pre-wrap;max-height:40vh}dialog::backdrop{background:color-mix(in srgb,var(--ink) 55%,transparent)}
 .trace{margin:12px 0 0;padding-left:20px}.trace li{margin:3px 0}.trace:empty{display:none}
 .stat{font:700 38px/1 var(--display);margin:4px 0 8px;text-transform:uppercase}
-.ed-cell{cursor:text}.ed-cell:hover{outline:1px dashed var(--ink)}td.changed{background:color-mix(in srgb,var(--ink) 10%,transparent)}.checks{display:flex;flex-wrap:wrap;gap:6px 16px}.chk{display:flex;gap:6px;align-items:center;font-size:13px}.crumb{background:none;border:0;color:inherit;font:inherit;cursor:pointer;display:flex;gap:6px;align-items:baseline}.crumb .car{font-style:normal;opacity:.6}#switcher{position:fixed;top:64px;left:max(16px,env(safe-area-inset-left,0px));z-index:20;width:min(420px,calc(100vw - 32px));max-height:70vh;overflow:auto}.areas .lk.on{background:var(--ink);color:var(--paper)}.areas .lk.on span{color:inherit}.areas{display:grid;gap:6px}.areas .lk{display:flex;gap:16px;text-align:left;width:100%}.areas .lk b{min-width:9.5em}.areas .lk span{color:var(--mute)}
+.ed-cell{cursor:text}.ed-cell:hover{outline:1px dashed var(--ink)}td.changed{background:color-mix(in srgb,var(--ink) 10%,transparent)}.checks{display:flex;flex-wrap:wrap;gap:6px 16px}.chk{display:flex;gap:6px;align-items:center;font-size:13px}.crumb{background:none;border:0;color:inherit;font:inherit;cursor:pointer;display:flex;gap:6px;align-items:baseline}.crumb .car{font-style:normal;opacity:.6}#switcher{position:fixed;top:64px;left:max(16px,env(safe-area-inset-left,0px));z-index:20;width:min(420px,calc(100vw - 32px));max-height:70vh;overflow:auto}.areas .lk.on{background:var(--ink);color:var(--paper)}.areas .lk.on span{color:inherit}.who{font-size:12px;color:var(--mute);align-self:center}header form{display:inline}.areas{display:grid;gap:6px}.areas .lk{display:flex;gap:16px;text-align:left;width:100%}.areas .lk b{min-width:9.5em}.areas .lk span{color:var(--mute)}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:12px}.kv b{font-weight:500;color:var(--mute)}
 pre{margin:10px 0 0}.pg .grid{gap:20px}.pg>section>h2{display:none}
 #chat{position:fixed;top:60px;right:0;bottom:0;margin:0;width:420px;max-width:100vw;background:var(--sheet);border-left:2px solid var(--ink);border-top:2px solid var(--ink);display:flex;flex-direction:column;
@@ -358,6 +361,25 @@ function boardPage(box){const g=h('div','cards');box.append(g);const P=D.app?.pa
   c.append(h('p',m.notes_grounded?'ok':'bad',m.notes_grounded?'Every number in the notes is in the pack\'s report views.':'Notes not checked.'));
   const fl=h('div','areas');[...m.items,{file:'notes.md',kind:'notes',status:'ok'}].forEach(it=>{const b=h('button','lk');b.append(h('b','',it.kind),h('span','',it.status==='ok'?it.file:'not made: '+(it.error||'')));
    if(it.status==='ok')b.onclick=async()=>{try{dl(await fileOf('/packs/file',{pack:m.id,file:it.file}),it.file)}catch(e){toast(e.message)}};fl.append(b)});c.append(fl);g.append(c)})}
+// Users & access (workspace owners): ABI's accounts and roles; the app's sections and reports per person
+async function usersPage(box){if(!LIVE){box.append(h('p','empty','Users & access works with the live app.'));return}
+ const post=(op,b)=>fetch('/admin/'+op,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json());
+ const r=await post('users');if(r.error){box.append(h('p','bad',r.error));return}const U=r.result,g=h('div','cards');box.append(g);
+ const inv=card('Invite','ABI creates the account and emails a link to choose a password'),em=h('input','f');em.type='email';em.placeholder='name@company.com';inv.append(em);
+ act(inv,'Invite',async()=>{let x=await post('invite',{email:em.value});if(x.confirm){if(!await ask(x.confirm))return 'Not invited.';x=await fetch('/confirm/'+x.confirm.id,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(y=>y.json())}
+  if(x.error)throw new Error(x.error);return 'Invited through ABI. Give them a role below.'},1);g.append(inv);
+ const t=card(`People in ${U.project}`,'role: Viewer reads the published copy; Editor and Owner build (Developer)');t.style.gridColumn='1/-1';g.append(t);
+ U.users.forEach(u=>{const row=h('div','hit'),role=(u.roles||{})[U.project]||'none',sel=h('select','f');['none','viewer','editor','owner'].forEach(x=>sel.append(new Option(x==='none'?'no access':x,x)));sel.value=role;
+  const a=U.access[u.name]||{},sx=h('div','checks'),rx=h('div','checks'),m=h('div','msg');
+  U.sections.forEach(x=>{const l=h('label','chk'),c=h('input');c.type='checkbox';c.value=x;c.checked=!a.sections||a.sections.includes(x);l.append(c,h('span','',x));sx.append(l)});
+  U.reports.forEach(x=>{const l=h('label','chk'),c=h('input');c.type='checkbox';c.value=x.id;c.checked=!a.reports||a.reports.includes(x.id);l.append(c,h('span','',x.name));rx.append(l)});
+  const save=btn('Save',async()=>{try{if(sel.value!==role){let x=await post('role',{user:u.name,role:sel.value});
+    if(x.confirm){if(!await ask(x.confirm))throw new Error('Not changed.');x=await fetch('/confirm/'+x.confirm.id,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(y=>y.json())}if(x.error)throw new Error(x.error)}
+   const pick=el=>{const v=[...el.querySelectorAll('input:checked')].map(c=>c.value);return v.length===el.querySelectorAll('input').length?null:v};
+   const y=await post('access',{user:u.name,sections:pick(sx),reports:pick(rx)});if(y.error)throw new Error(y.error);say(m,'Saved.')}catch(e){say(m,e.message,1)}},1);
+  row.append(h('div','',`${u.name}${u.workspace_owner?' · workspace owner (sees everything)':''}${u.tenant?' · tenant '+u.tenant:''}`),h('label','l','Role in this project'),sel,
+   h('label','l','Sections'),sx,h('label','l','Reports'),rx,save,m);t.append(row)});
+ const note=card('What this controls','and what it does not');note.append(h('p','','Role, sign-in and row-level security are ABI\'s: they decide what data a person can read or change, everywhere. Sections and reports decide what this app shows them and the app\'s own routes refuse the rest. Row and column rules are on the Security page.'));g.append(note)}
 function transferPage(box){if(!LIVE||MODE==='viewer'){box.append(h('p','empty','Export and import work in Developer mode with the live app.'));return}
  const ex=card('Export','the whole project as one zip'),im=card('Import','replace this project with a zip; ABI checks it first'),g=h('div','cards');
  ex.append(h('p','','ABI\'s committed files (sources, tables, model, measures, glossary, queries, reports, flows, ML, tools, agents, security, environments, docs), the app\'s JSON (Monitor settings, saved analyses), the vault\'s documents and the team\'s plan. Not inside: the data (refresh the sources after an import), secret values, people\'s roles, chats, uncommitted changes.'));
@@ -666,12 +688,13 @@ function vaultPage(box){if(!LIVE){box.append(h('p','empty','The vault opens with
 const PENDING={filters:null,explore:null};
 const LEDE={vault:'Your business documents: definitions, finance rules, KPI specs. The agents search them before they define or check a measure.',home:'Start here: ask anything, see what needs attention, and every part of the project at a glance.',datasets:'Saved questions to the model (measures by dimensions, with filters). Each run returns a fresh table; nothing is stored. Reports, flows and ML reuse them. Preview their rows.',
  measures:'The business numbers. Edit a formula and ABI checks it before it saves; Test shows the total.',model:'Tables and how they join. Facts are black, dimensions are outlined.',
- chat:'Talk to the agent: ask a question, ask where something is, or ask for a change. When it shows you a page, the chat moves to the side and goes on.',boardpack:'Board packs: the documents, data and explainer video a review needs, made from ABI by the board-pack agent and checked before they leave. Nothing is sent from here.',documents:'A report, some of its pages or one view, as ABI renders it: PDF, PNG, PowerPoint (with a newer ABI).',onepager:'One page for the board: a report page with the headline numbers, two charts and the caveats. The agent builds it in ABI; export it here.',dataexport:'The rows behind any view, as CSV or Excel, or a query\'s rows as CSV.',video:'A silent explainer of report views: the numbers from ABI, animated, with a caption per slide, in the app\'s theme.',transfer:'The whole project as one zip, so it can be kept, reviewed, moved or rebuilt. Import goes through ABI, which checks it and makes it one undoable commit.',edits:'Write-back: people correct or add rows of the gold tables. Edits apply on top of the table by row key (the loaded data is never changed), survive refreshes, can be undone, and every query sees the edited table.',reports:'The saved reports of this project. Open one to filter it and click through.',monitor:'Is anything wrong right now: data freshness, model readiness, ML runs and flows. Reports show the business; this shows the system.',explore:'Your own analysis: pick measures, a dimension and a filter; the numbers come from the model, so they match the reports. Keep the ones you want: they are saved with the app, the project itself doesn\'t change.',glossary:'What the business words mean and which measures implement them.',sources:'Bronze: the data as it landed, one source per file or bucket folder. Reload, add or delete a source.',
+ chat:'Talk to the agent: ask a question, ask where something is, or ask for a change. When it shows you a page, the chat moves to the side and goes on.',boardpack:'Board packs: the documents, data and explainer video a review needs, made from ABI by the board-pack agent and checked before they leave. Nothing is sent from here.',documents:'A report, some of its pages or one view, as ABI renders it: PDF, PNG, PowerPoint (with a newer ABI).',onepager:'One page for the board: a report page with the headline numbers, two charts and the caveats. The agent builds it in ABI; export it here.',dataexport:'The rows behind any view, as CSV or Excel, or a query\'s rows as CSV.',video:'A silent explainer of report views: the numbers from ABI, animated, with a caption per slide, in the app\'s theme.',people:'Who may sign in to this project, as what (Viewer, Editor, Owner), and which sections and reports each person sees.',transfer:'The whole project as one zip, so it can be kept, reviewed, moved or rebuilt. Import goes through ABI, which checks it and makes it one undoable commit.',edits:'Write-back: people correct or add rows of the gold tables. Edits apply on top of the table by row key (the loaded data is never changed), survive refreshes, can be undone, and every query sees the edited table.',reports:'The saved reports of this project. Open one to filter it and click through.',monitor:'Is anything wrong right now: data freshness, model readiness, ML runs and flows. Reports show the business; this shows the system.',explore:'Your own analysis: pick measures, a dimension and a filter; the numbers come from the model, so they match the reports. Keep the ones you want: they are saved with the app, the project itself doesn\'t change.',glossary:'What the business words mean and which measures implement them.',sources:'Bronze: the data as it landed, one source per file or bucket folder. Reload, add or delete a source.',
  staged:'Silver: the cleaned and combined tables between the sources and the final tables. Hidden from the model; edit their steps here.',tables:'Gold: the final business tables the model and measures are built on. Edit kind, key, description and steps.',flows:'Automations. Run one now and follow its steps, or switch it on or off.',
  ml:'Forecasts, segments and anomaly models. Train, score and read the latest run.',tools:'Calculations your agents can call. Run one with inputs or run its tests.',
  agents:'Custom agents for this project. Ask one a question or run its evaluation set.',docs:'The project documentation ABI writes from its definitions.',
  security:'Who sees which rows. Roles are set in ABI itself.',environments:'Where each environment reads its data from.',history:'Every change is a commit in ABI. Newest first.'};let PAGES={},CUR='home';const side=$('aside');
-function nav(){return [['Start',[['home','Home',home],['chat','Chat',chatPage]]],
+function nav(){const all=navAll(),me=window.ME||{admin:true};return all.filter(([g])=>g==='Start'||!me.sections||me.sections.includes(g))}
+function navAll(){return [['Start',[['home','Home',home],['chat','Chat',chatPage]]],
  ['Data',[['sources','Sources',sources,D.sources.length],['staged','Staged',stagedPage,(D.layers||[]).filter(t=>t.layer==='silver').length],['tables','Tables',tablesPage,(D.model?Object.keys(D.model.tables||{}).length:D.tables.length)],['edits','Edits',editsPage]]],
  ['Data Model',[['model','Diagram',modelCanvas],['measures','Measures',measures,D.measures.length],
  ['glossary','Glossary',glossary,D.glossary.length],['datasets','Queries',datasets,D.datasets.length]]],
@@ -679,7 +702,7 @@ function nav(){return [['Start',[['home','Home',home],['chat','Chat',chatPage]]]
  ['Export',[['boardpack','Board pack',boardPage,(D.app?.packs||[]).length],['documents','Documents',documentsPage],['onepager','One-pager',onePagerPage],['dataexport','Data',dataExportPage],['video','Video',videoPage],['transfer','Project',transferPage]]],
  ['Automate',[['flows','Flows',flows,D.flows.length],['ml','ML models',ml,D.ml.length],['tools','Tools',tools,D.tools.length],['agents','Agents',agents,D.agents.length]]],
  ['Knowledge',[['vault','Vault',vaultPage,(VAULT||[]).length],['docs','Docs',docs]]],
- ['Govern',[['security','Security',security],['environments','Environments',b=>b.insertAdjacentHTML('beforeend',D.sections.Environments)],['history','History',commits,(D.history||[]).length]]]]}
+ ['Govern',[['security','Security',security],['environments','Environments',b=>b.insertAdjacentHTML('beforeend',D.sections.Environments)],['history','History',commits,(D.history||[]).length],...((window.ME||{admin:true}).admin?[['people','Users & access',usersPage]]:[])]]]}
 let MODE='developer',VAULT=[];
 let FOLD={};try{FOLD=JSON.parse(localStorage.getItem('abi-fold')||'{}')}catch(e){}
 function sidebar(){side.innerHTML='';PAGES={};nav().forEach(([g,items])=>{const sec=h('div','sec'),hd=h('button','grp'),list=h('div','items');
@@ -700,7 +723,7 @@ const R=document.documentElement,TB=$('#theme');const dark=()=>R.dataset.theme?R
 const setTheme=t=>{if(t)R.dataset.theme=t;TB.textContent=dark()?'Paper':'Ink'};try{setTheme(localStorage.getItem('abi-theme'))}catch(e){setTheme()}
 TB.onclick=()=>{const t=dark()?'light':'dark';setTheme(t);try{localStorage.setItem('abi-theme',t)}catch(e){}};
 $('.snap').hidden=LIVE;$('.snap').title=`Snapshot of ${D.stamp}. Run scripts/app.py ${D.project} to work live.`;
-function setMode(md){MODE=md;setTimeout(()=>{ctx();const g=log.querySelector('.hello');if(g)g.replaceWith(hello())});document.body.dataset.mode=md;$('#m-dev').classList.toggle('on',md==='developer');$('#m-view').classList.toggle('on',md==='viewer');
+function setMode(md){if(window.ME&&!['editor','owner'].includes(ME.role))md='viewer';MODE=md;setTimeout(()=>{ctx();const g=log.querySelector('.hello');if(g)g.replaceWith(hello())});document.body.dataset.mode=md;$('#m-dev').classList.toggle('on',md==='developer');$('#m-view').classList.toggle('on',md==='viewer');
  $('#chat textarea').placeholder=md==='viewer'?'Ask a question. In Viewer the agent only reads.':'Ask a question or for a change.'}
 async function pickMode(md){if(!LIVE){toast('Snapshot: start the app to switch modes.');return}
  await fetch('/mode',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({mode:md})})}
@@ -718,7 +741,9 @@ $('#publish').onclick=async()=>{if(!LIVE)return;if(!await ask({message:'Publish 
  let r=await post('/publish');if(r.confirm){if(!await ask(r.confirm)){toast('Not published.');return}r=await post('/confirm/'+r.confirm.id)}
  toast(r.error?`Publish failed: ${r.error}`:`Published ${r.result.commit}`)};
 $('#menu').onclick=()=>document.body.classList.toggle('menu-open');side.addEventListener('click',e=>{if(e.target.closest('button.it'))document.body.classList.remove('menu-open')});
-$('#switch').onclick=switcher;$('#m-dev').onclick=()=>pickMode('developer');$('#m-view').onclick=()=>pickMode('viewer');
+$('#switch').onclick=switcher;
+if(window.ME?.signin){const w=h('span','who',ME.name),f=h('form');f.method='post';f.action='/signout';f.append(h('button','btn','Sign out'));const r0=$('header .right');r0.prepend(w,f)}
+if(window.ME&&!['editor','owner'].includes(ME.role)){$('#m-dev').hidden=true;$('#m-view').classList.add('on')}$('#m-dev').onclick=()=>pickMode('developer');$('#m-view').onclick=()=>pickMode('viewer');
 let first=decodeURIComponent(location.hash.slice(1));if(!first)try{first=localStorage.getItem('abi-app-'+D.project)}catch(e){}show(first||'home');
 boot.then(()=>{sidebar();show(CUR)});setMode('developer');vc();
 window.addEventListener('hashchange',()=>{const k=decodeURIComponent(location.hash.slice(1));if(k&&k!==CUR)show(k)});
@@ -895,7 +920,16 @@ def build(project: str) -> Path:
     dest = abi.folder(project)
     if not dest:
         raise SystemExit(f"No folder for project '{project}'; create it with `abi.py project`.")
-    data = json.dumps(snapshot(dest, project), default=str).replace("</", "<\\/")
+    (dest / "app.html").write_text(page_html(project, snapshot(dest, project)))
+    exclude = dest / ".git/info/exclude"  # never committed locally, never in a bundle to ABI
+    if "app.html" not in exclude.read_text():
+        exclude.write_text(exclude.read_text().rstrip("\n") + "\napp.html\n")
+    return dest / "app.html"
+
+
+def page_html(project: str, snap: dict) -> str:
+    dest = abi.folder(project)
+    data = json.dumps(snap, default=str).replace("</", "<\\/")
     name = (render.j(dest / "project.json", {}) or {}).get("name", project)
     page = render.shell(name, "", "", "")
     head = (f"<header><button class=btn id=menu aria-label=Menu>Menu</button><span class=brand>ABI</span><button class=crumb id=switch title='Switch workspace or project'>{render.esc(dest.parent.name)}<i>/</i><b>{render.esc(project)}</b><i class=car>▾</i></button>"
@@ -916,12 +950,7 @@ def build(project: str) -> Path:
                         "<button class=btn id=c-close>Close</button></div><div class=msg></div></dialog>"
                         "<dialog id=confirm><h3>ABI asks for your confirmation</h3><p id=c-msg></p><pre id=c-prev></pre>"
                         "<div class=row><button class='btn pri' id=c-yes>Confirm</button><button class=btn id=c-no>Cancel</button></div></dialog>")
-    page = page.replace("</style>", CSS + "</style>").replace("</body>", f"<script>window.APP={data};{render.JS}\n{JS}</script></body>")
-    (dest / "app.html").write_text(page)
-    exclude = dest / ".git/info/exclude"  # never committed locally, never in a bundle to ABI
-    if "app.html" not in exclude.read_text():
-        exclude.write_text(exclude.read_text().rstrip("\n") + "\napp.html\n")
-    return dest / "app.html"
+    return page.replace("</style>", CSS + "</style>").replace("</body>", f"<script>window.ME={ME_SLOT};window.APP={data};{render.JS}\n{JS}</script></body>")
 
 
 class Hub:
@@ -931,8 +960,9 @@ class Hub:
     after the harness grounded them (message_end, never the streamed draft), its confirmations become a dialog in the
     page and the person's yes or no goes back to Pi (the confirm token stays in the harness)."""
 
-    def __init__(self, project: str, url: str, agent_key: str, cid: str = "", mobile: bool = False):
+    def __init__(self, project: str, url: str, agent_key: str, cid: str = "", mobile: bool = False, user: str = "", token: str | None = None):
         self.project, self.url, self.agent_key, self.cid, self.mobile = project, url, agent_key, cid, mobile
+        self.user, self.token, self.view = user, token, lambda d: d  # view: the person's sections and reports only
         self.clients: list = []
         self.lock = threading.Lock()
         self.pi = None
@@ -1005,13 +1035,14 @@ class Hub:
 
     def push_data(self) -> None:
         cur = self.current()
-        self.emit({"type": "data", "data": cached(cur)})
+        with abi.as_user(self.token):
+            self.emit({"type": "data", "data": self.view(cached(cur, self.user))})
 
     def chat(self, message: str, page: str) -> None:
         if not self.chat_id:
             self.chat_switch(None)
         if not self.pi or self.pi.poll() is not None:
-            env = {**os.environ, "ABI_TOKEN": abi.token(), "ABI_APP_URL": self.url, "ABI_APP_PROJECT": self.project,
+            env = {**os.environ, "ABI_TOKEN": self.token or abi.token(), "ABI_APP_URL": self.url, "ABI_APP_PROJECT": self.project,
                    "ABI_APP_AGENT_KEY": self.agent_key, "ABI_APP_CLIENT": self.cid}
             session = str(self.chats_dir / f"{self.chat_id}.session.jsonl")  # Pi's own transcript: this chat's context
             self.pi = subprocess.Popen(["pi", "--mode", "rpc", "--session", session], cwd=abi.ROOT, env=env, text=True, bufsize=1,
@@ -1065,16 +1096,16 @@ class Hub:
 
 
 HUBS: dict[str, Hub] = {}
-_SNAP: dict[str, dict] = {}
+_SNAP: dict[tuple, dict] = {}
 _SNAP_LOCK = threading.Lock()
 
 
-def cached(project: str) -> dict:
-    """One snapshot per project version, shared by every open browser (it runs every report's visual queries)."""
+def cached(project: str, who: str = "") -> dict:
+    """One snapshot per project version and person (row-level security), computed as them (abi.as_user)."""
     with _SNAP_LOCK:
-        if project not in _SNAP:
-            _SNAP[project] = snapshot(abi.folder(project), project)
-        return _SNAP[project]
+        if (project, who) not in _SNAP:
+            _SNAP[(project, who)] = snapshot(abi.folder(project), project)
+        return _SNAP[(project, who)]
 
 
 def changed(project: str) -> None:
@@ -1082,8 +1113,8 @@ def changed(project: str) -> None:
         try:
             abi.sync(project)  # pull ABI's commits, re-render the folder views (writes app.html too)
             with _SNAP_LOCK:
-                _SNAP.pop(project, None)
-                _SNAP.pop(pub_id(project), None)
+                for k in [k for k in _SNAP if k[0] in (project, pub_id(project))]:
+                    _SNAP.pop(k, None)
             for hub in list(HUBS.values()):
                 if hub.clients:
                     hub.push_data()
@@ -1092,6 +1123,21 @@ def changed(project: str) -> None:
                 hub.emit({"type": "note", "text": f"Couldn't refresh: {type(e).__name__}"})
     threading.Thread(target=go, daemon=True).start()
 
+
+SIGNIN = """<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>Sign in · ABI</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#ebe4d4;color:#141311;font:14px ui-monospace,Menlo,monospace}
+@media (prefers-color-scheme:dark){body{background:#131210;color:#e8e0cf}input,button{color:inherit}}
+form{display:flex;flex-direction:column;gap:10px;width:min(340px,calc(100vw - 32px))}b{font:700 26px 'Courier New',monospace;letter-spacing:.08em}
+input,button{font:inherit;padding:11px;border:2px solid currentColor;background:none}button{background:#141311;color:#ebe4d4;cursor:pointer}
+@media (prefers-color-scheme:dark){button{background:#e8e0cf;color:#131210}}[hidden]{display:none}.m{min-height:1.4em}small{opacity:.7}</style>
+<form method=post action=/signin><b>ABI</b><small>Sign in with your ABI account.</small><label for=n>Name or email</label>
+<input id=n name=name value="%NAME%" autocomplete=username autofocus required><label for=p>Password</label>
+<input id=p name=password type=password autocomplete=current-password required><label for=c %CODE%>Authenticator code</label>
+<input id=c name=code inputmode=numeric autocomplete=one-time-code %CODE%><button>Sign in</button><span class=m>%MSG%</span></form>"""
+NO_PROJECT = """<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>ABI</title>
+<body style="font:14px ui-monospace,monospace;display:grid;place-items:center;min-height:100vh;margin:0;background:#ebe4d4;color:#141311">
+<div style="max-width:340px"><b>Signed in as %NAME%</b><p>You have no project yet. Ask a workspace owner to give you a role in one.</p>
+<form method=post action=/signout><button>Sign out</button></form></div>"""
 
 LOGIN = """<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>ABI</title>
 <style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#ebe4d4;color:#141311;font:14px ui-monospace,Menlo,monospace}
@@ -1102,11 +1148,65 @@ input,button{font:inherit;padding:10px;border:2px solid currentColor;background:
 <button>Open</button><span>%s</span></form>"""
 
 
-def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str | None = None, tailnet: bool = False) -> ThreadingHTTPServer:
+SECTIONS = ["Data", "Data Model", "Visualizations", "Export", "Automate", "Knowledge", "Govern"]  # Start is everyone's
+ROUTE_SECTION = {"/edits/rows": "Data", "/upload": "Data", "/report/export": "Export", "/data/export": "Export", "/video/export": "Export",
+                 "/packs/file": "Export", "/transfer/": "Export", "/vault/": "Knowledge", "/analyses": "Visualizations"}
+REPORT_ACTIONS = {"visual_data", "report_snapshot", "export_visual", "save_report", "delete_report"}
+HIDDEN_DATA = {"Data": ("sources", "source_specs", "table_steps", "layers"), "Knowledge": ("docs",), "Govern": ("history", "rls")}
+
+
+def viewed(d: dict, acc: dict) -> dict:
+    """What a person may see of a snapshot: the admin's sections and reports (people.json); ABI's row-level security
+    already shaped the numbers, since the snapshot was computed as them."""
+    if not acc:
+        return d
+    d = dict(d)
+    if acc.get("reports") is not None:
+        d["reports"] = [r for r in d.get("reports", []) if r["id"] in acc["reports"]]
+    hidden = [x for x in SECTIONS if acc.get("sections") is not None and x not in acc["sections"]]
+    for sec in hidden:
+        for k in HIDDEN_DATA.get(sec, ()):
+            d[k] = [] if isinstance(d.get(k), list) else {}
+    if "Export" in hidden:
+        d["app"] = {**(d.get("app") or {}), "packs": []}
+    return d
+
+
+def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str | None = None, tailnet: bool = False,
+          signin: bool = False) -> ThreadingHTTPServer:
     """remote: a passphrase; then the app listens on every interface (your VPN) and asks for it before anything loads.
-    tailnet: listen on every interface but answer only this machine and Tailscale devices (100.64.0.0/10, your tailnet)."""
+    tailnet: listen on every interface but answer only this machine and Tailscale devices (100.64.0.0/10, your tailnet).
+    signin: everyone signs in with their own ABI account; the app then acts as them (their roles, row-level security,
+    reports), Developer only for editors and owners, and workspace owners get Users & access."""
     import ipaddress  # noqa: PLC0415
     project, opened = default, set()
+    people: dict[str, dict] = {}  # session id -> {name, token, admin, roles, t}: memory only, never written
+    tries: dict[str, int] = {}  # wrong sign-ins per client address (ABI throttles too, but sees only this server)
+
+    def role_of(sess: dict | None, p: str) -> str | None:
+        """The person's role in a project, as ABI says (cached a minute); one person on this machine: the owner."""
+        if not sess:
+            return "owner"
+        hit = sess["roles"].get(p)
+        if hit and time.time() - hit[1] < 60:
+            return hit[0]
+        try:
+            with abi.as_user(sess["token"]):
+                r = abi._open("GET", f"/api/projects/{p}/me")[1].get("role")
+        except abi.ActionError:
+            r = None
+        sess["roles"][p] = (r, time.time())
+        return r
+
+    def access(sess: dict | None, p: str) -> dict:
+        """The admin's choice for this person in this project: {sections, reports} (absent: everything)."""
+        if not sess or sess["admin"]:
+            return {}
+        return ((render.j(app_dir(p) / "people.json", {}) or {}).get("users") or {}).get(sess["name"]) or {}
+
+    def mine(sess: dict | None) -> list[str]:
+        return [d.name for ws in sorted(abi.WORKSPACES.iterdir()) if ws.is_dir() and not ws.name.startswith((".", "_"))
+                for d in sorted(ws.iterdir()) if d.is_dir() and known(d.name) and role_of(sess, d.name)]
 
     def known(p: str | None) -> bool:
         return bool(p) and bool(abi.PROJECT_ID.match(p)) and not p.endswith("_pub") and abi.folder(p) is not None
@@ -1133,16 +1233,23 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
     cookies: set = set()  # sessions that gave the passphrase (memory only)
     fails = {"n": 0}
 
-    def hub_for(cid: str, mobile: bool = False, want: str | None = None) -> Hub:
+    def hub_for(cid: str, mobile: bool = False, want: str | None = None, sess: dict | None = None) -> Hub:
         cid = re.sub(r"[^\w-]", "", cid)[:40] or "default"
-        h = HUBS.get(cid)
+        hid = f"{sess['name']}/{cid}" if sess else cid  # a browser's hub is its signed-in person's, never another's
+        h = HUBS.get(hid)
         if not h:
-            h = HUBS[cid] = Hub(default, url, agent_key, cid, mobile)
-        if known(want):
+            first = default if role_of(sess, default) else next(iter(mine(sess)), default)
+            h = HUBS[hid] = Hub(first, url, agent_key, cid, mobile, sess["name"] if sess else "", sess["token"] if sess else None)
+        if sess:
+            h.token = sess["token"]
+        if known(want) and role_of(sess, want):
             opening(want)
             h.use(want)
         if mobile and not h.mobile:
             h.mobile, h.mode = True, "viewer"
+        if role_of(sess, h.project) not in ("editor", "owner"):
+            h.mode = "viewer"  # a viewer's browser has no Developer
+        h.view = lambda d, p=h.project: viewed(d, access(sess, p))
         return h
 
     class H(BaseHTTPRequestHandler):
@@ -1162,9 +1269,33 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
             ip = ipaddress.ip_address(self.client_address[0])
             return ip.is_loopback or ip in ipaddress.ip_network("100.64.0.0/10")
 
+        def session(self) -> dict | None:
+            c = re.search(r"abi_u=([\w-]+)", self.headers.get("Cookie", ""))
+            s = people.get(c.group(1)) if c else None
+            if s and time.time() - s["t"] > 12 * 3600:
+                people.pop(c.group(1), None)
+                return None
+            return s
+
+        def do_GET(self):
+            self.sess = self.session() if signin else None
+            with abi.as_user(self.sess and self.sess["token"]):
+                return self.get()
+
+        def do_POST(self):
+            self.sess = self.session() if signin else None
+            with abi.as_user(self.sess and self.sess["token"]):
+                return self.post()
+
+        def signin_page(self, msg: str = "", name: str = "", code: bool = False) -> None:
+            self.reply(200, SIGNIN.replace("%MSG%", html.escape(msg)).replace("%NAME%", html.escape(name))
+                       .replace("%CODE%", "" if code else "hidden").encode(), "text/html; charset=utf-8")
+
         def authed(self) -> bool:
             if not self.allowed():
                 return False
+            if signin:
+                return bool(self.sess)
             if tailnet and not remote:
                 return True  # Tailscale authenticated the device; the page key still guards every action
             if not remote:
@@ -1172,17 +1303,19 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
             c = re.search(r"abi_s=([\w-]+)", self.headers.get("Cookie", ""))
             return bool(c and c.group(1) in cookies)
 
-        def do_GET(self):
+        def get(self):
             route, _, query = self.path.partition("?")
             qs = dict(x.split("=", 1) for x in query.split("&") if "=" in x)
             if not self.authed():
+                if signin and self.allowed() and route in ("/", "/app.html"):
+                    return self.signin_page()
                 if remote and route in ("/", "/app.html"):
                     return self.reply(200, (LOGIN % "").encode(), "text/html; charset=utf-8")
                 return self.reply(404, b"{}")
             if route == "/events":  # EventSource can't send headers: the page key and this browser's id come in the query
                 if not secrets.compare_digest(qs.get("k", ""), key):
                     return self.reply(403, b"{}")
-                hub = hub_for(qs.get("c", ""), qs.get("m") == "1", urllib.parse.unquote(qs.get("p", "")))
+                hub = hub_for(qs.get("c", ""), qs.get("m") == "1", urllib.parse.unquote(qs.get("p", "")), self.sess)
                 project = hub.project
                 self.send_response(200)
                 for k, v in (("Content-Type", "text/event-stream"), ("Cache-Control", "no-store"), ("Connection", "keep-alive")):
@@ -1211,12 +1344,57 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
             if route not in ("/", "/app.html"):
                 return self.reply(404, b"{}")
             want = urllib.parse.unquote(qs.get("p", ""))
-            p = want if known(want) else default
+            p = want if known(want) and role_of(self.sess, want) else default if role_of(self.sess, default) else next(iter(mine(self.sess)), None)
+            if not p:
+                return self.reply(200, NO_PROJECT.replace("%NAME%", html.escape(self.sess["name"])).encode(), "text/html; charset=utf-8")
             opening(p)
-            self.reply(200, page_of(p).read_text().replace(KEY_SLOT, key, 1).encode(), "text/html; charset=utf-8")
+            me = {"name": self.sess["name"] if self.sess else None, "admin": bool(not self.sess or self.sess["admin"]), "signin": signin,
+                  "role": role_of(self.sess, p), **access(self.sess, p)}
+            if self.sess:  # the page's data as this person: their row-level security, their sections and reports
+                page = page_html(p, viewed(cached(p, self.sess["name"]), access(self.sess, p)))
+            else:
+                page = page_of(p).read_text()
+            self.reply(200, page.replace(KEY_SLOT, key, 1).replace(ME_SLOT, json.dumps(me), 1).encode(), "text/html; charset=utf-8")
 
-        def do_POST(self):
-            raw = self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}"
+        def post(self):
+            raw = self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 64 << 20)) or b"{}"
+            if self.path == "/signin" and signin and self.allowed():  # ABI checks the password; the app keeps only the session
+                ip = self.client_address[0]
+                f = urllib.parse.parse_qs(raw.decode(errors="replace"))
+                name, code = f.get("name", [""])[0].strip()[:254], (f.get("code", [""])[0].strip() or None)
+                status, b = abi.login(name, f.get("password", [""])[0], code)
+                f = None  # the password is not kept
+                if status != 200:
+                    tries[ip] = tries.get(ip, 0) + 1
+                    time.sleep(min(20, 2 ** min(tries[ip], 4)))
+                    msg = "Set up the authenticator for this account in ABI first." if b.get("mfa") == "setup" else b.get("message") or "Sign-in failed."
+                    return self.signin_page(msg, name, b.get("mfa") == "code")
+                tries.pop(ip, None)
+                tok, admin = b["token"], False
+                with abi.as_user(tok):
+                    try:
+                        admin = any(u["name"] == name and u.get("workspace_owner") for u in abi.call("list_users").get("users", []))
+                    except abi.ActionError:
+                        pass
+                sid = secrets.token_urlsafe(32)
+                people[sid] = {"name": name, "token": tok, "admin": admin, "roles": {}, "t": time.time()}
+                self.send_response(303)
+                self.send_header("Set-Cookie", f"abi_u={sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200")
+                self.send_header("Location", "/")
+                self.end_headers()
+                return None
+            if self.path == "/signout" and signin:
+                c = re.search(r"abi_u=([\w-]+)", self.headers.get("Cookie", ""))
+                gone = people.pop(c.group(1), None) if c else None
+                for hid in [k for k, h in HUBS.items() if gone and h.user == gone["name"]]:
+                    if HUBS[hid].pi and HUBS[hid].pi.poll() is None:
+                        HUBS[hid].pi.terminate()
+                    HUBS.pop(hid, None)
+                self.send_response(303)
+                self.send_header("Set-Cookie", "abi_u=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")
+                self.send_header("Location", "/")
+                self.end_headers()
+                return None
             if self.path == "/login" and remote:
                 given = urllib.parse.parse_qs(raw.decode(errors="replace")).get("p", [""])[0]
                 if secrets.compare_digest(given.encode(), remote.encode()):
@@ -1249,8 +1427,19 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
                 return self.reply(200, b"{}")
             if not self.authed():
                 return self.reply(403, b'{"error":"forbidden"}')
-            hub = hub_for(self.headers.get("X-Abi-Client", ""), self.headers.get("X-Abi-Mobile") == "1", self.headers.get("X-Abi-Project"))
+            hub = hub_for(self.headers.get("X-Abi-Client", ""), self.headers.get("X-Abi-Mobile") == "1", self.headers.get("X-Abi-Project"), self.sess)
             project = hub.project
+            acc = access(self.sess, project)
+            sec = next((v for k, v in ROUTE_SECTION.items() if self.path.startswith(k)), None)
+            if acc.get("sections") is not None and sec and sec not in acc["sections"]:
+                return self.reply(403, json.dumps({"error": f"{sec} isn't open to you in this project; ask an admin."}).encode())
+            rid = body.get("report")
+            if acc.get("reports") is not None and rid and (self.path.split("/")[-1] in REPORT_ACTIONS or sec == "Export") and rid not in acc["reports"]:
+                return self.reply(403, json.dumps({"error": "That report isn't open to you; ask an admin."}).encode())
+            if self.path.startswith("/admin/"):
+                if self.sess and not self.sess["admin"]:
+                    return self.reply(403, b'{"error":"Users & access is for workspace owners."}')
+                return self.reply(*admin_route(hub, self.path.removeprefix("/admin/"), body))
             # the page: a local Host (no DNS rebinding) and the per-start key (a custom header other sites can't send)
             if not secrets.compare_digest(self.headers.get("X-Abi-App", ""), key):
                 return self.reply(403, b'{"error":"forbidden"}')
@@ -1258,12 +1447,12 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
                 out = {}
                 for ws in sorted(abi.WORKSPACES.iterdir()) if abi.WORKSPACES.exists() else []:
                     if ws.is_dir() and not ws.name.startswith((".", "_")):
-                        ps = [d.name for d in sorted(ws.iterdir()) if d.is_dir() and known(d.name)]
+                        ps = [d.name for d in sorted(ws.iterdir()) if d.is_dir() and known(d.name) and role_of(self.sess, d.name)]
                         if ps:
                             out[ws.name] = [{"id": x, "name": (render.j(ws / x / "project.json", {}) or {}).get("name") or x} for x in ps]
                 return self.reply(200, json.dumps({"result": {"workspaces": out, "current": project, "workspace": abi.folder(project).parent.name}}).encode())
             if self.path == "/mode":  # the person's switch (the agent can't call this: it has no page key); a phone stays Viewer
-                hub.mode = "viewer" if body.get("mode") == "viewer" or hub.mobile else "developer"
+                hub.mode = "viewer" if body.get("mode") == "viewer" or hub.mobile or role_of(self.sess, project) not in ("editor", "owner") else "developer"
                 hub.emit({"type": "mode", "mode": hub.mode, "mobile": hub.mobile, "published": bool(abi.folder(pub_id(project)))})
                 threading.Thread(target=hub.push_data, daemon=True).start()
                 return self.reply(200, b"{}")
@@ -1420,6 +1609,63 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
                 changed(project)
             self.reply(200, json.dumps(out, default=str).encode())
 
+    def admin_route(hub: Hub, op: str, body: dict) -> tuple[int, bytes]:
+        """Users & access (workspace owners): ABI's own accounts and roles, as the admin; plus the app's sections and
+        reports per person (people.json). Roles go to the project and, read-only, to its published copy."""
+        p, pub = hub.project, pub_id(hub.project)
+        if hub.mode == "viewer":
+            return 403, b'{"error":"Switch to Developer to manage access."}'
+        if op == "users":
+            try:
+                users = abi.call("list_users").get("users", [])
+            except abi.ActionError as e:
+                return 200, json.dumps({"error": (e.body or {}).get("message", "ABI refused list_users")}).encode()
+            reps = (abi.call("list_reports", project=p) or {}).get("reports") or []
+            return 200, json.dumps({"result": {"project": p, "users": users, "sections": SECTIONS, "published": bool(abi.folder(pub)),
+                                               "reports": [{"id": r["id"], "name": r.get("name") or r["id"]} for r in reps],
+                                               "access": (render.j(app_dir(p) / "people.json", {}) or {}).get("users") or {}}}, default=str).encode()
+        who = str(body.get("user") or "").strip()
+        if op == "role":
+            role = body.get("role")
+            if not who or role not in ("viewer", "editor", "owner", "none"):
+                return 400, b'{"error":"a user and a role (viewer, editor, owner or none)"}'
+
+            def mirror():
+                if abi.folder(pub):
+                    try:
+                        if role == "none":
+                            abi.call("remove_role", project=pub, user=who)
+                        else:
+                            abi.call("set_role", project=pub, user=who, role="viewer")
+                    except abi.ActionError:
+                        return "Saved; set the published copy's role in ABI too."
+                return "Saved through ABI."
+            if role == "none":
+                return 200, json.dumps(run("remove_role", {"project": p, "user": who}, None, mirror), default=str).encode()
+            return 200, json.dumps(run("set_role", {"project": p, "user": who, "role": role}, None, mirror), default=str).encode()
+        if op == "invite":
+            email = str(body.get("email") or "").strip()
+            if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+                return 400, b'{"error":"an email address"}'
+            return 200, json.dumps(run("invite_user", {"email": email}, None), default=str).encode()
+        if op == "access":
+            secs, reps = body.get("sections"), body.get("reports")
+            known_reps = {r["id"] for r in (abi.call("list_reports", project=p) or {}).get("reports") or []}
+            if not who or (secs is not None and not set(secs) <= set(SECTIONS)) or (reps is not None and not set(reps) <= known_reps):
+                return 400, b'{"error":"sections and reports from this project only"}'
+            f = app_dir(p) / "people.json"
+            data = render.j(f, {}) or {}
+            users = data.setdefault("users", {})
+            users[who] = {k: v for k, v in (("sections", secs), ("reports", reps)) if v is not None}
+            if not users[who]:
+                users.pop(who)
+            app_dir(p).mkdir(parents=True, exist_ok=True)
+            f.write_text(json.dumps(data, indent=1) + "\n")
+            for s0 in people.values():  # their next page and data follow it
+                s0["roles"].pop(p, None)
+            return 200, b'{"result":"saved"}'
+        return 404, b"{}"
+
     def vault_route(hub: Hub, op: str, body: dict) -> tuple[int, bytes]:
         import base64  # noqa: PLC0415
         import tempfile  # noqa: PLC0415
@@ -1501,8 +1747,9 @@ def main(argv: list[str]) -> int:
         raise SystemExit(__doc__)
     remote = os.environ.pop("ABI_APP_PASS", None) or None  # read once, then out of the environment (children don't get it)
     tailnet = "open" if "--open" in argv else "--tailnet" in argv  # --open: any device that can reach this machine
-    argv = [a for a in argv if a not in ("--tailnet", "--open")]
-    s = serve(argv[0], int(argv[1]) if len(argv) > 1 else 8790, open_browser=not (remote or tailnet), remote=remote, tailnet=tailnet)
+    signin = "--single" not in argv
+    argv = [a for a in argv if a not in ("--tailnet", "--open", "--single")]
+    s = serve(argv[0], int(argv[1]) if len(argv) > 1 else 8790, open_browser=not (remote or tailnet), remote=remote, tailnet=tailnet, signin=signin)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     atexit.register(lambda: [h.pi.terminate() for h in HUBS.values() if h.pi and h.pi.poll() is None])  # the chats' agents stop with the app
     print(f"{abi.folder(argv[0]) / 'app.html'} · live at http://127.0.0.1:{s.server_address[1]}/ (Ctrl+C to stop)", flush=True)

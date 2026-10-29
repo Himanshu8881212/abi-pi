@@ -1,9 +1,12 @@
 """app.html and its local server (needs ABI at :8770, no LLM): the build, and every guard on the server."""
 import json
+import os
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
+from pathlib import Path
 
 import pytest
 
@@ -218,5 +221,51 @@ def test_vpn_mode_asks_for_the_passphrase_first(srv):
         cookie = r.headers["Set-Cookie"].split(";")[0]
         page = urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{port}/", headers={"Cookie": cookie})).read().decode()
         assert "window.APP" in page
+    finally:
+        s.shutdown()
+
+
+def _account(name):
+    """A test account's password, read like scripts/creds.py does (never printed)."""
+    acc = Path(os.environ.get("ABI_ACCOUNTS", "~/abi-preview/accounts.txt")).expanduser()
+    line = next((x for x in acc.read_text().splitlines() if re.match(rf"\s*{re.escape(name)}\b", x)), None) if acc.exists() else None
+    return line.split()[-1] if line else None
+
+
+def test_people_sign_in_with_their_abi_account_and_get_only_their_access():
+    import http.client
+    if not _account("himanshu"):
+        pytest.skip("no accounts file")
+    s = app.serve(P, 0, open_browser=False, signin=True)
+    port = s.server_address[1]
+    try:
+        page = urllib.request.urlopen(f"http://127.0.0.1:{port}/").read().decode()
+        assert "Sign in with your ABI account" in page and "__ABI_APP_KEY__" not in page, "no app, no key before sign-in"
+
+        def sign(name, pw):
+            c = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
+            c.request("POST", "/signin", urllib.parse.urlencode({"name": name, "password": pw}), {"Content-Type": "application/x-www-form-urlencoded"})
+            r = c.getresponse()
+            return r.status, r.getheader("Set-Cookie") or "", r.read().decode()
+        st, cookie, body = sign("himanshu", "wrong-" + "x" * 12)
+        assert st == 200 and "Wrong name or password" in body and not cookie
+        st, cookie, _ = sign("himanshu", _account("himanshu"))
+        assert st == 303 and "abi_u=" in cookie and "HttpOnly" in cookie
+        sid = cookie.split(";")[0]
+        page = urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{port}/", headers={"Cookie": sid})).read().decode()
+        key = re.search(r"KEY='([^']+)'", page).group(1)
+        assert '"name": "himanshu"' in page and '"admin": true' in page
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/admin/users", b"{}", {"Cookie": sid, "X-Abi-App": key, "Content-Type": "application/json"})
+        users = json.loads(urllib.request.urlopen(req).read())["result"]["users"]
+        assert any(u["name"] == "himanshu" for u in users)
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/semantic_model", json.dumps({"project": P}).encode(), {"X-Abi-App": key, "Content-Type": "application/json"})
+        with pytest.raises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(req)
+        assert e.value.code == 403, "the page key alone is not enough: a session is"
+        other = next((n for n in ("lena", "ken", "ivy", "omar") if _account(n)), None)
+        if other:  # an account with no role in any project on this machine sees none, and no admin page
+            st, cookie, _ = sign(other, _account(other))
+            page = urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{port}/", headers={"Cookie": cookie.split(";")[0]})).read().decode()
+            assert "You have no project yet" in page and "window.APP" not in page
     finally:
         s.shutdown()

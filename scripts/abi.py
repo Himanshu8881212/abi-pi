@@ -15,11 +15,13 @@ project repository (read-only).
 
 Token: $ABI_TOKEN (the Pi extension passes its in-memory one), else scripts/creds.py signs in. Output: JSON on stdout.
 """
+import contextlib
 import json
 import os
 import re
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -46,7 +48,40 @@ class ActionError(Exception):
         self.status, self.body = status, body
 
 
+_ME = threading.local()  # a signed-in person's ABI session for this request's thread (the app); memory only
+
+
+@contextlib.contextmanager
+def as_user(tok: str | None):
+    """Every call in this block is made as that person (their roles, row-level security); None: this process's."""
+    prev, _ME.token = getattr(_ME, "token", None), tok
+    try:
+        yield
+    finally:
+        _ME.token = prev
+
+
+def login(name: str, password: str, code: str | None = None) -> tuple[int, dict]:
+    """ABI's own sign-in (password, then an MFA code when the account has one): (status, body with the token).
+    The password goes to ABI only; nothing here keeps or logs it."""
+    body = json.dumps({"name": name, "password": password, **({"code": code} if code else {})}).encode()
+    req = urllib.request.Request(URL + "/api/login", body, {"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        try:
+            d = json.loads(e.read()).get("detail")
+        except ValueError:
+            d = None
+        if e.code in (401, 403, 429):  # wrong name or password, an MFA step, throttled: ABI's own words
+            return e.code, {k: v for k, v in d.items() if k in ("message", "mfa")} if isinstance(d, dict) else {"message": str(d or "Sign-in failed.")}
+        return e.code, {"message": "Sign-in failed."}  # never ABI's other bodies: a 422 repeats the password
+
+
 def token() -> str:
+    if t := getattr(_ME, "token", None):
+        return t
     if t := os.environ.get("ABI_TOKEN"):
         return t
     t = subprocess.run([sys.executable, str(HERE / "creds.py"), "abi-token"], capture_output=True, text=True, check=True).stdout.strip()
