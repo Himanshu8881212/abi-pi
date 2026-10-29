@@ -1199,6 +1199,12 @@ def viewed(d: dict, acc: dict) -> dict:
     return d
 
 
+def team_view(t: dict, acc: dict) -> dict:
+    """The team on Home: a person the admin restricted gets the plan and what waits, not the journal and brief (their
+    handoffs quote figures from every report)."""
+    return {**t, "journal": [], "brief": ""} if acc else t
+
+
 def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str | None = None, tailnet: bool = False,
           signin: bool = False) -> ThreadingHTTPServer:
     """remote: a passphrase; then the app listens on every interface (your VPN) and asks for it before anything loads.
@@ -1435,7 +1441,8 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
                 sid = secrets.token_urlsafe(32)
                 people[sid] = {"name": name, "token": tok, "admin": admin, "roles": {}, "t": time.time()}
                 self.send_response(303)
-                self.send_header("Set-Cookie", f"abi_u={sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200")
+                tls = "; Secure" if self.headers.get("X-Forwarded-Proto", "").lower() == "https" else ""  # behind an HTTPS proxy
+                self.send_header("Set-Cookie", f"abi_u={sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200{tls}")
                 self.send_header("Location", "/")
                 self.end_headers()
                 return None
@@ -1629,7 +1636,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
             if self.path == "/team":
                 import team  # noqa: PLC0415 (sibling script)
                 try:
-                    return self.reply(200, json.dumps({"result": team.status(hub.current() if hub.mode == "viewer" else project)}, default=str).encode())
+                    return self.reply(200, json.dumps({"result": team_view(team.status(hub.current() if hub.mode == "viewer" else project), acc)}, default=str).encode())
                 except SystemExit as e:
                     return self.reply(200, json.dumps({"error": str(e)}).encode())
             if self.path.startswith("/vault/"):
@@ -1814,6 +1821,8 @@ def main(argv: list[str]) -> int:
     remote = os.environ.pop("ABI_APP_PASS", None) or None  # read once, then out of the environment (children don't get it)
     tailnet = "open" if "--open" in argv else "--tailnet" in argv  # --open: any device that can reach this machine
     signin = "--single" not in argv
+    if not signin and tailnet and not remote:
+        raise SystemExit("--single has no sign-in: it acts as this machine's ABI account, so it stays on this machine. Use sign-in (the default) for other devices.")
     argv = [a for a in argv if a not in ("--tailnet", "--open", "--single")]
     s = serve(argv[0], int(argv[1]) if len(argv) > 1 else 8790, open_browser=not (remote or tailnet), remote=remote, tailnet=tailnet, signin=signin)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))

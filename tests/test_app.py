@@ -338,3 +338,14 @@ def test_every_change_belongs_to_a_section_the_admin_can_close():
     assert app.section_of("/api/semantic_query") is None, "reads serve every section"
     unmapped = sorted(a for a in app.WRITES if app.section_of(f"/api/{a}") is None)
     assert not unmapped, unmapped
+
+
+def test_one_person_mode_is_never_open_to_the_network():
+    with pytest.raises(SystemExit, match="sign-in"):
+        app.main(["pi_app_test", "0", "--single", "--open"])
+
+
+def test_a_restricted_person_gets_the_team_status_without_its_journal():
+    t = {"tasks": [{"id": "a", "status": "passed"}], "pending": [], "journal": [{"kind": "handoff", "handoff": {"summary": "revenue 37.3m"}}], "brief": "x"}
+    assert app.team_view(t, {"reports": ["r1"]}) == {"tasks": t["tasks"], "pending": [], "journal": [], "brief": ""}
+    assert app.team_view(t, {}) == t
