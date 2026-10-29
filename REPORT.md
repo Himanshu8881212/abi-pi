@@ -119,4 +119,4 @@ files). Tenants stay ABI's client isolation; the harness doesn't map them.
 ## Tests
 
 `.venv/bin/python -m pytest tests/` runs the offline tests (grounding rules, layout and schema validation, secret scan);
-`ABI_PI_LIVE=1` adds the live scenario and guardrail tests (about 15 minutes, GPT-6.1 Sol). Last full run: see below.
+`ABI_PI_LIVE=1` adds the live scenario and guardrail tests (GPT-6.1 Sol). Last full run (2026-10-29): **16 passed in 4 min 35 s** (4 grounding, 3 layout, 4 guardrails incl. the secret scan over sessions, logs, workspaces and git history, 5 scenarios).
