@@ -142,7 +142,7 @@ def test_viewer_mode_is_read_only_on_the_server(srv):
         assert post(port, "/vault/add", {"name": "x.md", "data": ""}, key)[0] == 403
         code, r = post(port, "/api/semantic_model", {"project": P}, key)
         assert code == 200 and "result" in r, "reads still work"
-        req = urllib.request.Request(f"http://127.0.0.1:{port}/agent/mode", b"{}", {"X-Abi-Agent": HUB.agent_key})
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/agent/mode", b"{}", {"X-Abi-Agent": HUB.agent_key, "X-Abi-Client": "default"})
         assert json.loads(urllib.request.urlopen(req).read())["mode"] == "viewer", "the harness reads the same switch"
     finally:
         post(port, "/mode", {"mode": "developer"}, key)
@@ -160,3 +160,18 @@ def test_vault_add_search_remove(srv):
     assert "use .md" in r["error"]
     post(port, "/vault/rm", {"name": "definitions.md"}, key)
     assert post(port, "/vault/list", {}, key)[1]["result"] == []
+
+
+def test_modes_are_per_browser_and_a_phone_stays_viewer(srv):
+    port, key, _ = srv
+    def p(path, body, cid, mobile="0"):
+        r = urllib.request.Request(f"http://127.0.0.1:{port}{path}", json.dumps(body).encode(),
+                                   {"X-Abi-App": key, "Content-Type": "application/json", "X-Abi-Client": cid, "X-Abi-Mobile": mobile})
+        try:
+            return urllib.request.urlopen(r).status, json.loads(urllib.request.urlopen(r).read() if False else b"{}")
+        except urllib.error.HTTPError as e:
+            return e.code, {}
+    assert p("/mode", {"mode": "developer"}, "phone1", "1")[0] == 200
+    assert p("/api/set_measure", {"project": P, "id": "m_probe", "name": "M", "expression": "SUM(orders.amount)"}, "phone1", "1")[0] == 403
+    p("/mode", {"mode": "developer"}, "laptop1")
+    assert app.HUBS["laptop1"].mode == "developer" and app.HUBS["phone1"].mode == "viewer"

@@ -203,7 +203,7 @@ export default async function abi(pi: ExtensionAPI) {
 		const a = await appFor(project, start);
 		if (!a) return false;
 		try {
-			const r = await fetch(`${a.url}${route}`, { method: "POST", headers: { "X-Abi-Agent": a.key, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+			const r = await fetch(`${a.url}${route}`, { method: "POST", headers: { "X-Abi-Agent": a.key, "X-Abi-Client": process.env.ABI_APP_CLIENT ?? "", "Content-Type": "application/json" }, body: JSON.stringify(body) });
 			return r.ok;
 		} catch { apps.delete(project); return false; }
 	}
@@ -213,13 +213,16 @@ export default async function abi(pi: ExtensionAPI) {
 		"list_snapshots", "preview_steps", "edit_history", "edit_proposals", "flow_runs", "agent_runs", "history", "diff", "ml_history", "get_sharing",
 		"list_share_links", "shared_with_me", "test_tool", "run_tool", "test_agent", "sql_query", "project_locale", "remote_settings", "check_condition"]);
 	const READ_STEPS = new Set(["abi_tools", "abi_show", "abi_sync", "abi_health", "abi_cli", "abi_prefs", "abi_vault", "read", "ls", "grep", "find", "subagent", "tool_search"]);
+	let readsFrom: string | undefined;
 	let modeAt = 0, modeNow = process.env.ABI_PI_MODE === "viewer" ? "viewer" : "developer";
 	async function mode(): Promise<string> {
 		const a = process.env.ABI_APP_PROJECT ? apps.get(process.env.ABI_APP_PROJECT) : undefined;
 		if (!a || Date.now() - modeAt < 1000) return modeNow;
 		try {
-			const r = await fetch(`${a.url}/agent/mode`, { method: "POST", headers: { "X-Abi-Agent": a.key, "Content-Type": "application/json" }, body: "{}" });
-			modeNow = ((await r.json()) as any).mode === "viewer" ? "viewer" : "developer";
+			const r = await fetch(`${a.url}/agent/mode`, { method: "POST", headers: { "X-Abi-Agent": a.key, "X-Abi-Client": process.env.ABI_APP_CLIENT ?? "", "Content-Type": "application/json" }, body: "{}" });
+			const j: any = await r.json();
+			modeNow = j.mode === "viewer" ? "viewer" : "developer";
+			readsFrom = j.project;
 			modeAt = Date.now();
 		} catch {}
 		return modeNow;
@@ -284,6 +287,9 @@ export default async function abi(pi: ExtensionAPI) {
 		const name = event.toolName;
 		if (await mode() === "viewer" && !(READ_STEPS.has(name) || (name.startsWith(MCP) && READS.has(name.slice(MCP.length)))))
 			return { block: true, reason: "Viewer mode: you are the analyst and can only read. Nothing changed. Tell the person they can switch to Developer in the app's top bar for this." };
+		const dev = process.env.ABI_APP_PROJECT;
+		if (dev && (event.input as any)?.project === dev && await mode() === "viewer" && readsFrom && readsFrom !== dev)
+			return { block: true, reason: `Viewer mode reads the published version: use project ${readsFrom}, not ${dev} (that one holds unpublished work).` };
 		if (name === "bash" || name === "powershell")
 			return { block: true, reason: "The shell is off in the ABI harness: data goes through ABI's tools, harness steps through the abi_* tools." };
 		if (["read", "write", "edit", "ls", "grep", "find"].includes(name)) {
