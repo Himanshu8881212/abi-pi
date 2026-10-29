@@ -1,5 +1,6 @@
 """app.html and its local server (needs the engine at :8780, no LLM): the build, and every guard on the server."""
 import json
+import subprocess
 import os
 import re
 import time
@@ -223,36 +224,6 @@ def test_modes_are_per_browser_and_a_phone_stays_viewer(srv):
     assert app.HUBS["laptop1"].mode == "developer" and app.HUBS["phone1"].mode == "viewer"
 
 
-def test_vpn_mode_asks_for_the_passphrase_first(srv):
-    import secrets
-    import urllib.parse
-    pw = secrets.token_urlsafe(16)  # a test passphrase, made here and never printed
-    s = app.serve(P, 0, open_browser=False, remote=pw)
-    port = s.server_address[1]
-    try:
-        page = urllib.request.urlopen(f"http://127.0.0.1:{port}/").read().decode()
-        assert "Passphrase" in page and "window.APP" not in page, "nothing of the project before the passphrase"
-        with pytest.raises(urllib.error.HTTPError):
-            urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{port}/api/semantic_model", b"{}", {"X-Abi-App": "x"}))
-        wrong = urllib.request.urlopen(f"http://127.0.0.1:{port}/login", urllib.parse.urlencode({"p": "nope"}).encode()).read().decode()
-        assert "Wrong passphrase" in wrong
-
-        class NoRedirect(urllib.request.HTTPRedirectHandler):
-            def redirect_request(self, *a, **k):
-                return None
-        opener = urllib.request.build_opener(NoRedirect)
-        try:
-            r = opener.open(f"http://127.0.0.1:{port}/login", urllib.parse.urlencode({"p": pw}).encode())
-        except urllib.error.HTTPError as e:
-            r = e
-        assert r.code == 303 and "HttpOnly" in r.headers["Set-Cookie"]
-        cookie = r.headers["Set-Cookie"].split(";")[0]
-        page = urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{port}/", headers={"Cookie": cookie})).read().decode()
-        assert "window.APP" in page
-    finally:
-        s.shutdown()
-
-
 def _account(name):
     """A test account's password, read like scripts/creds.py does (never printed)."""
     acc = Path(os.environ.get("ABI_ACCOUNTS", Path(__file__).resolve().parent.parent / "data/accounts.txt")).expanduser()
@@ -424,3 +395,14 @@ def test_report_pdf_is_landscape_a4_so_charts_are_not_cut_off(srv):
     pdf = abi.artifact(s["snapshot"])
     w, h = map(float, re.search(rb"/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)", pdf).groups())
     assert (int(w), int(h)) == (842, 595), (w, h)  # A4 landscape in points (Chrome: 842.88 x 595.92)
+
+
+def test_the_apps_own_settings_have_a_git_history(srv):
+    """people.json, analyses.json: JSON like the project's files, and versioned like them (REPORT #46)."""
+    port, key, _ = srv
+    for n in (1, 2):
+        assert post(port, "/analyses", {"analyses": [{"name": f"a{n}", "measures": [], "dimensions": []}]}, key)[0] == 200
+    d = app.app_dir(P)
+    log = subprocess.run(["git", "-C", str(d), "log", "--format=%s", "--", "analyses.json"], capture_output=True, text=True).stdout
+    assert log.count("analyses.json by") >= 2, log
+    assert subprocess.run(["git", "-C", str(d), "status", "--porcelain"], capture_output=True, text=True).stdout == ""

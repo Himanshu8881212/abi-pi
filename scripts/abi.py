@@ -8,7 +8,6 @@ project repository (read-only).
   abi.py project <ws> <project> [name]           create_project + auto-commit + clone + full empty skeleton
   abi.py load <ws> <project> <folder|file>...    upload every data file, build the model, starter measures + report
   abi.py sync <project>                          git pull ABI's commits, re-render the HTML views and <project>/app.html
-  abi.py app <project> [port]                    app.html live: run flows, edit measures, filter reports (as you)
   abi.py pack make|list <project> ...            a board pack (scripts/pack.py)
   abi.py call <action> '<json>'                  one action (a 409 is printed as needs-confirmation, never confirmed)
   abi.py cli validate|diff|apply|watch <project> ABI's own CLI on the folder (bundle without .gitkeep)
@@ -33,8 +32,8 @@ ROOT = HERE.parent
 WORKSPACES = Path(os.environ.get("ABI_PI_WORKSPACES", ROOT / "workspaces"))
 URL = os.environ.get("ABI_URL", "http://127.0.0.1:8780")
 ABI_PROJECTS = Path(os.environ.get("ABI_PROJECTS_PATH", HERE.parent / "data/projects")).expanduser()
-ABI_CLI = Path(os.environ.get("ABI_BACKEND", HERE.parent / "engine/backend")).expanduser()
-SCHEMAS = Path(os.environ.get("ABI_SCHEMAS", HERE.parent / "engine/schemas/v1")).expanduser()
+ABI_CLI = HERE.parent / "engine/backend"
+SCHEMAS = HERE.parent / "engine/schemas/v1"
 PROJECT_ID = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 SKELETON = ["sources", "tables", "model", "reports", "ml", "flows", "agents", "tools", "security", "environments", "docs"]
 DATA = {".csv", ".tsv", ".parquet", ".json", ".jsonl", ".ndjson", ".xlsx", ".avro", ".arrow", ".sqlite"}
@@ -490,9 +489,6 @@ def main(argv: list[str]) -> None:
             out = load(args[0], args[1], args[2:])
         elif cmd == "sync":
             out = sync(args[0])
-        elif cmd == "app":
-            import app  # noqa: PLC0415
-            raise SystemExit(app.main(args))
         elif cmd == "validate-files":
             out = {"errors": validate_files(folder(args[0]) or Path(args[0]))}
         elif cmd == "pack":

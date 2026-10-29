@@ -20,7 +20,7 @@ import { Type } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 const ROOT = path.resolve(__dirname, "..", "..", "..");
-const PY = process.env.ABI_PI_PYTHON ?? (fs.existsSync(path.join(ROOT, ".venv", "bin", "python")) ? path.join(ROOT, ".venv", "bin", "python") : "python3");  // a container has no .venv
+const PY = (fs.existsSync(path.join(ROOT, ".venv", "bin", "python")) ? path.join(ROOT, ".venv", "bin", "python") : "python3");  // a container has no .venv
 const CREDS = path.join(ROOT, "scripts", "creds.py");
 const ABI_URL = process.env.ABI_URL ?? "http://127.0.0.1:8780";
 const MCP = "mcp__abi__";

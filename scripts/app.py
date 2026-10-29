@@ -42,15 +42,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 import abi  # noqa: E402
 import render  # noqa: E402
 
-ALLOWED = {"semantic_model", "semantic_query", "readiness", "rls_rules", "data_quality", "history", "docs", "refresh",
-           "list_reports", "visual_data", "how_calculated", "dataset_data",
-           "set_measure", "delete_measure", "set_glossary_term", "delete_glossary_term",
-           "list_flows", "run_flow", "flow_runs", "enable_flow", "ml_models", "train_model", "score_model",
-           "list_tools", "test_tool", "run_tool", "list_agents", "test_agent", "run_agent", "changes", "commit", "undo",
-           "add_data", "delete_source", "delete_table", "set_table", "add_relationship", "remove_relationship", "save_dataset",
-           "delete_dataset", "save_report", "delete_report", "save_flow", "delete_flow", "save_ml_model", "delete_ml_model",
-           "save_tool", "publish_tool", "delete_tool", "save_agent", "publish_agent", "delete_agent", "preview_steps", "set_steps",
-           "edit_cells", "edit_history", "edit_proposals", "approve_edit", "reject_edit", "undo_edits", "create_input_table", "report_snapshot", "export_visual"}
 KEY_SLOT = "__ABI_APP_KEY__"
 ME_SLOT = "null/*__ABI_ME__*/"
 READS_ONLY = {"run_flow", "run_agent"}  # not changes to the project, but they act (send, call tools): Developer only
@@ -58,6 +49,11 @@ WRITES = {"set_measure", "delete_measure", "set_glossary_term", "delete_glossary
           "commit", "undo", "add_data", "delete_source", "delete_table", "set_table", "add_relationship", "remove_relationship",
           "save_dataset", "delete_dataset", "save_report", "delete_report", "save_flow", "delete_flow", "save_ml_model",
           "delete_ml_model", "save_tool", "publish_tool", "delete_tool", "save_agent", "publish_agent", "delete_agent", "set_steps", "edit_cells", "approve_edit", "reject_edit", "undo_edits", "create_input_table"}
+READS = {"changes", "data_quality", "dataset_data", "docs", "edit_history", "edit_proposals", "export_visual",
+         "flow_runs", "history", "how_calculated", "list_agents", "list_flows", "list_reports", "list_tools",
+         "ml_models", "preview_steps", "readiness", "report_snapshot", "rls_rules", "run_tool", "semantic_model",
+         "semantic_query", "test_agent", "test_tool", "visual_data"}
+ALLOWED = READS | WRITES | READS_ONLY  # the page's actions; every other one is ABI's app's
 STATIC = ["Model", "Sources", "Tables", "Security", "Environments"]  # explorer sections shown as they are
 
 CSS = """
@@ -422,7 +418,7 @@ function transferPage(box){if(!LIVE||MODE==='viewer'){box.append(h('p','empty','
   if(r.confirm){if(!await ask(r.confirm))throw new Error('You declined. Nothing changed.');r=await fetch('/confirm/'+r.confirm.id,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(x=>x.json())}
   if(r.error)throw new Error(r.error);return 'Imported through ABI (one undoable commit). Refresh the sources to load the data.'});
  g.append(ex,im);box.append(g)}
-// Export: ABI renders the report as the person (PDF, PNG; PPTX and several pages in one file with a newer ABI)
+// Export: ABI renders the report as the person (PDF, PNG, PPTX; several pages in one file)
 function exportCard(rep,filters,curPage){const c=card('Export',`rendered by ABI · ${rep.name||rep.id}`),fm=h('select','f'),vs=h('select','f'),pg=h('div','checks'),ap=h('input');
  ['pdf','pptx','png'].forEach(f=>fm.append(new Option({pdf:'PDF',pptx:'PowerPoint (PPTX)',png:'Image (PNG)'}[f],f)));ap.type='checkbox';ap.checked=true;
  rep.pages.forEach(p=>{const l=h('label','chk'),x=h('input');x.type='checkbox';x.value=p.id;x.checked=p.id===curPage().id;l.append(x,h('span','',p.name||p.id));pg.append(l)});
@@ -714,7 +710,7 @@ function vaultPage(box){if(!LIVE){box.append(h('p','empty','The vault opens with
 const PENDING={filters:null,explore:null};
 const LEDE={vault:'Your business documents: definitions, finance rules, KPI specs. The agents search them before they define or check a measure.',home:'Start here: ask anything, see what needs attention, and every part of the project at a glance.',datasets:'Saved questions to the model (measures by dimensions, with filters). Each run returns a fresh table; nothing is stored. Reports, flows and ML reuse them. Preview their rows.',
  measures:'The business numbers. Edit a formula and ABI checks it before it saves; Test shows the total.',model:'Tables and how they join. Facts are black, dimensions are outlined.',
- chat:'Talk to the agent: ask a question, ask where something is, or ask for a change. When it shows you a page, the chat moves to the side and goes on.',boardpack:'Board packs: the documents, data and explainer video a review needs, made from ABI by the board-pack agent and checked before they leave. Nothing is sent from here.',documents:'A report, some of its pages or one view, as ABI renders it: PDF, PNG, PowerPoint (with a newer ABI).',onepager:'One page for the board: a report page with the headline numbers, two charts and the caveats. The agent builds it in ABI; export it here.',dataexport:'The rows behind any view, as CSV or Excel, or a query\'s rows as CSV.',video:'A silent explainer of report views: the numbers from ABI, animated, with a caption per slide, in the app\'s theme.',settings:'The agent\'s model and how hard it thinks, and the providers it may use. API keys are stored encrypted and never shown again.',people:'Who may sign in to this project, as what (Viewer, Editor, Owner), and which sections and reports each person sees.',transfer:'The whole project as one zip, so it can be kept, reviewed, moved or rebuilt. Import goes through ABI, which checks it and makes it one undoable commit.',edits:'Write-back: people correct or add rows of the gold tables. Edits apply on top of the table by row key (the loaded data is never changed), survive refreshes, can be undone, and every query sees the edited table.',reports:'The saved reports of this project. Open one to filter it and click through.',monitor:'Is anything wrong right now: data freshness, model readiness, ML runs and flows. Reports show the business; this shows the system.',explore:'Your own analysis: pick measures, a dimension and a filter; the numbers come from the model, so they match the reports. Keep the ones you want: they are saved with the app, the project itself doesn\'t change.',glossary:'What the business words mean and which measures implement them.',sources:'Bronze: the data as it landed, one source per file or bucket folder. Reload, add or delete a source.',
+ chat:'Talk to the agent: ask a question, ask where something is, or ask for a change. When it shows you a page, the chat moves to the side and goes on.',boardpack:'Board packs: the documents, data and explainer video a review needs, made from ABI by the board-pack agent and checked before they leave. Nothing is sent from here.',documents:'A report, some of its pages or one view, as ABI renders it: PDF, PNG or PowerPoint.',onepager:'One page for the board: a report page with the headline numbers, two charts and the caveats. The agent builds it in ABI; export it here.',dataexport:'The rows behind any view, as CSV or Excel, or a query\'s rows as CSV.',video:'A silent explainer of report views: the numbers from ABI, animated, with a caption per slide, in the app\'s theme.',settings:'The agent\'s model and how hard it thinks, and the providers it may use. API keys are stored encrypted and never shown again.',people:'Who may sign in to this project, as what (Viewer, Editor, Owner), and which sections and reports each person sees.',transfer:'The whole project as one zip, so it can be kept, reviewed, moved or rebuilt. Import goes through ABI, which checks it and makes it one undoable commit.',edits:'Write-back: people correct or add rows of the gold tables. Edits apply on top of the table by row key (the loaded data is never changed), survive refreshes, can be undone, and every query sees the edited table.',reports:'The saved reports of this project. Open one to filter it and click through.',monitor:'Is anything wrong right now: data freshness, model readiness, ML runs and flows. Reports show the business; this shows the system.',explore:'Your own analysis: pick measures, a dimension and a filter; the numbers come from the model, so they match the reports. Keep the ones you want: they are saved with the app, the project itself doesn\'t change.',glossary:'What the business words mean and which measures implement them.',sources:'Bronze: the data as it landed, one source per file or bucket folder. Reload, add or delete a source.',
  staged:'Silver: the cleaned and combined tables between the sources and the final tables. Hidden from the model; edit their steps here.',tables:'Gold: the final business tables the model and measures are built on. Edit kind, key, description and steps.',flows:'Automations. Run one now and follow its steps, or switch it on or off.',
  ml:'Forecasts, segments and anomaly models. Train, score and read the latest run.',tools:'Calculations your agents can call. Run one with inputs or run its tests.',
  agents:'Custom agents for this project. Ask one a question or run its evaluation set.',docs:'The project documentation ABI writes from its definitions.',
@@ -859,6 +855,19 @@ def app_dir(project: str) -> Path:
     return abi.folder(project).parent / "_app" / project
 
 
+def app_save(project: str, name: str, data, by: str = "") -> None:
+    """Writes one of the app's JSON files and commits it in the folder's own Git, so the app's settings have a history
+    and can be reviewed and undone like the project's (git -C workspaces/<ws>/_app/<project> log)."""
+    d = app_dir(project)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / name).write_text(json.dumps(data, indent=1) + "\n")
+    git = ["git", "-C", str(d), "-c", "user.name=" + (by or "ABI-PI"), "-c", "user.email=abi-pi@localhost"]
+    if not (d / ".git").exists():
+        subprocess.run([*git, "init", "-q"], check=True)
+    subprocess.run([*git, "add", name], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", f"{name} by {by or 'the app'}"], capture_output=True)  # nothing new: no commit
+
+
 def snapshot(dest: Path, project: str) -> dict:
     """What the page shows: ABI's live state (uncommitted changes included); a few definitions only the folder has
     (a dataset's query, a source's location) come from the last commit."""
@@ -988,7 +997,7 @@ class Hub:
     page and the person's yes or no goes back to Pi (the confirm token stays in the harness)."""
 
     def __init__(self, project: str, url: str, agent_key: str, cid: str = "", mobile: bool = False, user: str = "", token: str | None = None):
-        self.project, self.url, self.agent_key, self.cid, self.mobile = project, url, agent_key, cid, mobile
+        self.project, self.url, self.agent_key, self.mobile = project, url, agent_key, mobile
         self.user, self.token, self.view = user, token, lambda d: d  # view: the person's sections and reports only
         self.hid = f"{user}/{cid}" if user else cid  # the key in HUBS; the chat agent steers this hub only
         self.clients: list = []
@@ -999,7 +1008,6 @@ class Hub:
         self.heard, self.told = time.time(), False  # the agent's last sign; whether a silent model was reported
         self.mode = "viewer" if mobile else "developer"  # this browser's switch (a phone is always Viewer)
         # chats: one Pi session each (its own context), kept on this machine next to the views; one runs at a time
-        self.user = user
         self.chats_dir = self.chats_of(project)
         self.chat_id = None
 
@@ -1065,10 +1073,6 @@ class Hub:
     def current(self) -> str:
         """Viewer reads the published copy; Developer the project itself."""
         return pub_id(self.project) if self.mode == "viewer" and abi.folder(pub_id(self.project)) else self.project
-
-    def refresh(self) -> None:
-        """After a change through ABI (anyone's): every open browser gets its mode's data again."""
-        changed(self.project)
 
     def push_data(self) -> None:
         cur = self.current()
@@ -1187,13 +1191,6 @@ NO_PROJECT = """<!doctype html><meta charset=utf-8><meta name=viewport content='
 <div style="max-width:340px"><b>Signed in as %NAME%</b><p>You have no project yet. Ask a workspace owner to give you a role in one.</p>
 <form method=post action=/signout><button>Sign out</button></form></div>"""
 
-LOGIN = """<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>ABI</title>
-<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#ebe4d4;color:#141311;font:14px ui-monospace,Menlo,monospace}
-@media (prefers-color-scheme:dark){body{background:#131210;color:#e8e0cf}input,button{color:inherit}}
-form{display:flex;flex-direction:column;gap:12px;width:min(320px,calc(100vw - 32px))}b{font:700 22px 'Courier New',monospace;letter-spacing:.08em}
-input,button{font:inherit;padding:10px;border:2px solid currentColor;background:none}button{background:#141311;color:#ebe4d4;cursor:pointer}</style>
-<form method=post action=/login><b>ABI</b><label for=p>Passphrase</label><input id=p name=p type=password autofocus autocomplete=current-password>
-<button>Open</button><span>%s</span></form>"""
 
 
 SECTIONS = ["Data", "Data Model", "Visualizations", "Export", "Automate", "Knowledge", "Govern"]  # Start is everyone's
@@ -1256,10 +1253,8 @@ def team_view(t: dict, acc: dict) -> dict:
     return {**t, "journal": [], "brief": ""} if acc else t
 
 
-def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str | None = None, tailnet: bool = False,
-          signin: bool = False) -> ThreadingHTTPServer:
-    """remote: a passphrase; then the app listens on every interface (your VPN) and asks for it before anything loads.
-    tailnet: listen on every interface but answer only this machine and Tailscale devices (100.64.0.0/10, your tailnet).
+def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bool | str = False, signin: bool = False) -> ThreadingHTTPServer:
+    """tailnet: listen on every interface but answer only this machine and Tailscale devices (100.64.0.0/10, your tailnet).
     signin: everyone signs in with their own ABI account; the app then acts as them (their roles, row-level security,
     reports), Developer only for editors and owners, and workspace owners get Users & access."""
     import ipaddress  # noqa: PLC0415
@@ -1326,8 +1321,6 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
     agent_key = os.environ.get("ABI_APP_AGENT_KEY") or secrets.token_urlsafe(24)
     host = f"127.0.0.1:{port}"
     url = ""
-    cookies: set = set()  # sessions that gave the passphrase (memory only)
-    fails = {"n": 0}
 
     def hub_for(cid: str, mobile: bool = False, want: str | None = None, sess: dict | None = None) -> Hub:
         cid = re.sub(r"[^\w-]", "", cid)[:40] or "default"
@@ -1412,12 +1405,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
                 return False
             if signin:
                 return bool(self.sess)
-            if tailnet and not remote:
-                return True  # Tailscale authenticated the device; the page key still guards every action
-            if not remote:
-                return self.headers.get("Host") == host
-            c = re.search(r"abi_s=([\w-]+)", self.headers.get("Cookie", ""))
-            return bool(c and c.group(1) in cookies)
+            return self.headers.get("Host") == host  # --single: this machine only (no DNS rebinding)
 
         def get(self):
             route, _, query = self.path.partition("?")
@@ -1425,8 +1413,6 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
             if not self.authed():
                 if signin and self.allowed() and route in ("/", "/app.html"):
                     return self.signin_page()
-                if remote and route in ("/", "/app.html"):
-                    return self.reply(200, (LOGIN % "").encode(), "text/html; charset=utf-8")
                 return self.reply(404, b"{}")
             if route == "/events":  # EventSource can't send headers: the page key and this browser's id come in the query
                 if not secrets.compare_digest(qs.get("k", ""), key):
@@ -1514,20 +1500,6 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
                 self.send_header("Location", "/")
                 self.end_headers()
                 return None
-            if self.path == "/login" and remote:
-                given = urllib.parse.parse_qs(raw.decode(errors="replace")).get("p", [""])[0]
-                if secrets.compare_digest(given.encode(), remote.encode()):
-                    fails["n"] = 0
-                    tok = secrets.token_urlsafe(32)
-                    cookies.add(tok)
-                    self.send_response(303)
-                    self.send_header("Set-Cookie", f"abi_s={tok}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200")
-                    self.send_header("Location", "/")
-                    self.end_headers()
-                    return None
-                fails["n"] += 1
-                time.sleep(min(30, 2 ** min(fails["n"], 5)))  # a slow wrong passphrase
-                return self.reply(200, (LOGIN % "Wrong passphrase.").encode(), "text/html; charset=utf-8")
             body = json.loads(raw)
             project = default
             if self.path.startswith("/agent/"):  # the harness on this machine, with the agent key: steer pages, data changed
@@ -1619,9 +1591,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
                                       "application/vnd.openxmlformats-officedocument.presentationml.presentation"))
                 except abi.ActionError as e:
                     b = e.body if isinstance(e.body, dict) else {}
-                    old = any(x.get("loc") in (["page"], ["format"]) for x in b.get("errors") or [] if isinstance(x, dict))
-                    return self.reply(400, json.dumps({"error": "This ABI renders one page at a time as PDF or PNG. Several pages in one"
-                                                       " file and PPTX need a newer ABI (MULTI-EXPORT)." if old else b.get("message") or str(e.body)}).encode())
+                    return self.reply(400, json.dumps({"error": b.get("message") or str(e.body)}).encode())
             if self.path == "/data/export":  # one view's rows as CSV or Excel (ABI's export_visual, as the person)
                 try:
                     link = abi.call("export_visual", project=hub.current(), **{k: body.get(k) for k in ("report", "page", "visual", "format")},
@@ -1652,8 +1622,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
                 items = body.get("analyses")
                 if not isinstance(items, list) or len(items) > 100 or len(raw) > 200_000:
                     return self.reply(400, b'{"error":"at most 100 analyses"}')
-                app_dir(project).mkdir(parents=True, exist_ok=True)
-                (app_dir(project) / "analyses.json").write_text(json.dumps(items, indent=1) + "\n")
+                app_save(project, "analyses.json", items, hub.user)
                 return self.reply(200, b'{"result":"saved"}')
             if self.path.startswith("/transfer/"):  # the whole project as one zip, and back (Developer only)
                 import base64  # noqa: PLC0415
@@ -1807,8 +1776,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
             users[who] = {k: v for k, v in (("sections", secs), ("reports", reps)) if v is not None}
             if not users[who]:
                 users.pop(who)
-            app_dir(p).mkdir(parents=True, exist_ok=True)
-            f.write_text(json.dumps(data, indent=1) + "\n")
+            app_save(p, "people.json", data, (hub.user if hub else "") or "an admin")
             for s0 in people.values():  # their next page and data follow it
                 s0["roles"].pop(p, None)
             return 200, b'{"result":"saved"}'
@@ -1866,7 +1834,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
                                  f"{'.'.join(map(str, x.get('loc') or []))}: {x.get('msg')}").strip() for x in b.get("errors") or [] if isinstance(x, dict))
             return {"error": "\n".join(filter(None, [b.get("message"), detail])) or json.dumps(b)[:500]}
 
-    srv = ThreadingHTTPServer(("0.0.0.0" if remote or tailnet else "127.0.0.1", port), H)
+    srv = ThreadingHTTPServer(("0.0.0.0" if tailnet else "127.0.0.1", port), H)
     srv.daemon_threads = True
     host = f"127.0.0.1:{srv.server_address[1]}"  # port 0 = any free port
     url = f"http://{host}"
@@ -1907,14 +1875,13 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
 def main(argv: list[str]) -> int:
     if not argv:
         raise SystemExit(__doc__)
-    remote = os.environ.pop("ABI_APP_PASS", None) or None  # read once, then out of the environment (children don't get it)
     tailnet = "open" if "--open" in argv else "--tailnet" in argv  # --open: any device that can reach this machine
     signin = "--single" not in argv
-    if not signin and tailnet and not remote:
+    if not signin and tailnet:
         raise SystemExit("--single has no sign-in: it acts as this machine's ABI account, so it stays on this machine. Use sign-in (the default) for other devices.")
     argv = [a for a in argv if a not in ("--tailnet", "--open", "--single")]
     try:
-        s = serve(argv[0], int(argv[1]) if len(argv) > 1 else 8790, open_browser=not (remote or tailnet), remote=remote, tailnet=tailnet, signin=signin)
+        s = serve(argv[0], int(argv[1]) if len(argv) > 1 else 8790, open_browser=not tailnet, tailnet=tailnet, signin=signin)
     except (urllib.error.URLError, subprocess.CalledProcessError):  # no ABI to talk to, or to sign in with
         raise SystemExit(f"Can't reach ABI at {abi.URL}: start ABI (or set ABI_URL) and try again.") from None
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))

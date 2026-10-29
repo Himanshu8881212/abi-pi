@@ -8,16 +8,24 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "cryptography" },
-    { name = "duckdb" },
     { name = "jsonschema" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "duckdb" },
     { name = "pytest" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "cryptography", specifier = ">=44,<47" },
-    { name = "duckdb" },
     { name = "jsonschema" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "duckdb" },
     { name = "pytest" },
 ]
 

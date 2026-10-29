@@ -17,7 +17,7 @@ Glossary) · Data (Sources, Tables) · Automate (Flows, ML models, Tools, Agents
 History). Every `abi_sync` rewrites it.
 
 ```sh
-.venv/bin/python scripts/abi.py app <project>    # http://127.0.0.1:8790/ live, as you
+.venv/bin/python scripts/app.py <project>       # http://127.0.0.1:8790/ live, as you
 ```
 
 Live, you filter reports (or click a bar to cross-filter), edit/test/add measures and glossary terms, run a flow and

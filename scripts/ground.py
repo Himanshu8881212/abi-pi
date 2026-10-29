@@ -408,12 +408,6 @@ def check(answer: str, results: list, vocab: set[str] = frozenset(), members: se
 MARK = "[not verified]"
 
 
-# GATE-9-fix-4: the retry turn shows the model its draft masked (never the flagged values) and asks for a fresh answer,
-# so it has nothing to quote back in an apology the person would see as "[not verified]" talk about a hidden check
-RETRY = (f"Your answer above has {MARK} where it stated a number or name that no tool result backs. Answer the"
-         " person's question again from the start, stating only numbers and names that tool results show (call a"
-         " tool if you need one) and leaving out what you can't back. Don't mention this check, an earlier answer or"
-         " a correction.")
 
 
 def mask(answer: str, bad: dict) -> str:

@@ -89,9 +89,7 @@ def make(project: str, spec: dict) -> dict:
             rec["status"] = "ok"
         except (abi.ActionError, SystemExit, ValueError, KeyError) as e:
             body = e.body if isinstance(e, abi.ActionError) and isinstance(e.body, dict) else {}
-            old = any(isinstance(x, dict) and x.get("loc") in (["page"], ["format"]) for x in body.get("errors") or [])
-            rec.update(status="failed", file=None, error="This ABI renders one page at a time as PDF or PNG; several pages in one file"
-                       " and PPTX need a newer ABI (MULTI-EXPORT)." if old else body.get("message") or str(e)[:300])
+            rec.update(status="failed", file=None, error=body.get("message") or str(e)[:300])
         done.append(rec)
     (d / "notes.md").write_text(f"# {spec.get('title', spec['id'])}\n\n{notes}\n")
     ok = all(x["status"] == "ok" for x in done)

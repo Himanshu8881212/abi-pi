@@ -23,7 +23,7 @@ def figures(text: str) -> set[int]:
 
 
 def scenario1(project: str) -> dict:
-    """Load a new CSV, model it, top 5 categories by views. Returns the check (used by bench.py too)."""
+    """Load a new CSV, model it, top 5 categories by views. Returns the check."""
     drop = ROOT / "scratch" / project
     drop.mkdir(parents=True, exist_ok=True)
     shutil.copy2(CSV, drop / CSV.name)
