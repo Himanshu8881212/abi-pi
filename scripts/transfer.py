@@ -100,6 +100,8 @@ def extras(project: str, z: dict) -> dict:
     for part in ("app", "team"):
         p[part].mkdir(parents=True, exist_ok=True)
         for name, data in z[part].items():
+            if part == "team" and name == "pending.json":
+                continue  # steps waiting for a yes belong to a live team job, never to a zip
             (p[part] / name).write_bytes(data)
     with tempfile.TemporaryDirectory() as tmp:
         import vault  # noqa: PLC0415 (sibling script)
