@@ -395,7 +395,8 @@ function transferPage(box){if(!LIVE||MODE==='viewer'){box.append(h('p','empty','
   const r=await post({data});if(r.error)throw new Error(r.error);const ch=r.result?.changes||[],m=r.manifest||{};out.innerHTML='';
   out.append(h('p','file',`${m.name||m.project} · exported ${m.exported} · ABI commit ${String(m.abi_commit||'').slice(0,8)}`),
    ...(ch.length?ch.map(c=>h('p','',typeof c==='string'?c:JSON.stringify(c))):[h('p','ok','No changes: this project already matches the zip.')]),
-   ...(m.needs?.secrets?.length?[h('p','bad','Create these secrets in ABI first: '+m.needs.secrets.join(', '))]:[]));return ch.length?`${ch.length} changes. Apply to replace the project.`:'Nothing to apply.'});
+   ...(m.needs?.secrets?.length?[h('p','bad','Create these secrets in ABI first: '+m.needs.secrets.join(', '))]:[]),
+   ...(r.uncommitted?[h('p','bad',`This project has ${r.uncommitted} uncommitted change${r.uncommitted>1?'s':''}: Apply replaces them too. Commit first to keep them.`)]:[]));return ch.length?`${ch.length} changes. Apply to replace the project.`:'Nothing to apply.'});
  act(im,'Apply',async()=>{if(!data)return 'Check the zip first.';let r=await post({data,apply:true});
   if(r.confirm){if(!await ask(r.confirm))throw new Error('You declined. Nothing changed.');r=await fetch('/confirm/'+r.confirm.id,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(x=>x.json())}
   if(r.error)throw new Error(r.error);return 'Imported through ABI (one undoable commit). Refresh the sources to load the data.'});
@@ -1627,8 +1628,9 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
                 except Exception as e:  # noqa: BLE001 (any unreadable upload)
                     return self.reply(400, json.dumps({"error": f"Not an export zip: {e}"}).encode())
                 if not body.get("apply"):
+                    open_work = len((abi.call("changes", project=project) or {}).get("files") or [])  # an import replaces these too
                     return self.reply(200, json.dumps(run("import_project", {"project": project, "bundle": z["abi"], "dry_run": True}, None)
-                                                      | {"manifest": z["manifest"]}, default=str).encode())
+                                                      | {"manifest": z["manifest"], "uncommitted": open_work}, default=str).encode())
                 return self.reply(200, json.dumps(run("import_project", {"project": project, "bundle": z["abi"]}, None,
                                                       lambda: transfer.extras(project, z)), default=str).encode())
             if self.path == "/team/answer":  # the person's Approve/Decline on Home: the step runs through ABI (and its confirmation)
@@ -1798,7 +1800,8 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
                 pending[cid] = (action, args, b["confirm_token"], after, getattr(asking, "hid", None))  # the page never sees the token
                 preview = json.dumps(b["preview"], indent=1, default=str)[:4000] if b.get("preview") else ""
                 return {"confirm": {"id": cid, "message": b.get("message", "Confirm?"), "preview": preview}}
-            detail = "\n".join(f"{x.get('error')} {x.get('fix') or ''}".strip() for x in b.get("errors") or [] if isinstance(x, dict))
+            detail = "\n".join((f"{x['error']} {x.get('fix') or ''}" if x.get("error") else  # ABI's checks; a 422 names the field
+                                 f"{'.'.join(map(str, x.get('loc') or []))}: {x.get('msg')}").strip() for x in b.get("errors") or [] if isinstance(x, dict))
             return {"error": "\n".join(filter(None, [b.get("message"), detail])) or json.dumps(b)[:500]}
 
     srv = ThreadingHTTPServer(("0.0.0.0" if remote or tailnet else "127.0.0.1", port), H)

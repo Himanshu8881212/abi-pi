@@ -189,3 +189,11 @@ Before hosting on the local infrastructure:
 - [ ] Update the ABI preview to a build with MULTI-EXPORT (PPTX and several pages in one file) and the line-chart clipping fix in its PDF renderer.
 - [ ] Remotion's licence: free for individuals and companies up to 3 people; a company licence otherwise (video export).
 - [ ] Lower ABI's snapshot retention (`ABI_SNAPSHOT_RETENTION_DAYS`) or watch the disk: each refresh keeps DuckLake snapshots for 30 days.
+
+End-to-end, stress and edge cases (from round 14): `tests/test_e2e.py` drives a real app server on the throwaway project `demo/pi_app_test` through the page's own routes: measures, glossary, queries and reports created, queried and removed; exports (PDF, CSV, project zip) and the import check; commit and undo; odd input (unicode, a 5000-character name, nulls, a bad expression, a bad ID); 40 parallel requests from 7 browsers; rapid mode flips; an unknown project in the header; a 65 MB body. Steps ABI confirms are left for a person.
+
+| # | Area | Finding | Fix |
+|---|---|---|---|
+| 21 | Errors (E2E) | When ABI refused a request's shape (422) the page said "Invalid input. None": the field ABI named was lost. | ABI's field errors are shown as `field: reason` (e.g. `report: Field required`). Test: `test_abis_refusal_names_the_field`. |
+| 22 | Import (E2E) | Checking a zip compares it with the project as it is now: uncommitted work showed as changes, and Apply would replace it without saying so. | The check says how many uncommitted changes Apply replaces, and to commit first to keep them. |
+| — | Invite | Inviting the owner's email was refused by ABI: account email is off in the preview (needs `ABI_PUBLIC_URL` and `set_account_mail`). Nothing was sent. | Release checklist item: set up ABI's account mail. |
