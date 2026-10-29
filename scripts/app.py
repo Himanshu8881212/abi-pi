@@ -102,7 +102,7 @@ dialog h3{margin:0 0 12px;font:700 18px var(--display);text-transform:uppercase}
 .areas{display:grid;gap:6px}.areas .lk{display:flex;gap:16px;text-align:left;width:100%}.areas .lk b{min-width:9.5em}.areas .lk span{color:var(--mute)}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:12px}.kv b{font-weight:500;color:var(--mute)}
 pre{margin:10px 0 0}.pg .grid{gap:20px}.pg>section>h2{display:none}
-#chat{position:fixed;top:60px;right:0;bottom:0;width:420px;max-width:100vw;background:var(--sheet);border-left:2px solid var(--ink);display:flex;flex-direction:column;
+#chat{position:fixed;top:60px;right:0;bottom:0;margin:0;width:420px;max-width:100vw;background:var(--sheet);border-left:2px solid var(--ink);border-top:2px solid var(--ink);display:flex;flex-direction:column;
  transform:translateX(100%);transition:transform .18s ease-out;z-index:7;padding-bottom:env(safe-area-inset-bottom,0px)}
 #chat.open{transform:none}body.chat-open main{padding-right:452px}
 #chat.full{position:static;width:auto;max-width:none;height:calc(100vh - 230px);min-height:420px;transform:none;border:2px solid var(--ink)}
@@ -623,8 +623,8 @@ const md=t=>t.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])).repl
 function bubble(cls,text){const b=h('div','m '+cls);if(cls==='ai')b.innerHTML=md(text);else b.textContent=text;log.append(b);log.scrollTop=log.scrollHeight;return b}
 let steps=null;
 // Chat page: the same conversation as the side panel, full width; leaving the page (or the agent showing one) puts it back at the side
-function chatPage(box){$('#chat .wide-t').textContent='Side panel';chatBox.classList.add('full','open');document.body.classList.remove('chat-open');box.append(chatBox);inp.focus()}
-function openChat(on){chatBox.classList.toggle('open',on??!chatBox.classList.contains('open'));document.body.classList.toggle('chat-open',chatBox.classList.contains('open'));if(chatBox.classList.contains('open'))inp.focus()}
+function chatPage(box){$('#chat .wide-t').textContent='Side panel';chatBox.classList.add('full','open');document.body.classList.remove('chat-open');box.append(chatBox);chats();inp.focus()}
+function openChat(on){const was=chatBox.classList.contains('open');chatBox.classList.toggle('open',on??!was);if(!was&&chatBox.classList.contains('open'))chats();document.body.classList.toggle('chat-open',chatBox.classList.contains('open'));if(chatBox.classList.contains('open'))inp.focus()}
 const STEP={abi_show:'opened a page',semantic_query:'asked the model',visual_data:'read a chart',abi_vault:'searched the vault',abi_tools:'picked tools',
  semantic_model:'read the model',readiness:'checked readiness',data_quality:'checked data quality',how_calculated:'looked up a formula',set_measure:'saved a measure',
  save_report:'saved a report',save_flow:'saved a flow',commit:'committed',changes:'listed changes',subagent:'asked the team',abi_prefs:'read your preferences',read:'read a file'};
@@ -644,7 +644,7 @@ async function chats(sel){if(!LIVE)return;const r=await cpost('/chat/list'),pk=$
 function paint(c){log.innerHTML='';steps=null;(c.messages||[]).forEach(m=>bubble(m.role==='me'?'me':'ai',m.text));if(!log.children.length)log.append(hello())}
 $('#chat-new').onclick=async()=>{const c=await cpost('/chat/new');paint(c);chats(c.id);inp.focus()};
 $('#chat-pick').onchange=async e=>{if(!e.target.value)return;const c=await cpost('/chat/open',{id:e.target.value});paint(c);chats(c.id)};
-$('#chat-toggle').onclick=()=>{openChat();chats()};$('#chat .wide-t').onclick=()=>show(chatBox.classList.contains('full')?(PREV||'home'):'chat');$('#chat .x').onclick=()=>openChat(false);
+$('#chat-toggle').onclick=()=>openChat();$('#chat .wide-t').onclick=()=>show(chatBox.classList.contains('full')?(PREV||'home'):'chat');$('#chat .x').onclick=()=>openChat(false);
 async function sendChat(){const t=inp.value.trim();if(!t)return;if(!LIVE){bubble('sys','Snapshot: start `python scripts/app.py '+D.project+'` to talk to the agent.');return}
  log.querySelector('.hello')?.remove();bubble('me',t);inp.value='';steps=null;
  await fetch('/chat',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({message:t,page:CUR})})}
