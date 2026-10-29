@@ -20,3 +20,6 @@ description: How a senior data engineer works in ABI - grain, idempotent loads, 
 - **Cost.** Aggregate to the grain the business reads (daily, not per event) in gold; keep wide raw columns in
   bronze only.
 - **Change control.** In the app, Developer work stays uncommitted until the person commits; say what to commit.
+- **Storage.** Every load or `set_steps` on a big table writes a new copy of it, and ABI keeps the old ones. So:
+  try steps with `preview_steps` (it reads 1,000 rows and writes nothing), save each big table once, and never
+  rebuild a big table just to try a variant or rename a column; fix all of a table's steps first, then save.

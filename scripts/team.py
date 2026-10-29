@@ -235,7 +235,7 @@ def check(project: str, name: str, done: list[dict], h: dict) -> dict:
             elif have.get(tid) == 0:
                 bad.append(f"table {tid} has no rows")
         if not ids("table"):
-            bad.append("the handoff lists no tables (done: [{kind: 'table', id}])")
+            bad.append("list every table this task covers in done, also the ones you reused unchanged: {kind: 'table', id, what: 'reused'}; the harness checks each exists and has rows")
     elif name == "model_ready":
         r = _rows("readiness", project=project)
         if not r.get("ready"):
