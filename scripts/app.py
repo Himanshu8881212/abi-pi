@@ -1085,7 +1085,7 @@ class Hub:
             flags = (["--model", conf["model"]] if conf["model"] else []) + ["--thinking", conf["thinking"]]
             env |= {"ABI_PI_MODEL": conf["model"] or "", "ABI_PI_THINKING": conf["thinking"]}
             self.pi = subprocess.Popen(["pi", "--mode", "rpc", "--session", session, *flags], cwd=abi.ROOT, env=env, text=True, bufsize=1,
-                                       stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                                       stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=open(abi.ROOT / "logs" / "pi-stderr.log", "ab"))
             threading.Thread(target=self.read, daemon=True).start()
         if self.mode == "viewer":
             where = (f"project {self.current()} (the published version of {self.project}); Viewer mode: you are the analyst,"
@@ -1133,6 +1133,10 @@ class Hub:
                 final = ""
                 self.busy = False
                 self.emit({"type": "busy", "on": False})
+        if self.busy:  # the agent ended without an answer (it couldn't start, or it crashed): say so instead of waiting
+            self.busy = False
+            self.emit({"type": "busy", "on": False})
+            self.emit({"type": "answer", "text": "The agent stopped before it could answer (details in logs/pi-stderr.log). Try again; if it keeps happening, check the model settings (Govern › Settings)."})
 
 
 HUBS: dict[str, Hub] = {}

@@ -380,3 +380,13 @@ def test_settings_take_a_key_and_never_give_it_back(srv):
     finally:
         post(port, "/mode", {"mode": "developer"}, key)
         post(port, "/admin/settings/remove", {"id": "e2e-prov"}, key)
+
+
+def test_an_agent_that_dies_gives_an_answer_not_silence():
+    import io
+    h = app.Hub(P, "", "k", "dies")
+    events = []
+    h.emit = events.append
+    h.busy, h.pi = True, type("Proc", (), {"stdout": io.StringIO("")})()
+    h.read()
+    assert not h.busy and any(e.get("type") == "answer" and "stopped" in e["text"] for e in events)
