@@ -32,3 +32,5 @@ silver steps as one list and reuse it inline; build the silver table too (hidden
 5. Then build-model: `build_model`, hide bronze/silver/ref (`set_table hidden: true`), set kinds and keys on gold,
    add relationships, describe every table, readiness until Ready.
 6. Measures only on gold columns.
+- The first load from a new host (e.g. the S3 endpoint) asks the person once (ABI's address policy): do that
+  load yourself, not in a subagent; later loads from the same host don't ask.

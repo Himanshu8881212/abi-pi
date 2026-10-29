@@ -145,6 +145,7 @@ body[data-mode=viewer] .pghead{border-bottom-style:dashed}
 .tbl.fact .th{background:var(--ink);color:var(--paper)}.tbl .badge{border:1px solid currentColor;background:none;color:inherit;font:600 9px var(--text);text-transform:uppercase;letter-spacing:.1em;padding:2px 6px;cursor:pointer}
 .tbl .cols{max-height:230px;overflow:auto}.tbl .col{display:grid;grid-template-columns:14px 1fr auto;gap:6px;align-items:center;padding:3px 10px;font-size:11.5px;border-bottom:1px solid var(--faint)}
 .tbl .col .ty{color:var(--mute);font-size:10px}.tbl .dot{width:9px;height:9px;border:2px solid var(--ink);border-radius:50%;cursor:crosshair}.tbl .dot:hover{background:var(--ink)}
+.cards>.wide{grid-column:1/-1}
 .hits{display:flex;flex-direction:column;gap:10px;margin-top:12px}.hit{border-left:2px solid var(--ink);padding:2px 0 2px 12px;white-space:pre-wrap}.hit .file{margin:0 0 4px}
 .toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:10px 16px;font-size:12px;z-index:9;max-width:calc(100vw - 32px)}
 .card.hl{outline:4px solid var(--ink);outline-offset:3px}
@@ -473,9 +474,27 @@ function vaultPage(box){if(!LIVE){box.append(h('p','empty','The vault opens with
   act(c,'Read',async()=>{pre.hidden=!pre.hidden;if(!pre.textContent)pre.textContent=await vpost('read',{name:d.name})});
   act(c,'Remove',async()=>{if(await ask({message:`Remove ${d.name} from the vault?`,preview:''})){await vpost('rm',{name:d.name})}});g.append(c)})}
 
+// ---------- Knowledge: the agent team ----------
+async function teamPage(box){if(!LIVE){box.append(h('p','empty','The team view opens with the live app.'));return}
+ const r=await fetch('/team',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(r=>r.json());
+ if(r.error||!r.result){box.append(h('p','empty',r.error||'No plan yet: ask the agent for a job and it plans it with the team.'));return}
+ const T=r.result,g=h('div','cards');box.append(g);
+ const pl=card('Plan',T.goal||'');const tb=h('table');const hr=tb.insertRow();['task','agent','area','status','tries','after'].forEach(x=>{const th=document.createElement('th');th.textContent=x;hr.append(th)});
+ (T.tasks||[]).forEach(t=>{const r0=tb.insertRow();[t.id,t.agent,t.area,t.status,t.attempts||0,(t.depends_on||[]).join(', ')].forEach((v,i)=>{const c=r0.insertCell();c.textContent=v;if(i===3)c.className=v==='passed'?'ok':v==='failed'?'bad':''})});
+ if(!(T.tasks||[]).length)pl.append(h('p','empty','No tasks.'));else pl.append(tb);pl.classList.add('wide');g.append(pl);
+ const pe=card('Waiting for your yes','steps specialists could not run');if(!(T.pending||[]).length)pe.append(h('p','empty','Nothing waiting.'));
+ (T.pending||[]).forEach(p=>pe.append(h('div','kv'),h('div','',`${p.id} · ${p.action} · ${p.why||''} (from ${p.agent}, task ${p.task}). Ask the agent to run the pending steps.`)));g.append(pe);
+ if(T.brief){const b=card('Brief');b.append(h('pre','',T.brief));g.append(b)}
+ const jc=card('Journal','newest first');jc.classList.add('wide');const list=h('div','hits');
+ (T.journal||[]).slice().reverse().forEach(e=>{const d=h('div','hit');const head=`${cell(e.t)} · ${e.kind} · ${e.agent||''}${e.task?' · '+e.task:''}${e.result?' · '+e.result:''}`;d.append(h('div','file',head));
+  if(e.kind==='handoff'){const hh=e.handoff||{};d.append(h('div','',hh.summary||''));(e.checks||[]).forEach(c=>d.append(h('div',c.passed?'ok':'bad',`${c.passed?'✓':'✗'} ${c.check}${c.problems?.length?': '+c.problems.join('; '):''}`)));
+   if(hh.decisions?.length)d.append(h('div','file','decisions: '+hh.decisions.join('; ')));if(hh.open_issues?.length)d.append(h('div','file','open: '+hh.open_issues.join('; ')))}
+  else if(e.kind==='plan')d.append(h('div','',(e.tasks||[]).map(t=>`${t.id} → ${t.agent}`).join(', ')));list.append(d)});
+ if(!list.children.length)list.append(h('p','empty','Nothing yet.'));jc.append(list);g.append(jc)}
+
 // ---------- sidebar ----------
 const PENDING={filters:null};
-const LEDE={vault:'Your business documents: definitions, finance rules, KPI specs. The agents search them before they define or check a measure.',home:'Is the model ready, is the data fresh, and what changed last.',datasets:'Saved queries at a fixed grain, reused by reports, flows and ML. Preview their rows.',
+const LEDE={team:'The agent team: the Lead\'s plan, who works on what, every handoff and the checks the harness ran on it, and the steps waiting for your yes.',vault:'Your business documents: definitions, finance rules, KPI specs. The agents search them before they define or check a measure.',home:'Is the model ready, is the data fresh, and what changed last.',datasets:'Saved queries at a fixed grain, reused by reports, flows and ML. Preview their rows.',
  measures:'The business numbers. Edit a formula and ABI checks it before it saves; Test shows the total.',model:'Tables and how they join. Facts are black, dimensions are outlined.',
  glossary:'What the business words mean and which measures implement them.',sources:'Where the data comes from. Reload a source to take a new snapshot.',
  tables:'The tables built from the sources, with their transform steps.',flows:'Automations. Run one now and follow its steps, or switch it on or off.',
@@ -488,7 +507,7 @@ function nav(){return [['Start',[['home','Home',home]]],
  ['model','Model',modelCanvas],['glossary','Glossary',glossary,D.glossary.length]]],
  ['Data',[['sources','Sources',sources,D.sources.length],['tables','Tables',tablesPage,D.tables.length]]],
  ['Automate',[['flows','Flows',flows,D.flows.length],['ml','ML models',ml,D.ml.length],['tools','Tools',tools,D.tools.length],['agents','Agents',agents,D.agents.length]]],
- ['Knowledge',[['vault','Vault',vaultPage,(VAULT||[]).length],['docs','Docs',docs]]],
+ ['Knowledge',[['team','Team',teamPage],['vault','Vault',vaultPage,(VAULT||[]).length],['docs','Docs',docs]]],
  ['Govern',[['security','Security',security],['environments','Environments',b=>b.insertAdjacentHTML('beforeend',D.sections.Environments)],['history','History',commits,(D.history||[]).length]]]]}
 let MODE='developer',VAULT=[];
 let FOLD={};try{FOLD=JSON.parse(localStorage.getItem('abi-fold')||'{}')}catch(e){}
@@ -1004,6 +1023,12 @@ def serve(project: str, port: int = 8790, open_browser: bool = True, remote: str
                         out = {"error": str(e.body.get("message") if isinstance(e.body, dict) else e.body)}
                 changed(project)
                 return self.reply(200, json.dumps(out, default=str).encode())
+            if self.path == "/team":
+                import team  # noqa: PLC0415 (sibling script)
+                try:
+                    return self.reply(200, json.dumps({"result": team.status(hub.current() if hub.mode == "viewer" else project)}, default=str).encode())
+                except SystemExit as e:
+                    return self.reply(200, json.dumps({"error": str(e)}).encode())
             if self.path.startswith("/vault/"):
                 return self.reply(*vault_route(hub, self.path.removeprefix("/vault/"), body))
             if self.path == "/chat":

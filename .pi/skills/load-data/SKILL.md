@@ -27,3 +27,5 @@ description: Load files, S3 folders of Parquet, or a database into a new or exis
    as secret references.
 5. After loading: `data_quality` (rows, freshness, gaps). Row counts come from its rows only.
 6. Continue with the medallion skill (layers) or profile-clean (steps), then build-model.
+- The first load from a new host (e.g. the S3 endpoint) asks the person once (ABI's address policy): do that
+  load yourself, not in a subagent; later loads from the same host don't ask.

@@ -12,7 +12,7 @@
  *  - context     project memory (ABI) + the person's preferences (Pi-side, private) + today's date, last in the prompt
  *  - harness     abi_project / abi_load / abi_sync / abi_health / abi_cli wrap scripts/abi.py (deterministic steps)
  */
-import { execFile, execFileSync } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -93,6 +93,17 @@ function runPy(args: string[], signal?: AbortSignal): Promise<string> {
 	});
 }
 
+function runTeam(args: string[], input = ""): Promise<string> {
+	return new Promise((resolve) => {
+		const p = spawn(PY, [path.join(ROOT, "scripts", "team.py"), ...args], { cwd: ROOT, env: { ...process.env, ABI_TOKEN: token() } });
+		let out = "", err = "";
+		p.stdout.on("data", (d: Buffer) => (out += d));
+		p.stderr.on("data", (d: Buffer) => (err += d));
+		p.on("close", () => resolve(out.trim() || JSON.stringify({ error: err.trim().split("\n").slice(-2).join(" ") })));
+		p.stdin.end(input);
+	});
+}
+
 const text = (s: string) => ({ content: [{ type: "text" as const, text: s.length > 20000 ? s.slice(0, 20000) + "\n…truncated" : s }], details: undefined });
 
 function inside(p: string, cwd: string): string | null {
@@ -131,6 +142,7 @@ export default async function abi(pi: ExtensionAPI) {
 		started: new Map<string, number>(),
 		zones: new Map<string, string>(),
 		areas: [] as string[],
+		delegated: new Map<string, { project: string; tasks: string[] }>(),
 		projects: [] as string[],
 	};
 
@@ -257,6 +269,72 @@ export default async function abi(pi: ExtensionAPI) {
 	const CHANGES = /^(set_|save_|delete_|add_|build_|create_|edit_|propose_|approve_|reject_|enable_|run_|train_|score_|refresh|publish_|import_|revert|undo|commit|remove_|rename_|undo_edits|sync_edits)/;
 	const changed = (project: unknown) => { if (typeof project === "string" && apps.has(project)) void appPost(project, "/agent/changed", {}); };
 
+	// ---------- the team (harness/team.json, scripts/team.py): the Lead plans and delegates, specialists hand off ----------
+	const team = { task: undefined as string | undefined, project: undefined as string | undefined, handedOff: false, nudged: false };
+	const leadProject = (p?: string) => p ?? state.project ?? process.env.ABI_APP_PROJECT;
+	if (!sub) {
+		pi.registerTool({
+			name: "abi_plan",
+			label: "Team plan",
+			description: "The Lead's plan for a job bigger than a few steps: tasks {id, agent, area, task, depends_on}, one per specialist and area. Agents and areas (harness/team.json): data-engineer (sources, transform), analytics-engineer (model, measures), analyst (reports, analysis), ml-engineer (ml), automation-engineer (flows), agent-builder (agents), reviewer (review), release-ops (release). Phases data -> model -> build -> review -> release: a later task depends on every earlier-phase task. The harness refuses a plan that breaks this and says why; a revised plan keeps tasks that passed. Then delegate each task with subagent, its text starting 'Plan task <id>:'.",
+			parameters: Type.Object({ project: Type.String(), goal: Type.String(), tasks: Type.Array(Type.Object({ id: Type.String(), agent: Type.String(), area: Type.String(), task: Type.String(), depends_on: Type.Optional(Type.Array(Type.String())) })) }),
+			async execute(_id, p) { return text(await runTeam(["plan", p.project], JSON.stringify({ goal: p.goal, tasks: p.tasks }))); },
+		});
+		pi.registerTool({
+			name: "abi_brief",
+			label: "Team brief",
+			description: "Set the team's project brief: goal, phases, conventions (naming, grain, definitions), open questions. Every specialist is briefed with it. Lasting decisions also go to ABI's project memory (remember).",
+			parameters: Type.Object({ project: Type.String(), text: Type.String() }),
+			async execute(_id, p) { return text(await runTeam(["brief-set", p.project], p.text)); },
+		});
+		pi.registerTool({
+			name: "abi_team",
+			label: "Team status",
+			description: "The plan with each task's status and attempts, the steps waiting for the person's yes, the brief and the latest journal (handoffs and check results).",
+			parameters: Type.Object({ project: Type.String() }),
+			async execute(_id, p) { return text(await runTeam(["status", p.project])); },
+		});
+		pi.registerTool({
+			name: "abi_pending",
+			label: "Pending confirmations",
+			description: "Steps specialists couldn't run because they need the person's yes. list shows them; run asks the person for each (ABI's own message and preview) and runs the ones they approve.",
+			parameters: Type.Object({ project: Type.String(), action: Type.String({ enum: ["list", "run"] }) }),
+			async execute(_id, p, _signal, _onUpdate, ctx) {
+				const list = JSON.parse(await runTeam(["pending", p.project]) || "[]");
+				if (p.action === "list" || !list.length) return text(JSON.stringify(list));
+				const out: unknown[] = [];
+				for (const it of list) {
+					const r: any = await confirmBridge(String(it.action), { project: p.project, ...(it.args || {}) }, ctx);
+					const outcome = "result" in r ? "ok" : String(r.status ?? "").includes("declined") ? "declined" : "failed";
+					await runTeam(["pending", p.project, "done", it.id, outcome]);
+					out.push({ id: it.id, action: it.action, outcome, detail: "result" in r ? undefined : r });
+				}
+				if (out.some((o: any) => o.outcome === "ok")) changed(p.project);
+				return text(JSON.stringify(out));
+			},
+		});
+	} else {
+		pi.registerTool({
+			name: "abi_handoff",
+			label: "Hand off to the Lead",
+			description: "Finish your task with exactly one handoff. The harness checks your work against ABI (per your role) and tells you what failed; fix it and hand off again. done: every object you made or changed as {kind, id, what} (kind: table, measure, glossary, relationship, report, dataset, ml, flow, tool, agent, commit, doc, other).",
+			parameters: Type.Object({
+				project: Type.String(), task_id: Type.String(), status: Type.String({ enum: ["done", "partial", "blocked"] }), summary: Type.String(),
+				done: Type.Optional(Type.Array(Type.Object({ kind: Type.String(), id: Type.String(), what: Type.Optional(Type.String()) }))),
+				decisions: Type.Optional(Type.Array(Type.String())), assumptions: Type.Optional(Type.Array(Type.String())),
+				checks: Type.Optional(Type.Array(Type.Object({ what: Type.String(), result: Type.String() }))), open_issues: Type.Optional(Type.Array(Type.String())),
+				pending_confirmations: Type.Optional(Type.Array(Type.Object({ action: Type.String(), args: Type.Optional(Type.Any()), why: Type.Optional(Type.String()) }))),
+				next: Type.Optional(Type.String()),
+			}),
+			async execute(_id, p) {
+				const { project, ...h } = p as any;
+				const out = await runTeam(["handoff", project, process.env.ABI_PI_AGENT ?? ""], JSON.stringify(h));
+				try { if (JSON.parse(out).accepted) team.handedOff = true; } catch {}
+				return text(out);
+			},
+		});
+	}
+
 	pi.registerTool({
 		name: "abi_vault",
 		label: "Search the vault",
@@ -291,6 +369,26 @@ export default async function abi(pi: ExtensionAPI) {
 	pi.on("tool_call", async (event, ctx) => {
 		state.started.set(event.toolCallId, Date.now());
 		const name = event.toolName;
+		if (name === "subagent" && !sub) {
+			const inp: any = event.input ?? {};
+			const items = inp.chain?.length ? inp.chain : inp.tasks?.length ? inp.tasks : inp.agent ? [{ agent: inp.agent, task: inp.task }] : [];
+			if (!items.length) return { block: true, reason: "Team guard: say which agent and which plan task." };
+			const proj = leadProject();
+			if (!proj) return { block: true, reason: "Name the project first (abi_plan for it), then delegate its plan tasks." };
+			const started: string[] = [];
+			for (const it of items) {
+				let g: any;
+				try { g = JSON.parse(await runTeam(["guard", proj, String(it.agent)], String(it.task ?? "")) || "{}"); }
+				catch (e) { g = { ok: false, reason: `the team guard failed (${String(e).slice(0, 120)})` }; }  // fail closed
+				log({ event: "team_guard", agent: it.agent, ok: !!g.ok, task: g.task, reason: g.ok ? undefined : String(g.reason ?? g.error).slice(0, 200) });
+				if (!g.ok) {
+					for (const t of started) await runTeam(["release", proj, t]);
+					return { block: true, reason: `Team guard: ${g.reason ?? g.error}` };
+				}
+				started.push(g.task);
+			}
+			state.delegated.set(event.toolCallId, { project: proj, tasks: started });
+		}
 		if (await mode() === "viewer" && !(READ_STEPS.has(name) || (name.startsWith(MCP) && READS.has(name.slice(MCP.length)))))
 			return { block: true, reason: "Viewer mode: you are the analyst and can only read. Nothing changed. Tell the person they can switch to Developer in the app's top bar for this." };
 		const dev = process.env.ABI_APP_PROJECT;
@@ -335,6 +433,11 @@ export default async function abi(pi: ExtensionAPI) {
 			if (!event.isError && !out?.error && CHANGES.test(tool)) changed((event.input as any)?.project);
 		}
 		if (["abi_sync", "abi_load"].includes(name) && !event.isError) changed((event.input as any)?.project);
+		if (name === "subagent" && state.delegated.has(event.toolCallId)) {  // a specialist that exited without a handoff frees its task
+			const d = state.delegated.get(event.toolCallId)!;
+			for (const t of d.tasks) await runTeam(["release", d.project, t]);
+			state.delegated.delete(event.toolCallId);
+		}
 		ingest(name, raw, event.isError);
 		status(ctx);
 	});
@@ -364,7 +467,7 @@ export default async function abi(pi: ExtensionAPI) {
 		state.pending.push({ message, input });
 		if (!ctx.hasUI) {
 			log({ event: "confirm", tool, decision: "no-ui" });
-			return { status: "Needs the person's confirmation, and no one is at the terminal to give it. Nothing changed.", message };
+			return { status: "Needs the person's confirmation, which only the Lead can get. Nothing changed. Don't retry: list it in your handoff's pending_confirmations ({action, args, why}) and go on.", message, action: tool, args: input };
 		}
 		const yes = await ctx.ui.confirm("ABI asks for your confirmation", `${message}${preview ? `\n\nPreview:\n${preview}` : ""}\n\nProceed?`);
 		log({ event: "confirm", tool, decision: yes ? "yes" : "no" });
@@ -376,6 +479,16 @@ export default async function abi(pi: ExtensionAPI) {
 	// ---------- context: memory, preferences, date last ----------
 	pi.on("before_agent_start", async (event) => {
 		const lines: string[] = [];
+		if (sub && event.messageType === "user" && !team.task) {  // a specialist: the harness briefs it for its plan task
+			const m = /\bPlan task ([A-Za-z0-9_-]+)/.exec(event.prompt ?? "");
+			if (m) {
+				const where = JSON.parse(await runTeam(["whereis", "-", process.env.ABI_PI_AGENT ?? "", m[1]]) || "{}");
+				if (where.project) {
+					team.task = m[1]; team.project = where.project;
+					lines.push(await runTeam(["brief", where.project, process.env.ABI_PI_AGENT ?? "", m[1]]));
+				}
+			}
+		}
 		if (event.messageType === "user") {
 			state.asked += "\n" + event.prompt;
 			state.retried = false;
@@ -472,6 +585,10 @@ export default async function abi(pi: ExtensionAPI) {
 	});
 
 	pi.on("agent_before_settle", async () => {
+		if (sub && team.task && !team.handedOff && !team.nudged && !state.needRetry) {
+			team.nudged = true;
+			return { entries: [{ type: "custom_message", customType: "abi-team", content: `Finish plan task ${team.task} with one abi_handoff call (project ${team.project}): what you did with IDs, decisions, checks with figures, open issues, pending confirmations, and what the next agent needs.`, display: false }], continue: true };
+		}
 		if (!state.needRetry) return;
 		state.needRetry = false;
 		return { entries: [{ type: "custom_message", customType: "abi-grounding", content: RETRY, display: false }], continue: true };

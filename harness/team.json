@@ -1,0 +1,60 @@
+{
+ "about": "The harness's agent team: one Lead (the agent in the chat) and eight specialists it delegates to. scripts/team.py validates plans, guards delegation, briefs specialists, takes handoffs and runs post-checks from this file; scripts/gen_agents.py writes .pi/agents/<name>.md from it.",
+ "phases": ["data", "model", "build", "review", "release"],
+ "areas": {
+  "sources": "loading data: sources, S3 folders, streams (bronze)",
+  "transform": "silver and gold tables (steps)",
+  "model": "facts, dimensions, keys, joins, calendar, descriptions",
+  "measures": "measures and glossary terms",
+  "reports": "reports and dashboards",
+  "analysis": "answering questions (read-only)",
+  "ml": "datasets for ML, ML models, training, scoring",
+  "flows": "flows, schedules, alerts, deliveries",
+  "agents": "custom agents and tools",
+  "review": "checking the others' work (read-only)",
+  "release": "commits, documentation, release notes, publish and promote preparation, operations health"
+ },
+ "lead": {"name": "lead", "may_confirm": true, "skills": ["team-lead"]},
+ "agents": {
+  "data-engineer": {
+   "description": "Brings data in and builds the medallion layers: bronze sources (files, S3 folders, streams), silver cleaning and combining, gold facts and dimensions; reconciles each layer.",
+   "phase": "data", "areas": ["sources", "transform"], "groups": ["data", "model"],
+   "skills": ["load-data", "medallion", "profile-clean", "practice-data-engineering"],
+   "checks": ["tables_exist"]},
+  "analytics-engineer": {
+   "description": "Builds the semantic model on gold (kinds, keys, joins, calendar, descriptions) until Ready, and the measures and glossary from the vault's definitions.",
+   "phase": "model", "areas": ["model", "measures"], "groups": ["model"],
+   "skills": ["build-model", "measures", "practice-data-engineering"],
+   "checks": ["model_ready", "measures_work"]},
+  "analyst": {
+   "description": "Answers questions and builds reports and dashboards from the model; segments before concluding; read-only except reports.",
+   "phase": "build", "areas": ["reports", "analysis"], "groups": ["reports", "model"],
+   "skills": ["practice-analyst", "build-report"],
+   "checks": ["reports_work"]},
+  "ml-engineer": {
+   "description": "Builds datasets for ML, forecasts, anomaly and segment models; trains and scores them; reports accuracy against the baseline.",
+   "phase": "build", "areas": ["ml"], "groups": ["ml", "model"],
+   "skills": ["forecast-ml", "practice-analyst"],
+   "checks": ["ml_trained"]},
+  "automation-engineer": {
+   "description": "Builds flows: schedules, digests, alerts, deliveries and failure alerts, saved switched off.",
+   "phase": "build", "areas": ["flows"], "groups": ["flows"],
+   "skills": ["flows-alerts", "practice-automation"],
+   "checks": ["flows_saved_off"]},
+  "agent-builder": {
+   "description": "Builds ABI custom agents and tools with narrow scope, tested tools and evaluation sets.",
+   "phase": "build", "areas": ["agents"], "groups": ["agents", "tools"],
+   "skills": ["custom-agent", "practice-agentic"],
+   "checks": ["agents_tested"]},
+  "reviewer": {
+   "description": "Checks the others' work before release, read-only: measures against the vault, counts across layers, report figures against queries, flows off. Reports findings; changes nothing.",
+   "phase": "review", "areas": ["review"], "groups": [],
+   "skills": ["practice-analyst", "practice-data-engineering"],
+   "checks": ["review_findings"], "read_only": true},
+  "release-ops": {
+   "description": "Version control, documentation and operations: groups and commits the work with clear messages, writes release notes from the journal, prepares publish and promotion, checks refresh, data quality, flow runs and stream health.",
+   "phase": "release", "areas": ["release"], "groups": ["project", "docs"],
+   "skills": ["promote", "practice-release"],
+   "checks": ["committed"]}
+ }
+}
