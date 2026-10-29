@@ -20,6 +20,7 @@ sign-in, this process's own ABI session (one person on this machine). A confirm 
 gets ABI's message and preview and the person's click redeems it. Only the actions in ALLOWED pass.
 """
 import atexit
+import contextlib
 import html
 import json
 import os
@@ -1181,6 +1182,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
     reports), Developer only for editors and owners, and workspace owners get Users & access."""
     import ipaddress  # noqa: PLC0415
     project, opened = default, set()
+    asking = threading.local()  # the hub of this request's thread: a confirmation is redeemed by the browser that asked
     people: dict[str, dict] = {}  # session id -> {name, token, admin, roles, t}: memory only, never written
     tries: dict[str, int] = {}  # wrong sign-ins per client address (ABI throttles too, but sees only this server)
 
@@ -1281,15 +1283,25 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
                 return None
             return s
 
-        def do_GET(self):
+        def guarded(self, handle) -> None:
             self.sess = self.session() if signin else None
-            with abi.as_user(self.sess and self.sess["token"]):
-                return self.get()
+            try:
+                with abi.as_user(self.sess and self.sess["token"]):
+                    return handle()
+            except (ValueError, TypeError, KeyError, AttributeError):  # malformed input: JSON, numbers, missing fields
+                with contextlib.suppress(OSError):
+                    self.reply(400, b'{"error":"That request isn\'t valid."}')
+            except OSError:
+                pass  # the browser went away
+            except Exception:  # noqa: BLE001 (never a dropped connection; no details, they may carry values)
+                with contextlib.suppress(OSError):
+                    self.reply(500, b'{"error":"Something went wrong. Try again."}')
+
+        def do_GET(self):
+            self.guarded(self.get)
 
         def do_POST(self):
-            self.sess = self.session() if signin else None
-            with abi.as_user(self.sess and self.sess["token"]):
-                return self.post()
+            self.guarded(self.post)
 
         def signin_page(self, msg: str = "", name: str = "", code: bool = False) -> None:
             self.reply(200, SIGNIN.replace("%MSG%", html.escape(msg)).replace("%NAME%", html.escape(name))
@@ -1436,7 +1448,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
             if not self.authed():
                 return self.reply(403, b'{"error":"forbidden"}')
             hub = hub_for(self.headers.get("X-Abi-Client", ""), self.headers.get("X-Abi-Mobile") == "1", self.headers.get("X-Abi-Project"), self.sess)
-            project = hub.project
+            project, asking.hid = hub.project, hub.hid
             acc = access(self.sess, project)
             sec = next((v for k, v in ROUTE_SECTION.items() if self.path.startswith(k)), None)
             if acc.get("sections") is not None and sec and sec not in acc["sections"]:
@@ -1602,10 +1614,11 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
                     hub.send({"type": "abort"})
                 return self.reply(200, b"{}")
             if self.path.startswith("/confirm/"):
-                job = pending.pop(self.path.split("/")[-1], None)
+                cid = self.path.split("/")[-1]
+                job = pending.pop(cid, None) if pending.get(cid, (None,) * 5)[4] == hub.hid else None
                 if not job:
                     return self.reply(410, b'{"error":"That confirmation expired; try again."}')
-                return self.reply(200, json.dumps(run(*job), default=str).encode())  # job: action, args, token[, after]
+                return self.reply(200, json.dumps(run(*job[:4]), default=str).encode())  # job: action, args, token, after, hub
             action = self.path.removeprefix("/api/")
             if action not in ALLOWED or body.get("project") != project:
                 return self.reply(403, json.dumps({"error": f"'{action}' is not available here; use ABI's app."}).encode())
@@ -1717,7 +1730,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
             b = e.body if isinstance(e.body, dict) else {"message": str(e.body)}
             if e.status == 409 and b.get("confirm_token") and token is None:
                 cid = secrets.token_urlsafe(12)
-                pending[cid] = (action, args, b["confirm_token"], after)  # stays here: the page never sees the token
+                pending[cid] = (action, args, b["confirm_token"], after, getattr(asking, "hid", None))  # the page never sees the token
                 preview = json.dumps(b["preview"], indent=1, default=str)[:4000] if b.get("preview") else ""
                 return {"confirm": {"id": cid, "message": b.get("message", "Confirm?"), "preview": preview}}
             detail = "\n".join(f"{x.get('error')} {x.get('fix') or ''}".strip() for x in b.get("errors") or [] if isinstance(x, dict))

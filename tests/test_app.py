@@ -160,6 +160,27 @@ def test_an_agent_only_reaches_its_own_browser(srv):
     assert json.loads(urllib.request.urlopen(req).read())["mode"] == "viewer", "an unknown browser fails closed, never another's Developer"
 
 
+def test_bad_input_gets_an_answer_not_a_dropped_connection(srv):
+    port, key, _ = srv
+    for path, raw in (("/api/semantic_model", b"{not json"), ("/edits/rows", b'{"table":"x","offset":"abc"}')):
+        req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", raw, {"X-Abi-App": key, "Content-Type": "application/json"})
+        with pytest.raises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(req)
+        assert e.value.code == 400 and "error" in json.loads(e.value.read())
+
+
+def test_a_confirmation_belongs_to_the_browser_that_asked(srv):
+    port, key, _ = srv
+    _, r = post(port, "/api/set_measure", {"project": P, "id": "c_probe", "name": "C", "expression": "SUM(orders.amount)"}, key)
+    if "confirm" not in r:
+        pytest.skip("ABI asked no confirmation for this change")
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/confirm/{r['confirm']['id']}", b"{}",
+                                 {"X-Abi-App": key, "Content-Type": "application/json", "X-Abi-Client": "another-browser"})
+    with pytest.raises(urllib.error.HTTPError) as e:
+        urllib.request.urlopen(req)
+    assert e.value.code == 410
+
+
 def test_switcher_lists_workspaces_and_their_projects(srv):
     port, key, _ = srv
     _, r = post(port, "/projects", {}, key)
