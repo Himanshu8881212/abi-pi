@@ -175,3 +175,33 @@ def test_modes_are_per_browser_and_a_phone_stays_viewer(srv):
     assert p("/api/set_measure", {"project": P, "id": "m_probe", "name": "M", "expression": "SUM(orders.amount)"}, "phone1", "1")[0] == 403
     p("/mode", {"mode": "developer"}, "laptop1")
     assert app.HUBS["laptop1"].mode == "developer" and app.HUBS["phone1"].mode == "viewer"
+
+
+def test_vpn_mode_asks_for_the_passphrase_first(srv):
+    import secrets
+    import urllib.parse
+    pw = secrets.token_urlsafe(16)  # a test passphrase, made here and never printed
+    s = app.serve(P, 0, open_browser=False, remote=pw)
+    port = s.server_address[1]
+    try:
+        page = urllib.request.urlopen(f"http://127.0.0.1:{port}/").read().decode()
+        assert "Passphrase" in page and "window.APP" not in page, "nothing of the project before the passphrase"
+        with pytest.raises(urllib.error.HTTPError):
+            urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{port}/api/semantic_model", b"{}", {"X-Abi-App": "x"}))
+        wrong = urllib.request.urlopen(f"http://127.0.0.1:{port}/login", urllib.parse.urlencode({"p": "nope"}).encode()).read().decode()
+        assert "Wrong passphrase" in wrong
+
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, *a, **k):
+                return None
+        opener = urllib.request.build_opener(NoRedirect)
+        try:
+            r = opener.open(f"http://127.0.0.1:{port}/login", urllib.parse.urlencode({"p": pw}).encode())
+        except urllib.error.HTTPError as e:
+            r = e
+        assert r.code == 303 and "HttpOnly" in r.headers["Set-Cookie"]
+        cookie = r.headers["Set-Cookie"].split(";")[0]
+        page = urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{port}/", headers={"Cookie": cookie})).read().decode()
+        assert "window.APP" in page
+    finally:
+        s.shutdown()

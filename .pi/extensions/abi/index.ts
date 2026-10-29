@@ -28,12 +28,18 @@ const AREAS: { core: string[]; areas: Record<string, { about: string; words: str
 	fs.readFileSync(path.join(ROOT, "harness", "areas.json"), "utf8"),
 );
 // each group's playbooks (.pi/skills): they come with the group's notes, so no extra turn reads them
-const PLAYBOOKS: Record<string, string[]> = { data: ["load-data", "profile-clean"], model: ["build-model", "measures"],
-	reports: ["build-report"], writeback: ["writeback-planning"], ml: ["forecast-ml"], flows: ["flows-alerts"],
-	agents: ["custom-agent"], project: ["promote"] };
+// the build playbook and the practice of the role that does that work, together, when the group's tools are activated
+const PLAYBOOKS: Record<string, string[]> = { data: ["load-data", "medallion", "profile-clean", "practice-data-engineering"],
+	model: ["build-model", "measures", "practice-data-engineering"], reports: ["build-report", "practice-analyst"],
+	writeback: ["writeback-planning"], ml: ["forecast-ml", "practice-analyst"], flows: ["flows-alerts", "practice-automation"],
+	agents: ["custom-agent", "practice-agentic"], tools: ["practice-agentic"], project: ["promote"] };
 // ABI's keyword routing (agent.areas, D-71); "project" alone is left out: every harness prompt names one
+const MORE: Record<string, string> = { data: "medallion|bronze|silver|gold|layer|bucket|stream|ingest|pipeline|lake",
+	model: "medallion|gold|semantic|grain|dimension|fact", reports: "why|trend|compare|breakdown|analy[sz]",
+	flows: "automat|schedule|alert|notify|digest|weekly|daily|monday", agents: "assistant|bot|copilot|custom agent",
+	ml: "forecast|predict|anomal|cluster|segment|churn" };
 const WORDS = Object.fromEntries(Object.entries(AREAS.areas).map(([a, v]) =>
-	[a, new RegExp(`\\b(${(a === "project" ? v.words.replace(/^project\|/, "") : v.words)})`, "i")]));
+	[a, new RegExp(`\\b(${[(a === "project" ? v.words.replace(/^project\|/, "") : v.words), MORE[a]].filter(Boolean).join("|")})`, "i")]));
 function groupNotes(a: string): string {
 	const f = path.join(ROOT, "harness", "notes", `${a}.md`);
 	const notes = fs.existsSync(f) ? fs.readFileSync(f, "utf8") : `# ${a}\n${AREAS.areas[a]?.about ?? ""}`;

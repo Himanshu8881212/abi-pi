@@ -7,17 +7,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 AREAS = json.loads((ROOT / "harness/areas.json").read_text())
 MODEL = "cliproxy/gpt-6.1-sol"
-COMMON = ["read", "ls", "abi_tools", "abi_sync", "abi_prefs"]
+COMMON = ["read", "ls", "abi_tools", "abi_sync", "abi_prefs", "abi_vault", "abi_show"]
 AGENTS = {
     "data-engineer": (["data", "model"], ["abi_load", "abi_project"],
                       "Loads, profiles, cleans and models data in ABI until the model is Ready.",
-                      "Read the load-data, profile-clean and build-model skills. Profile before modelling."),
+                      "Read the load-data, medallion, profile-clean, build-model and practice-data-engineering skills. Grain first; profile before modelling; reconcile each layer."),
     "analyst": (["model", "reports", "docs"], [], "Writes measures, builds reports and answers data questions from ABI.",
-                "Read the measures and build-report skills. Ask ABI's own custom agents with run_agent when one fits."),
+                "Read the practice-analyst, measures and build-report skills. Definitions from the vault (abi_vault); segment before you conclude. Ask ABI's own custom agents with run_agent when one fits."),
     "ml": (["ml", "model"], [], "Builds datasets, trains and scores ML models (forecasts, clusters, anomalies) in ABI.",
-           "Read the forecast-ml skill. Accuracy and baseline only from ml_models rows."),
+           "Read the forecast-ml and practice-analyst skills. Accuracy and baseline only from ml_models rows."),
     "automation": (["flows", "tools"], [], "Creates flows, schedules, alerts and sends in ABI.",
-                   "Read the flows-alerts skill. Numbers ride in a step's data, never in its text."),
+                   "Read the flows-alerts and practice-automation skills. Flows off by default; numbers ride in a step's data, never in its text."),
 }
 EXTRA = {"analyst": ["run_agent", "list_agents", "agent_runs"]}
 

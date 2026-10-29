@@ -1,16 +1,29 @@
 ---
 name: load-data
-description: Load files or a database into a new or existing ABI project. Use for "load this", "here are some files/parquet/csv", "connect to postgres", a folder of data.
+description: Load files, S3 folders of Parquet, or a database into a new or existing ABI project. Use for "load this", "here are some files/parquet/csv", "data is in a bucket", "connect to postgres", a folder of data.
 ---
 # Load data
-1. Pick IDs: workspace (default `main` or the person's preference) and project (lowercase, digits, `_`, starts with a letter).
-2. Files on this machine: `abi_load {workspace, project, paths}`. It creates the project and folder, uploads each file
-   (CSV with explicit quoting first: DuckDB's guess splits quoted multi-line fields), types a date column, builds the
-   model, adds starter measures and an Overview report, and renders views. Read its JSON: `loaded`, `failed`,
-   `readiness.missing`.
-3. A server path, URL or database: `abi_tools ["data"]`, then `add_data` (credentials only as `${secret:NAME}` the
-   person created in ABI).
-4. Check row counts in the `loaded` list against what the person expects; a CSV with broken rows shows as NULLs in a
-   column that should be full: say so (data_quality).
-5. Continue with the profile-and-clean skill if steps are needed, then build-model.
-Lessons: profile before modelling; one file = one table; staging tables that only feed another table get `hidden`.
+1. IDs: workspace (default `main` or the person's preference) and project (lowercase, digits, `_`, starts with a
+   letter). A new project for a bucket or database: `abi_project {workspace, project, name}` first.
+2. Files on this machine: `abi_load {workspace, project, paths}` (uploads each file, types a date, builds the model,
+   starter measures, an Overview report).
+3. **A folder of Parquet on S3 (RustFS, MinIO, AWS):** one `add_data` per folder; the folder is one table.
+   ```json
+   {"project": "p", "table": "bronze_basic", "location": "s3://bucket/batch/report_a/*.parquet", "format": "parquet",
+    "s3": {"endpoint": "127.0.0.1:9100", "url_style": "path", "use_ssl": false, "region": "us-east-1"}}
+   ```
+   - `endpoint` is host:port only, never `http://`; no `?` in the location; local S3 servers need `url_style: path`
+     and `use_ssl: false`. A public or anonymous bucket needs no keys; otherwise `key_id`/`secret` are
+     `${secret:NAME}` references the person created in ABI (never ask for a key).
+   - The glob must match at least one file, or the load fails: a stream folder that is still empty can't be a source
+     yet (load it once the first file has landed).
+   - One file per day per report is normal: the glob reads them all; ABI reloads the table when files change (new
+     days appear within a minute).
+   - Batch history and the streamed days are two sources (`bronze_x`, `bronze_x_stream`); silver appends them
+     (medallion skill).
+   - Large folders (tens of millions of rows) take one to two minutes each. Wait for the result; never retry a load
+     that is still running, and never load the same folder twice.
+4. A database: `add_data` with `postgres://host/db` (or mysql, clickhouse) and `database: {table, user, password}`
+   as secret references.
+5. After loading: `data_quality` (rows, freshness, gaps). Row counts come from its rows only.
+6. Continue with the medallion skill (layers) or profile-clean (steps), then build-model.

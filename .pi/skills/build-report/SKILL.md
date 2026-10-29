@@ -1,12 +1,22 @@
 ---
 name: build-report
-description: Build or change an ABI report (pages, KPIs, charts, filters) and its interactive HTML view. Use for "report", "dashboard", "chart of X by Y".
+description: Build or change an ABI report (pages, KPIs, charts, filters) and show it in the app. Use for "report", "dashboard", "chart of X by Y".
 ---
 # Build a report
-1. `semantic_model` for measure IDs and table.column dimensions. Missing measure: write it first (measures skill).
-2. `abi_tools ["reports"]`; `save_report` with one page per theme; a row of KPIs on top (`kpi`, w 3, h 3), charts below
-   (w 6 or 12, h 5): `bar` for categories (order_by the measure desc, limit 20), `line` for calendar.day/month,
-   `table`/`matrix` for detail, `map` for countries, `slicer` for a filter.
-3. Use only measure IDs and dimensions from semantic_model; ABI rejects others with a fix.
-4. `list_reports` to confirm it exists, `abi_sync`, then give the path `workspaces/<ws>/_views/<project>/reports/<id>.html`.
-5. Describe what each visual shows without numbers, or quote numbers from visual_data rows only.
+1. `semantic_model` for measure IDs and `table.column` dimensions. A missing measure: write it first (measures skill).
+2. `abi_tools ["reports"]`; `save_report {report}` with one page per theme. The layout is a 12-column grid:
+   ```json
+   {"id": "executive", "name": "Executive overview", "pages": [{"id": "main", "name": "Overview", "visuals": [
+     {"id": "kpi-revenue", "type": "kpi", "title": "Partner revenue", "query": {"measures": ["partner_revenue"], "dimensions": []},
+      "layout": {"x": 0, "y": 0, "w": 3, "h": 3}},
+     {"id": "rev-month", "type": "line", "title": "Partner revenue by month", "query": {"measures": ["partner_revenue"],
+      "dimensions": ["calendar.month"], "order_by": [{"field": "calendar.month"}]}, "layout": {"x": 0, "y": 3, "w": 12, "h": 5}},
+     {"id": "top-channels", "type": "table", "title": "Top 10 channels", "query": {"measures": ["partner_revenue", "views", "rpm"],
+      "dimensions": ["dim_channel.channel_display_name"], "order_by": [{"field": "partner_revenue", "desc": true}], "limit": 10},
+      "layout": {"x": 0, "y": 8, "w": 12, "h": 6}}]}]}
+   ```
+   KPIs on top (w 3, h 3); `bar` for categories (order by the measure desc, limit 20); `line` for calendar.day or
+   calendar.month; `table`/`matrix` for detail; `map` for countries; `slicer` for a filter. Five KPIs: w 2 or wrap.
+3. Only measure IDs and dimensions from semantic_model; ABI rejects others with a fix: apply it.
+4. `list_reports` to confirm, then `abi_show {page: "report", report: <id>}` so the person sees it.
+5. Describe what each visual shows; quote numbers only from visual_data or semantic_query rows.
