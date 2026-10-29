@@ -18,10 +18,16 @@ The session token stays in this process; a confirm token stays here too: the pag
 the person's click redeems it. Only the actions in ALLOWED pass; requests need the per-start key and a local Host.
 Roles, users, secrets and remotes stay in ABI's app.
 """
+import atexit
 import json
+import os
+import re
+import signal
 import secrets
+import subprocess
 import sys
 import threading
+import time
 import webbrowser
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -37,34 +43,84 @@ ALLOWED = {"semantic_model", "semantic_query", "readiness", "rls_rules", "data_q
            "list_flows", "run_flow", "flow_runs", "enable_flow", "ml_models", "train_model", "score_model",
            "list_tools", "test_tool", "run_tool", "list_agents", "test_agent", "run_agent"}
 KEY_SLOT = "__ABI_APP_KEY__"
+READS_ONLY = {"run_flow", "run_agent"}  # not changes to the project, but they act (send, call tools): Developer only
+WRITES = {"set_measure", "delete_measure", "set_glossary_term", "delete_glossary_term", "enable_flow", "train_model", "score_model", "refresh"}
 STATIC = ["Model", "Sources", "Tables", "Security", "Environments"]  # explorer sections shown as they are
 
 CSS = """
-body{display:grid;grid-template-columns:244px minmax(0,1fr);grid-template-rows:auto 1fr;min-height:100vh}
-header{grid-column:1/3;padding:14px 28px;position:sticky;top:0;z-index:6;background:var(--bg);align-items:center}header h1{font-size:18px}
-aside{border-right:1px solid var(--line);padding:16px 12px 32px;position:sticky;top:53px;height:calc(100vh - 53px);overflow:auto}
-aside .grp{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--mute);margin:20px 10px 6px}aside .grp:first-child{margin-top:4px}
-aside button{display:flex;justify-content:space-between;align-items:center;width:100%;text-align:left;border:0;background:none;color:var(--ink);padding:7px 10px;margin:1px 0;border-radius:8px;cursor:pointer;font:inherit}
-aside button:hover{background:var(--card)}aside button.on{background:var(--acc);color:#fff}aside button .n{color:var(--mute);font-size:12px;font-variant-numeric:tabular-nums}aside button.on .n{color:#fff}
-aside button.sub{padding-left:22px;font-size:13px}
-main{max-width:1280px;min-width:0;margin:0;padding:28px 32px 64px;align-self:start;width:100%}
-.pg>h2{font-size:22px;font-weight:650;margin:0 0 20px;letter-spacing:-.2px}.mode{font-size:12px;color:var(--mute)}.mode.live{color:var(--ok)}
-.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:16px;align-items:start}
-.card{padding:18px;border-radius:14px}.card h3{font-size:15px;margin:0 0 10px;align-items:baseline}.card h3 .file{font-weight:400;text-align:right}
-.card h4{font-size:13px;margin:14px 0 6px}.card>.file{margin:2px 0 10px}.card table{margin-top:4px}
-.btn{border:1px solid var(--line);background:var(--card);color:var(--ink);padding:6px 12px;border-radius:8px;cursor:pointer;font:inherit;font-size:13px}.btn:hover{border-color:var(--mute)}
-.btn.pri{background:var(--acc);color:#fff;border-color:var(--acc)}.btn:disabled{opacity:.5;cursor:default}
-.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.card>.acts{margin-top:14px}label.l{display:block;font-size:11px;font-weight:600;color:var(--mute);text-transform:uppercase;letter-spacing:.05em;margin:12px 0 0}label.l+.f{margin-top:4px}.bar{margin:0 0 18px}
-input.f,textarea.f,select.f{padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:13px;min-width:0}
-.card>input.f,.card>textarea.f{display:block;width:100%;margin:8px 0 0}.card .row>input.f{flex:1}.card .row>input.f:first-child{flex:0 0 38%}
-textarea.f{font:12px/1.5 ui-monospace,Menlo,monospace;min-height:64px;resize:vertical}input.f:focus,textarea.f:focus,select.f:focus{outline:2px solid var(--acc);outline-offset:-1px}
-.msg{font-size:12px;margin:10px 0;white-space:pre-wrap}.msg:empty{display:none}.out{margin-top:12px}.out:empty{display:none}
-.chip{padding:3px 10px;margin:3px 4px 3px 0}.chip.x{cursor:pointer}.chip.x:after{content:' ×'}
-dialog{border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--ink);max-width:640px;padding:22px}dialog h3{margin:0 0 10px}dialog .row{margin-top:16px}
-dialog::backdrop{background:#0008}.trace{margin:10px 0 0;padding-left:20px}.trace li{margin:3px 0}.trace:empty{display:none}
-.stat{font-size:30px;font-weight:650;margin:4px 0}.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:13px}.kv b{font-weight:500;color:var(--mute)}
-pre{margin:10px 0 0}.pg .grid{gap:16px}.pg section{margin-bottom:28px}.pg>.card{margin-bottom:16px}
-@media (max-width:820px){body{grid-template-columns:1fr}aside{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line);top:auto}header{grid-column:1}main{padding:20px 16px 48px}.cards{grid-template-columns:1fr}}
+/* layout: a top bar (project, live state, the agent), a left rail grouped by what you want to do, one page at a time with
+   its purpose and main actions up top; the agent opens as a drawer on the right and can steer the page */
+body{display:grid;grid-template-columns:236px minmax(0,1fr);grid-template-rows:auto 1fr;min-height:100vh}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--paper)}
+header{grid-column:1/3;position:sticky;top:env(safe-area-inset-top,0px);z-index:6;min-height:60px}
+header .sub{display:flex;gap:10px;align-items:center}.mode{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--mute)}
+.mode.live{color:var(--ink)}.mode.live::before{content:"";display:inline-block;width:7px;height:7px;background:var(--ok);margin-right:6px;vertical-align:1px}
+aside{border-right:2px solid var(--ink);padding:8px 0 40px;position:sticky;top:60px;height:calc(100vh - 60px);overflow:auto;background:var(--paper)}
+aside .sec{margin-bottom:6px}aside .sec+.sec{border-top:1px solid var(--faint);padding-top:4px}
+aside button.grp{display:flex;justify-content:space-between;align-items:center;width:100%;border:0;background:none;cursor:pointer;color:var(--ink);
+ padding:10px 18px 8px;font:700 13px/1 var(--display);text-transform:uppercase;letter-spacing:.1em;text-align:left}
+aside button.grp:hover{background:color-mix(in srgb,var(--ink) 8%,transparent)}
+aside .car::before{content:"";display:inline-block;width:7px;height:7px;border-right:2px solid var(--ink);border-bottom:2px solid var(--ink);transform:rotate(45deg) translate(-2px,-2px);transition:transform .15s}
+aside .folded .car::before{transform:rotate(-45deg)}aside .folded .items{display:none}aside .items{padding:2px 0 8px}
+aside button.it{display:flex;justify-content:space-between;align-items:baseline;gap:8px;width:100%;text-align:left;border:0;background:none;color:var(--ink);
+ padding:6px 18px 6px 30px;cursor:pointer;font:400 13px/1.4 var(--text)}
+aside button.it:hover{background:color-mix(in srgb,var(--ink) 8%,transparent)}aside button.it.on{background:var(--ink);color:var(--paper);font-weight:600}
+aside button.it .n{color:var(--mute);font-size:11px;font-variant-numeric:tabular-nums}aside button.it.on .n{color:var(--paper)}
+aside button.it.sub{margin-left:30px;width:calc(100% - 30px);padding-left:12px;border-left:2px solid var(--faint);font-size:12px}aside button.it.sub.on{border-left-color:var(--ink)}
+main{max-width:none;min-width:0;margin:0;align-self:start;width:100%;padding-top:32px}
+.pghead{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;padding-bottom:16px;margin-bottom:24px;border-bottom:2px solid var(--ink)}
+.pghead h2{font:700 34px/1 var(--display);text-transform:uppercase;letter-spacing:.01em;margin:0}
+.pg nav.tabs:has(button:only-child){display:none}.card .kpi:only-child .l{display:none}
+.pghead p{margin:8px 0 0;color:var(--mute);max-width:64ch}.pghead .bar{margin:0}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px;align-items:start}
+.card h3 .file{font:400 11px var(--text);text-transform:none;letter-spacing:0;text-align:right;margin:0}
+.card h4{font:700 13px var(--display);margin:16px 0 6px;text-transform:uppercase;letter-spacing:.04em}.card>.file{margin:0 0 12px}
+.btn{border:2px solid var(--ink);background:none;color:var(--ink);padding:6px 12px;cursor:pointer;font:600 11px/1.2 var(--text);text-transform:uppercase;letter-spacing:.08em}
+.btn:hover{background:var(--ink);color:var(--paper)}.btn.pri{background:var(--ink);color:var(--paper)}.btn.pri:hover{background:var(--mute);border-color:var(--mute)}
+.btn:disabled{opacity:.45;cursor:default}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.card>.acts{margin-top:16px}.bar{margin:0 0 20px}
+input.f,textarea.f,select.f{padding:8px 10px;border:2px solid var(--ink);background:var(--paper);color:var(--ink);font:inherit;font-size:13px;min-width:0;border-radius:0}
+select.f{appearance:none;padding-right:28px;background-image:linear-gradient(45deg,transparent 50%,var(--ink) 50%),linear-gradient(135deg,var(--ink) 50%,transparent 50%);
+ background-position:calc(100% - 15px) 50%,calc(100% - 10px) 50%;background-size:5px 5px;background-repeat:no-repeat}
+.card>input.f,.card>textarea.f{display:block;width:100%;margin:6px 0 0}textarea.f{font:12px/1.5 var(--text);min-height:64px;resize:vertical}
+input.f:focus,textarea.f:focus,select.f:focus{outline:none;box-shadow:inset 0 0 0 1px var(--ink);background:var(--sheet)}
+label.l{display:block;font:600 10px var(--text);color:var(--mute);text-transform:uppercase;letter-spacing:.12em;margin:14px 0 0}
+.msg{font-size:12px;margin:10px 0;white-space:pre-wrap}.msg:empty{display:none}.out{margin-top:14px}.out:empty{display:none}
+.chip.x{cursor:pointer;background:var(--ink);color:var(--paper)}.chip.x:after{content:'  \00d7'}
+dialog{border:2px solid var(--ink);background:var(--sheet);color:var(--ink);max-width:640px;padding:24px;border-radius:0}
+dialog h3{margin:0 0 12px;font:700 18px var(--display);text-transform:uppercase}dialog .row{margin-top:18px}dialog::backdrop{background:color-mix(in srgb,var(--ink) 55%,transparent)}
+.trace{margin:12px 0 0;padding-left:20px}.trace li{margin:3px 0}.trace:empty{display:none}
+.stat{font:700 38px/1 var(--display);margin:4px 0 8px;text-transform:uppercase}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:12px}.kv b{font-weight:500;color:var(--mute)}
+pre{margin:10px 0 0}.pg .grid{gap:16px}.pg section{margin-bottom:28px}.pg>.card{margin-bottom:16px}.pg>section>h2{display:none}
+#chat{position:fixed;top:60px;right:0;bottom:0;width:420px;max-width:100vw;background:var(--sheet);border-left:2px solid var(--ink);display:flex;flex-direction:column;
+ transform:translateX(100%);transition:transform .18s ease-out;z-index:7;padding-bottom:env(safe-area-inset-bottom,0px)}
+#chat.open{transform:none}body.chat-open main{padding-right:452px}
+#chat header{position:static;display:flex;align-items:center;gap:8px;min-height:0;padding:14px 18px;border-bottom:2px solid var(--ink);background:none}
+#chat header h3{margin:0;font:700 16px var(--display);text-transform:uppercase;flex:1}
+#chat .log{flex:1;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:12px}
+#chat .m{padding:10px 12px;font-size:13px;line-height:1.55;white-space:pre-wrap;max-width:94%;border:2px solid var(--ink)}
+#chat .me{align-self:flex-end;background:var(--ink);color:var(--paper)}#chat .ai{align-self:flex-start;background:var(--paper)}
+#chat .ai code{background:color-mix(in srgb,var(--ink) 8%,transparent);padding:0 3px}
+#chat .sys{align-self:stretch;border:0;border-top:1px dashed var(--faint);color:var(--mute);font-size:11px;padding:8px 0 0;max-width:none}
+#chat .steps{align-self:flex-start;border:0;border-left:2px solid var(--ink);color:var(--mute);font-size:11px;line-height:1.7;padding:2px 10px}
+#chat .busy{color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.1em;padding:0 18px 10px}
+#chat .compose{display:flex;gap:8px;padding:14px 18px 18px;border-top:2px solid var(--ink)}#chat textarea{flex:1;min-height:46px;max-height:160px;margin:0}
+.brand{font:700 20px/1 var(--display);letter-spacing:.08em;padding:6px 10px;background:var(--ink);color:var(--paper)}
+.crumb{font:600 13px var(--text);display:flex;gap:8px;align-items:baseline}.crumb i{font-style:normal;color:var(--mute)}.crumb b{font-weight:700}
+.snap{font-size:10px;text-transform:uppercase;letter-spacing:.1em;border:1px dashed var(--mute);color:var(--mute);padding:2px 6px}
+header .right{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.modes{display:flex;border:2px solid var(--ink)}.modes button{border:0;background:none;color:var(--ink);padding:5px 10px;font:600 11px var(--text);text-transform:uppercase;letter-spacing:.08em;cursor:pointer}
+.modes button.on{background:var(--ink);color:var(--paper)}body[data-mode=viewer] .w{display:none}
+body[data-mode=viewer] .ed{background:transparent;border-color:var(--faint)}
+body[data-mode=viewer] .pghead{border-bottom-style:dashed}
+.hits{display:flex;flex-direction:column;gap:10px;margin-top:12px}.hit{border-left:2px solid var(--ink);padding:2px 0 2px 12px;white-space:pre-wrap}.hit .file{margin:0 0 4px}
+.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:10px 16px;font-size:12px;z-index:9;max-width:calc(100vw - 32px)}
+.card.hl{outline:4px solid var(--ink);outline-offset:3px}
+@media (max-width:820px){body{grid-template-columns:1fr}header{grid-column:1}
+ aside{position:static;height:auto;border-right:0;border-bottom:2px solid var(--ink);display:flex;flex-wrap:wrap;padding:10px max(16px,env(safe-area-inset-left,0px))}
+ aside .sec{display:contents}aside button.grp{display:none}aside .folded .items,aside .items{display:contents}aside button.it,aside button.it.sub{width:auto;padding:5px 10px;margin:0;border:0}
+ main{padding:20px max(16px,env(safe-area-inset-right,0px)) 48px max(16px,env(safe-area-inset-left,0px))}body.chat-open main{padding-right:16px}
+ .cards{grid-template-columns:1fr}.pghead h2{font-size:26px}#chat{top:0}}
 """
 
 JS = r"""
@@ -81,7 +137,8 @@ function ask(c){return new Promise(res=>{const d=$('#confirm');$('#c-msg').textC
  d.showModal();$('#c-yes').onclick=()=>{d.close();res(true)};$('#c-no').onclick=()=>{d.close();res(false)}})}
 function say(box,text,bad){box.textContent=text;box.className='msg '+(bad?'bad':'ok')}
 function card(title,sub){const c=h('div','card'),t=h('h3');t.append(h('span','',title));if(sub)t.append(h('span','file',sub));c.append(t);return c}
-function btn(label,fn,pri){const b=h('button','btn'+(pri?' pri':''),label);b.onclick=async()=>{b.disabled=true;try{await fn()}finally{b.disabled=false}};return b}
+const W=/^(Save|Create|Delete|Reload |Run now|Enable|Disable|Train|Score|New |Ask$|Add document|Remove)/;
+function btn(label,fn,pri){const b=h('button','btn'+(pri?' pri':'')+(W.test(label)?' w':''),label);b.onclick=async()=>{b.disabled=true;try{await fn()}finally{b.disabled=false}};return b}
 const cell=v=>v!==null&&typeof v==='object'?JSON.stringify(v):typeof v==='string'&&/^\d{4}-\d\d-\d\dT\d\d:\d\d/.test(v)?new Date(v).toLocaleString():v;
 function rows(box,d){box.innerHTML='';box.classList.add('out');if(!(d&&d.columns&&Array.isArray(d.rows))){box.append(h('pre','',JSON.stringify(d,null,1)));return}
  const rs=d.rows.map(r=>(Array.isArray(r)?r:d.columns.map(c=>r[c])).map(cell));table(box,{measures:d.measures||{},format:d.format||{},columns:d.columns,rows:rs})}
@@ -92,7 +149,8 @@ function act(c,label,fn,pri){const m=c.querySelector(':scope>.msg')||c.appendChi
 function home(box){const s=D.summary,g=h('div','cards');box.append(g);
  const r=card('Readiness','semantic model');r.append(h('div','stat '+(D.readiness?.ready?'ok':'bad'),D.readiness?.ready?'Ready':'Not ready'));
  (D.readiness?.missing||[]).forEach(x=>r.append(h('div','file',typeof x==='string'?x:JSON.stringify(x))));g.append(r);
- const o=card('In this project');Object.entries(s).forEach(([k,v])=>o.append(h('span','chip',`${v} ${k}`)));g.append(o);
+ const o=card('In this project');const NAMES={sources:'sources',tables:'tables',measures:'measures',reports:'reports',datasets:'datasets',flows:'flows',ml:'ML models',tools:'tools',agents:'agents'};
+ const ok=h('div','kv');Object.entries(s).forEach(([k,v])=>ok.append(h('b','',NAMES[k]||k),h('span','',String(v))));o.append(ok);g.append(o);
  const q=card('Data quality'),qb=h('div');q.append(qb);g.append(q);
  const dq=()=>{qb.innerHTML='';const d=D.quality;if(!d?.rows?.length){qb.append(h('p','empty','No tables yet.'));return}const ix=c=>d.columns.indexOf(c);
   d.rows.forEach(r=>{const k=h('div','kv');k.style.marginBottom='12px';[['table',r[ix('table')]],['rows',fmt(r[ix('rows')])],['last load',cell(r[ix('last_load')])],['refresh',r[ix('refresh')]]].forEach(([a,b])=>{k.append(h('b','',a),h('span','',b??'—'))});
@@ -101,7 +159,7 @@ function home(box){const s=D.summary,g=h('div','cards');box.append(g);
  const c=card('Latest changes','History has all');const k=h('div','kv');(D.history||[]).slice(0,8).forEach(x=>k.append(h('b','',new Date(x.time*1000).toLocaleString([], {dateStyle:'short',timeStyle:'short'})),h('span','',x.message)));c.append(k);c.style.gridColumn='span 2';g.append(c)}
 
 // ---------- Analyze: one report per entry; filters and cross-filter ----------
-function report(box,rep){let flt=[];const top=h('div','row bar'),col=h('select','f');col.append(new Option('filter by…',''));D.dims.forEach(c=>col.append(new Option(c,c)));
+function report(box,rep){let flt=PENDING.filters||[];PENDING.filters=null;const top=h('div','row bar'),col=h('select','f');col.append(new Option('filter by…',''));D.dims.forEach(c=>col.append(new Option(c,c)));
  const val=h('select','f');val.multiple=true;val.hidden=true;const add=h('button','btn','add filter');add.hidden=true;const chips=h('span');
  top.append(col,val,add,chips);const tabs=h('nav','tabs'),grid=h('div','grid'),msg=h('div','msg');box.append(top,msg,tabs,grid);
  col.onchange=async()=>{val.innerHTML='';if(!col.value){val.hidden=add.hidden=true;return}
@@ -126,15 +184,15 @@ function report(box,rep){let flt=[];const top=h('div','row bar'),col=h('select',
      body.querySelectorAll('rect,circle').forEach((e,i)=>{e.style.cursor='pointer';e.onclick=()=>{const r=rs[e.tagName==='rect'?Math.floor(i/nm):i%rs.length];if(r)cross(v.dim,r[0])}})}};
    requestAnimationFrame(dr);$('[data-a=t]',c).onclick=()=>{asTable=!asTable;dr()};$('[data-a=c]',c).onclick=()=>csv(d);
    $('[data-a=h]',c).onclick=()=>{const x=$('.how',c);x.hidden=!x.hidden;x.textContent=v.how+(flt.length?`\nfilters ${JSON.stringify(flt)}`:'')}})}
- rep.pages.forEach(p=>{const b=h('button','',p.name||p.id);b.dataset.id=p.id;b.onclick=()=>page(p);tabs.append(b)});page(cur)}
+ rep.pages.forEach(p=>{const b=h('button','',p.name||p.id);b.dataset.id=p.id;b.onclick=()=>page(p);tabs.append(b)});flt.length?draw():page(cur)}
 function datasets(box){const g=h('div','cards');box.append(g);if(!D.datasets.length)box.append(h('p','empty','None yet.'));
  D.datasets.forEach(d=>{const c=card(d.name||d.id,'model/datasets.json');c.append(h('div','file',`${(d.query?.measures||[]).join(', ')} by ${(d.query?.dimensions||[]).join(', ')||'—'}`));
   const out=h('div');act(c,'Preview rows',async()=>{rows(out,await api('dataset_data',{dataset:d.id}))},1);c.append(out);g.append(c)})}
 
 // ---------- Model ----------
-function measures(box){const top=h('div','row bar'),q=h('input','f');q.placeholder='search measures';const list=h('div','cards');box.append(top,list);
+function measures(box){const top=h('div','row bar top'),q=h('input','f');q.placeholder='Search measures';const list=h('div','cards');box.append(top,list);
  const edit=(m,isNew)=>{const c=card(isNew?'New measure':(m.name||m.id),isNew?'':m.id),name=h('input','f'),id=h('input','f'),ex=h('textarea','f'),de=h('input','f');
-  name.value=m.name||'';id.value=m.id||'';ex.value=m.expression||'';de.value=m.description||'';
+  [name,id,ex,de].forEach(e=>e.classList.add('ed'));name.value=m.name||'';id.value=m.id||'';ex.value=m.expression||'';de.value=m.description||'';
   id.placeholder='a-z, 0-9, _';name.placeholder='display name';ex.placeholder='e.g. SUM(sales.revenue)';de.placeholder='what it means';
   if(isNew)c.append(h('label','l','ID'),id);c.append(h('label','l','Name'),name,h('label','l','MEL'),ex,h('label','l','Description'),de);
   act(c,isNew?'Create':'Save',async()=>{await api('set_measure',{id:id.value,name:name.value,expression:ex.value,description:de.value||null});
@@ -144,13 +202,13 @@ function measures(box){const top=h('div','row bar'),q=h('input','f');q.placehold
  const fill=()=>{list.innerHTML='';D.measures.filter(m=>!q.value||JSON.stringify(m).toLowerCase().includes(q.value.toLowerCase())).forEach(m=>list.append(edit(m)))};
  top.append(q,btn('New measure',()=>list.prepend(edit({},true)),1));q.oninput=fill;fill()}
 function glossary(box){const list=h('div','cards');box.append(list);
- const edit=(t,isNew)=>{const c=card(isNew?'New term':(t.term||t.id)),term=h('input','f'),def=h('textarea','f'),ms=h('input','f');term.value=t.term||'';def.value=t.definition||'';ms.value=(t.measures||[]).join(', ');
+ const edit=(t,isNew)=>{const c=card(isNew?'New term':(t.term||t.id)),term=h('input','f'),def=h('textarea','f'),ms=h('input','f');[term,def,ms].forEach(e=>e.classList.add('ed'));term.value=t.term||'';def.value=t.definition||'';ms.value=(t.measures||[]).join(', ');
   term.placeholder='business term';def.placeholder='what it means';ms.placeholder='e.g. revenue, units';
   c.append(h('label','l','Term'),term,h('label','l','Definition'),def,h('label','l','Implemented by (measure IDs)'),ms);
   act(c,isNew?'Create':'Save',async()=>{await api('set_glossary_term',{term:term.value,definition:def.value,measures:ms.value.split(',').map(x=>x.trim()).filter(Boolean),columns:t.columns||[]});
    Object.assign(t,{term:term.value,definition:def.value});if(isNew)D.glossary.push(t);return 'Saved through ABI.'},1);
   if(!isNew)act(c,'Delete',async()=>{await api('delete_glossary_term',{id:t.id});D.glossary=D.glossary.filter(x=>x!==t);show('glossary')});return c};
- const bar=h('div','row bar');bar.append(btn('New term',()=>list.prepend(edit({},true)),1));box.insertBefore(bar,list);D.glossary.forEach(t=>list.append(edit(t)))}
+ const bar=h('div','row bar top');bar.append(btn('New term',()=>list.prepend(edit({},true)),1));box.insertBefore(bar,list);D.glossary.forEach(t=>list.append(edit(t)))}
 
 // ---------- Data ----------
 function data(box,which){box.insertAdjacentHTML('beforeend',D.sections[which]);const ids=D.sources;if(!ids.length)return;
@@ -203,22 +261,100 @@ function security(box){const g=h('div','cards');box.append(g);const r=D.rls||{},
  const ro=card('Roles','set in ABI\'s app (a person\'s click)');const k=h('div','kv');(r.accounts||[]).forEach(a=>k.append(h('b','',a.name),h('span','',a.role||'no role')));ro.append(k);g.append(ro);
  box.insertAdjacentHTML('beforeend',D.sections.Security.includes('None yet')?'':D.sections.Security)}
 
+// ---------- Knowledge: the vault ----------
+async function vpost(op,body){const r=await fetch('/vault/'+op,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(body||{})}).then(r=>r.json());
+ if(r.error)throw new Error(r.error);return r.result}
+async function loadVault(){if(LIVE)try{VAULT=await vpost('list')}catch(e){VAULT=[]}}
+function vaultPage(box){if(!LIVE){box.append(h('p','empty','The vault opens with the live app: run scripts/app.py '+D.project+'.'));return}
+ const bar=h('div','row bar top'),file=h('input');file.type='file';file.multiple=true;file.accept='.md,.txt,.html,.htm,.docx,.pdf';file.hidden=true;file.id='vault-file';
+ bar.append(file,btn('Add document',()=>file.click(),1));box.append(bar);
+ file.onchange=async()=>{for(const f of file.files){const data=await new Promise(r=>{const fr=new FileReader();fr.onload=()=>r(fr.result.split(',')[1]);fr.readAsDataURL(f)});
+  try{const r=await vpost('add',{name:f.name,data});toast(`Added ${r.name}: ${r.chunks} passages`)}catch(e){toast(e.message)}}file.value=''};
+ const sc=card('Search the vault','the passages the agents read'),q=h('input','f');q.placeholder='e.g. how is net revenue defined?';q.id='vault-q';
+ const out=h('div','hits');sc.append(q,out);box.append(sc);
+ const go=async()=>{out.innerHTML='';if(!q.value.trim())return;const hits=await vpost('search',{query:q.value,k:6});if(!hits.length){out.append(h('p','empty','No passage matches.'));return}
+  hits.forEach(x=>{const d=h('div','hit');d.append(h('div','file',`${x.document}${x.section?' · '+x.section:''}`),h('div','',x.text));out.append(d)})};
+ q.onkeydown=e=>{if(e.key==='Enter')go()};act(sc,'Search',go,1);
+ const g=h('div','cards');box.append(g);if(!VAULT.length)box.append(h('p','empty','No documents yet. Add the definitions your measures must follow (.md, .txt, .html, .docx).'));
+ VAULT.forEach(d=>{const c=card(d.name,`${Math.max(1,Math.round(d.bytes/1024))} KB · ${d.chunks} passages`);
+  if(d.sections.length){const k=h('div');d.sections.forEach(x=>k.append(h('span','chip',x)));c.append(k)}
+  const pre=h('pre');pre.hidden=true;c.append(pre);
+  act(c,'Read',async()=>{pre.hidden=!pre.hidden;if(!pre.textContent)pre.textContent=await vpost('read',{name:d.name})});
+  act(c,'Remove',async()=>{if(await ask({message:`Remove ${d.name} from the vault?`,preview:''})){await vpost('rm',{name:d.name})}});g.append(c)})}
+
 // ---------- sidebar ----------
-const NAV=[['Overview',[['home','Home',home]]],
- ['Analyze',[...D.reports.map(r=>['rep:'+r.id,r.name||r.id,b=>report(b,r),r.pages.length+'p']),['datasets','Datasets',datasets,D.datasets.length]]],
+const PENDING={filters:null};
+const LEDE={vault:'Your business documents: definitions, finance rules, KPI specs. The agents search them before they define or check a measure.',home:'Is the model ready, is the data fresh, and what changed last.',datasets:'Saved queries at a fixed grain, reused by reports, flows and ML. Preview their rows.',
+ measures:'The business numbers. Edit a formula and ABI checks it before it saves; Test shows the total.',model:'Tables and how they join. Facts are black, dimensions are outlined.',
+ glossary:'What the business words mean and which measures implement them.',sources:'Where the data comes from. Reload a source to take a new snapshot.',
+ tables:'The tables built from the sources, with their transform steps.',flows:'Automations. Run one now and follow its steps, or switch it on or off.',
+ ml:'Forecasts, segments and anomaly models. Train, score and read the latest run.',tools:'Calculations your agents can call. Run one with inputs or run its tests.',
+ agents:'Custom agents for this project. Ask one a question or run its evaluation set.',docs:'The project documentation ABI writes from its definitions.',
+ security:'Who sees which rows. Roles are set in ABI itself.',environments:'Where each environment reads its data from.',history:'Every change is a commit in ABI. Newest first.'};let PAGES={},CUR='home';const side=$('aside');
+function nav(){return [['Start',[['home','Home',home]]],
+ ['Analyze',[...D.reports.map(r=>['rep:'+r.id,r.name||r.id,b=>report(b,r)]),['datasets','Datasets',datasets,D.datasets.length]]],
  ['Model',[['measures','Measures',measures,D.measures.length],['model','Model',b=>b.insertAdjacentHTML('beforeend',D.sections.Model)],['glossary','Glossary',glossary,D.glossary.length]]],
  ['Data',[['sources','Sources',b=>data(b,'Sources'),D.sources.length],['tables','Tables',b=>data(b,'Tables'),D.tables.length]]],
  ['Automate',[['flows','Flows',flows,D.flows.length],['ml','ML models',ml,D.ml.length],['tools','Tools',tools,D.tools.length],['agents','Agents',agents,D.agents.length]]],
- ['Govern',[['docs','Docs',docs],['security','Security',security],['environments','Environments',b=>b.insertAdjacentHTML('beforeend',D.sections.Environments)],['history','History',commits,(D.history||[]).length]]]];
-const PAGES={};const side=$('aside');
-NAV.forEach(([g,items])=>{side.append(h('div','grp',g));items.forEach(([k,label,fn,n])=>{PAGES[k]=[label,fn];const b=h('button',k.startsWith('rep:')?'sub':'');b.dataset.k=k;
- b.append(h('span','',label));if(n!==undefined&&n!=='')b.append(h('span','n',String(n)));b.onclick=()=>show(k);side.append(b)})});
-function show(k){if(!PAGES[k])k='home';side.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.k===k));
- const box=$('main');box.innerHTML='';const pg=h('div','pg');pg.append(h('h2','',PAGES[k][0]));box.append(pg);PAGES[k][1](pg);
+ ['Knowledge',[['vault','Vault',vaultPage,(VAULT||[]).length],['docs','Docs',docs]]],
+ ['Govern',[['security','Security',security],['environments','Environments',b=>b.insertAdjacentHTML('beforeend',D.sections.Environments)],['history','History',commits,(D.history||[]).length]]]]}
+let MODE='developer',VAULT=[];
+let FOLD={};try{FOLD=JSON.parse(localStorage.getItem('abi-fold')||'{}')}catch(e){}
+function sidebar(){side.innerHTML='';PAGES={};nav().forEach(([g,items])=>{const sec=h('div','sec'),hd=h('button','grp'),list=h('div','items');
+ hd.append(h('span','',g),h('span','car'));hd.setAttribute('aria-expanded',String(!FOLD[g]));sec.classList.toggle('folded',!!FOLD[g]);
+ hd.onclick=()=>{FOLD[g]=!FOLD[g];sec.classList.toggle('folded',FOLD[g]);hd.setAttribute('aria-expanded',String(!FOLD[g]));try{localStorage.setItem('abi-fold',JSON.stringify(FOLD))}catch(e){}};
+ items.forEach(([k,label,fn,n])=>{PAGES[k]=[label,fn];const b=h('button',k.startsWith('rep:')?'it sub':'it');b.dataset.k=k;
+  b.append(h('span','',label));if(n!==undefined&&n!=='')b.append(h('span','n',String(n)));b.onclick=()=>show(k);list.append(b)});
+ sec.append(hd,list);side.append(sec)})}
+function show(k){if(!PAGES[k])k='home';CUR=k;side.querySelectorAll('button.it').forEach(b=>b.classList.toggle('on',b.dataset.k===k));
+ const act=side.querySelector('button.it.on');if(act)act.closest('.sec').classList.remove('folded');
+ const box=$('main');box.innerHTML='';const pg=h('div','pg'),head=h('div','pghead'),t=h('div');t.append(h('h2','',PAGES[k][0]));
+ const lede=k.startsWith('rep:')?'Filter the report or click a bar to filter by it. Every number comes from ABI.':LEDE[k];if(lede)t.append(h('p','',lede));head.append(t);pg.append(head);box.append(pg);PAGES[k][1](pg);
+ const top=pg.querySelector(':scope>.bar.top');if(top)head.append(top);if(MODE==='viewer')pg.querySelectorAll('.ed').forEach(e=>e.readOnly=true);
  try{localStorage.setItem('abi-app-'+D.project,k)}catch(e){}try{window.history.replaceState(null,'','#'+k)}catch(e){}}
-const m=$('.mode');m.textContent=LIVE?'live · as you, through ABI':`snapshot ${D.stamp} · run scripts/app.py ${D.project} to work live`;m.classList.toggle('live',LIVE);
+const boot=loadVault();sidebar();
+const R=document.documentElement,TB=$('#theme');const dark=()=>R.dataset.theme?R.dataset.theme==='dark':matchMedia('(prefers-color-scheme: dark)').matches;
+const setTheme=t=>{if(t)R.dataset.theme=t;TB.textContent=dark()?'Paper':'Ink'};try{setTheme(localStorage.getItem('abi-theme'))}catch(e){setTheme()}
+TB.onclick=()=>{const t=dark()?'light':'dark';setTheme(t);try{localStorage.setItem('abi-theme',t)}catch(e){}};
+$('.snap').hidden=LIVE;$('.snap').title=`Snapshot of ${D.stamp}. Run scripts/app.py ${D.project} to work live.`;
+function setMode(md){MODE=md;document.body.dataset.mode=md;$('#m-dev').classList.toggle('on',md==='developer');$('#m-view').classList.toggle('on',md==='viewer');
+ $('#chat textarea').placeholder=md==='viewer'?'Ask a question. In Viewer the agent only reads.':'Ask a question or for a change.'}
+async function pickMode(md){if(!LIVE){toast('Snapshot: start the app to switch modes.');return}
+ await fetch('/mode',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({mode:md})})}
+$('#m-dev').onclick=()=>pickMode('developer');$('#m-view').onclick=()=>pickMode('viewer');
 let first=decodeURIComponent(location.hash.slice(1));if(!first)try{first=localStorage.getItem('abi-app-'+D.project)}catch(e){}show(first||'home');
-window.addEventListener('hashchange',()=>{const k=decodeURIComponent(location.hash.slice(1));if(k&&!side.querySelector(`button.on[data-k="${CSS.escape(k)}"]`))show(k)});
+boot.then(()=>{sidebar();show(CUR)});setMode('developer');
+window.addEventListener('hashchange',()=>{const k=decodeURIComponent(location.hash.slice(1));if(k&&k!==CUR)show(k)});
+
+// ---------- the agent: it steers this page, the page follows its changes, and the person talks to it here ----------
+function toast(t){const x=h('div','toast',t);document.body.append(x);setTimeout(()=>x.remove(),6000)}
+function highlight(item){if(!item)return;const want=String(item).toLowerCase();
+ const c=[...document.querySelectorAll('main .card')].find(c=>c.textContent.toLowerCase().includes(want));if(c){c.classList.add('hl');c.scrollIntoView({behavior:'smooth',block:'center'});setTimeout(()=>c.classList.remove('hl'),4000)}}
+const chatBox=$('#chat'),log=$('#chat .log'),inp=$('#chat textarea'),busy=$('#chat .busy');
+const md=t=>t.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])).replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>');
+function bubble(cls,text){const b=h('div','m '+cls);if(cls==='ai')b.innerHTML=md(text);else b.textContent=text;log.append(b);log.scrollTop=log.scrollHeight;return b}
+let steps=null;
+function openChat(on){chatBox.classList.toggle('open',on??!chatBox.classList.contains('open'));document.body.classList.toggle('chat-open',chatBox.classList.contains('open'));if(chatBox.classList.contains('open'))inp.focus()}
+$('#chat-toggle').onclick=()=>openChat();$('#chat .x').onclick=()=>openChat(false);
+async function sendChat(){const t=inp.value.trim();if(!t)return;if(!LIVE){bubble('sys','Snapshot: start `python scripts/app.py '+D.project+'` to talk to the agent.');return}
+ bubble('me',t);inp.value='';steps=null;
+ await fetch('/chat',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({message:t,page:CUR})})}
+$('#chat .send').onclick=sendChat;inp.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChat()}};
+$('#chat .stop').onclick=()=>fetch('/chat/stop',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'});
+if(LIVE){const es=new EventSource('/events?k='+encodeURIComponent(KEY));
+ es.onmessage=async ev=>{const e=JSON.parse(ev.data);
+  if(e.type==='show'){PENDING.filters=e.filters||null;const k=e.page==='report'?'rep:'+e.report:e.page;show(k);setTimeout(()=>highlight(e.item),400);if(e.note)toast('Agent: '+e.note)}
+  else if(e.type==='data'){Object.assign(D,e.data);const k=CUR;sidebar();show(k);toast('Updated from ABI')}
+  else if(e.type==='busy'){busy.hidden=!e.on;$('#chat .stop').hidden=!e.on}
+  else if(e.type==='step'){if(!steps){steps=h('div','m steps');log.append(steps)}const last=[...steps.children].reverse().find(x=>x.dataset.t===e.tool&&x.dataset.s==='run');
+   if(e.state==='run'||!last){const l=h('div','',`${e.state==='run'?'…':e.state==='ok'?'✓':'✗'} ${e.tool}`);l.dataset.t=e.tool;l.dataset.s=e.state;steps.append(l)}
+   else{last.textContent=`${e.state==='ok'?'✓':'✗'} ${e.tool}`;last.dataset.s=e.state;last.className=e.state==='ok'?'':'bad'}log.scrollTop=log.scrollHeight}
+  else if(e.type==='answer'){steps=null;bubble('ai',e.text);if(!chatBox.classList.contains('open'))toast('The agent answered')}
+  else if(e.type==='ask'){const yes=await ask({message:e.title||'ABI asks for your confirmation',preview:e.message});bubble('sys',yes?'You confirmed.':'You declined.');
+   fetch('/chat/answer',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({id:e.id,yes})})}
+  else if(e.type==='mode'){setMode(e.mode);show(CUR)}
+  else if(e.type==='vault'){await loadVault();sidebar();show(CUR)}
+  else if(e.type==='note')toast(e.text)}}
 """
 
 
@@ -268,8 +404,19 @@ def build(project: str) -> Path:
         raise SystemExit(f"No folder for project '{project}'; create it with `abi.py project`.")
     data = json.dumps(snapshot(dest, project), default=str).replace("</", "<\\/")
     name = (render.j(dest / "project.json", {}) or {}).get("name", project)
-    page = render.shell(name, f"{render.esc(project)} · numbers from ABI · <span class=mode></span>", "", "")
+    page = render.shell(name, "", "", "")
+    head = (f"<header><span class=brand>ABI</span><span class=crumb>{render.esc(dest.parent.name)}<i>/</i><b>{render.esc(project)}</b></span>"
+            "<span class=snap hidden>snapshot</span><span class=right><span class=modes role=group aria-label=Mode>"
+            "<button id=m-dev class=on title='Build and change: you and the agent'>Developer</button>"
+            "<button id=m-view title='Read only: the agent answers as an analyst'>Viewer</button></span>"
+            "<button class=btn id=theme title='Paper or ink'>Ink</button><button class='btn pri' id=chat-toggle>Ask the agent</button></span></header>")
+    page = re.sub(r"<header>.*?</header>", lambda _: head, page, count=1, flags=re.S)
     page = page.replace("<main></main>", "<aside></aside><main></main>"
+                        "<section id=chat><header><h3>Agent</h3><button class='btn stop' hidden>Stop</button><button class='btn x'>Close</button></header>"
+                        "<div class=log><div class='m sys'>Ask about this project, or ask for a change. Every number comes from ABI; changes"
+                        " that need your yes show ABI's dialog here.</div></div><div class=busy hidden>working…</div>"
+                        "<div class=compose><textarea class=f placeholder='e.g. which videos gained the most subscribers? show me'></textarea>"
+                        "<button class='btn pri send'>Send</button></div></section>"
                         "<dialog id=confirm><h3>ABI asks for your confirmation</h3><p id=c-msg></p><pre id=c-prev></pre>"
                         "<div class=row><button class='btn pri' id=c-yes>Confirm</button><button class=btn id=c-no>Cancel</button></div></dialog>")
     page = page.replace("</style>", CSS + "</style>").replace("</body>", f"<script>window.APP={data};{render.JS}\n{JS}</script></body>")
@@ -280,9 +427,90 @@ def build(project: str) -> Path:
     return dest / "app.html"
 
 
+class Hub:
+    """The live side of one app: the page's event stream, the agent's view commands and the chat's Pi process.
+
+    The chat runs `pi --mode rpc` here as the person (ABI_TOKEN from this process); its answers reach the page only
+    after the harness grounded them (message_end, never the streamed draft), its confirmations become a dialog in the
+    page and the person's yes or no goes back to Pi (the confirm token stays in the harness)."""
+
+    def __init__(self, project: str, url: str, agent_key: str):
+        self.project, self.url, self.agent_key = project, url, agent_key
+        self.clients: list = []
+        self.lock = threading.Lock()
+        self.pi = None
+        self.busy = False
+        self.mode = "developer"  # the person's switch; the harness asks for it before every tool call (/agent/mode)
+
+    def emit(self, event: dict) -> None:
+        line = f"data: {json.dumps(event, default=str)}\n\n".encode()
+        with self.lock:
+            for q in list(self.clients):
+                q.append(line)
+
+    def refresh(self) -> None:
+        """After a change through ABI (the agent's or the person's): the folder, app.html and the open pages follow."""
+        def go():
+            try:
+                abi.sync(self.project)  # pull ABI's commit, re-render (writes app.html too)
+                self.emit({"type": "data", "data": snapshot(abi.folder(self.project), self.project)})
+            except Exception as e:  # noqa: BLE001 (a failed refresh keeps the page as it was)
+                self.emit({"type": "note", "text": f"Couldn't refresh: {type(e).__name__}"})
+        threading.Thread(target=go, daemon=True).start()
+
+    def chat(self, message: str, page: str) -> None:
+        if not self.pi or self.pi.poll() is not None:
+            env = {**os.environ, "ABI_TOKEN": abi.token(), "ABI_APP_URL": self.url, "ABI_APP_PROJECT": self.project,
+                   "ABI_APP_AGENT_KEY": self.agent_key}
+            self.pi = subprocess.Popen(["pi", "--mode", "rpc", "--no-session"], cwd=abi.ROOT, env=env, text=True, bufsize=1,
+                                       stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            threading.Thread(target=self.read, daemon=True).start()
+        role = ("Viewer mode: you are the analyst, read-only" if self.mode == "viewer"
+                else "Developer mode: you build and change through ABI")
+        text = f"[In the app for project {self.project}; {role}; the person is on its '{page}' page.] {message}"
+        self.send({"type": "follow_up" if self.busy else "prompt", "message": text})
+        self.busy = True
+        self.emit({"type": "busy", "on": True})
+
+    def send(self, cmd: dict) -> None:
+        self.pi.stdin.write(json.dumps(cmd) + "\n")
+        self.pi.stdin.flush()
+
+    def read(self) -> None:
+        started, final = {}, ""
+        for line in self.pi.stdout:
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            t = e.get("type")
+            if t == "extension_ui_request" and e.get("method") == "confirm":
+                self.emit({"type": "ask", "id": e["id"], "title": e.get("title"), "message": e.get("message")})
+            elif t == "extension_ui_request" and e.get("method") in ("select", "input", "editor"):
+                self.send({"type": "extension_ui_response", "id": e["id"], "cancelled": True})
+            elif t == "tool_execution_start":
+                started[e["toolCallId"]] = e["toolName"]
+                self.emit({"type": "step", "tool": e["toolName"].removeprefix("mcp__abi__"), "state": "run"})
+            elif t == "tool_execution_end":
+                self.emit({"type": "step", "tool": started.get(e["toolCallId"], e.get("toolName", "")).removeprefix("mcp__abi__"),
+                           "state": "error" if e.get("isError") else "ok"})
+            elif t == "message_end" and (m := e.get("message", {})).get("role") == "assistant":
+                txt = "".join(c.get("text", "") for c in m.get("content", []) if c.get("type") == "text")
+                if txt.strip() and not any(c.get("type") == "toolCall" for c in m.get("content", [])):
+                    final = txt  # after grounding; a first draft that failed it is followed by the retry: keep the last
+            elif t == "agent_settled":
+                if final:
+                    self.emit({"type": "answer", "text": final})
+                final = ""
+                self.busy = False
+                self.emit({"type": "busy", "on": False})
+
+
 def serve(project: str, port: int = 8790, open_browser: bool = True) -> ThreadingHTTPServer:
     path, key, pending = build(project), secrets.token_urlsafe(24), {}
+    agent_key = os.environ.get("ABI_APP_AGENT_KEY") or secrets.token_urlsafe(24)
     host = f"127.0.0.1:{port}"
+    hub: Hub
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):  # no request log: bodies may carry business values
@@ -296,15 +524,71 @@ def serve(project: str, port: int = 8790, open_browser: bool = True) -> Threadin
             self.wfile.write(body)
 
         def do_GET(self):
-            if self.headers.get("Host") != host or self.path.split("?")[0] not in ("/", "/app.html"):
+            route, _, query = self.path.partition("?")
+            if self.headers.get("Host") != host:
+                return self.reply(404, b"{}")
+            if route == "/events":  # EventSource can't send headers: the page key comes as ?k=
+                if not secrets.compare_digest(query.removeprefix("k="), key):
+                    return self.reply(403, b"{}")
+                self.send_response(200)
+                for k, v in (("Content-Type", "text/event-stream"), ("Cache-Control", "no-store"), ("Connection", "keep-alive")):
+                    self.send_header(k, v)
+                self.end_headers()
+                q: list = []
+                with hub.lock:
+                    hub.clients.append(q)
+                try:
+                    self.wfile.write(f"data: {json.dumps({'type': 'busy', 'on': hub.busy})}\n\ndata: {json.dumps({'type': 'mode', 'mode': hub.mode})}\n\n".encode())
+                    self.wfile.flush()
+                    while True:
+                        while q:
+                            self.wfile.write(q.pop(0))
+                        self.wfile.write(b": keep-alive\n\n")
+                        self.wfile.flush()
+                        time.sleep(0.3)
+                except OSError:
+                    pass
+                finally:
+                    with hub.lock:
+                        hub.clients.remove(q)
+                return None
+            if route not in ("/", "/app.html"):
                 return self.reply(404, b"{}")
             self.reply(200, path.read_text().replace(KEY_SLOT, key, 1).encode(), "text/html; charset=utf-8")
 
         def do_POST(self):
-            # a local Host (no DNS rebinding) and the per-start key (a custom header: other sites can't send it)
-            if self.headers.get("Host") != host or not secrets.compare_digest(self.headers.get("X-Abi-App", ""), key):
+            if self.headers.get("Host") != host:
                 return self.reply(403, b'{"error":"forbidden"}')
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+            if self.path.startswith("/agent/"):  # the agent (its harness), with the agent key: steer the page, data changed
+                if not secrets.compare_digest(self.headers.get("X-Abi-Agent", ""), agent_key):
+                    return self.reply(403, b'{"error":"forbidden"}')
+                if self.path == "/agent/mode":
+                    return self.reply(200, json.dumps({"mode": hub.mode}).encode())
+                if self.path == "/agent/show" and body.get("project") == project:
+                    hub.emit({"type": "show", **{k: body.get(k) for k in ("page", "report", "filters", "item", "note")}})
+                elif self.path == "/agent/changed":
+                    hub.refresh()
+                return self.reply(200, b"{}")
+            # the page: a local Host (no DNS rebinding) and the per-start key (a custom header other sites can't send)
+            if not secrets.compare_digest(self.headers.get("X-Abi-App", ""), key):
+                return self.reply(403, b'{"error":"forbidden"}')
+            if self.path == "/mode":  # the person's switch (the agent can't call this: it has no page key)
+                hub.mode = "viewer" if body.get("mode") == "viewer" else "developer"
+                hub.emit({"type": "mode", "mode": hub.mode})
+                return self.reply(200, b"{}")
+            if self.path.startswith("/vault/"):
+                return self.reply(*vault_route(self.path.removeprefix("/vault/"), body))
+            if self.path == "/chat":
+                hub.chat(str(body.get("message", ""))[:4000], str(body.get("page", "home")))
+                return self.reply(200, b"{}")
+            if self.path == "/chat/answer":  # the person's yes/no to a confirmation the agent's step asked for
+                hub.send({"type": "extension_ui_response", "id": str(body.get("id")), "confirmed": bool(body.get("yes"))})
+                return self.reply(200, b"{}")
+            if self.path == "/chat/stop":
+                if hub.pi:
+                    hub.send({"type": "abort"})
+                return self.reply(200, b"{}")
             if self.path.startswith("/confirm/"):
                 job = pending.pop(self.path.split("/")[-1], None)
                 if not job:
@@ -313,11 +597,49 @@ def serve(project: str, port: int = 8790, open_browser: bool = True) -> Threadin
             action = self.path.removeprefix("/api/")
             if action not in ALLOWED or body.get("project") != project:
                 return self.reply(403, json.dumps({"error": f"'{action}' is not available here; use ABI's app."}).encode())
-            self.reply(200, json.dumps(run(action, body, None), default=str).encode())
+            if hub.mode == "viewer" and (action in WRITES or action in READS_ONLY):
+                return self.reply(403, json.dumps({"error": "Viewer mode is read-only. Switch to Developer in the top bar to change things."}).encode())
+            out = run(action, body, None)
+            if "result" in out and action in WRITES:
+                hub.refresh()
+            self.reply(200, json.dumps(out, default=str).encode())
+
+    def vault_route(op: str, body: dict) -> tuple[int, bytes]:
+        import base64  # noqa: PLC0415
+        import tempfile  # noqa: PLC0415
+
+        import vault  # noqa: PLC0415 (sibling script)
+        if op in ("add", "rm") and hub.mode == "viewer":
+            return 403, b'{"error":"Viewer mode is read-only. Switch to Developer to add or remove documents."}'
+        try:
+            if op == "list":
+                out = vault.listing(project)
+            elif op == "search":
+                out = vault.search(project, str(body.get("query", "")), int(body.get("k") or 6))
+            elif op == "read":
+                out = vault.read(project, Path(str(body.get("name"))).name)
+            elif op == "add":
+                name = Path(str(body.get("name"))).name
+                with tempfile.TemporaryDirectory() as d:
+                    f = Path(d) / name
+                    f.write_bytes(base64.b64decode(body.get("data") or ""))
+                    out = vault.add(project, f, name)
+            elif op == "rm":
+                out = vault.remove(project, Path(str(body.get("name"))).name)
+            else:
+                return 404, b"{}"
+        except SystemExit as e:  # vault's own messages (unsupported type, missing pypdf)
+            return 200, json.dumps({"error": str(e)}).encode()
+        if op in ("add", "rm"):
+            hub.emit({"type": "vault"})
+        return 200, json.dumps({"result": out}).encode()
 
     def run(action: str, args: dict, token: str | None) -> dict:
         try:
-            return {"result": abi.call(action, confirm=token, **args)}
+            out = {"result": abi.call(action, confirm=token, **args)}
+            if token and action in WRITES:
+                hub.refresh()
+            return out
         except abi.ActionError as e:
             b = e.body if isinstance(e.body, dict) else {"message": str(e.body)}
             if e.status == 409 and b.get("confirm_token") and token is None:
@@ -329,7 +651,10 @@ def serve(project: str, port: int = 8790, open_browser: bool = True) -> Threadin
             return {"error": "\n".join(filter(None, [b.get("message"), detail])) or json.dumps(b)[:500]}
 
     srv = ThreadingHTTPServer(("127.0.0.1", port), H)
+    srv.daemon_threads = True
     host = f"127.0.0.1:{srv.server_address[1]}"  # port 0 = any free port
+    hub = Hub(project, f"http://{host}", agent_key)
+    srv.hub = hub
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     if open_browser:
         webbrowser.open(f"http://{host}/")
@@ -340,6 +665,8 @@ def main(argv: list[str]) -> int:
     if not argv:
         raise SystemExit(__doc__)
     s = serve(argv[0], int(argv[1]) if len(argv) > 1 else 8790)
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    atexit.register(lambda: s.hub.pi and s.hub.pi.poll() is None and s.hub.pi.terminate())  # the chat's agent stops with the app
     print(f"{abi.folder(argv[0]) / 'app.html'} · live at http://127.0.0.1:{s.server_address[1]}/ (Ctrl+C to stop)", flush=True)
     try:
         threading.Event().wait()

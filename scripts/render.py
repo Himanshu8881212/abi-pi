@@ -19,23 +19,45 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 CSS = """
-:root{--bg:#f7f7f5;--card:#fff;--ink:#1d1d1f;--mute:#6e6e73;--line:#e3e3e0;--acc:#2f6fdf;--acc2:#e07a2f;--ok:#2e9d5b;--bad:#c9473b}
-@media (prefers-color-scheme:dark){:root{--bg:#141416;--card:#1e1e21;--ink:#ececee;--mute:#9a9aa0;--line:#2e2e33;--acc:#6b9cff;--acc2:#f0a060}}
-*{box-sizing:border-box}body{margin:0;font:14px/1.45 -apple-system,system-ui,Segoe UI,sans-serif;background:var(--bg);color:var(--ink)}
-header{padding:16px 32px;border-bottom:1px solid var(--line);display:flex;gap:16px;align-items:baseline;flex-wrap:wrap}
-header h1{font-size:20px;margin:0}header .sub{color:var(--mute)}main{padding:24px 32px 56px;max-width:1400px;margin:auto}
-nav.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 18px}nav.tabs button{border:1px solid var(--line);background:var(--card);color:var(--ink);padding:6px 12px;border-radius:999px;cursor:pointer}
-nav.tabs button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
-.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;min-width:0}
-.card h3{margin:0 0 10px;font-size:15px;display:flex;justify-content:space-between;gap:8px}.card h3 .tools button{font-size:11px;border:1px solid var(--line);background:none;color:var(--mute);border-radius:6px;cursor:pointer;margin-left:4px}
-.kpi .v{font-size:30px;font-weight:650;letter-spacing:-.5px}.kpi .l{color:var(--mute)}
-table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
-th{cursor:pointer;user-select:none;color:var(--mute);font-weight:600}td.n{text-align:right;font-variant-numeric:tabular-nums}
-.scroll{max-height:360px;overflow:auto}svg text{fill:var(--mute);font-size:11px}.tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--bg);padding:4px 8px;border-radius:6px;font-size:12px;display:none;z-index:9}
-code,pre{font:12px/1.4 ui-monospace,Menlo,monospace}pre{background:var(--bg);padding:10px 12px;border-radius:8px;overflow:auto;max-height:300px}
-.file{color:var(--mute);font-size:12px;margin-top:8px}.chip{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--bg);border:1px solid var(--line);margin:2px;font-size:12px}
-section{margin-bottom:32px}section>h2{font-size:17px;margin:0 0 12px}input.search{padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);width:260px}
-a{color:var(--acc)}.empty{color:var(--mute);font-style:italic}.steps li{margin:2px 0}.ok{color:var(--ok)}.bad{color:var(--bad)}
+/* typewritten ledger: beige paper, black ink, hard 2px rules, no radius, no shadow; black blocks mark what is active */
+:root{--paper:#ebe4d4;--sheet:#f4efe4;--ink:#141311;--mute:#5f584c;--faint:#cdc4b1;--red:#a3321f;--ok:#2f5a3a;
+ --c2:#8a7650;--c3:#4f6355;--c4:#b8a27a;--display:"Courier Prime","American Typewriter","Courier New",monospace;
+ --text:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+ --bg:var(--paper);--card:var(--sheet);--line:var(--faint);--acc:var(--ink);--acc2:var(--c2);--bad:var(--red);color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--paper:#131210;--sheet:#1b1a17;--ink:#e8e0cf;--mute:#a1988a;
+ --faint:#3a3631;--red:#e07a63;--ok:#93bf96;--c2:#c2aa7d;--c3:#8fa596;--c4:#6f6450;color-scheme:dark}}
+:root[data-theme="dark"]{--paper:#131210;--sheet:#1b1a17;--ink:#e8e0cf;--mute:#a1988a;--faint:#3a3631;--red:#e07a63;--ok:#93bf96;
+ --c2:#c2aa7d;--c3:#8fa596;--c4:#6f6450;color-scheme:dark}
+*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+body{margin:0;font:13px/1.6 var(--text);background:var(--paper);color:var(--ink)}
+header{display:flex;gap:18px;align-items:center;flex-wrap:wrap;padding-block:14px;padding-left:max(24px,env(safe-area-inset-left,0px));
+ padding-right:max(24px,env(safe-area-inset-right,0px));border-bottom:2px solid var(--ink);background:var(--paper)}
+header h1{font:700 22px/1.1 var(--display);margin:0;text-transform:uppercase;letter-spacing:.02em}
+header .sub{color:var(--mute);font-size:12px}
+main{padding:28px max(24px,env(safe-area-inset-right,0px)) 64px max(24px,env(safe-area-inset-left,0px));max-width:1440px;margin:0 auto}
+h2,h3,h4{font-family:var(--display);text-wrap:balance}
+nav.tabs{display:flex;gap:0;flex-wrap:wrap;margin:0 0 20px;border:2px solid var(--ink);width:max-content;max-width:100%}
+nav.tabs button{border:0;border-right:2px solid var(--ink);background:none;color:var(--ink);padding:7px 14px;cursor:pointer;font:600 12px var(--text);text-transform:uppercase;letter-spacing:.06em}
+nav.tabs button:last-child{border-right:0}nav.tabs button.on{background:var(--ink);color:var(--paper)}
+.grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:16px}
+.card{background:var(--sheet);border:2px solid var(--ink);padding:16px 18px 18px;min-width:0}
+.card h3{margin:0 0 12px;padding-bottom:10px;border-bottom:1px solid var(--faint);font:700 15px/1.25 var(--display);display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.card h3 .tools{display:flex;gap:0;flex-shrink:0}.card h3 .tools button{font:500 10px var(--text);text-transform:uppercase;letter-spacing:.08em;border:1px solid var(--ink);margin-left:-1px;background:none;color:var(--ink);padding:3px 7px;cursor:pointer}
+.card h3 .tools button:hover{background:var(--ink);color:var(--paper)}
+.kpi .v{font:700 40px/1 var(--display);letter-spacing:-.01em;font-variant-numeric:tabular-nums;margin:6px 0 4px}.kpi .l{color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.08em}
+table{border-collapse:collapse;width:100%;font-size:12px}th,td{padding:7px 10px;border-bottom:1px solid var(--faint);text-align:left;vertical-align:top}
+th{cursor:pointer;user-select:none;color:var(--mute);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.08em;border-bottom:2px solid var(--ink)}
+td.n{text-align:right;font-variant-numeric:tabular-nums}tr:hover td{background:color-mix(in srgb,var(--ink) 5%,transparent)}
+.scroll{max-height:380px;overflow:auto}svg text{fill:var(--mute);font:11px var(--text)}
+.tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--paper);padding:5px 9px;font-size:12px;display:none;z-index:9}
+code,pre{font:12px/1.5 var(--text)}pre{background:var(--paper);border:1px solid var(--faint);padding:10px 12px;overflow:auto;max-height:320px}
+.file{color:var(--mute);font-size:11px;margin-top:10px;letter-spacing:.02em}
+.chip{display:inline-block;padding:2px 8px;border:1px solid var(--ink);margin:2px 4px 2px 0;font-size:11px;background:none}
+section{margin-bottom:36px}section>h2{font:700 18px var(--display);text-transform:uppercase;margin:0 0 12px;letter-spacing:.03em}
+input.search{padding:8px 10px;border:2px solid var(--ink);background:var(--sheet);color:var(--ink);font:inherit;width:280px;max-width:100%}
+a{color:var(--ink);text-underline-offset:3px}.empty{color:var(--mute);font-style:italic}.steps li{margin:2px 0}.ok{color:var(--ok)}.bad{color:var(--red)}
+:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 """
 
 JS = r"""
@@ -48,7 +70,7 @@ function fmt(v,f){if(v===null||v===undefined)return'—';if(typeof v!=='number')
  if(f.style==='currency'&&f.currency)return new Intl.NumberFormat(undefined,{...o,style:'currency',currency:f.currency}).format(v);
  return new Intl.NumberFormat(undefined,o).format(v)}
 const NS='http://www.w3.org/2000/svg';function el(t,a,p){const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);p&&p.appendChild(e);return e}
-const COL=['var(--acc)','var(--acc2)','#7f5bd5','#2e9d5b','#c9473b','#8a8f98'];
+const COL=['var(--ink)','var(--c2)','var(--c3)','var(--c4)','var(--mute)','var(--faint)'];
 function table(box,d){const t=document.createElement('table');const cols=d.columns;let sort=null,desc=false;
  function draw(){t.innerHTML='';const h=t.insertRow();cols.forEach((c,i)=>{const th=document.createElement('th');th.textContent=(d.measures[c]||c)+(sort===i?(desc?' ▼':' ▲'):'');th.onclick=()=>{desc=sort===i?!desc:true;sort=i;draw()};h.appendChild(th)});
   let rows=d.rows.slice();if(sort!==null)rows.sort((a,b)=>((a[sort]>b[sort])-(a[sort]<b[sort]))*(desc?-1:1));
@@ -65,7 +87,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
  rows.forEach((r,i)=>{if(i%lab===0){const s=String(r[0]??'—');el('text',{x:L+step*i+step/2,y:H-B+14,'text-anchor':'middle'},svg).textContent=s.length>11?s.slice(0,10)+'…':s}});
  if(type==='line'){ms.forEach((m,j)=>{const pts=rows.map((r,i)=>[L+step*i+step/2,y(r[nd+j]||0)]);el('polyline',{points:pts.map(p=>p.join(',')).join(' '),fill:'none',stroke:COL[j%6],'stroke-width':2},svg);
    pts.forEach((p,i)=>{const c=el('circle',{cx:p[0],cy:p[1],r:Math.max(2,Math.min(4,step/3)),fill:COL[j%6],opacity:.01},svg);c.onmousemove=e=>{c.setAttribute('opacity',1);showTip(e,`${rows[i][0]} · ${d.measures[m]||m}: ${fmt(rows[i][nd+j],{...d.format[m],compact:false})}`)};c.onmouseleave=()=>{c.setAttribute('opacity',.01);hideTip()}})});return}
- const bw=step/ms.length*.8;rows.forEach((r,i)=>ms.forEach((m,j)=>{const v=r[nd+j]||0;const b=el('rect',{x:L+step*i+step*.1+bw*j,y:Math.min(y(v),y(0)),width:Math.max(bw,1),height:Math.abs(y(v)-y(0)),fill:COL[j%6],rx:2},svg);
+ const bw=step/ms.length*.8;rows.forEach((r,i)=>ms.forEach((m,j)=>{const v=r[nd+j]||0;const b=el('rect',{x:L+step*i+step*.1+bw*j,y:Math.min(y(v),y(0)),width:Math.max(bw,1),height:Math.abs(y(v)-y(0)),fill:COL[j%6]},svg);
   b.onmousemove=e=>{b.setAttribute('opacity',.7);showTip(e,`${r[0]} · ${d.measures[m]||m}: ${fmt(v,{...d.format[m],compact:false})}`)};b.onmouseleave=()=>{b.setAttribute('opacity',1);hideTip()}}))}
 function csv(d){const q=v=>v===null?'':/[",\n]/.test(String(v))?'"'+String(v).replace(/"/g,'""')+'"':String(v);
  const blob=new Blob([[d.columns.join(','),...d.rows.map(r=>r.map(q).join(','))].join('\n')],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=d.id+'.csv';a.click()}
@@ -94,7 +116,7 @@ def j(path: Path, default=None):
 
 def shell(title: str, sub: str, body: str, script: str = "") -> str:
     return (f"<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-            f"<title>{esc(title)}</title><style>{CSS}</style></head><body><div class=tip></div><header><h1>{esc(title)}</h1>"
+            f"<title>{esc(title)}</title><link rel=stylesheet href='https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap'><style>{CSS}</style></head><body><div class=tip></div><header><h1>{esc(title)}</h1>"
             f"<span class=sub>{sub}</span></header><main>{body}</main>{script}</body></html>")
 
 
@@ -142,12 +164,12 @@ def diagram(model: dict, kinds: dict) -> str:
     out = [f"<svg viewBox='0 0 700 {H}' width=100% style='max-width:760px'>"]
     for r in model.get("relationships", []):
         (x1, y1), (x2, y2) = pos[r["from"]["table"]], pos[r["to"]["table"]]
-        out.append(f"<path d='M{x1 + 200},{y1 + 18} C{x1 + 300},{y1 + 18} {x2 - 100},{y2 + 18} {x2},{y2 + 18}' fill=none stroke='var(--acc)' stroke-width=1.5>"
+        out.append(f"<path d='M{x1 + 200},{y1 + 18} C{x1 + 300},{y1 + 18} {x2 - 100},{y2 + 18} {x2},{y2 + 18}' fill=none stroke='var(--ink)' stroke-width=1.5>"
                    f"<title>{esc(r['from']['table'])}.{esc(','.join(r['from']['columns']))} → {esc(r['to']['table'])}.{esc(','.join(r['to']['columns']))} (many-to-one)</title></path>")
     for t, (x, y) in pos.items():
-        out.append(f"<rect x={x} y={y} width=200 height=36 rx=8 fill='var(--card)' stroke='{'var(--acc2)' if t in facts else 'var(--line)'}'/>"
-                   f"<text x={x + 10} y={y + 22} style='fill:var(--ink);font-size:13px'>{esc(t)}</text>"
-                   f"<text x={x + 190} y={y + 22} text-anchor=end>{esc(kinds.get(t) or '')}</text>")
+        out.append(f"<rect x={x} y={y} width=200 height=36 fill='{'var(--ink)' if t in facts else 'var(--card)'}' stroke='var(--ink)' stroke-width='2'/>"
+                   f"<text x={x + 10} y={y + 22} style='fill:{'var(--paper)' if t in facts else 'var(--ink)'};font-size:13px;font-weight:600'>{esc(t)}</text>"
+                   f"<text x={x + 190} y={y + 22} text-anchor=end style='fill:{'var(--paper)' if t in facts else 'var(--mute)'}'>{esc(kinds.get(t) or '')}</text>")
     return "".join(out) + "</svg>"
 
 
