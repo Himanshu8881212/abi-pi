@@ -1,0 +1,7 @@
+scratch/
+.venv/
+__pycache__/
+.pi/sessions/
+logs/
+workspaces/*
+!workspaces/.gitkeep

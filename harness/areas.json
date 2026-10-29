@@ -1,0 +1,240 @@
+{
+  "core": [
+    "list_projects",
+    "semantic_model",
+    "semantic_query",
+    "how_calculated",
+    "lineage",
+    "docs",
+    "readiness",
+    "detect_model",
+    "data_quality",
+    "list_reports",
+    "list_tools",
+    "list_agents",
+    "list_flows",
+    "ml_models",
+    "remember",
+    "changes"
+  ],
+  "unclassified": [],
+  "areas": {
+    "data": {
+      "about": "load, connect, transform, refresh and delete sources and tables",
+      "tools": [
+        "add_data",
+        "delete_source",
+        "delete_table",
+        "list_snapshots",
+        "preview_steps",
+        "refresh",
+        "restore_snapshot",
+        "set_steps"
+      ]
+    },
+    "model": {
+      "about": "semantic model: tables, keys, relationships, measures, glossary, datasets, date/rates tables, row-level rules",
+      "tools": [
+        "add_relationship",
+        "build_model",
+        "dataset_data",
+        "delete_dataset",
+        "delete_glossary_term",
+        "delete_measure",
+        "delete_rls_rule",
+        "remove_relationship",
+        "rls_rules",
+        "save_dataset",
+        "set_column_rule",
+        "set_date_table",
+        "set_glossary_term",
+        "set_measure",
+        "set_rates_table",
+        "set_rls_rule",
+        "set_table",
+        "sql_query"
+      ]
+    },
+    "reports": {
+      "about": "reports, visuals, snapshots, exports, sharing, share links and embeds",
+      "tools": [
+        "create_embed_key",
+        "create_share_link",
+        "delete_report",
+        "export_visual",
+        "get_sharing",
+        "list_embed_keys",
+        "list_share_links",
+        "report_snapshot",
+        "revoke_embed_key",
+        "revoke_share_link",
+        "save_report",
+        "set_sharing",
+        "shared_with_me",
+        "visual_data"
+      ]
+    },
+    "writeback": {
+      "about": "write-back: edit cells and totals, input tables, proposals and approvals, edit history, sync to sources",
+      "tools": [
+        "approve_edit",
+        "create_input_table",
+        "edit_cells",
+        "edit_history",
+        "edit_proposals",
+        "edit_total",
+        "propose_edit",
+        "reject_edit",
+        "sync_edits",
+        "undo_edits"
+      ]
+    },
+    "tools": {
+      "about": "custom tools: save, test, publish, run",
+      "tools": [
+        "delete_tool",
+        "publish_tool",
+        "run_tool",
+        "save_tool",
+        "test_tool"
+      ]
+    },
+    "agents": {
+      "about": "custom agents (save, test, publish, run) and project memory",
+      "tools": [
+        "agent_runs",
+        "chat_history",
+        "chatgpt_account",
+        "delete_agent",
+        "delete_chat",
+        "forget",
+        "link_memory",
+        "list_chats",
+        "mark_notifications_read",
+        "publish_agent",
+        "rename_chat",
+        "run_agent",
+        "save_agent",
+        "save_chat",
+        "set_chatgpt_model",
+        "test_agent",
+        "unlink_chatgpt"
+      ]
+    },
+    "flows": {
+      "about": "flows and tasks, schedules, conditions and subscriptions, email/message sends, inbox, inbound messages",
+      "tools": [
+        "approve_flow_run",
+        "approve_inbound_action",
+        "check_condition",
+        "delete_flow",
+        "delivery_channels",
+        "delivery_settings",
+        "enable_flow",
+        "flow_runs",
+        "inbound_approvals",
+        "inbox",
+        "list_senders",
+        "list_subscriptions",
+        "map_sender",
+        "post_message",
+        "reject_flow_run",
+        "reject_inbound_action",
+        "rotate_webhook_token",
+        "run_flow",
+        "save_flow",
+        "send_email",
+        "set_delivery",
+        "subscribe",
+        "test_task",
+        "unmap_sender",
+        "unsubscribe"
+      ]
+    },
+    "ml": {
+      "about": "ML models: forecast, classify, predict, cluster, anomalies; train, score, pre-fill",
+      "tools": [
+        "delete_ml_model",
+        "ml_history",
+        "pin_ml_run",
+        "prefill_input_table",
+        "save_ml_model",
+        "score_model",
+        "train_model"
+      ]
+    },
+    "docs": {
+      "about": "documentation: generate, draft and review descriptions",
+      "tools": [
+        "draft_descriptions",
+        "generate_docs",
+        "review_description",
+        "save_docs"
+      ]
+    },
+    "project": {
+      "about": "projects, project JSON import, commits, undo, revert, history, diffs, remotes, push/pull, environments, locale",
+      "tools": [
+        "commit",
+        "create_project",
+        "delete_project",
+        "diff",
+        "history",
+        "import_project",
+        "project_locale",
+        "pull",
+        "push",
+        "remote_branches",
+        "remote_settings",
+        "rename_project",
+        "revert",
+        "set_auto_commit",
+        "set_environment",
+        "set_project_locale",
+        "set_remote",
+        "undo"
+      ]
+    },
+    "admin": {
+      "about": "users, roles, tenants, sign-in providers, LLM providers, usage, secrets list",
+      "tools": [
+        "confirm_mfa",
+        "create_tenant",
+        "create_user",
+        "delete_llm_provider",
+        "delete_oidc_provider",
+        "delete_secret",
+        "delete_tenant",
+        "delete_user",
+        "disable_mfa",
+        "invite_user",
+        "list_llm_providers",
+        "list_secrets",
+        "list_tenants",
+        "list_users",
+        "mfa_status",
+        "order_llm_providers",
+        "remove_role",
+        "reset_mfa",
+        "rotate_secret_key",
+        "set_account_mail",
+        "set_llm_provider",
+        "set_main_agent_model",
+        "set_mfa_required",
+        "set_oidc_provider",
+        "set_password",
+        "set_project_tenant",
+        "set_role",
+        "set_secret",
+        "set_tenant",
+        "set_tenant_admin",
+        "set_user_email",
+        "set_user_tenant",
+        "set_workspace_owner",
+        "start_mfa",
+        "test_llm_provider",
+        "usage"
+      ]
+    }
+  }
+}

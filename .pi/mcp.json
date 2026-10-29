@@ -1,0 +1,35 @@
+{
+  "mcpServers": {
+    "abi": {
+      "url": "http://127.0.0.1:8770/api/mcp",
+      "headers": {
+        "Authorization": "!python3 /Users/himanshu/Work/Working/abi-pi/scripts/creds.py abi-bearer"
+      },
+      "description": "ABI, the Agentic Open BI platform: every data read and change goes through these actions.",
+      "exposure": "deferred",
+      "timeout": 600,
+      "toolExposure": {
+        "list_projects": "direct",
+        "semantic_model": "direct",
+        "semantic_query": "direct",
+        "how_calculated": "direct",
+        "lineage": "direct",
+        "docs": "direct",
+        "readiness": "direct",
+        "detect_model": "direct",
+        "data_quality": "direct",
+        "list_reports": "direct",
+        "list_tools": "direct",
+        "list_agents": "direct",
+        "list_flows": "direct",
+        "ml_models": "direct",
+        "remember": "direct",
+        "changes": "direct"
+      }
+    },
+    "blender": {
+      "enabled": false
+    }
+  },
+  "autoEnableCodemode": false
+}
