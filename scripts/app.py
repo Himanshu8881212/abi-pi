@@ -31,6 +31,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.parse
 import webbrowser
 from datetime import datetime, timezone
@@ -1387,6 +1388,9 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
             except (ValueError, TypeError, KeyError, AttributeError):  # malformed input: JSON, numbers, missing fields
                 with contextlib.suppress(OSError):
                     self.reply(400, b'{"error":"That request isn\'t valid."}')
+            except urllib.error.URLError:  # ABI itself didn't answer (down, restarting, unreachable): say so
+                with contextlib.suppress(OSError):
+                    self.reply(503, b'{"error":"ABI isn\'t answering right now. Try again in a minute."}')
             except OSError:
                 pass  # the browser went away
             except Exception:  # noqa: BLE001 (never a dropped connection; no details, they may carry values)
@@ -1907,7 +1911,10 @@ def main(argv: list[str]) -> int:
     if not signin and tailnet and not remote:
         raise SystemExit("--single has no sign-in: it acts as this machine's ABI account, so it stays on this machine. Use sign-in (the default) for other devices.")
     argv = [a for a in argv if a not in ("--tailnet", "--open", "--single")]
-    s = serve(argv[0], int(argv[1]) if len(argv) > 1 else 8790, open_browser=not (remote or tailnet), remote=remote, tailnet=tailnet, signin=signin)
+    try:
+        s = serve(argv[0], int(argv[1]) if len(argv) > 1 else 8790, open_browser=not (remote or tailnet), remote=remote, tailnet=tailnet, signin=signin)
+    except urllib.error.URLError:
+        raise SystemExit(f"Can't reach ABI at {abi.URL}: start ABI (or set ABI_URL) and try again.") from None
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     atexit.register(lambda: [h.pi.terminate() for h in HUBS.values() if h.pi and h.pi.poll() is None])  # the chats' agents stop with the app
     print(f"{abi.folder(argv[0]) / 'app.html'} · live at http://127.0.0.1:{s.server_address[1]}/ (Ctrl+C to stop)", flush=True)

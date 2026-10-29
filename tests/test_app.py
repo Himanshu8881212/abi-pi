@@ -398,3 +398,13 @@ def test_a_silent_model_is_reported_after_two_minutes():
     assert app.silent([h], now=121) == [h] and app.silent([h], now=60) == []
     h.busy = False
     assert app.silent([h], now=500) == []
+
+
+def test_abi_down_answers_503_not_a_hung_request(srv, monkeypatch):
+    port, key, _ = srv
+    monkeypatch.setattr(abi, "URL", "http://127.0.0.1:9")  # nothing listens there: ABI is down
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/api/readiness", json.dumps({"project": P}).encode(),
+                                 {"X-Abi-App": key, "Content-Type": "application/json"})
+    with pytest.raises(urllib.error.HTTPError) as e:
+        urllib.request.urlopen(req, timeout=30)
+    assert e.value.code == 503 and "ABI" in json.loads(e.value.read())["error"]
