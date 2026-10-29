@@ -6,7 +6,9 @@
   to: dim.key`. `set_date_table` when the date table isn't detected.
 - Measures: see measures notes (`set_measure`). Glossary: `set_glossary_term` ties words to measures/columns.
 - Datasets (`save_dataset`): a named semantic query (measures + dimensions); ML models train on datasets.
-- Row-level security lives in the security notes (`set_rls_rule`, `set_column_rule`).
+- Row-level security: `set_rls_rule` (table, column, users = {user ID: allowed values}; Viewers only, an unlisted
+  Viewer sees no rows; user IDs from `rls_rules`), `set_column_rule` hides columns from Viewers. These are model
+  changes the agent makes; roles (`set_role`) stay the person's click in ABI's app.
 
 # measures (MEL)
 - `set_measure {id, name, expression, description}`; IDs lowercase snake_case. Checked against loaded columns.

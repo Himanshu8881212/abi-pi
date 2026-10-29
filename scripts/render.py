@@ -22,19 +22,19 @@ CSS = """
 :root{--bg:#f7f7f5;--card:#fff;--ink:#1d1d1f;--mute:#6e6e73;--line:#e3e3e0;--acc:#2f6fdf;--acc2:#e07a2f;--ok:#2e9d5b;--bad:#c9473b}
 @media (prefers-color-scheme:dark){:root{--bg:#141416;--card:#1e1e21;--ink:#ececee;--mute:#9a9aa0;--line:#2e2e33;--acc:#6b9cff;--acc2:#f0a060}}
 *{box-sizing:border-box}body{margin:0;font:14px/1.45 -apple-system,system-ui,Segoe UI,sans-serif;background:var(--bg);color:var(--ink)}
-header{padding:18px 24px;border-bottom:1px solid var(--line);display:flex;gap:16px;align-items:baseline;flex-wrap:wrap}
-header h1{font-size:20px;margin:0}header .sub{color:var(--mute)}main{padding:16px 24px;max-width:1400px;margin:auto}
-nav.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px}nav.tabs button{border:1px solid var(--line);background:var(--card);color:var(--ink);padding:6px 12px;border-radius:999px;cursor:pointer}
+header{padding:16px 32px;border-bottom:1px solid var(--line);display:flex;gap:16px;align-items:baseline;flex-wrap:wrap}
+header h1{font-size:20px;margin:0}header .sub{color:var(--mute)}main{padding:24px 32px 56px;max-width:1400px;margin:auto}
+nav.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 18px}nav.tabs button{border:1px solid var(--line);background:var(--card);color:var(--ink);padding:6px 12px;border-radius:999px;cursor:pointer}
 nav.tabs button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
-.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:12px}.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;min-width:0}
-.card h3{margin:0 0 8px;font-size:14px;display:flex;justify-content:space-between;gap:8px}.card h3 .tools button{font-size:11px;border:1px solid var(--line);background:none;color:var(--mute);border-radius:6px;cursor:pointer;margin-left:4px}
+.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;min-width:0}
+.card h3{margin:0 0 10px;font-size:15px;display:flex;justify-content:space-between;gap:8px}.card h3 .tools button{font-size:11px;border:1px solid var(--line);background:none;color:var(--mute);border-radius:6px;cursor:pointer;margin-left:4px}
 .kpi .v{font-size:30px;font-weight:650;letter-spacing:-.5px}.kpi .l{color:var(--mute)}
-table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:5px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
 th{cursor:pointer;user-select:none;color:var(--mute);font-weight:600}td.n{text-align:right;font-variant-numeric:tabular-nums}
 .scroll{max-height:360px;overflow:auto}svg text{fill:var(--mute);font-size:11px}.tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--bg);padding:4px 8px;border-radius:6px;font-size:12px;display:none;z-index:9}
-code,pre{font:12px/1.4 ui-monospace,Menlo,monospace}pre{background:var(--bg);padding:8px;border-radius:8px;overflow:auto;max-height:300px}
-.file{color:var(--mute);font-size:12px}.chip{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--bg);border:1px solid var(--line);margin:2px;font-size:12px}
-section{margin-bottom:22px}section>h2{font-size:16px;margin:0 0 8px}input.search{padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);width:260px}
+code,pre{font:12px/1.4 ui-monospace,Menlo,monospace}pre{background:var(--bg);padding:10px 12px;border-radius:8px;overflow:auto;max-height:300px}
+.file{color:var(--mute);font-size:12px;margin-top:8px}.chip{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--bg);border:1px solid var(--line);margin:2px;font-size:12px}
+section{margin-bottom:32px}section>h2{font-size:17px;margin:0 0 12px}input.search{padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);width:260px}
 a{color:var(--acc)}.empty{color:var(--mute);font-style:italic}.steps li{margin:2px 0}.ok{color:var(--ok)}.bad{color:var(--bad)}
 """
 
@@ -98,7 +98,8 @@ def shell(title: str, sub: str, body: str, script: str = "") -> str:
             f"<span class=sub>{sub}</span></header><main>{body}</main>{script}</body></html>")
 
 
-def report_html(dest: Path, project: str, rid: str, rep: dict, measures: dict) -> str:
+def report_pages(project: str, rid: str, rep: dict, measures: dict) -> list[dict]:
+    """Each page's visuals with ABI's visual_data rows (or the text, or ABI's error) and a "how" note."""
     import abi  # noqa: PLC0415 (sibling; REST as the signed-in person)
 
     pages = []
@@ -120,7 +121,11 @@ def report_html(dest: Path, project: str, rid: str, rep: dict, measures: dict) -
                 item["error"] = str(e.body.get("message"))
             vs.append(item)
         pages.append({"id": p["id"], "name": p.get("name"), "visuals": vs})
-    data = json.dumps({"pages": pages}, default=str).replace("</", "<\\/")
+    return pages
+
+
+def report_html(dest: Path, project: str, rid: str, rep: dict, measures: dict) -> str:
+    data = json.dumps({"pages": report_pages(project, rid, rep, measures)}, default=str).replace("</", "<\\/")
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     return shell(rep.get("name", rid), f"{esc(project)} · numbers from ABI's visual_data, {stamp} · <a href='../index.html'>project</a>",
                  "<nav class=tabs></nav><div class=grid></div>", f"<script>{JS}\nrender({data})</script>")
@@ -149,7 +154,7 @@ def diagram(model: dict, kinds: dict) -> str:
 def cards(files: list[Path], dest: Path, fn) -> str:
     if not files:
         return "<p class=empty>None yet.</p>"
-    return "".join(f"<div class=card style='margin-bottom:8px'>{fn(f, j(f, {}))}<div class=file>edit: {esc(f.relative_to(dest))}</div></div>"
+    return "".join(f"<div class=card style='margin-bottom:12px'>{fn(f, j(f, {}))}<div class=file>edit: {esc(f.relative_to(dest))}</div></div>"
                    for f in files)
 
 
@@ -167,8 +172,8 @@ def flow(f: dict) -> str:
             f"<div>trigger: <code>{esc(json.dumps(trig))}</code></div><div style='margin-top:6px'>{chain}</div>")
 
 
-def index_html(dest: Path, project: str, reports: list[str]) -> str:
-    pj = j(dest / "project.json", {})
+def sections(dest: Path) -> dict[str, str]:
+    """The explorer's sections as HTML, by name (index.html and app.html both show them)."""
     model = j(dest / "model/model.json", {})
     meas = (j(dest / "model/measures.json", {}) or {}).get("measures", [])
     gloss = (j(dest / "model/glossary.json", {}) or {}).get("terms", [])
@@ -205,6 +210,13 @@ def index_html(dest: Path, project: str, reports: list[str]) -> str:
         sec["Tables"] = (sec["Tables"] if g("tables") else "") + "<div class=card>" + "".join(f"<span class=chip>{esc(t)} · {esc(kinds[t] or '')}</span>" for t in plain) + \
             "<div class=file>loaded as is (no transform steps); steps go to tables/&lt;id&gt;.json through set_steps</div></div>"
     sec["Tables"] = sec["Tables"] or "<p class=empty>None yet.</p>"
+    return sec
+
+
+def index_html(dest: Path, project: str, reports: list[str]) -> str:
+    pj = j(dest / "project.json", {})
+    meas = (j(dest / "model/measures.json", {}) or {}).get("measures", [])
+    sec = sections(dest)
     nav = "<nav class=tabs>" + "".join(f"<button onclick=\"document.getElementById('{k}').scrollIntoView({{behavior:'smooth'}})\">{k}</button>" for k in sec) + "</nav>"
     body = nav + "".join(f"<section id='{k}'><h2>{k}</h2>{v}</section>" for k, v in sec.items())
     body += ("<section><h2>Edit</h2><div class=card>Every card names its JSON file in <code>" + esc(dest) + "</code>. Edit it, then send it through ABI's import"

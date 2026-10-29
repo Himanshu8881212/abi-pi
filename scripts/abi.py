@@ -7,7 +7,8 @@ project repository (read-only).
   abi.py workspace <ws>                          new workspace: an empty folder
   abi.py project <ws> <project> [name]           create_project + auto-commit + clone + full empty skeleton
   abi.py load <ws> <project> <folder|file>...    upload every data file, build the model, starter measures + report
-  abi.py sync <project>                          git pull ABI's commits, re-render the HTML views
+  abi.py sync <project>                          git pull ABI's commits, re-render the HTML views and <project>/app.html
+  abi.py app <project> [port]                    app.html live: run flows, edit measures, filter reports (as you)
   abi.py call <action> '<json>'                  one action (a 409 is printed as needs-confirmation, never confirmed)
   abi.py cli validate|diff|apply|watch <project> ABI's own CLI on the folder (bundle without .gitkeep)
 
@@ -154,11 +155,25 @@ def sync(project: str) -> dict:
     dest = folder(project)
     if not dest:
         raise SystemExit(f"No folder for project '{project}' under {WORKSPACES}; create it with `abi.py project`.")
+    git(dest, "fetch", "-q")
+    edited = git(dest, "ls-files", "--others", "--modified", "--exclude-standard").split()
+    for rel in dict.fromkeys(edited):  # hand edits ABI has now committed (cli apply): drop ours, take ABI's
+        theirs = subprocess.run(["git", "-C", str(dest), "show", f"FETCH_HEAD:{rel}"], capture_output=True, text=True)
+        ours = (dest / rel).read_text() if (dest / rel).exists() else None
+        same = lambda a, b: json.loads(a) == json.loads(b) if rel.endswith(".json") else a == b  # noqa: E731
+        if theirs.returncode == 0 and ours is not None and same(theirs.stdout, ours):
+            if git(dest, "ls-files", rel).strip():
+                git(dest, "checkout", "--", rel)
+            else:
+                (dest / rel).unlink()
     git(dest, "pull", "-q", "--rebase")
     skeleton(dest)
     from render import render  # noqa: PLC0415 (sibling script)
     views = render(dest, project)
-    return {"project": project, "folder": str(dest), "head": git(dest, "log", "-1", "--format=%h %s").strip(), "views": views}
+    from app import build  # noqa: PLC0415 (sibling script: the one-file app in the project folder)
+    views.insert(0, str(build(project)))
+    return {"project": project, "folder": str(dest), "head": git(dest, "log", "-1", "--format=%h %s").strip(), "views": views,
+            "live": f"python scripts/app.py {project}"}
 
 
 # ---------- one-shot build from a folder of files ----------
@@ -387,7 +402,7 @@ def cli(cmd: str, project: str) -> int:
         files = {}
         for p in sorted(dest.rglob("*")):
             rel = p.relative_to(dest).as_posix()
-            if p.is_file() and ".git" not in p.relative_to(dest).parts and p.name != ".gitkeep":
+            if p.is_file() and ".git" not in p.relative_to(dest).parts and p.name not in (".gitkeep", "app.html"):
                 files[rel] = json.loads(p.read_text()) if rel.endswith(".json") else p.read_text()
         out = ROOT / "scratch" / f"{project}.bundle.json"
         out.parent.mkdir(exist_ok=True)
@@ -426,6 +441,9 @@ def main(argv: list[str]) -> None:
             out = load(args[0], args[1], args[2:])
         elif cmd == "sync":
             out = sync(args[0])
+        elif cmd == "app":
+            import app  # noqa: PLC0415
+            raise SystemExit(app.main(args))
         elif cmd == "validate-files":
             out = {"errors": validate_files(folder(args[0]) or Path(args[0]))}
         elif cmd == "call":

@@ -31,6 +31,13 @@ views. `bin/abi` starts it; `/load <folder> <project>` goes from a folder of fil
   reports, ML, flows, agents, tools, security, environments, Git history; every card names the JSON file to edit) and
   one self-contained interactive page per report (KPIs, bar/line charts, hover values, sort, table toggle, CSV
   download, "how" with the MEL). Numbers come from ABI's `visual_data` rows; no CDN, opens from disk.
+- **One app per project.** `workspaces/<ws>/<project>/app.html` (written on every sync, git-excluded) holds everything
+  behind a sidebar (Overview · Analyze · Model · Data · Automate · Govern). `scripts/abi.py app <project>` serves it on
+  127.0.0.1 and it works live as the person: report filters and click-to-cross-filter, measures and glossary edited
+  through ABI's checks, flows run with their trace, ML train/score, tools run, agents asked, sources reloaded. ABI's
+  confirmations show in a dialog; the confirm token stays in the local server (the page gets an opaque one-time ID).
+  An allow-list, a per-start key header and a Host check keep other sites and other actions out; roles, users and
+  secrets stay in ABI's app. From disk the file is a snapshot.
 - **Hand edits** go back through ABI's import checks: `scripts/abi.py cli diff|apply|watch <project>` runs ABI's own CLI.
 
 ## Benchmark and what it changed (`bench/RESULTS.md`)
@@ -56,6 +63,10 @@ Bugs found and fixed by the benchmark and the tests:
    now use explicit quoting first, as the demo build does.
 3. Resumed sessions lost the grounding sources (in memory) → false masks; rebuilt from the session branch now.
 4. The model answered a question by creating measures in `yt`; questions are read-only now (rule 7, SYSTEM.md).
+5. RLS was refused as an "access change" (AGENTS.md wording); ABI lets agents set RLS rules (with a confirmation),
+   only roles/users/tenants are a person's click. Rule 4 and the model notes now say so.
+6. `sync` crashed after a hand edit (`cli apply`): the edited file blocked the pull of ABI's commit of the same file.
+   `sync` now drops a local edit ABI has committed with the same content (JSON compared parsed).
 
 ## What didn't, or only partly
 
@@ -73,7 +84,11 @@ Bugs found and fixed by the benchmark and the tests:
   `gained_category_fc` model/dataset, and four measures: `target_uplift_10pct`, `gained_change`, `gained_per_day`,
   `gained_per_day_mom`) and one pending proposal (+10 % on 12 May 2018 target rows). Review with `changes` /
   `edit_proposals` in ABI and undo/reject what you don't want; the harness never undoes on its own.
-- Test projects left in ABI: `pi_smoke`, `pi_test_layout`, `kr_drop`, `kr_full`, `s1_*`, `b_*` (delete in ABI's app).
+- Test projects left in ABI: `pi_smoke`, `pi_test_layout`, `pi_app_test`, `kr_drop`, `kr_full`, `s1_*`, `b_*`, `sec_*`
+  (delete in ABI's app).
+- Custom agents can't answer on this ABI: no LLM provider is set up in ABI itself ("No model is available"); the app
+  shows ABI's message. Tools, flows and ML run.
+- Environment files have no action (ABI gap 9): they arrive only through import, i.e. the hand-edit path.
 
 ## Which harness part needed which Pi mechanism
 
@@ -115,8 +130,16 @@ files). Tenants stay ABI's client isolation; the harness doesn't map them.
    anywhere.
 8. DuckDB's CSV auto-detect silently splits quoted multi-line rows; `add_data` could default to `quote='"',
    escape='"'` or warn when a VARCHAR column's values look shifted.
+9. No action writes `environments/<branch>.json` (`set_environment` only binds a branch); it arrives only through an
+   import, so an agent can't add one. An `set_environment_file` action (or a `sources` argument) would close it.
+10. With auto-commit on, `abi apply` says "Applied as one uncommitted change" although ABI committed it.
 
 ## Tests
 
 `.venv/bin/python -m pytest tests/` runs the offline tests (grounding rules, layout and schema validation, secret scan);
-`ABI_PI_LIVE=1` adds the live scenario and guardrail tests (GPT-6.1 Sol). Last full run (2026-10-29): **16 passed in 4 min 35 s** (4 grounding, 3 layout, 4 guardrails incl. the secret scan over sessions, logs, workspaces and git history, 5 scenarios).
+`ABI_PI_LIVE=1` adds the live scenario and guardrail tests (GPT-6.1 Sol). Last full run (2026-10-29): **34 tests**: 17 offline (grounding, layout, secret scan, `test_app.py`: the app's
+build and every server guard) and 17 live (5 scenarios, 3 guardrails, `test_sections.py`: the agent builds every
+explorer tab in a throwaway project: glossary, dataset, ML, flow, tool + agent, RLS (role change refused), environment
+and tracked-file hand edits, every tab renders). All pass; two live tests were fixed on the way (an invented-number
+check whose prompt contained the number, which ABI's D-75 rightly grounds; a role check that asserted "not tried"
+instead of "not changed").

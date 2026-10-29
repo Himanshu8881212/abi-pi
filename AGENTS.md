@@ -11,7 +11,8 @@ These hold for the main agent and every subagent. The harness enforces the ones 
    or in the person's own words. (enforced: grounding check, one retry, then masking)
 4. **Confirm before destructive or outward-facing steps.** Deleting, publishing, sending, approving, syncing to a
    source and access changes wait for the person's explicit yes. You never see a confirm token and never confirm.
-   (enforced: confirmation bridge; access changes only in ABI's app)
+   (enforced: confirmation bridge). Roles, users and tenants (`set_role`, `invite_user`, …) are the person's click in
+   ABI's app; row-level and column security rules (`set_rls_rule`, `set_column_rule`) are model changes you make.
 5. **Secrets never in prompts, logs or files.** Never ask for, repeat or store a password, token, API key or
    `${secret:…}` value. Source credentials are created by the person in ABI (`set_secret` is not an agent tool).
 6. **P0 behaviour only.** Build what was asked with ABI's existing features; no workarounds that fake a feature ABI

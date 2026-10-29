@@ -170,7 +170,7 @@ export default async function abi(pi: ExtensionAPI) {
 	py("abi_load", "Load files into ABI", "The fast path for 'here are some files': uploads every data file (csv, parquet, json, xlsx, …) of the folders/files to ABI, types a date column, builds the model, adds starter measures (row count, sums) and an Overview report, and renders the HTML views. Returns what it did and what readiness still misses. The files' contents never reach you.",
 		Type.Object({ workspace: Type.String(), project: Type.String({ pattern: "^[a-z][a-z0-9_]{0,62}$" }), paths: Type.Array(Type.String(), { minItems: 1 }) }),
 		(p) => ["load", p.workspace, p.project, ...p.paths]);
-	py("abi_sync", "Sync project folder", "Pulls ABI's commits into the project folder and re-renders the HTML views (index.html and one interactive page per report). Run after changes.",
+	py("abi_sync", "Sync project folder", "Pulls ABI's commits into the project folder and re-renders the HTML views (app.html in the project folder: everything in one page with a sidebar; plus index.html and one page per report). Run after changes. The person opens app.html live with `python scripts/app.py <project>`.",
 		Type.Object({ project: Type.String() }), (p) => ["sync", p.project]);
 	py("abi_health", "ABI health", "Checks ABI is up, the person is signed in, MCP answers and GPT-6.1 Sol is reachable.", Type.Object({}), () => ["health"]);
 	py("abi_cli", "ABI CLI", "ABI's own CLI on the project folder: validate or diff (dry runs) or apply (import the folder's hand edits through ABI's checks).",
@@ -418,7 +418,7 @@ export default async function abi(pi: ExtensionAPI) {
 			description: "ABI status: health, current project, views folder",
 			handler: async (_a, ctx) => {
 				const h = await runPy(["health"]);
-				ctx.ui.notify(`${h}\nproject: ${state.project ?? "-"}\nviews: ${ROOT}/workspaces/<workspace>/_views/<project>/index.html`, "info");
+				ctx.ui.notify(`${h}\nproject: ${state.project ?? "-"}\napp: ${ROOT}/workspaces/<workspace>/<project>/app.html (live: python scripts/app.py <project>)`, "info");
 			},
 		});
 	}
