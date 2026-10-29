@@ -177,6 +177,7 @@ Correctness sweep (round 8): every one of the 32 pages opened in Developer and i
 
 Before hosting on the local infrastructure:
 
+- [x] ABI-PI is independent: its own engine (`engine/`, a copy of ABI's backend), Postgres and data; one container (3.98 GB) holds all of it, the data in one volume. No other ABI is needed.
 - [x] Everyone signs in with their own ABI account; the app acts as them (roles, row-level security, reports). `--single` refuses the network.
 - [x] Admins (ABI workspace owners) manage people in Govern › Users & access; sections and reports per person are enforced by the server, not just hidden.
 - [x] Sessions: HttpOnly, SameSite=Strict, `Secure` behind HTTPS; sign-out and the 12 h expiry end the ABI session too.
@@ -185,11 +186,13 @@ Before hosting on the local infrastructure:
 - [x] Import refuses zip bombs and never brings waiting steps; pack file names are safe IDs.
 - [x] Tests pass (`.venv/bin/python -m pytest -q tests`).
 - [ ] Put the app behind an HTTPS reverse proxy (it speaks HTTP; the proxy should send `X-Forwarded-Proto: https`) and run it with `--open` only behind that proxy.
-- [ ] Configure ABI's email delivery so Users & access invitations and flow emails reach people.
+- [ ] Configure the engine's email delivery (`ABI_PUBLIC_URL` and the account mail server) so Users & access invitations and flow emails reach people.
+- [ ] Bring yt_cms onto the own engine: its sources (RustFS S3) and about 100M rows need the data loaded again (the old ABI's copy stays in `workspaces.old-abi/`).
+- [ ] Optional, deeper trim: the engine still carries ABI's own chat agent and full web UI (Pi and the app replace them; the UI only draws PDFs).
 - [x] ABI preview updated on 29 Oct 2026 (owner's approval) from 87018dff to fcc3aa35 with ABI's own `preview.sh` (backup first: Postgres dump and the old UI in `~/abi-preview-backups/`): PPTX (16:9, a slide per page, speaker notes say how each number is calculated) and several pages in one PDF work, also from the app's Export.
 - [x] PDF charts no longer cut off: the own engine prints landscape A4 at 0.8 (Release loop #39).
 - [x] Remotion's licence (video export): the owner confirmed on 29 Oct 2026 that they qualify for Remotion's free licence (individuals and companies up to 3 people). A larger company needs Remotion's company licence.
-- [x] ABI's worker runs with `ABI_SNAPSHOT_RETENTION_DAYS=7` (was 30): the nightly purge (03:17) keeps a week. A restart of the preview by `preview.sh` needs the variable again.
+- [x] ABI's worker runs with `ABI_SNAPSHOT_RETENTION_DAYS=7` (was 30): the nightly purge (03:17) keeps a week. A restart of the preview by `preview.sh` needs the variable again. (The old ABI; ABI-PI's own engine sets 7 days itself.)
 
 End-to-end, stress and edge cases (from round 14): `tests/test_e2e.py` drives a real app server on the throwaway project `demo/pi_app_test` through the page's own routes: measures, glossary, queries and reports created, queried and removed; exports (PDF, CSV, project zip) and the import check; commit and undo; odd input (unicode, a 5000-character name, nulls, a bad expression, a bad ID); 40 parallel requests from 7 browsers; rapid mode flips; an unknown project in the header; a 65 MB body. Steps ABI confirms are left for a person.
 
@@ -221,3 +224,5 @@ The release is now the ABI-PI container (self-hosted like n8n). Container checks
 | 38 | Agent (data leak) | With the engine inside the repo, the agent's file tools and uploads could reach `data/` (Postgres files, the lake, `accounts.txt`) and `engine/`. | Both are refused by the file-tool guard and by uploads. Test: `test_the_agents_file_tools_and_uploads_refuse_the_engines_data`. |
 | 39 | Exports (PDF) | Every PDF export cut off the right side of its charts (bar and line alike): the engine draws them for a 1280 px viewport and printed on a portrait Letter sheet (816 px). An ABI gap until now; the engine is ABI-PI's own copy, so fixed there. | `report_snapshot` prints landscape A4 at scale 0.8 (laid out 1309 px wide): one-pagers and board packs show whole charts. Test: `test_report_pdf_is_landscape_a4_so_charts_are_not_cut_off`. |
 | 40 | Container (size) | The image carried two headless Chromes (Remotion's and the engine's), two Pythons (pip copies of DuckDB, jsonschema, cryptography next to the engine's venv), the uv binary and the repo's tests, benchmark and demo converters: 4.5 GB. | One Chrome (Remotion renders with the engine's, `REMOTION_BROWSER`), one Python (the engine's venv first on PATH), uv only at build time, dev files ignored: 3.98 GB. Checked in a fresh container: PDF, PPTX and a video render. |
+
+Release loop on the independent ABI-PI (29 Oct 2026, findings 35–40): pass 1 found the PDF cut-off (#39) and the image weight (#40); passes 2 and 3 found nothing new on the own engine and the trimmed container (security fuzz without publish or send, Settings, 200 parallel queries over 10 sessions, a forged cookie, a hard kill with the data kept, zip export/import, PDF/PPTX/video inside the container, no secret in logs, files, layers or `docker inspect` beyond what was passed). Loop stopped.
