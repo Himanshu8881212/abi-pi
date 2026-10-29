@@ -1,0 +1,54 @@
+[project]
+name = "abi"
+version = "0.5.0a0"
+requires-python = ">=3.13,<3.14"
+license = "AGPL-3.0-or-later"
+# Pins from work/validation/V-01.md. Only what F-01 runs; later tasks add their own.
+dependencies = [
+    "fastapi>=0.142,<0.143",
+    "uvicorn>=0.54,<0.55",
+    "procrastinate>=3.10,<3.11",
+    "psycopg[binary]>=3.3,<3.4",
+    "duckdb>=1.5.2,<1.6",
+    "pygit2>=1.20,<1.21",
+    "openai>=3.22,<3.23",
+    "cryptography>=50,<51",
+    "jsonschema>=4.26,<4.27",
+    "sqlglot>=30.20,<31",
+    "lark>=1.3,<1.4",
+    "typer>=0.27,<0.28",
+    "croniter>=6.2,<6.3",  # flow schedule triggers (T-03); already a Procrastinate dependency
+    "aiosmtplib>=5.1,<5.2",
+    "playwright>=1.63,<1.64",
+    "httpx2>=2.13,<3",  # deliver_message transport (T-05.1) and starlette TestClient
+    "clickhouse-connect>=1.9,<1.10",
+    "pymysql>=1.2,<1.3",
+    "scikit-learn>=1.9,<1.10",
+    "lightgbm>=4.7,<4.8",
+    "numpy>=2.5,<2.6",
+    "threadpoolctl>=3.7,<3.8",
+    "statsforecast>=2.1,<2.2",
+    "pyarrow>=25,<26",  # SE-9 Arrow/Parquet export (X-03.2)
+    "mcp>=2.2,<2.3",  # SE-9 MCP server (X-03.3)
+    "mcp-types>=2.2,<2.3",  # imported by agent/mcp.py; mcp pins the exact version
+    "wasmtime>=49,<50",
+    "pyjwt[crypto]>=2.15,<2.16",  # SC-1 OIDC ID tokens (E-01.1); already locked via mcp
+    "python-pptx>=1.0.2,<1.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9,<10",
+    "ruff>=0.16,<0.17",
+    "hypothesis>=6.168,<6.169",
+    "aiosmtpd>=1.4,<1.5",
+    "pypdf>=6.19,<6.20",
+    "pytest-xdist>=3.8,<3.9",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

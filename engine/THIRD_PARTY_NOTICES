@@ -1,0 +1,44 @@
+Third-party components shipped in the Docker image that are not under this project's license (GNU AGPL v3.0 or later).
+
+DuckDB mysql extension (mysql_scanner.duckdb_extension), preinstalled for MySQL/MariaDB sources (PRD IN-2)
+  License: GNU Lesser General Public License v2.1 (https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html).
+  The extension's own source is MIT; the binary statically links MariaDB Connector/C (LGPL v2.1).
+  Source: https://github.com/duckdb/duckdb-mysql
+          https://github.com/mariadb-corporation/mariadb-connector-c
+  DuckDB loads it at runtime as a separate library; replace it under ~/.duckdb/extensions/ in the image
+  (or run `INSTALL mysql FORCE`) to use a build of your own. This project's code does not link it.
+
+wasmtime (Python package `wasmtime` 49), runtime of the calculation tool sandbox (PRD TL-5)
+  License: Apache License 2.0 WITH LLVM-exception (https://github.com/bytecodealliance/wasmtime-py/blob/main/LICENSE).
+  Source: https://github.com/bytecodealliance/wasmtime-py
+
+CPython 3.13.15 built for WASI (python-3.13.15-wasi_sdk-24.zip), the interpreter inside that sandbox (PRD TL-5)
+  License: Python Software Foundation License Version 2 (https://docs.python.org/3/license.html); the full text
+  ships next to it in the image as /opt/abi/sandbox/LICENSE.
+  Build: https://github.com/brettcannon/cpython-wasi-build (MIT), source https://github.com/python/cpython
+
+Natural Earth 1:110m Admin 0 countries v5.1.1 (frontend/src/world.json), the shapes of the map visual (PRD RP-1)
+  License: public domain (https://www.naturalearthdata.com/about/terms-of-use/); no attribution required.
+  Stripped to names and ISO codes, coordinates rounded to 0.01 degrees (work/validation/X-05.4.md).
+  Source: https://github.com/nvkelso/natural-earth-vector (geojson/ne_110m_admin_0_countries.geojson)
+
+Apache ECharts 6 (bundled in the web UI), NOTICE:
+  Apache ECharts
+  Copyright 2017-2026 The Apache Software Foundation
+  This product includes software developed at The Apache Software Foundation (https://www.apache.org/).
+
+python-pptx 1.0.2 (Python package), writes PowerPoint report exports (PRD RP-6, MULTI-EXPORT.2)
+  License: MIT (https://github.com/scanny/python-pptx/blob/master/LICENSE). Source: https://github.com/scanny/python-pptx
+  Its dependencies: Pillow 13 (MIT-CMU; its wheels bundle libjpeg-turbo, libpng, zlib, libtiff, libwebp, FreeType,
+  Little CMS, OpenJPEG, HarfBuzz and others, each licence text in Pillow's *.dist-info), lxml 6 (BSD-3-Clause; bundles
+  libxml2 and libxslt, MIT), XlsxWriter 3 (BSD-2-Clause).
+  Portions of this software are copyright © The FreeType Project (www.freetype.org). All rights reserved.
+
+Every other component is under a licence compatible with the AGPL v3.0 (MIT, BSD, ISC, Apache-2.0, MPL-2.0, PSF,
+LGPL, GPL-2.0 with the libgit2 linking exception; audit in work/validation/LICENSE-AGPL.md). Their licence texts ship
+with them: each Python package's in its *.dist-info folder under /app/backend/.venv, and the web UI's bundled
+packages in one file the app serves at /licenses.md. That file also carries the code Monaco Editor vendors inside its
+own package: Monaco's ThirdPartyNotices.txt (Node.js path library, marked, js-beautify, TypeScript, ...) and
+DOMPurify's licence (MPL-2.0 OR Apache-2.0, used under Apache-2.0); Monaco's bundled Microsoft language services
+(vscode-*-languageservice, jsonc-parser, vscode-uri) are MIT, Copyright (c) Microsoft Corporation, with glob.js also
+Copyright (c) 2013, Nick Fitzgerald (MIT).

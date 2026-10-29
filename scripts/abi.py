@@ -31,10 +31,10 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 WORKSPACES = Path(os.environ.get("ABI_PI_WORKSPACES", ROOT / "workspaces"))
-URL = os.environ.get("ABI_URL", "http://127.0.0.1:8770")
-ABI_PROJECTS = Path(os.environ.get("ABI_PROJECTS_PATH", "~/abi-preview/projects")).expanduser()
-ABI_CLI = Path(os.environ.get("ABI_BACKEND", "~/Work/Working/ABI-preview/backend")).expanduser()
-SCHEMAS = Path(os.environ.get("ABI_SCHEMAS", "~/Work/Working/ABI/schemas/v1")).expanduser()
+URL = os.environ.get("ABI_URL", "http://127.0.0.1:8780")
+ABI_PROJECTS = Path(os.environ.get("ABI_PROJECTS_PATH", HERE.parent / "data/projects")).expanduser()
+ABI_CLI = Path(os.environ.get("ABI_BACKEND", HERE.parent / "engine/backend")).expanduser()
+SCHEMAS = Path(os.environ.get("ABI_SCHEMAS", HERE.parent / "engine/schemas/v1")).expanduser()
 PROJECT_ID = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 SKELETON = ["sources", "tables", "model", "reports", "ml", "flows", "agents", "tools", "security", "environments", "docs"]
 DATA = {".csv", ".tsv", ".parquet", ".json", ".jsonl", ".ndjson", ".xlsx", ".avro", ".arrow", ".sqlite"}
@@ -379,7 +379,7 @@ def starter_report(project: str) -> str:
 
 # ---------- guards and checks ----------
 
-DENY = [Path("~/abi-preview").expanduser(), Path("~/.pi").expanduser(), Path("~/.ssh").expanduser()]
+DENY = [HERE.parent / "data", HERE.parent / "engine", Path("~/abi-preview").expanduser(), Path("~/.pi").expanduser(), Path("~/.ssh").expanduser()]
 
 
 def guard(path: Path) -> None:

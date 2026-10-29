@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.abi.invalid/v1/roles.json",
+  "title": "Roles",
+  "description": "security/roles.json: {user_id: role} per project (PRD §6.6, SC-2, DECISIONS D-1). Changing it requires Owner (enforced at import, M-06).",
+  "type": "object",
+  "required": ["$schema"],
+  "properties": {
+    "$schema": {"const": "https://schema.abi.invalid/v1/roles.json"}
+  },
+  "patternProperties": {
+    "^[1-9][0-9]*$": {"enum": ["owner", "editor", "viewer"]}
+  },
+  "additionalProperties": false,
+  "examples": [
+    {"$schema": "https://schema.abi.invalid/v1/roles.json", "1": "owner", "7": "editor", "12": "viewer"}
+  ]
+}

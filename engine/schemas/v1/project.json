@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.abi.invalid/v1/project.json",
+  "title": "Project",
+  "description": "project.json: name, schema version, settings (PRD §6.6). The project's ID is its folder name.",
+  "type": "object",
+  "required": ["$schema", "name", "schema_version"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {"const": "https://schema.abi.invalid/v1/project.json"},
+    "name": {"type": "string", "minLength": 1},
+    "schema_version": {"const": 1},
+    "description": {"type": "string", "minLength": 1, "description": "Purpose of the project (§8 Start here); drafted by the Documenter when missing (DC-5)."},
+    "settings": {
+      "type": "object",
+      "properties": {
+        "auto_commit": {"type": "boolean", "description": "PC-6: commit every change right away with the proposed message."},
+        "time_zone": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9_+/-]+$", "description": "SE-13: IANA time zone of day boundaries and time intelligence (e.g. Europe/Berlin), over the tenant's; default UTC. Queries refuse a name that isn't a zone."},
+        "currency": {"type": "string", "pattern": "^[A-Z]{3}$", "description": "SE-13: ISO 4217 display currency (e.g. EUR), over the tenant's."},
+        "remote": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["url"],
+          "description": "PC-8 Git remote (push, pull, remote_branches): HTTPS only (D-34). The password, a token for GitHub/GitLab/Gitea, goes only to this host and only if the secret's allowed_hosts holds it (D-2).",
+          "properties": {
+            "url": {"type": "string", "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._~/-]*$", "description": "https://<host>[:port]/<path>: no user or password, query or other scheme"},
+            "username": {"type": "string", "pattern": "^[A-Za-z0-9._@+-]{1,100}$"},
+            "password": {"type": "string", "pattern": "^\\$\\{secret:[A-Za-z0-9_]+\\}$", "description": "exactly ${secret:NAME}"}
+          },
+          "dependentRequired": {"username": ["password"], "password": ["username"]}
+        },
+        "delivery": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "AT-1 delivery targets for send_email and post_message. Credentials only as ${secret:NAME} (§6.6, SC-4); each secret goes only to its allowed_hosts (D-2). Channel `inbox` (the in-app inbox) is built in.",
+          "properties": {
+            "smtp": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["host", "port", "from", "security"],
+              "properties": {
+                "host": {"type": "string", "pattern": "^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$"},
+                "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+                "from": {"type": "string", "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"},
+                "security": {"enum": ["starttls", "tls", "none"], "description": "none: a local relay without credentials only"},
+                "username": {"type": "string", "pattern": "^[^\\r\\n]+$"},
+                "password": {"type": "string", "pattern": "^\\$\\{secret:[A-Za-z0-9_]+\\}$", "description": "exactly ${secret:NAME}"}
+              },
+              "dependentRequired": {"username": ["password"], "password": ["username"]},
+              "if": {"properties": {"security": {"const": "none"}}},
+              "then": {"properties": {"username": false, "password": false}}
+            },
+            "channels": {
+              "type": "object",
+              "propertyNames": {"minLength": 1, "maxLength": 200, "not": {"const": "inbox"}},
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["type", "url"],
+                "properties": {
+                  "type": {"enum": ["slack", "teams", "webhook"], "description": "teams: a Workflows webhook (Adaptive Card)"},
+                  "url": {"type": "string", "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[^\\s]*\\$\\{secret:[A-Za-z0-9_]+\\}", "description": "https:// with a literal host; the token part as ${secret:NAME}"},
+                  "secret": {"type": "string", "pattern": "^\\$\\{secret:[A-Za-z0-9_]+\\}$", "description": "webhook only, exactly ${secret:NAME}: FL-7 flow status posts carry X-ABI-Timestamp and X-ABI-Signature: v1=<hex HMAC-SHA256(secret, timestamp + \".\" + body)>; the key is never sent"}
+                },
+                "if": {"properties": {"type": {"not": {"const": "webhook"}}}},
+                "then": {"properties": {"secret": false}}
+              }
+            }
+          }
+        },
+        "inbound": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "AG-5/SC-7 inbound channels: the secrets that verify their requests, only as ${secret:NAME} (SC-4). Slack and Teams secrets are HMAC keys used in-process and never sent anywhere; the IMAP password goes only to its host (D-2).",
+          "properties": {
+            "slack": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["signing_secret"],
+              "properties": {"signing_secret": {"type": "string", "pattern": "^\\$\\{secret:[A-Za-z0-9_]+\\}$", "description": "the Slack app's signing secret, exactly ${secret:NAME}"}}
+            },
+            "teams": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["hmac_token"],
+              "properties": {"hmac_token": {"type": "string", "pattern": "^\\$\\{secret:[A-Za-z0-9_]+\\}$", "description": "the outgoing webhook's security token (base64), exactly ${secret:NAME}"}}
+            },
+            "imap": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["host", "username", "password", "authserv_id"],
+              "description": "Email inbound (X-02.6): the worker reads unseen mail every minute over IMAP with TLS; a message counts only when the top Authentication-Results header, added by the trusted mail server `authserv_id`, shows dmarc=pass for its From domain (D-32).",
+              "properties": {
+                "host": {"type": "string", "pattern": "^[A-Za-z0-9.-]{1,253}$"},
+                "port": {"type": "integer", "minimum": 1, "maximum": 65535, "default": 993},
+                "username": {"type": "string", "minLength": 1, "maxLength": 320},
+                "password": {"type": "string", "pattern": "^\\$\\{secret:[A-Za-z0-9_]+\\}$", "description": "exactly ${secret:NAME}; the secret's allowed_hosts must hold `host`"},
+                "mailbox": {"type": "string", "pattern": "^[A-Za-z0-9 ._/-]{1,100}$", "default": "INBOX"},
+                "authserv_id": {"type": "string", "pattern": "^[A-Za-z0-9.-]{1,253}$", "description": "the authserv-id your receiving mail server writes into Authentication-Results (e.g. mx.example.com)"}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    {"$schema": "https://schema.abi.invalid/v1/project.json", "name": "Supply Chain", "description": "Material flows from suppliers to plants.", "schema_version": 1, "settings": {"auto_commit": false, "time_zone": "Europe/Berlin", "currency": "EUR",
+      "remote": {"url": "https://github.com/acme/supply-chain.git", "username": "x-access-token", "password": "${secret:GITHUB_TOKEN}"}}},
+    {"$schema": "https://schema.abi.invalid/v1/project.json", "name": "Shop", "schema_version": 1, "settings": {"delivery": {
+      "smtp": {"host": "smtp.example.com", "port": 587, "from": "bi@example.com", "security": "starttls", "username": "bi@example.com", "password": "${secret:SMTP_PASSWORD}"},
+      "channels": {
+        "#ops": {"type": "slack", "url": "https://hooks.slack.com/services/${secret:SLACK_OPS}"},
+        "sales-team": {"type": "teams", "url": "https://prod-01.westeurope.logic.azure.com:443/workflows/abc/triggers/manual/paths/invoke?api-version=2016-06-01&sig=${secret:TEAMS_SIG}"},
+        "erp": {"type": "webhook", "url": "https://erp.example.com/hooks/${secret:ERP_TOKEN}", "secret": "${secret:ERP_SIGNING}"}
+      }},
+      "inbound": {"slack": {"signing_secret": "${secret:SLACK_SIGNING}"}, "teams": {"hmac_token": "${secret:TEAMS_HMAC}"},
+        "imap": {"host": "imap.example.com", "port": 993, "username": "bi@example.com", "password": "${secret:IMAP_PASSWORD}", "mailbox": "INBOX", "authserv_id": "mx.example.com"}}}}
+  ]
+}

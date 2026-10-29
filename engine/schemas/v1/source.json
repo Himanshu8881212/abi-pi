@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.abi.invalid/v1/source.json",
+  "title": "Source",
+  "description": "sources/<id>.json: connection reference and refresh mode (PRD §6.6, IN-1, IN-2, IN-6). Credentials only as ${secret:NAME} (SC-4).",
+  "type": "object",
+  "required": ["$schema", "id", "location"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {"const": "https://schema.abi.invalid/v1/source.json"},
+    "id": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$", "description": "The file name and the table add_data loads it into (a table name)"},
+    "description": {"type": "string"},
+    "location": {"type": "string", "minLength": 1, "description": "Server path (under the files root), s3://…, http(s)://…, or postgres|mysql|clickhouse|clickhouses://host[:port]/database (no user, password or options). SC-4: no login (user:password@) and, except http(s)://, no '?' query", "not": {"pattern": "://[^/?#]*@|^(?![hH][tT][tT][pP][sS]?://)[\\s\\S]*://[\\s\\S]*\\?"}},
+    "format": {"enum": ["parquet", "csv", "json", "xlsx", "avro", "arrow", "delta", "iceberg", "sqlite"], "description": "Default: from the file extension, or a server folder holding _delta_log/ (delta) or metadata/ (iceberg). IN-4: delta and iceberg are folders (server path or s3://; Delta on S3 needs s3.endpoint and url_style path), sqlite is a server path with `sqlite`"},
+    "sqlite": {
+      "type": "object",
+      "description": "IN-4: the table a SQLite file source reads",
+      "required": ["table"],
+      "additionalProperties": false,
+      "properties": {"table": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$"}}
+    },
+    "csv": {
+      "type": "object",
+      "description": "IN-2: CSV dialect for files DuckDB's auto-detect rejects (format csv only). Only the options given override auto-detect (IN-5)",
+      "additionalProperties": false,
+      "properties": {
+        "quote": {"enum": ["\"", "'"]},
+        "escape": {"enum": ["\"", "'", "\\"], "description": "The character that escapes the quote inside a quoted value"},
+        "delimiter": {"enum": [",", ";", "|", "\t"]},
+        "header": {"type": "boolean", "description": "The first line holds the column names"},
+        "strict_mode": {"type": "boolean", "description": "false: also read rows that break RFC 4180, e.g. a quoted value followed by more text"}
+      }
+    },
+    "s3": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "key_id": {"type": "string", "pattern": "^\\$\\{secret:[A-Za-z0-9_]+\\}$"},
+        "secret": {"type": "string", "pattern": "^\\$\\{secret:[A-Za-z0-9_]+\\}$"},
+        "region": {"type": "string"},
+        "endpoint": {"type": "string"},
+        "url_style": {"enum": ["path", "vhost"]},
+        "use_ssl": {"type": "boolean"}
+      }
+    },
+    "headers": {
+      "type": "object",
+      "description": "HTTP headers; every value must contain a ${secret:NAME} reference",
+      "additionalProperties": {"type": "string", "pattern": "\\$\\{secret:[A-Za-z0-9_]+\\}"}
+    },
+    "database": {
+      "type": "object",
+      "description": "IN-2, IN-3: the table a postgres://, mysql:// or clickhouse(s):// location reads, and its login (secret references only, D-27)",
+      "required": ["table", "user", "password"],
+      "additionalProperties": false,
+      "properties": {
+        "table": {"type": "string", "pattern": "^([A-Za-z_][A-Za-z0-9_]{0,62}\\.)?[A-Za-z_][A-Za-z0-9_]{0,62}$", "description": "schema.table or table"},
+        "user": {"type": "string", "pattern": "^\\$\\{secret:[A-Za-z0-9_]+\\}$"},
+        "password": {"type": "string", "pattern": "^\\$\\{secret:[A-Za-z0-9_]+\\}$"},
+        "incremental": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$", "description": "IN-6: the monotonic column daily loads append past; default: the table's auto-increment/identity key"},
+        "sync": {"type": "boolean", "default": false, "description": "WB-10: an Owner may write this table's edits back to the source table (sync_edits, Postgres and MySQL/MariaDB only). The source login then needs UPDATE, INSERT and DELETE rights on that table, and the table needs a primary key equal to the model key"}
+      }
+    },
+    "api": {
+      "type": "object",
+      "description": "API-SRC: the https:// location is a REST/JSON or CSV API, fetched page by page on each load (refresh daily, or every `every_hours`). Secrets only as whole ${secret:NAME} values, sent only to their allowed hosts (D-2); the host must pass API tools' address policy (D-35)",
+      "additionalProperties": false,
+      "properties": {
+        "format": {"enum": ["json", "csv"], "default": "json"},
+        "records": {"type": "string", "pattern": "^(/[^/]*)*$", "default": "", "description": "JSON pointer to the array of records in each response (json only)"},
+        "query": {
+          "type": "object",
+          "description": "Query parameters; a value is either a whole ${secret:NAME} or has no '${'",
+          "propertyNames": {"pattern": "^[A-Za-z0-9_.\\[\\]$-]{1,100}$"},
+          "additionalProperties": {"oneOf": [{"type": "integer"}, {"type": "string", "pattern": "^(\\$\\{secret:[A-Za-z0-9_]+\\}|(?![\\s\\S]*\\$\\{)[\\s\\S]*)$"}]}
+        },
+        "auth": {
+          "type": "object",
+          "required": ["kind"],
+          "oneOf": [
+            {"additionalProperties": false, "required": ["token"], "properties": {"kind": {"const": "bearer"}, "token": {"type": "string", "pattern": "^\\$\\{secret:[A-Za-z0-9_]+\\}$"}}},
+            {"additionalProperties": false, "required": ["name", "value"], "properties": {"kind": {"const": "header"}, "name": {"type": "string", "pattern": "^[A-Za-z0-9-]{1,100}$"}, "value": {"type": "string", "pattern": "^\\$\\{secret:[A-Za-z0-9_]+\\}$"}}},
+            {"additionalProperties": false, "required": ["username", "password"], "properties": {"kind": {"const": "basic"}, "username": {"type": "string", "pattern": "^\\$\\{secret:[A-Za-z0-9_]+\\}$"}, "password": {"type": "string", "pattern": "^\\$\\{secret:[A-Za-z0-9_]+\\}$"}}},
+            {"additionalProperties": false, "required": ["token_url", "client_id", "client_secret"], "description": "API-SRC.3: OAuth 2.0 client credentials (RFC 6749 §4.4); access tokens are kept in memory only",
+             "properties": {"kind": {"const": "oauth_client"}, "token_url": {"type": "string", "maxLength": 500, "pattern": "^https://[A-Za-z0-9.-]+(:\\d{1,5})?(/[^\\s#]*)?$"},
+                            "client_id": {"type": "string", "pattern": "^\\$\\{secret:[A-Za-z0-9_]+\\}$"}, "client_secret": {"type": "string", "pattern": "^\\$\\{secret:[A-Za-z0-9_]+\\}$"},
+                            "scope": {"type": "string", "maxLength": 1000, "pattern": "^[\\x21\\x23-\\x5B\\x5D-\\x7E]+( [\\x21\\x23-\\x5B\\x5D-\\x7E]+)*$"}}},
+            {"additionalProperties": false, "required": ["authorize_url", "token_url", "client_id"], "description": "API-SRC.3: OAuth 2.0 authorization code with PKCE (RFC 6749 §4.1, RFC 7636); an Editor connects it in the browser, the refresh token is stored encrypted and bound to the token endpoint's host",
+             "properties": {"kind": {"const": "oauth_code"}, "authorize_url": {"type": "string", "maxLength": 500, "pattern": "^https://[A-Za-z0-9.-]+(:\\d{1,5})?(/[^\\s#]*)?$"},
+                            "token_url": {"type": "string", "maxLength": 500, "pattern": "^https://[A-Za-z0-9.-]+(:\\d{1,5})?(/[^\\s#]*)?$"},
+                            "client_id": {"type": "string", "pattern": "^[A-Za-z0-9._~:@+/=-]{1,200}$", "description": "Public: it is in the browser's URL"},
+                            "client_secret": {"type": "string", "pattern": "^\\$\\{secret:[A-Za-z0-9_]+\\}$", "description": "Omitted: a public client (PKCE only)"},
+                            "scope": {"type": "string", "maxLength": 1000, "pattern": "^[\\x21\\x23-\\x5B\\x5D-\\x7E]+( [\\x21\\x23-\\x5B\\x5D-\\x7E]+)*$"}}}
+          ]
+        },
+        "pagination": {
+          "type": "object",
+          "required": ["kind"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"enum": ["page", "offset", "cursor", "next_link"]},
+            "param": {"type": "string", "pattern": "^[A-Za-z0-9_.\\[\\]-]{1,100}$", "description": "The query parameter carrying the page number, offset or cursor"},
+            "start": {"type": "integer", "minimum": 0, "description": "First page number (default 1) or offset (default 0)"},
+            "pointer": {"type": "string", "pattern": "^(/[^/]*)*$", "description": "cursor: JSON pointer to the next cursor in a response; next_link: to the next URL (default: the Link header, RFC 8288). A next link must stay on the location's host"},
+            "max_pages": {"type": "integer", "minimum": 1, "maximum": 100000, "default": 100}
+          },
+          "allOf": [
+            {"if": {"properties": {"kind": {"enum": ["page", "offset", "cursor"]}}}, "then": {"required": ["param"]}},
+            {"if": {"properties": {"kind": {"const": "cursor"}}}, "then": {"required": ["pointer"]}}
+          ]
+        },
+        "columns": {
+          "type": "object",
+          "description": "Column mapping: name -> {pointer in a record (json only, default /<name>), DuckDB type}; unmapped columns keep auto-detection (IN-5)",
+          "propertyNames": {"pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$"},
+          "additionalProperties": {"type": "object", "required": ["type"], "additionalProperties": false,
+                                   "properties": {"pointer": {"type": "string", "pattern": "^(/[^/]*)*$"}, "type": {"type": "string"}}}
+        },
+        "rate": {"type": "integer", "minimum": 1, "maximum": 6000, "description": "At most this many requests per minute"},
+        "incremental": {
+          "type": "object",
+          "description": "IN-6: send the largest stored value of `field` as query parameter `param` and append the records past it (a changed definition reloads fully)",
+          "required": ["field", "param"],
+          "additionalProperties": false,
+          "properties": {
+            "field": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$", "description": "A loaded column (numeric, date/time or text)"},
+            "param": {"type": "string", "pattern": "^[A-Za-z0-9_.\\[\\]-]{1,100}$"}
+          }
+        },
+        "every_hours": {"type": "integer", "minimum": 1, "maximum": 24, "description": "Load every this many hours (default: daily)"}
+      }
+    },
+    "refresh": {"enum": ["on_change", "daily", "live"], "description": "IN-6: files on change, databases and APIs daily, ClickHouse live (IN-3: never copied)"},
+    "quality": {
+      "type": "object",
+      "description": "IN-8 data-quality settings",
+      "additionalProperties": false,
+      "properties": {
+        "fresh_hours": {"type": "number", "exclusiveMinimum": 0, "description": "A file source is stale when its last successful load is older than this; without it a file source has no freshness check (daily database sources: 26 h)"}
+      }
+    }
+  },
+  "if": {"properties": {"location": {"pattern": "^clickhouses?://"}}},
+  "then": {"required": ["database"], "properties": {"refresh": {"const": "live"}}},
+  "else": {
+    "if": {"anyOf": [{"required": ["database"]}, {"required": ["api"]}]},
+    "then": {"properties": {"refresh": {"const": "daily"}}},
+    "else": {"properties": {"refresh": {"const": "on_change"}}}
+  },
+  "examples": [
+    {"$schema": "https://schema.abi.invalid/v1/source.json", "id": "erp", "location": "s3://erp-exports/consumption.parquet", "format": "parquet",
+     "s3": {"key_id": "${secret:ERP_KEY}", "secret": "${secret:ERP_SECRET}", "region": "eu-central-1"}, "refresh": "on_change", "quality": {"fresh_hours": 30}},
+    {"$schema": "https://schema.abi.invalid/v1/source.json", "id": "orders", "location": "postgres://erp.example.com:5432/erp",
+     "database": {"table": "sales.orders", "user": "${secret:ERP_USER}", "password": "${secret:ERP_PASSWORD}", "incremental": "order_id", "sync": true}, "refresh": "daily"},
+    {"$schema": "https://schema.abi.invalid/v1/source.json", "id": "legacy", "location": "exports/shop.sqlite", "format": "sqlite", "sqlite": {"table": "orders"}, "refresh": "on_change"},
+    {"$schema": "https://schema.abi.invalid/v1/source.json", "id": "videos", "location": "exports/USvideos.csv",
+     "csv": {"quote": "\"", "escape": "\"", "delimiter": ",", "header": true, "strict_mode": false}, "refresh": "on_change"},
+    {"$schema": "https://schema.abi.invalid/v1/source.json", "id": "events", "location": "clickhouses://ch.example.com/analytics",
+     "database": {"table": "events", "user": "${secret:CH_USER}", "password": "${secret:CH_PASSWORD}"}, "refresh": "live"},
+    {"$schema": "https://schema.abi.invalid/v1/source.json", "id": "tickets", "location": "https://api.example.com/v2/tickets",
+     "api": {"records": "/data", "query": {"per_page": 100, "api_key": "${secret:HELPDESK_KEY}"}, "auth": {"kind": "bearer", "token": "${secret:HELPDESK_TOKEN}"},
+             "pagination": {"kind": "next_link", "max_pages": 500}, "columns": {"opened": {"pointer": "/dates/opened", "type": "DATE"}}, "rate": 60,
+             "incremental": {"field": "opened", "param": "since"}, "every_hours": 6},
+     "refresh": "daily"},
+    {"$schema": "https://schema.abi.invalid/v1/source.json", "id": "deals", "location": "https://api.crm.example.com/v1/deals",
+     "api": {"records": "/results", "auth": {"kind": "oauth_code", "authorize_url": "https://crm.example.com/oauth/authorize",
+             "token_url": "https://api.crm.example.com/oauth/token", "client_id": "abi-reports", "client_secret": "${secret:CRM_CLIENT_SECRET}", "scope": "deals.read"}},
+     "refresh": "daily"}
+  ]
+}

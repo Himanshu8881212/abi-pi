@@ -4,7 +4,7 @@
   llm-base   CLIProxyAPI base URL (from ~/cliproxy-server-credentials.txt)
   llm-key    CLIProxyAPI API key
   abi-token  an ABI session token: $ABI_TOKEN, else sign in as $ABI_USER (default himanshu) with the
-             password from ~/abi-preview/accounts.txt. The password never leaves this process.
+             password from data/accounts.txt (scripts/accounts.py). The password never leaves this process.
 
 Stdlib only (runs on the system python3).
 """
@@ -15,9 +15,9 @@ import sys
 import urllib.request
 from pathlib import Path
 
-ABI_URL = os.environ.get("ABI_URL", "http://127.0.0.1:8770")
+ABI_URL = os.environ.get("ABI_URL", "http://127.0.0.1:8780")
 PROXY = Path(os.environ.get("CLIPROXY_CREDS", "~/cliproxy-server-credentials.txt")).expanduser()
-ACCOUNTS = Path(os.environ.get("ABI_ACCOUNTS", "~/abi-preview/accounts.txt")).expanduser()
+ACCOUNTS = Path(os.environ.get("ABI_ACCOUNTS", Path(__file__).resolve().parent.parent / "data/accounts.txt")).expanduser()
 
 
 def proxy(label: str) -> str:

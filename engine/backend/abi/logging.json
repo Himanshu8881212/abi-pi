@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "disable_existing_loggers": false,
+  "formatters": {"json": {"()": "abi.ops.Json"}},
+  "handlers": {"stdout": {"class": "logging.StreamHandler", "formatter": "json", "stream": "ext://sys.stdout"}},
+  "loggers": {
+    "uvicorn": {"handlers": [], "propagate": true},
+    "uvicorn.error": {"handlers": [], "propagate": true},
+    "uvicorn.access": {"handlers": [], "propagate": true}
+  },
+  "root": {"level": "INFO", "handlers": ["stdout"]}
+}

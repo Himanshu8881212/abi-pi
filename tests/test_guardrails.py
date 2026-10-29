@@ -45,7 +45,7 @@ def test_invented_number_in_a_draft_is_caught():
 
 
 def _secrets() -> list[str]:
-    pw = next(l.split()[-1] for l in Path("~/abi-preview/accounts.txt").expanduser().read_text().splitlines()
+    pw = next(l.split()[-1] for l in (Path(__file__).resolve().parent.parent / "data/accounts.txt").read_text().splitlines()
               if re.match(r"\s*himanshu\b", l))
     key = subprocess.run(["python3", str(ROOT / "scripts/creds.py"), "llm-key"], capture_output=True, text=True).stdout.strip()
     rustfs = [subprocess.run(["security", "find-generic-password", "-s", "abi-pi-rustfs", "-a", a, "-w"], capture_output=True,

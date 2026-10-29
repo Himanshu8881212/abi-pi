@@ -9,7 +9,7 @@ import re
 import sys
 from pathlib import Path
 
-SRC = Path(sys.argv[1] if len(sys.argv) > 1 else "~/Work/Working/ABI/backend").expanduser()
+SRC = Path(sys.argv[1] if len(sys.argv) > 1 else Path(__file__).resolve().parent.parent / "engine/backend").expanduser()
 OUT = Path(__file__).resolve().parent.parent / "harness" / "areas.json"
 
 # copied from abi/agent/__init__.py (CORE, AREAS: description and module prefixes)

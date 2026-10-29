@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.abi.invalid/v1/datasets.json",
+  "title": "Datasets",
+  "description": "model/datasets.json: named, saved semantic queries at a defined grain (glossary \"Dataset\", SE-1), reused by reports, tools, flows and ML. `$defs.query` is the semantic query format (glossary \"Semantic query\") every consumer sends to the semantic engine: action `semantic_query` (REST: POST /api/actions/semantic_query with the query plus `project`, SE-9). Time is the date table: group by and filter on calendar.year/.quarter/.month/.week (ISO week, with .week_year)/.day; YTD and the other time functions are measures. Result columns: the dimensions, `grouping_id` when totals are asked (GROUPING_ID bits in dimension order, 0 = detail row), then the measure IDs. Row order: `order_by`, then grouping_id (detail rows before totals), then the dimensions ascending; NULLs last. Results are cached per query and data snapshot (SE-7).",
+  "type": "object",
+  "required": ["$schema", "datasets"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {"const": "https://schema.abi.invalid/v1/datasets.json"},
+    "datasets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "query"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$"},
+          "name": {"type": "string", "minLength": 1, "description": "Display name, shown to users"},
+          "description": {"type": "string"},
+          "owner": {"type": "string", "pattern": "^[0-9]+$", "description": "User ID of the person who created it; with the project Owners, the one who may share it (SH-1)"},
+          "sharing": {"type": "object", "additionalProperties": false, "description": "SH-1 (D-51): view-only access for accounts with no role in the project. Changed with action set_sharing; project members always see it", "properties": {"users": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[0-9]+$"}, "description": "User IDs of named recipients (their tenant must match the project, checked when they read)"}, "workspace": {"type": "boolean", "description": "Every account of the project's tenant (platform project: every platform account)"}}},
+          "query": {"$ref": "#/$defs/query"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "query": {
+      "type": "object",
+      "required": ["measures"],
+      "additionalProperties": false,
+      "properties": {
+        "measures": {"type": "array", "minItems": 1, "items": {"type": "string"}, "description": "Measure IDs (model/measures.json), never display names (PC-1)"},
+        "dimensions": {"type": "array", "items": {"type": "string", "pattern": "^[^.\\s][^.]*\\.[^.]+$"}, "description": "table.column to group by: the grain"},
+        "filters": {"type": "array", "items": {"$ref": "#/$defs/filter"}, "description": "Row filters; all must hold"},
+        "totals": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}, "description": "Extra grouping sets, each a subset of the dimensions; [] is the grand total"},
+        "order_by": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["field"],
+            "additionalProperties": false,
+            "properties": {
+              "field": {"type": "string", "description": "A dimension, measure ID or grouping_id of this query"},
+              "desc": {"type": "boolean"}
+            }
+          }
+        },
+        "limit": {"type": "integer", "minimum": 1, "maximum": 100000}
+      }
+    },
+    "filter": {
+      "type": "object",
+      "required": ["column", "op", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "column": {"type": "string", "pattern": "^[^.\\s][^.]*\\.[^.]+$", "description": "table.column"},
+        "op": {"enum": ["=", "<>", "<", "<=", ">", ">=", "in"]},
+        "value": {"description": "One value; a list for `in`", "anyOf": [{"type": ["string", "number", "boolean"]}, {"type": "array", "items": {"type": ["string", "number", "boolean", "null"]}}]}
+      }
+    }
+  },
+  "examples": [
+    {"$schema": "https://schema.abi.invalid/v1/datasets.json",
+     "datasets": [
+       {"id": "category-monthly", "name": "Sales by category and month", "description": "Monthly grain with category subtotals", "owner": "1", "sharing": {"users": ["2"], "workspace": false},
+        "query": {"measures": ["sales", "customers"], "dimensions": ["products.category", "calendar.year", "calendar.month"],
+                  "filters": [{"column": "calendar.year", "op": "in", "value": [2024, 2025]}],
+                  "totals": [["products.category"]], "order_by": [{"field": "sales", "desc": true}], "limit": 1000}}
+     ]}
+  ]
+}

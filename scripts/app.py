@@ -1385,7 +1385,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
             try:
                 with abi.as_user(self.sess and self.sess["token"]):
                     return handle()
-            except (ValueError, TypeError, KeyError, AttributeError):  # malformed input: JSON, numbers, missing fields
+            except (ValueError, TypeError, KeyError, AttributeError, ArithmeticError, SystemExit):  # malformed input: JSON, numbers (1e309), missing fields, a helper's refusal
                 with contextlib.suppress(OSError):
                     self.reply(400, b'{"error":"That request isn\'t valid."}')
             except urllib.error.URLError:  # ABI itself didn't answer (down, restarting, unreachable): say so
@@ -1840,6 +1840,8 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
                 return 404, b"{}"
         except SystemExit as e:  # vault's own messages (unsupported type, missing pypdf)
             return 200, json.dumps({"error": str(e)}).encode()
+        except FileNotFoundError:  # an OSError: guarded() would take it for a closed browser and drop the request
+            return 404, b'{"error":"That document isn\'t in the vault."}'
         if op in ("add", "rm"):
             for h0 in HUBS.values():
                 h0.emit({"type": "vault"})

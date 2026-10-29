@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.abi.invalid/v1/report.json",
+  "title": "Report",
+  "description": "reports/<id>.json: one report (RP-2): pages, visuals, layout and filters. Visuals are bound to the model by ID only (PC-1): each data visual's `query` is the semantic query format (`$defs.query` of datasets.json: measure IDs and table.column dimensions) and its data comes from the semantic engine. Filters (RP-4) apply at three levels and all must hold: report `filters`, page `filters`, and the visual's `query.filters`. `type` is optional: without it the chart type is chosen automatically (RP-3); `format` overrides the automatic number format per measure ID. A slicer lists the members of its first dimension that its query returns. Layout is in cells of a 12-column snap grid (RP-4).",
+  "type": "object",
+  "required": ["$schema", "id", "name", "pages"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {"const": "https://schema.abi.invalid/v1/report.json"},
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$", "description": "The file name without .json"},
+    "name": {"type": "string", "minLength": 1, "description": "Display name, shown to users"},
+    "description": {"type": "string"},
+    "owner": {"type": "string", "pattern": "^[0-9]+$", "description": "User ID of the person who created it; with the project Owners, the one who may share it (SH-1)"},
+    "sharing": {"type": "object", "additionalProperties": false, "description": "SH-1 (D-51): view-only access for accounts with no role in the project. Changed with action set_sharing; project members always see it", "properties": {"users": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[0-9]+$"}, "description": "User IDs of named recipients (their tenant must match the project, checked when they read)"}, "workspace": {"type": "boolean", "description": "Every account of the project's tenant (platform project: every platform account)"}}},
+    "filters": {"type": "array", "items": {"$ref": "#/$defs/filter"}, "description": "Report filters: apply to every visual"},
+    "hide_details": {"type": "boolean", "description": "On the report canvas, hide each visual's time zone and currency caption (SE-13) and its inline \"How is this calculated?\" (RP-5); both stay one click away in the visual's header, whose explanation shows the time zone and currency. Print, share and embed views keep the caption. Default false"},
+    "pages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "visuals"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$"},
+          "name": {"type": "string", "minLength": 1},
+          "filters": {"type": "array", "items": {"$ref": "#/$defs/filter"}, "description": "Page filters: apply to every visual on the page"},
+          "visuals": {"type": "array", "items": {"$ref": "#/$defs/visual"}}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "visual": {
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$"},
+        "type": {"enum": ["kpi", "bar", "line", "pie", "table", "matrix", "scatter", "slicer", "map", "text", "combo", "waterfall", "funnel", "heatmap", "treemap", "sankey"], "description": "RP-1/RP-8 visual type (map: countries by name or ISO-2/ISO-3 code; combo: first measure as bars, the others as lines; waterfall: steps of one measure; heatmap and Sankey: two dimensions); omit for the automatic choice (RP-3)"},
+        "title": {"type": "string"},
+        "query": {"$ref": "#/$defs/query"},
+        "text": {"type": "string", "description": "Markdown of a text visual"},
+        "format": {
+          "type": "object",
+          "description": "Number format per measure ID; overrides the automatic format (RP-3)",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "style": {"enum": ["number", "integer", "percent"]},
+              "decimals": {"type": "integer", "minimum": 0, "maximum": 6},
+              "compact": {"type": "boolean", "description": "1.2M instead of 1,200,000"}
+            }
+          }
+        },
+        "layout": {
+          "type": "object",
+          "required": ["x", "y", "w", "h"],
+          "additionalProperties": false,
+          "properties": {
+            "x": {"type": "integer", "minimum": 0, "maximum": 11},
+            "y": {"type": "integer", "minimum": 0},
+            "w": {"type": "integer", "minimum": 1, "maximum": 12},
+            "h": {"type": "integer", "minimum": 1}
+          }
+        }
+      },
+      "if": {"required": ["type"], "properties": {"type": {"const": "text"}}},
+      "then": {"required": ["text"], "not": {"required": ["query"]}},
+      "else": {"required": ["query"], "not": {"required": ["text"]}}
+    },
+    "query": {
+      "type": "object",
+      "required": ["measures"],
+      "additionalProperties": false,
+      "properties": {
+        "measures": {"type": "array", "minItems": 1, "items": {"type": "string"}, "description": "Measure IDs (model/measures.json), never display names (PC-1)"},
+        "dimensions": {"type": "array", "items": {"type": "string", "pattern": "^[^.\\s][^.]*\\.[^.]+$"}, "description": "table.column to group by: the grain"},
+        "filters": {"type": "array", "items": {"$ref": "#/$defs/filter"}, "description": "Row filters; all must hold"},
+        "totals": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}, "description": "Extra grouping sets, each a subset of the dimensions; [] is the grand total"},
+        "order_by": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["field"],
+            "additionalProperties": false,
+            "properties": {
+              "field": {"type": "string", "description": "A dimension, measure ID or grouping_id of this query"},
+              "desc": {"type": "boolean"}
+            }
+          }
+        },
+        "limit": {"type": "integer", "minimum": 1, "maximum": 100000}
+      }
+    },
+    "filter": {
+      "type": "object",
+      "required": ["column", "op", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "column": {"type": "string", "pattern": "^[^.\\s][^.]*\\.[^.]+$", "description": "table.column"},
+        "op": {"enum": ["=", "<>", "<", "<=", ">", ">=", "in"]},
+        "value": {"description": "One value; a list for `in`", "anyOf": [{"type": ["string", "number", "boolean"]}, {"type": "array", "items": {"type": ["string", "number", "boolean", "null"]}}]}
+      }
+    }
+  },
+  "examples": [
+    {"$schema": "https://schema.abi.invalid/v1/report.json",
+     "id": "sales-overview", "name": "Sales overview", "description": "Sales by category and month",
+     "owner": "1", "sharing": {"users": ["2"], "workspace": true},
+     "filters": [{"column": "calendar.year", "op": "in", "value": [2024, 2025]}],
+     "hide_details": true,
+     "pages": [
+       {"id": "overview", "name": "Overview",
+        "filters": [{"column": "products.category", "op": "<>", "value": "Parts"}],
+        "visuals": [
+          {"id": "total", "query": {"measures": ["sales"]}, "layout": {"x": 0, "y": 0, "w": 3, "h": 2}},
+          {"id": "by-month", "title": "Sales by month", "query": {"measures": ["sales"], "dimensions": ["calendar.month"]},
+           "layout": {"x": 3, "y": 0, "w": 9, "h": 4}},
+          {"id": "top-categories", "type": "table", "format": {"sales": {"style": "number", "decimals": 0, "compact": true}},
+           "query": {"measures": ["sales", "customers"], "dimensions": ["products.category"],
+                     "filters": [{"column": "orders.amount", "op": ">", "value": 0}],
+                     "order_by": [{"field": "sales", "desc": true}], "limit": 10},
+           "layout": {"x": 0, "y": 4, "w": 6, "h": 4}},
+          {"id": "category", "type": "slicer", "query": {"measures": ["sales"], "dimensions": ["products.category"]}},
+          {"id": "by-country", "type": "map", "query": {"measures": ["sales"], "dimensions": ["customers.country"]}},
+          {"id": "note", "type": "text", "text": "Figures exclude returns."}
+        ]}
+     ]}
+  ]
+}

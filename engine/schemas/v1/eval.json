@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.abi.invalid/v1/eval.json",
+  "title": "Agent evaluation set",
+  "description": "agents/<id>.eval.json: the evaluation set of custom agent <id> (§7.2, AG-4). A case passes when the answer is grounded, contains every `expect.contains` value and called every `expect.tools` tool. Every case must pass before the agent is published.",
+  "type": "object",
+  "required": ["$schema", "cases"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {"const": "https://schema.abi.invalid/v1/eval.json"},
+    "cases": {
+      "type": "array",
+      "items": {"type": "object", "required": ["question", "expect"], "additionalProperties": false, "properties": {
+        "question": {"type": "string", "minLength": 1},
+        "expect": {"type": "object", "required": ["contains"], "additionalProperties": false, "properties": {
+          "contains": {"type": "array", "items": {"type": ["string", "number"]}, "description": "Values the answer must contain (numbers match as written or rounded)"},
+          "tools": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}, "description": "Tools the agent must call"}}}}}
+    }
+  },
+  "examples": [
+    {
+      "$schema": "https://schema.abi.invalid/v1/eval.json",
+      "cases": [
+        {"question": "Which material had the highest consumption last month?", "expect": {"contains": ["Steel"], "tools": ["top_materials_trend"]}},
+        {"question": "How much steel is in stock?", "expect": {"contains": [1200]}}
+      ]
+    }
+  ]
+}

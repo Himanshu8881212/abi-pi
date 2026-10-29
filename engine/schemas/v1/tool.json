@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.abi.invalid/v1/tool.json",
+  "title": "Tool",
+  "description": "tools/<id>.json: one semantic-query tool (§7.1, TL-1): a named, typed, tested and versioned function agents call to get numbers. `inputs` is the JSON Schema of its parameters (each with a type, limits and optional default); `query` is the semantic query format (`$defs.query` of datasets.json) whose filter values and `limit` may be `{\"$input\": \"<name>\"}` placeholders; `outputs` is the JSON Schema of the result rows, an array of objects keyed by result column (dimensions, then measure IDs). Every number a tool returns comes from the semantic engine (principle 7). `tests` run on the project's current data: each gives inputs and, optionally, the exact rows to `expect` (numbers to 6 decimals, dates as ISO text). Only published tools run; a published tool whose tests fail after a model or tool change is disabled until they pass (TL-4; that state is runtime, not in this file).",
+  "type": "object",
+  "required": ["$schema", "id", "name", "description", "version", "owner", "status", "inputs", "outputs", "tests", "permissions"],
+  "additionalProperties": false,
+  "if": {"required": ["kind"], "properties": {"kind": {"const": "api"}}},
+  "then": {"required": ["request", "rows"], "not": {"required": ["query"]}},
+  "else": {"required": ["query"], "not": {"anyOf": [{"required": ["request"]}, {"required": ["rows"]}]}},
+  "properties": {
+    "$schema": {"const": "https://schema.abi.invalid/v1/tool.json"},
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$", "description": "Stable ID; the file name"},
+    "name": {"type": "string", "minLength": 1, "maxLength": 200, "description": "Display name"},
+    "description": {"type": "string", "minLength": 1, "maxLength": 2000, "description": "What it answers; agents choose tools by it"},
+    "version": {"type": "integer", "minimum": 0, "description": "Bumped on each publish; 0 = never published"},
+    "owner": {"type": "string", "pattern": "^[0-9]+$", "description": "User ID of the owner, notified when the tool is disabled (TL-4)"},
+    "status": {"enum": ["draft", "published"]},
+    "kind": {"enum": ["query", "calculation", "api"], "default": "query", "description": "query: the rows are the semantic query's result. calculation (TL-5): the query's rows go to `calculate(rows, inputs)` in tools/<id>.py, run in a sandbox (stdlib only; no files, network, environment or secrets; CPU, memory, time and output limits), and its returned rows are the result. api (TL-5): no `query`; `request` is sent to an outside HTTPS host (public addresses, or private ones the operator allows; never loopback, link-local or metadata; no redirects; 10 s, 1 MB) and the array at `rows` in its JSON response is the result. Publishing it needs the Owner role and a confirmation naming the host"},
+    "request": {
+      "type": "object",
+      "required": ["method", "url"],
+      "additionalProperties": false,
+      "description": "kind api: the HTTPS request. Secrets go only as a whole header or query value `${secret:NAME}`, and only to the secret's allowed hosts (D-2); they are never resolved anywhere else",
+      "properties": {
+        "method": {"enum": ["GET", "POST"]},
+        "url": {"type": "string", "maxLength": 2000, "pattern": "^https://([A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|\\[[0-9A-Fa-f:.]+\\])(:[0-9]{1,5})?(/[^\\s?#$]*)?$", "description": "https://<literal host>[:port]/<path>: no placeholders, secrets, user info, query string or fragment"},
+        "query": {"type": "object", "propertyNames": {"maxLength": 200}, "additionalProperties": {"anyOf": [{"$ref": "#/$defs/text"}, {"type": ["number", "boolean"]}, {"$ref": "#/$defs/placeholder"}]}},
+        "headers": {"type": "object", "propertyNames": {"pattern": "^[A-Za-z0-9-]{1,100}$", "not": {"pattern": "^[Hh][Oo][Ss][Tt]$"}}, "additionalProperties": {"$ref": "#/$defs/text"}},
+        "body": {"description": "POST only: the JSON body; any value may be a {\"$input\": name} placeholder"}
+      },
+      "if": {"properties": {"method": {"const": "GET"}}},
+      "then": {"not": {"required": ["body"]}}
+    },
+    "rows": {"type": "string", "maxLength": 500, "pattern": "^(/[^/]*)*$", "description": "kind api: JSON pointer (RFC 6901) to the array of row objects in the response; \"\" = the whole response"},
+    "inputs": {
+      "type": "object",
+      "required": ["type", "properties", "additionalProperties"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {"const": "object"},
+        "properties": {"type": "object", "propertyNames": {"pattern": "^[a-z][a-z0-9_]{0,62}$"}, "additionalProperties": {"$ref": "#/$defs/input"}},
+        "required": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "additionalProperties": {"const": false}
+      }
+    },
+    "query": {"$ref": "#/$defs/query"},
+    "outputs": {"type": "object", "description": "JSON Schema of the result rows (an array of {column: value})"},
+    "tests": {"type": "array", "items": {
+      "type": "object",
+      "required": ["inputs"],
+      "additionalProperties": false,
+      "properties": {
+        "inputs": {"type": "object"},
+        "expect": {"type": "array", "items": {"type": "object"}, "description": "Exact result rows; omit to check only that it runs and matches `outputs`"}
+      }
+    }},
+    "permissions": {
+      "type": "object",
+      "required": ["role"],
+      "additionalProperties": false,
+      "properties": {"role": {"enum": ["viewer", "editor"], "description": "Minimum project role to run it; it runs as the caller"}}
+    }
+  },
+  "$defs": {
+    "input": {
+      "type": "object",
+      "required": ["type", "description"],
+      "properties": {
+        "type": {"enum": ["string", "integer", "number", "boolean", "array"]},
+        "description": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {"if": {"properties": {"type": {"enum": ["integer", "number"]}}}, "then": {"required": ["minimum", "maximum"]}},
+        {"if": {"properties": {"type": {"const": "string"}}}, "then": {"anyOf": [{"required": ["maxLength"]}, {"required": ["enum"]}]}},
+        {"if": {"properties": {"type": {"const": "array"}}}, "then": {"required": ["maxItems", "items"], "properties": {"items": {"$ref": "#/$defs/input"}}}}
+      ]
+    },
+    "text": {"type": "string", "maxLength": 2000, "anyOf": [{"pattern": "^\\$\\{secret:[A-Za-z0-9_]+\\}$"}, {"not": {"pattern": "\\$\\{secret:"}}], "description": "A literal, or exactly ${secret:NAME}"},
+    "placeholder": {
+      "type": "object",
+      "required": ["$input"],
+      "additionalProperties": false,
+      "properties": {"$input": {"type": "string", "description": "Name of an input; replaced by its value"}}
+    },
+    "query": {
+      "type": "object",
+      "required": ["measures"],
+      "additionalProperties": false,
+      "properties": {
+        "measures": {"type": "array", "minItems": 1, "items": {"type": "string"}, "description": "Measure IDs (model/measures.json), never display names (PC-1)"},
+        "dimensions": {"type": "array", "items": {"type": "string", "pattern": "^[^.\\s][^.]*\\.[^.]+$"}},
+        "filters": {"type": "array", "items": {
+          "type": "object",
+          "required": ["column", "op", "value"],
+          "additionalProperties": false,
+          "properties": {
+            "column": {"type": "string", "pattern": "^[^.\\s][^.]*\\.[^.]+$"},
+            "op": {"enum": ["=", "<>", "<", "<=", ">", ">=", "in"]},
+            "value": {"anyOf": [{"type": ["string", "number", "boolean"]}, {"type": "array", "items": {"type": ["string", "number", "boolean", "null"]}}, {"$ref": "#/$defs/placeholder"}]}
+          }
+        }},
+        "totals": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}},
+        "order_by": {"type": "array", "items": {
+          "type": "object",
+          "required": ["field"],
+          "additionalProperties": false,
+          "properties": {"field": {"type": "string"}, "desc": {"type": "boolean"}}
+        }},
+        "limit": {"anyOf": [{"type": "integer", "minimum": 1, "maximum": 100000}, {"$ref": "#/$defs/placeholder"}]}
+      }
+    }
+  },
+  "examples": [
+    {"$schema": "https://schema.abi.invalid/v1/tool.json",
+     "id": "top_categories", "name": "Top categories", "description": "Sales of the top N product categories in a year.",
+     "version": 1, "owner": "1", "status": "published",
+     "inputs": {"type": "object", "additionalProperties": false, "required": ["year"], "properties": {
+       "year": {"type": "integer", "description": "Calendar year", "minimum": 2000, "maximum": 2100},
+       "n": {"type": "integer", "description": "How many categories", "minimum": 1, "maximum": 50, "default": 5}}},
+     "query": {"measures": ["sales"], "dimensions": ["products.category"],
+               "filters": [{"column": "calendar.year", "op": "=", "value": {"$input": "year"}}],
+               "order_by": [{"field": "sales", "desc": true}], "limit": {"$input": "n"}},
+     "outputs": {"type": "array", "items": {"type": "object", "required": ["products.category", "sales"],
+                                            "properties": {"products.category": {"type": "string"}, "sales": {"type": ["number", "null"]}}}},
+     "tests": [{"inputs": {"year": 2024}}, {"inputs": {"year": 2024, "n": 1}, "expect": [{"products.category": "Bikes", "sales": 30}]}],
+     "permissions": {"role": "viewer"}},
+    {"$schema": "https://schema.abi.invalid/v1/tool.json",
+     "id": "abc_class", "name": "ABC class", "description": "ABC class of each product by its share of sales (tools/abc_class.py).",
+     "version": 1, "owner": "1", "status": "published", "kind": "calculation",
+     "inputs": {"type": "object", "additionalProperties": false, "properties": {}},
+     "query": {"measures": ["sales"], "dimensions": ["products.name"]},
+     "outputs": {"type": "array", "items": {"type": "object", "required": ["products.name", "sales", "class"],
+                                            "properties": {"products.name": {"type": "string"}, "sales": {"type": ["number", "null"]}, "class": {"enum": ["A", "B", "C"]}}}},
+     "tests": [{"inputs": {}}],
+     "permissions": {"role": "viewer"}},
+    {"$schema": "https://schema.abi.invalid/v1/tool.json",
+     "id": "erp_stock", "name": "ERP stock", "description": "Stock level per warehouse of one product, from the ERP.",
+     "version": 1, "owner": "1", "status": "published", "kind": "api",
+     "inputs": {"type": "object", "additionalProperties": false, "required": ["sku"], "properties": {
+       "sku": {"type": "string", "description": "Product SKU", "maxLength": 40}}},
+     "request": {"method": "GET", "url": "https://erp.example.com/api/v2/stock",
+                 "query": {"sku": {"$input": "sku"}}, "headers": {"Authorization": "${secret:ERP_TOKEN}"}},
+     "rows": "/data/items",
+     "outputs": {"type": "array", "items": {"type": "object", "required": ["warehouse", "on_hand"],
+                                            "properties": {"warehouse": {"type": "string"}, "on_hand": {"type": "integer"}}}},
+     "tests": [{"inputs": {"sku": "BK-100"}}],
+     "permissions": {"role": "viewer"}}
+  ]
+}

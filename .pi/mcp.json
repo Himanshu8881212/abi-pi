@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "abi": {
-      "url": "http://127.0.0.1:8770/api/mcp",
+      "url": "http://127.0.0.1:8780/api/mcp",
       "headers": {
         "Authorization": "!python3 /Users/himanshu/Work/Working/abi-pi/scripts/creds.py abi-bearer"
       },

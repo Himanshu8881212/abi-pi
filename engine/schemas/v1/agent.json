@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.abi.invalid/v1/agent.json",
+  "title": "Custom agent",
+  "description": "agents/<id>.json: a custom agent (§7.2, AG-1). It reaches the semantic model only through its `tools`; its evaluation set is agents/<id>.eval.json (schemas/v1/eval.json). Custom agents are created and run only once the semantic model is Ready (§3). Run history lives in the database, not in this file.",
+  "type": "object",
+  "required": ["$schema", "id", "name", "purpose", "instructions", "version", "status", "scope", "tools", "mode", "grounding", "channels", "owner", "sharing", "evaluation"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {"const": "https://schema.abi.invalid/v1/agent.json"},
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$", "description": "The file name without .json"},
+    "name": {"type": "string", "minLength": 1, "description": "Display name, shown to users"},
+    "purpose": {"type": "string", "minLength": 1, "description": "What it answers, in one sentence"},
+    "instructions": {"type": "string", "minLength": 1, "description": "Tone, format, rules; Git keeps every version"},
+    "version": {"type": "integer", "minimum": 0, "description": "Published version; 0 until first published, + 1 on each publish"},
+    "status": {"enum": ["draft", "published"], "description": "Only published agents serve users; any save makes it a draft again"},
+    "scope": {
+      "type": "object", "additionalProperties": false, "description": "Knowledge scope: the IDs it may use",
+      "properties": {
+        "tables": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}, "description": "Model tables"},
+        "measures": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}, "description": "Measure IDs (model/measures.json)"},
+        "datasets": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}, "description": "Dataset IDs (model/datasets.json)"},
+        "glossary": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}, "description": "Glossary term IDs (model/glossary.json)"}
+      }
+    },
+    "tools": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1},
+              "description": "The exact tools it may call: custom tool IDs (tools/<id>.json), semantic_query, report_snapshot, and only the action tools send_email, post_message, refresh, propose_edit (DECISIONS D-3)"},
+    "agents": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$"},
+               "description": "Other published agents of the project it may ask (tool ask_agent): each runs as the asking user with its own scope, tools and grounding, at most two levels deep"},
+    "mode": {"enum": ["tools_only", "exploratory"], "default": "tools_only", "description": "exploratory may also run read-only semantic queries within the scope"},
+    "model": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$", "default": "auto", "description": "AG-6: a workspace LLM provider model alias (small, large, …; list_llm_providers) or auto (large for build/change or long questions, small otherwise)"},
+    "effort": {"enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max"], "description": "AG-6/D-71: reasoning effort for its runs and flow steps, sent only where the model lists the level (ChatGPT plan models, provider aliases with declared efforts); omitted: the user's ChatGPT effort or the alias default"},
+    "grounding": {"type": "boolean", "default": true, "description": "Check every number and entity name against tool results (AG-2); required (true) for any channel other than in_app"},
+    "channels": {
+      "type": "array",
+      "items": {"type": "object", "required": ["type"], "additionalProperties": false, "properties": {
+        "type": {"enum": ["in_app", "email", "slack", "teams", "api", "mcp"]},
+        "address": {"type": "string", "minLength": 1, "description": "email address"},
+        "channel": {"type": "string", "minLength": 1, "description": "Slack: the channel ID a slash command comes from (C0123ABCD; a DM gives its D… ID), never a name; Teams: the channel ID an @mention of the outgoing webhook comes from (channelData.channel.id, 19:…@thread.tacv2)"},
+        "reply": {"type": "string", "minLength": 1, "description": "Teams: the project's settings.delivery.channels entry (type teams) the answer is posted to; an outgoing webhook can't answer later in its reply chain (DECISIONS D-32)"}},
+        "if": {"properties": {"type": {"const": "teams"}}}, "then": {"required": ["channel", "reply"]}, "else": {"properties": {"reply": false}}},
+      "description": "Where it can be reached; stored only, delivery is AG-5"
+    },
+    "owner": {"type": "string", "pattern": "^[0-9]+$", "description": "User ID of the person who last saved it"},
+    "sharing": {"description": "SH-1 (D-51): \"project\" = everyone with a role in the project; or also view-only runs for accounts with no role there. Changed with action set_sharing; project members always see it", "oneOf": [
+      {"const": "project"},
+      {"type": "object", "additionalProperties": false, "properties": {"users": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[0-9]+$"}, "description": "User IDs of named recipients (their tenant must match the project, checked when they run it)"}, "workspace": {"type": "boolean", "description": "Every account of the project's tenant (platform project: every platform account)"}}}]},
+    "evaluation": {"type": "string", "pattern": "^agents/[a-z][a-z0-9_-]{0,62}\\.eval\\.json$", "description": "Its evaluation set: agents/<id>.eval.json"}
+  },
+  "examples": [
+    {
+      "$schema": "https://schema.abi.invalid/v1/agent.json",
+      "id": "supply-chain",
+      "name": "Supply Chain Assistant",
+      "purpose": "Answers stock and consumption questions",
+      "instructions": "Answer questions about materials, stock and consumption. Use tools for every number.",
+      "version": 1,
+      "status": "published",
+      "scope": {"measures": ["consumption_value", "consumption_yoy_pct"], "datasets": ["material_monthly"]},
+      "tools": ["top_materials_trend", "stock_levels", "report_snapshot"],
+      "agents": ["procurement"],
+      "mode": "tools_only",
+      "model": "large",
+      "effort": "low",
+      "grounding": true,
+      "channels": [{"type": "email", "address": "supply@company.com"}, {"type": "mcp"}, {"type": "teams", "channel": "19:a1b2c3@thread.tacv2", "reply": "sales-team"}],
+      "owner": "1",
+      "sharing": {"users": ["2"], "workspace": false},
+      "evaluation": "agents/supply-chain.eval.json"
+    }
+  ]
+}

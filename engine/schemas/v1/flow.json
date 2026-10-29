@@ -1,0 +1,289 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.abi.invalid/v1/flow.json",
+  "title": "Flow",
+  "description": "flows/<id>.json: a trigger and steps (FL-1, FL-2); agent tasks are flows (AT-3). Steps run in file order, each after the step listed before it, unless a step names the steps it waits for in `after` and so forms branches and joins (FLOW-DAG); `when` skips a step whose value doesn't compare true. Every step runs an action as the flow's `owner` (FL-6): `refresh` runs action refresh, `tool` run_tool, `agent` the custom agent action, `snapshot` report_snapshot, `train` train_model, `score` score_model, `action` the named action with `input`. The project is filled in by the run. Any string in a step may use `{{ data.<step id>.<path> }}` for the output of a step it waits for (FL-3): a string that is only the placeholder takes the output value itself, otherwise it is inserted as text. Run history lives in the database, not in this file.",
+  "type": "object",
+  "required": ["$schema", "id", "name", "owner", "enabled", "trigger", "steps"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {"const": "https://schema.abi.invalid/v1/flow.json"},
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$", "description": "The file name without .json"},
+    "name": {"type": "string", "minLength": 1, "description": "Display name, shown to users"},
+    "description": {"type": "string"},
+    "owner": {"type": "string", "pattern": "^[0-9]+$", "description": "User ID (as in security/roles.json and tools) whose role and permissions every run uses (FL-6); the person who last saved the flow"},
+    "enabled": {"type": "boolean", "description": "Whether the trigger fires; a manual run works either way"},
+    "notify": {"type": "object", "required": ["channel", "on"], "additionalProperties": false,
+      "description": "FL-7 outbound status webhook: when a run ends with a status in `on`, the worker posts {project, flow, run, status, error, started, finished} once to this webhook channel (project.json settings.delivery.channels), signed with the channel's `secret` if set. A failed post is traced as step `_notify` and never fails the run; test runs post nothing.",
+      "properties": {
+        "channel": {"type": "string", "minLength": 1, "maxLength": 200, "description": "A delivery channel of type webhook"},
+        "on": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["ok", "failed", "rejected"]}}}},
+    "on_failure": {"enum": ["stop", "continue", "retry_branch"], "default": "stop",
+      "description": "FLOW-DAG: what a failed step does to the run's other branches. stop: no new step starts, running ones finish, and the queue retries the run (FL-4: 3 retries), which resumes after the steps already ok. continue: steps that don't wait on the failed one run to the end, then the run ends failed with no retry. retry_branch: like continue, then the retry resumes only the failed branch. Ready steps run in parallel, at most 3 at a time per run."},
+    "trigger": {
+      "oneOf": [
+        {"type": "object", "required": ["type"], "additionalProperties": false, "properties": {"type": {"const": "manual"}}},
+        {"type": "object", "required": ["type", "cron", "timezone"], "additionalProperties": false, "properties": {
+          "type": {"const": "schedule"},
+          "cron": {"type": "string", "minLength": 1, "description": "Five-field cron expression, e.g. 0 7 * * 1"},
+          "timezone": {"type": "string", "minLength": 1, "description": "IANA time zone the cron is read in, e.g. Europe/Berlin"}}},
+        {"type": "object", "required": ["type", "tables"], "additionalProperties": false, "properties": {
+          "type": {"const": "after_refresh"},
+          "tables": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}, "description": "Runs after a refresh of any of these tables"}}},
+        {"type": "object", "required": ["type", "query", "measure", "op", "value"], "additionalProperties": false,
+         "description": "Data condition (FL-2): checked every minute as the owner, like a condition step (any result row's `measure` value satisfies `op value`); runs only when it goes from false to true (never checked counts as false), at most once per cooldown. An edge inside the cooldown is dropped.",
+         "properties": {
+          "type": {"const": "data_condition"},
+          "query": {"$ref": "#/$defs/query"},
+          "measure": {"type": "string", "minLength": 1, "description": "A measure ID in query.measures"},
+          "op": {"enum": [">", ">=", "<", "<=", "=", "!="]},
+          "value": {"type": "number"},
+          "cooldown_minutes": {"type": "integer", "minimum": 60, "default": 1440, "description": "Minutes after a run before the next false→true starts one (default 1 day)"}}},
+        {"type": "object", "required": ["type", "tables"], "additionalProperties": false,
+         "description": "Write-back event (FL-2): runs once per applied, approved or undone edit batch on any of these tables. Edits made by a flow start nothing.",
+         "properties": {
+          "type": {"const": "writeback"},
+          "tables": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}}},
+        {"type": "object", "required": ["type"], "additionalProperties": false,
+         "description": "Inbound webhook (FL-2, SC-8): POST /api/hooks/<project>/<flow id> with a JSON object body, headers X-ABI-Timestamp (Unix seconds, within 5 min) and X-ABI-Signature: v1=<hex HMAC-SHA256(token, timestamp + \".\" + body)>. Each signed call starts one run, as the owner; steps read the body as {{ data.trigger.body }}. The token is made by action rotate_webhook_token, kept encrypted outside Git, and never shown again.",
+         "properties": {"type": {"const": "webhook"}}},
+        {"type": "object", "required": ["type", "channel"], "additionalProperties": false,
+         "description": "Inbound message (FL-2, AG-5): each email to `address`, or Slack slash command / Teams @mention in channel `channel_id`, from a linked sender (SC-7) starts one run, as that sender (§11 #12); steps read the text as {{ data.trigger.text }}. Messages the app sends never trigger (D-23).",
+         "properties": {
+           "type": {"const": "message"},
+           "channel": {"enum": ["email", "slack", "teams"]},
+           "address": {"type": "string", "pattern": "^[^@\\s]{1,64}@[^@\\s]+\\.[^@\\s]{1,190}$", "description": "email: the address the mail is sent to (To or Cc)"},
+           "channel_id": {"type": "string", "minLength": 1, "description": "Slack/Teams: the channel ID, as in an agent's channel entry"}},
+         "if": {"properties": {"channel": {"const": "email"}}},
+         "then": {"required": ["address"], "properties": {"channel_id": false}},
+         "else": {"required": ["channel_id"], "properties": {"address": false}}},
+        {"type": "object", "required": ["type"], "additionalProperties": false,
+         "description": "Data quality (IN-8): runs once per new data-quality problem of a monitored table (stale, missing periods, volume drop, NULL-share rise), as the owner; steps read {{ data.trigger.table }}, {{ data.trigger.problems }} (a list) and {{ data.trigger.message }}. A problem found after a load made by a flow starts nothing (D-23). Email alerts are a send_email step.",
+         "properties": {
+           "type": {"const": "data_quality"},
+           "tables": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}, "description": "Only these tables (default: every table)"}}}
+      ]
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {"type": "object", "required": ["id", "type", "table"], "additionalProperties": false, "properties": {
+            "id": {"$ref": "#/$defs/step_id"}, "after": {"$ref": "#/$defs/after"}, "when": {"$ref": "#/$defs/when"}, "type": {"const": "refresh"},
+            "table": {"type": "string", "minLength": 1, "description": "Table to reload from its source; the tables that read it reload too"}}},
+          {"type": "object", "required": ["id", "type", "tool"], "additionalProperties": false, "properties": {
+            "id": {"$ref": "#/$defs/step_id"}, "after": {"$ref": "#/$defs/after"}, "when": {"$ref": "#/$defs/when"}, "type": {"const": "tool"},
+            "tool": {"type": "string", "minLength": 1}, "inputs": {"type": "object", "description": "The tool's inputs (action run_tool)"}}},
+          {"type": "object", "required": ["id", "type", "agent", "prompt"], "additionalProperties": false, "properties": {
+            "id": {"$ref": "#/$defs/step_id"}, "after": {"$ref": "#/$defs/after"}, "when": {"$ref": "#/$defs/when"}, "type": {"const": "agent"},
+            "agent": {"type": "string", "minLength": 1}, "prompt": {"type": "string", "minLength": 1},
+            "choices": {"type": "array", "minItems": 2, "maxItems": 20, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,39}$"},
+              "description": "FLOW-DAG.3: the agent is asked to start its answer with one of these words; that word becomes the step output's `verdict` (an answer that starts otherwise or also names another choice fails the step), so a `when` can route on {{ data.<step>.verdict }}"}}},
+          {"type": "object", "required": ["id", "type", "report"], "additionalProperties": false,
+            "oneOf": [{"required": ["page"]}, {"required": ["pages", "format"], "properties": {"format": {"enum": ["pdf", "pptx"]}}}], "dependentRequired": {"visual": ["page"]}, "properties": {
+            "id": {"$ref": "#/$defs/step_id"}, "after": {"$ref": "#/$defs/after"}, "when": {"$ref": "#/$defs/when"}, "type": {"const": "snapshot"},
+            "report": {"type": "string", "minLength": 1}, "page": {"type": "string", "minLength": 1},
+            "pages": {"description": "MULTI-EXPORT.1: several pages in this order, or \"all\", rendered into ONE PDF with one sheet per page or (MULTI-EXPORT.2) one PPTX with one slide per page (needs format pdf or pptx; not with page)",
+              "anyOf": [{"const": "all"}, {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}]},
+            "format": {"enum": ["png", "pdf", "pptx"]},
+            "visual": {"type": "string", "minLength": 1, "description": "One visual of page instead of the whole page"}, "filters": {"type": "array"}}},
+          {"type": "object", "required": ["id", "type", "action"], "additionalProperties": false, "properties": {
+            "id": {"$ref": "#/$defs/step_id"}, "after": {"$ref": "#/$defs/after"}, "when": {"$ref": "#/$defs/when"}, "type": {"const": "action"},
+            "action": {"type": "string", "minLength": 1, "description": "An action name from the action API"}, "input": {"type": "object"}}},
+          {"type": "object", "required": ["id", "type", "model"], "additionalProperties": false,
+           "description": "ML-6: train (re)trains the ML model, score writes its predictions with its latest successful training (in the worker, as the owner). The output is the registry run: run, status, metrics, baseline, better_than_baseline, summary, drift.",
+           "properties": {
+            "id": {"$ref": "#/$defs/step_id"}, "after": {"$ref": "#/$defs/after"}, "when": {"$ref": "#/$defs/when"}, "type": {"enum": ["train", "score"]},
+            "model": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$", "description": "An ML model ID (ml/<id>.json)"}}},
+          {"type": "object", "required": ["id", "type", "query", "measure", "op", "value"], "additionalProperties": false,
+           "description": "Stop unless (FL-1, AT-2 'only send if'): runs action check_condition; holds when any result row's `measure` value satisfies `op value` (NULL never). Otherwise the run ends as stopped and later steps don't run.",
+           "properties": {
+            "id": {"$ref": "#/$defs/step_id"}, "after": {"$ref": "#/$defs/after"}, "when": {"$ref": "#/$defs/when"}, "type": {"const": "condition"},
+            "query": {"$ref": "#/$defs/query"},
+            "measure": {"type": "string", "minLength": 1, "description": "A measure ID in query.measures"},
+            "op": {"enum": [">", ">=", "<", "<=", "=", "!="]},
+            "value": {"type": "number"}}},
+          {"type": "object", "required": ["id", "type", "changed"], "additionalProperties": false,
+           "description": "Stop unless the answer changed (AT-2): the tool and query results behind an earlier agent step differ from the same step's in the flow's previous non-test run (the first run counts as changed).",
+           "properties": {
+            "id": {"$ref": "#/$defs/step_id"}, "after": {"$ref": "#/$defs/after"}, "when": {"$ref": "#/$defs/when"}, "type": {"const": "condition"},
+            "changed": {"$ref": "#/$defs/step_id", "description": "An earlier agent step's id"}}},
+          {"type": "object", "required": ["id", "type", "message"], "additionalProperties": false,
+           "description": "Pause (FL-1): the run waits until a person approves it (action approve_flow_run, with a confirmation) or rejects it (reject_flow_run); then the later steps run as the owner, or never. The person who started the run can't approve it unless they are the project's only Owner.",
+           "properties": {
+            "id": {"$ref": "#/$defs/step_id"}, "after": {"$ref": "#/$defs/after"}, "when": {"$ref": "#/$defs/when"}, "type": {"const": "approval"},
+            "message": {"type": "string", "minLength": 1, "description": "What to check before approving; shown in the feed and the run"},
+            "approvers": {"default": "owner", "description": "Who may approve or reject: a project role (owner, or editor = Editors and Owners) or a list of user names with at least the Editor role",
+                          "oneOf": [{"enum": ["owner", "editor"]}, {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}]}}}
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "step_id": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,62}$", "description": "Unique in the flow; steps after it read its output as {{ data.<id> }}"},
+    "after": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/step_id"},
+      "description": "FLOW-DAG: ids of steps listed earlier that this step waits for (a join when there are several); [] = it starts at the trigger; omitted = after the step listed before it (the first step: the trigger). A step whose `after` steps were all skipped is skipped too. It may read {{ data.<id> }} only of steps it waits for, directly or through theirs."},
+    "when": {"type": "object", "required": ["value", "op", "to"], "additionalProperties": false,
+      "description": "FLOW-DAG: run this step only if the value compares true, else it is skipped (not a failure; unlike a condition step, the run goes on). A value that is missing or can't be compared fails the step.",
+      "properties": {
+        "value": {"type": "string", "pattern": "^\\{\\{\\s*data\\.[a-z][a-z0-9_]*(\\.[A-Za-z0-9_-]+)*\\s*\\}\\}$", "description": "One placeholder {{ data.<step id>.<path> }} of a step this one waits for, or of the trigger"},
+        "op": {"enum": ["=", "!=", ">", ">=", "<", "<=", "in"]},
+        "to": {"description": "The value to compare with; a list for `in`"}},
+      "if": {"properties": {"op": {"const": "in"}}}, "then": {"properties": {"to": {"type": "array"}}}},
+    "query": {"description": "The semantic query format (datasets.json $defs.query)", "type": "object", "required": ["measures"], "additionalProperties": false, "properties": {"measures": {"type": "array", "minItems": 1, "items": {"type": "string"}, "description": "Measure IDs (model/measures.json), never display names (PC-1)"}, "dimensions": {"type": "array", "items": {"type": "string", "pattern": "^[^.\\s][^.]*\\.[^.]+$"}, "description": "table.column to group by: the grain"}, "filters": {"type": "array", "items": {"$ref": "#/$defs/filter"}, "description": "Row filters; all must hold"}, "totals": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}, "description": "Extra grouping sets, each a subset of the dimensions; [] is the grand total"}, "order_by": {"type": "array", "items": {"type": "object", "required": ["field"], "additionalProperties": false, "properties": {"field": {"type": "string", "description": "A dimension, measure ID or grouping_id of this query"}, "desc": {"type": "boolean"}}}}, "limit": {"type": "integer", "minimum": 1, "maximum": 100000}}},
+    "filter": {"type": "object", "required": ["column", "op", "value"], "additionalProperties": false, "properties": {"column": {"type": "string", "pattern": "^[^.\\s][^.]*\\.[^.]+$", "description": "table.column"}, "op": {"enum": ["=", "<>", "<", "<=", ">", ">=", "in"]}, "value": {"description": "One value; a list for `in`", "anyOf": [{"type": ["string", "number", "boolean"]}, {"type": "array", "items": {"type": ["string", "number", "boolean", "null"]}}]}}}
+  },
+  "examples": [
+    {
+      "$schema": "https://schema.abi.invalid/v1/flow.json",
+      "id": "weekly-material-report",
+      "name": "Weekly material report",
+      "owner": "1",
+      "enabled": true,
+      "trigger": {"type": "schedule", "cron": "0 7 * * 1", "timezone": "Europe/Berlin"},
+      "steps": [
+        {"id": "load", "type": "refresh", "table": "orders"},
+        {"id": "late", "type": "tool", "tool": "late_materials", "inputs": {"days": 7}},
+        {"id": "summary", "type": "agent", "agent": "planner", "prompt": "Summarize these late materials: {{ data.late.rows }}"},
+        {"id": "trends", "type": "snapshot", "report": "trends", "pages": "all", "format": "pdf"},
+        {"id": "send", "type": "action", "action": "send_email", "input": {"to": ["team@example.com"], "subject": "Late materials", "body": "{{ data.summary.answer }}", "report": {"report": "trends", "page": "overview"}}}
+      ]
+    },
+    {
+      "$schema": "https://schema.abi.invalid/v1/flow.json",
+      "id": "note",
+      "name": "Note after refresh",
+      "owner": "2",
+      "enabled": false,
+      "trigger": {"type": "after_refresh", "tables": ["orders"]},
+      "steps": [{"id": "note", "type": "action", "action": "remember", "input": {"text": "orders refreshed"}}]
+    },
+    {
+      "$schema": "https://schema.abi.invalid/v1/flow.json",
+      "id": "monthly-docs",
+      "name": "Monthly documentation",
+      "description": "DC-6: the documentation is generated as the owner (drafting missing descriptions) and emailed as docs.zip on the 1st of each month.",
+      "owner": "1",
+      "enabled": true,
+      "trigger": {"type": "schedule", "cron": "0 6 1 * *", "timezone": "Europe/Berlin"},
+      "steps": [
+        {"id": "docs", "type": "action", "action": "generate_docs"},
+        {"id": "send", "type": "action", "action": "send_email", "input": {"to": ["team@example.com"], "subject": "Project documentation", "body": "This month's documentation is attached.", "docs": true}}
+      ]
+    },
+    {
+      "$schema": "https://schema.abi.invalid/v1/flow.json",
+      "id": "daily-stock-check",
+      "name": "Daily stock check",
+      "owner": "1",
+      "enabled": true,
+      "trigger": {"type": "schedule", "cron": "0 6 * * *", "timezone": "Europe/Berlin"},
+      "steps": [
+        {"id": "low", "type": "condition", "query": {"measures": ["stock"], "dimensions": ["materials.name"]}, "measure": "stock", "op": "<", "value": 10},
+        {"id": "summary", "type": "agent", "agent": "planner", "prompt": "Which materials are below 10 units?"},
+        {"id": "new", "type": "condition", "changed": "summary"},
+        {"id": "send", "type": "action", "action": "post_message", "input": {"channel": "#ops", "text": "{{ data.summary.answer }}"}}
+      ]
+    },
+    {
+      "$schema": "https://schema.abi.invalid/v1/flow.json",
+      "id": "low-stock-alert",
+      "name": "Low stock alert",
+      "owner": "1",
+      "enabled": true,
+      "trigger": {"type": "data_condition", "query": {"measures": ["stock"], "dimensions": ["materials.name"]}, "measure": "stock", "op": "<", "value": 10, "cooldown_minutes": 720},
+      "steps": [{"id": "send", "type": "action", "action": "post_message", "input": {"channel": "#ops", "text": "A material fell below 10 units."}}]
+    },
+    {
+      "$schema": "https://schema.abi.invalid/v1/flow.json",
+      "id": "budget-edited",
+      "name": "Budget edited",
+      "owner": "1",
+      "enabled": true,
+      "trigger": {"type": "writeback", "tables": ["budget"]},
+      "steps": [{"id": "send", "type": "action", "action": "post_message", "input": {"channel": "inbox", "text": "The budget was edited."}}]
+    },
+    {
+      "$schema": "https://schema.abi.invalid/v1/flow.json",
+      "id": "orders-quality-alert",
+      "name": "Orders data-quality alert",
+      "owner": "1",
+      "enabled": true,
+      "trigger": {"type": "data_quality", "tables": ["orders"]},
+      "steps": [{"id": "mail", "type": "action", "action": "send_email", "input": {"to": ["data@acme.com"], "subject": "Data quality of {{ data.trigger.table }}", "body": "{{ data.trigger.message }}"}}]
+    },
+    {
+      "$schema": "https://schema.abi.invalid/v1/flow.json",
+      "id": "erp-order",
+      "name": "ERP order received",
+      "owner": "1",
+      "enabled": true,
+      "trigger": {"type": "webhook"},
+      "steps": [{"id": "send", "type": "action", "action": "post_message", "input": {"channel": "inbox", "text": "New ERP order {{ data.trigger.body.order }}"}}]
+    },
+    {
+      "$schema": "https://schema.abi.invalid/v1/flow.json",
+      "id": "note-by-mail",
+      "name": "Note by mail",
+      "owner": "1",
+      "enabled": true,
+      "trigger": {"type": "message", "channel": "email", "address": "notes@bi.example.com"},
+      "steps": [{"id": "note", "type": "action", "action": "remember", "input": {"text": "{{ data.trigger.text }}"}}]
+    },
+    {
+      "$schema": "https://schema.abi.invalid/v1/flow.json",
+      "id": "monthly-retrain",
+      "name": "Monthly retrain",
+      "owner": "1",
+      "enabled": true,
+      "trigger": {"type": "schedule", "cron": "0 5 1 * *", "timezone": "Europe/Berlin"},
+      "steps": [
+        {"id": "train", "type": "train", "model": "demand-forecast"},
+        {"id": "score", "type": "score", "model": "demand-forecast"},
+        {"id": "note", "type": "action", "action": "post_message", "input": {"channel": "inbox", "text": "Retrained: {{ data.train.summary }}"}}
+      ]
+    },
+    {
+      "$schema": "https://schema.abi.invalid/v1/flow.json",
+      "id": "monthly-supplier-mail",
+      "name": "Monthly supplier mail",
+      "owner": "7",
+      "enabled": true,
+      "notify": {"channel": "erp", "on": ["ok", "failed", "rejected"]},
+      "trigger": {"type": "schedule", "cron": "0 8 1 * *", "timezone": "Europe/Berlin"},
+      "steps": [
+        {"id": "late", "type": "tool", "tool": "late_materials", "inputs": {"days": 30}},
+        {"id": "check", "type": "approval", "message": "Check the late list before it goes to suppliers.", "approvers": ["olga"]},
+        {"id": "send", "type": "action", "action": "send_email", "input": {"to": ["suppliers@example.com"], "subject": "Late materials", "body": "{{ data.late.rows }}"}}
+      ]
+    },
+    {
+      "$schema": "https://schema.abi.invalid/v1/flow.json",
+      "id": "late-orders-branches",
+      "name": "Late orders, two branches",
+      "owner": "1",
+      "enabled": true,
+      "on_failure": "continue",
+      "trigger": {"type": "after_refresh", "tables": ["orders"]},
+      "steps": [
+        {"id": "late", "type": "tool", "tool": "late_materials", "inputs": {"days": 7}},
+        {"id": "trends", "type": "snapshot", "report": "trends", "page": "overview", "format": "pptx", "after": []},
+        {"id": "alert", "type": "action", "action": "post_message", "after": ["late"], "when": {"value": "{{ data.late.count }}", "op": ">", "to": 0}, "input": {"channel": "#ops", "text": "{{ data.late.count }} late materials"}},
+        {"id": "send", "type": "action", "action": "send_email", "after": ["late", "trends"], "input": {"to": ["team@example.com"], "subject": "Late materials", "body": "{{ data.late.rows }}", "report": {"report": "trends", "page": "overview"}}}
+      ]
+    },
+    {
+      "$schema": "https://schema.abi.invalid/v1/flow.json",
+      "id": "late-orders-verdict",
+      "name": "Late orders, escalate if urgent",
+      "owner": "1",
+      "enabled": true,
+      "trigger": {"type": "after_refresh", "tables": ["orders"]},
+      "steps": [
+        {"id": "judge", "type": "agent", "agent": "planner", "prompt": "Are the late materials urgent?", "choices": ["urgent", "routine"]},
+        {"id": "escalate", "type": "action", "action": "post_message", "after": ["judge"], "when": {"value": "{{ data.judge.verdict }}", "op": "=", "to": "urgent"}, "input": {"channel": "#ops", "text": "{{ data.judge.answer }}"}}
+      ]
+    }
+  ]
+}

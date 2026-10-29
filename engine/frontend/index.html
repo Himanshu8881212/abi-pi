@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- RP-6: share links carry their token in the fragment; no page of the app sends a Referer -->
+    <meta name="referrer" content="no-referrer" />
+    <link rel="icon" href="data:," />
+    <title>Agentic Open BI</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <!-- Glide Data Grid opens its cell editor here (WB-1) -->
+    <div id="portal" style="position: fixed; left: 0; top: 0; z-index: 9999"></div>
+  </body>
+</html>

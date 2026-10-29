@@ -1,0 +1,20 @@
+# PC-13 CI checks for an ABI project repo. Copy to .gitlab-ci.yml.
+# Every merge request is applied to a dedicated CI environment project (D-34) on a running ABI instance, then
+# validated and tested: schema/import checks, measure (MEL) tests, tool tests, agent evaluation sets.
+# Setup (once): a service account gets Editor in this repo's security/roles.json (set_role in the project, then
+# commit and push), and only then an Owner creates the CI project on that same instance (roles.json keys are its user IDs), pulls this repo into it and
+# binds it to its own environment (set_environment; environments/<branch>.json points sources at test data).
+# The CI project's roles must stay exactly the repo's: a role set only there makes every MR a roles change (exit 3).
+# CI/CD variables: ABI_IMAGE (the app image), ABI_URL, ABI_PROJECT (the CI project ID); ABI_USER and
+# ABI_PASSWORD (the service account) as masked variables. Credentials live only there, never in the repo.
+# A merge request that changes security/roles.json always fails with exit 3: a roles change needs an Owner's
+# confirmation in the app (D-1), which CI can't give. Apply it in the app instead.
+abi:
+  image: $ABI_IMAGE
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  resource_group: abi-ci  # MRs share the CI project: one job at a time
+  script:
+    - python -m abi.cli validate . --project "$ABI_PROJECT"
+    - python -m abi.cli apply . --project "$ABI_PROJECT"
+    - python -m abi.cli test "$ABI_PROJECT"

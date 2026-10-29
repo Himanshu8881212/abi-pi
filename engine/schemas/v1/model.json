@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.abi.invalid/v1/model.json",
+  "title": "Semantic model",
+  "description": "model/model.json: model tables (fact/dimension), entities, relationships, date table (PRD §6.6, SE-1, SE-2). Tables and columns are referenced by ID/name, never display names (PC-1).",
+  "type": "object",
+  "required": ["$schema", "entities", "relationships"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {"const": "https://schema.abi.invalid/v1/model.json"},
+    "tables": {
+      "type": "array",
+      "description": "Model tables: fact or dimension (SE-1 dimensions, SE-2 classification) and the description the readiness check requires (§3)",
+      "items": {
+        "type": "object",
+        "required": ["table", "kind"],
+        "additionalProperties": false,
+        "properties": {
+          "table": {"type": "string", "description": "Table ID"},
+          "kind": {"enum": ["fact", "dimension"]},
+          "description": {"type": "string", "minLength": 1},
+          "hidden": {"type": "boolean", "description": "true: a staging table (e.g. a raw input appended into another table) kept out of the semantic model: queries, readiness, the agent's model view and docs. Its data stays loaded. build_model sets it for new tables that only feed other tables' steps; set_table overrides it"}
+        }
+      }
+    },
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "A real-world thing with a key (glossary \"Entity\")",
+        "required": ["id", "table", "key"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$"},
+          "name": {"type": "string"},
+          "description": {"type": "string"},
+          "table": {"type": "string", "description": "Table ID"},
+          "key": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+        }
+      }
+    },
+    "relationships": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "Many-to-one only: many rows of `from` match one row of `to`; filters flow from `to` (dimension) to `from` (fact) (SE-2)",
+        "required": ["id", "from", "to"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$"},
+          "from": {"$ref": "#/$defs/columns"},
+          "to": {"$ref": "#/$defs/columns"}
+        }
+      }
+    },
+    "date_table": {
+      "type": "object",
+      "required": ["table", "column"],
+      "additionalProperties": false,
+      "properties": {"table": {"type": "string"}, "column": {"type": "string"}}
+    },
+    "rates_table": {"type": "string", "minLength": 1, "description": "SE-13: the model table of currency rates (date DATE, from, to, rate DECIMAL) that CONVERT reads; set by set_rates_table"},
+    "removed_relationships": {"type": "array", "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$"}, "description": "IDs of relationships a person removed (remove_relationship): build_model doesn't add them back; add_relationship does"}
+  },
+  "$defs": {
+    "columns": {
+      "type": "object",
+      "required": ["table", "columns"],
+      "additionalProperties": false,
+      "properties": {"table": {"type": "string"}, "columns": {"type": "array", "minItems": 1, "items": {"type": "string"}}}
+    }
+  },
+  "examples": [
+    {"$schema": "https://schema.abi.invalid/v1/model.json",
+     "tables": [{"table": "consumption", "kind": "fact", "description": "Material consumption per posting"},
+                {"table": "materials", "kind": "dimension"}, {"table": "calendar", "kind": "dimension"},
+                {"table": "consumption_plant2", "kind": "fact", "hidden": true}],
+     "entities":[{"id": "material", "name": "Material", "table": "materials", "key": ["material_id"]}],
+     "relationships": [{"id": "consumption-material", "from": {"table": "consumption", "columns": ["material_id"]},
+                        "to": {"table": "materials", "columns": ["material_id"]}}],
+     "date_table": {"table": "calendar", "column": "date"}, "rates_table": "fx_rates",
+     "removed_relationships": ["consumption-posting_date"]}
+  ]
+}

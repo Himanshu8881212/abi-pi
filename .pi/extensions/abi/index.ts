@@ -22,7 +22,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 const ROOT = path.resolve(__dirname, "..", "..", "..");
 const PY = process.env.ABI_PI_PYTHON ?? (fs.existsSync(path.join(ROOT, ".venv", "bin", "python")) ? path.join(ROOT, ".venv", "bin", "python") : "python3");  // a container has no .venv
 const CREDS = path.join(ROOT, "scripts", "creds.py");
-const ABI_URL = process.env.ABI_URL ?? "http://127.0.0.1:8770";
+const ABI_URL = process.env.ABI_URL ?? "http://127.0.0.1:8780";
 const MCP = "mcp__abi__";
 const AREAS: { core: string[]; areas: Record<string, { about: string; words: string; tools: string[] }> } = JSON.parse(
 	fs.readFileSync(path.join(ROOT, "harness", "areas.json"), "utf8"),
@@ -435,7 +435,7 @@ export default async function abi(pi: ExtensionAPI) {
 			const real = inside(p, ctx.cwd);
 			const why = !real ? `${p} is outside the harness folder ${ROOT}`
 				: DATA_FILE.test(real) ? `${p} is a data file; read data only through ABI (semantic_query)`
-				: /[\\/](scratch|\.venv|logs)([\\/]|$)/.test(path.relative(ROOT, real).replace(/^/, "/")) ? `${p} is not a definitions folder`
+				: /^[\\/](scratch|\.venv|logs|data|engine)([\\/]|$)/.test(path.relative(ROOT, real).replace(/^/, "/")) ? `${p} is not a definitions folder (data/ is the engine's own data: read it only through ABI)`
 				// the admin's API keys and everyone's chats: never through the agent's file tools
 				: /[\\/]workspaces[\\/](_settings|[^\\/]+[\\/](_views|_team|_app[\\/][^\\/]+[\\/]packs))([\\/]|$)|secret\.key$/.test(real) ? `${p} holds keys, other people's chats, packs or the team's journal (the team reads it through its tools)`
 				: (name === "write" || name === "edit") && /[\\/]workspaces[\\/][^\\/]+[\\/][a-z][a-z0-9_]*[\\/]/.test(real)

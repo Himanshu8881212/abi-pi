@@ -1,0 +1,746 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.abi.invalid/v1/table.json",
+  "title": "Table",
+  "description": "tables/<id>.json: columns, key, transform steps (PRD §6.6, TR-1). Step parameters come from the transform compiler (M-01, abi.transform.Steps).",
+  "type": "object",
+  "required": [
+    "$schema",
+    "id",
+    "columns",
+    "steps"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "const": "https://schema.abi.invalid/v1/table.json"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$"
+    },
+    "description": {
+      "type": "string"
+    },
+    "columns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "type"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "type": {
+            "type": "string",
+            "minLength": 1,
+            "description": "DuckDB type, e.g. VARCHAR, DATE, DECIMAL(18,2)"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "key": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Detected or declared key columns; absent = keyless (read-only for write-back)"
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "add_column": "#/$defs/AddColumn",
+            "append": "#/$defs/Append",
+            "deduplicate": "#/$defs/Deduplicate",
+            "fill_nulls": "#/$defs/FillNulls",
+            "filter": "#/$defs/Filter",
+            "group": "#/$defs/Group",
+            "merge": "#/$defs/Merge",
+            "pivot": "#/$defs/Pivot",
+            "rename": "#/$defs/Rename",
+            "select": "#/$defs/Select",
+            "set_type": "#/$defs/SetType",
+            "sort": "#/$defs/Sort",
+            "source": "#/$defs/Source",
+            "split_column": "#/$defs/SplitColumn",
+            "sql": "#/$defs/Sql",
+            "unpivot": "#/$defs/Unpivot"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/Source"
+          },
+          {
+            "$ref": "#/$defs/Select"
+          },
+          {
+            "$ref": "#/$defs/Rename"
+          },
+          {
+            "$ref": "#/$defs/SetType"
+          },
+          {
+            "$ref": "#/$defs/Sort"
+          },
+          {
+            "$ref": "#/$defs/Deduplicate"
+          },
+          {
+            "$ref": "#/$defs/Filter"
+          },
+          {
+            "$ref": "#/$defs/FillNulls"
+          },
+          {
+            "$ref": "#/$defs/AddColumn"
+          },
+          {
+            "$ref": "#/$defs/SplitColumn"
+          },
+          {
+            "$ref": "#/$defs/Merge"
+          },
+          {
+            "$ref": "#/$defs/Append"
+          },
+          {
+            "$ref": "#/$defs/Group"
+          },
+          {
+            "$ref": "#/$defs/Pivot"
+          },
+          {
+            "$ref": "#/$defs/Unpivot"
+          },
+          {
+            "$ref": "#/$defs/Sql"
+          }
+        ]
+      },
+      "description": "Ordered transform steps (TR-1); generated from abi.transform.Steps"
+    }
+  },
+  "examples": [
+    {
+      "$schema": "https://schema.abi.invalid/v1/table.json",
+      "id": "consumption",
+      "description": "Material consumption per posting",
+      "columns": [
+        {
+          "name": "material_id",
+          "type": "VARCHAR"
+        },
+        {
+          "name": "posting_date",
+          "type": "DATE"
+        },
+        {
+          "name": "amount",
+          "type": "DECIMAL(18,2)"
+        }
+      ],
+      "key": [
+        "material_id",
+        "posting_date"
+      ],
+      "steps": [
+        {
+          "type": "source",
+          "source": "erp"
+        },
+        {
+          "type": "filter",
+          "condition": "amount <> 0"
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "AddColumn": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "add_column",
+          "title": "Type",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "expression": {
+          "minLength": 1,
+          "title": "Expression",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "name",
+        "expression"
+      ],
+      "title": "AddColumn",
+      "type": "object"
+    },
+    "Aggregation": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "function": {
+          "enum": [
+            "sum",
+            "avg",
+            "min",
+            "max",
+            "count",
+            "median",
+            "count_distinct"
+          ],
+          "title": "Function",
+          "type": "string"
+        },
+        "column": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Column"
+        }
+      },
+      "required": [
+        "name",
+        "function"
+      ],
+      "title": "Aggregation",
+      "type": "object"
+    },
+    "Append": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "append",
+          "title": "Type",
+          "type": "string"
+        },
+        "tables": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Tables",
+          "type": "array"
+        }
+      },
+      "required": [
+        "type",
+        "tables"
+      ],
+      "title": "Append",
+      "type": "object"
+    },
+    "Deduplicate": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "deduplicate",
+          "title": "Type",
+          "type": "string"
+        },
+        "columns": {
+          "default": [],
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Columns",
+          "type": "array"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Deduplicate",
+      "type": "object"
+    },
+    "FillNulls": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "fill_nulls",
+          "title": "Type",
+          "type": "string"
+        },
+        "columns": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "minLength": 1
+          },
+          "title": "Columns",
+          "type": "object"
+        }
+      },
+      "required": [
+        "type",
+        "columns"
+      ],
+      "title": "FillNulls",
+      "type": "object"
+    },
+    "Filter": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "filter",
+          "title": "Type",
+          "type": "string"
+        },
+        "condition": {
+          "minLength": 1,
+          "title": "Condition",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "condition"
+      ],
+      "title": "Filter",
+      "type": "object"
+    },
+    "Group": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "group",
+          "title": "Type",
+          "type": "string"
+        },
+        "by": {
+          "default": [],
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "By",
+          "type": "array"
+        },
+        "aggregations": {
+          "items": {
+            "$ref": "#/$defs/Aggregation"
+          },
+          "minItems": 1,
+          "title": "Aggregations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "type",
+        "aggregations"
+      ],
+      "title": "Group",
+      "type": "object"
+    },
+    "Merge": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "merge",
+          "title": "Type",
+          "type": "string"
+        },
+        "table": {
+          "minLength": 1,
+          "title": "Table",
+          "type": "string"
+        },
+        "on": {
+          "additionalProperties": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "minLength": 1
+          },
+          "title": "On",
+          "type": "object"
+        },
+        "columns": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Columns",
+          "type": "array"
+        },
+        "how": {
+          "default": "left",
+          "enum": [
+            "inner",
+            "left",
+            "right",
+            "full"
+          ],
+          "title": "How",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "table",
+        "on",
+        "columns"
+      ],
+      "title": "Merge",
+      "type": "object"
+    },
+    "Pivot": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "pivot",
+          "title": "Type",
+          "type": "string"
+        },
+        "column": {
+          "minLength": 1,
+          "title": "Column",
+          "type": "string"
+        },
+        "values": {
+          "minLength": 1,
+          "title": "Values",
+          "type": "string"
+        },
+        "function": {
+          "enum": [
+            "sum",
+            "avg",
+            "min",
+            "max",
+            "count",
+            "median",
+            "count_distinct"
+          ],
+          "title": "Function",
+          "type": "string"
+        },
+        "into": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Into",
+          "type": "array"
+        }
+      },
+      "required": [
+        "type",
+        "column",
+        "values",
+        "function",
+        "into"
+      ],
+      "title": "Pivot",
+      "type": "object"
+    },
+    "Rename": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "rename",
+          "title": "Type",
+          "type": "string"
+        },
+        "columns": {
+          "additionalProperties": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "minLength": 1
+          },
+          "title": "Columns",
+          "type": "object"
+        }
+      },
+      "required": [
+        "type",
+        "columns"
+      ],
+      "title": "Rename",
+      "type": "object"
+    },
+    "Select": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "select",
+          "title": "Type",
+          "type": "string"
+        },
+        "columns": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Columns",
+          "type": "array"
+        }
+      },
+      "required": [
+        "type",
+        "columns"
+      ],
+      "title": "Select",
+      "type": "object"
+    },
+    "SetType": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "set_type",
+          "title": "Type",
+          "type": "string"
+        },
+        "columns": {
+          "additionalProperties": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "minLength": 1
+          },
+          "title": "Columns",
+          "type": "object"
+        }
+      },
+      "required": [
+        "type",
+        "columns"
+      ],
+      "title": "SetType",
+      "type": "object"
+    },
+    "Sort": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "sort",
+          "title": "Type",
+          "type": "string"
+        },
+        "by": {
+          "items": {
+            "$ref": "#/$defs/SortKey"
+          },
+          "minItems": 1,
+          "title": "By",
+          "type": "array"
+        }
+      },
+      "required": [
+        "type",
+        "by"
+      ],
+      "title": "Sort",
+      "type": "object"
+    },
+    "SortKey": {
+      "additionalProperties": false,
+      "properties": {
+        "column": {
+          "minLength": 1,
+          "title": "Column",
+          "type": "string"
+        },
+        "descending": {
+          "default": false,
+          "title": "Descending",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "column"
+      ],
+      "title": "SortKey",
+      "type": "object"
+    },
+    "Source": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "source",
+          "title": "Type",
+          "type": "string"
+        },
+        "source": {
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "source"
+      ],
+      "title": "Source",
+      "type": "object"
+    },
+    "SplitColumn": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "split_column",
+          "title": "Type",
+          "type": "string"
+        },
+        "column": {
+          "minLength": 1,
+          "title": "Column",
+          "type": "string"
+        },
+        "delimiter": {
+          "minLength": 1,
+          "title": "Delimiter",
+          "type": "string"
+        },
+        "into": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Into",
+          "type": "array"
+        }
+      },
+      "required": [
+        "type",
+        "column",
+        "delimiter",
+        "into"
+      ],
+      "title": "SplitColumn",
+      "type": "object"
+    },
+    "Sql": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "sql",
+          "title": "Type",
+          "type": "string"
+        },
+        "query": {
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "query"
+      ],
+      "title": "Sql",
+      "type": "object"
+    },
+    "Unpivot": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "unpivot",
+          "title": "Type",
+          "type": "string"
+        },
+        "columns": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Columns",
+          "type": "array"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "value": {
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "columns",
+        "name",
+        "value"
+      ],
+      "title": "Unpivot",
+      "type": "object"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+# PC-13 CI checks for an ABI project repo. Copy to .github/workflows/abi.yml.
+# Every pull request is applied to a dedicated CI environment project (D-34) on a running ABI instance, then
+# validated and tested: schema/import checks, measure (MEL) tests, tool tests, agent evaluation sets.
+# Setup (once): a service account gets Editor in this repo's security/roles.json (set_role in the project, then
+# commit and push), and only then an Owner creates the CI project on that same instance (roles.json keys are its user IDs), pulls this repo into it and
+# binds it to its own environment (set_environment; environments/<branch>.json points sources at test data).
+# The CI project's roles must stay exactly the repo's: a role set only there makes every PR a roles change (exit 3).
+# Repository variables: ABI_IMAGE (the app image), ABI_URL, ABI_PROJECT (the CI project ID).
+# Repository secrets: ABI_USER, ABI_PASSWORD (the service account). Credentials live only in secrets, never in the repo.
+# A pull request that changes security/roles.json always fails with exit 3: a roles change needs an Owner's
+# confirmation in the app (D-1), which CI can't give. Apply it in the app instead.
+name: ABI checks
+on: pull_request
+concurrency:  # PRs share the CI project: one run at a time, none cancelled
+  group: abi-ci-${{ vars.ABI_PROJECT }}
+  cancel-in-progress: false
+jobs:
+  abi:
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ vars.ABI_IMAGE }}
+    env:
+      ABI_URL: ${{ vars.ABI_URL }}
+      ABI_PROJECT: ${{ vars.ABI_PROJECT }}
+      ABI_USER: ${{ secrets.ABI_USER }}
+      ABI_PASSWORD: ${{ secrets.ABI_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v5
+      - run: python -m abi.cli validate . --project "$ABI_PROJECT"
+      - run: python -m abi.cli apply . --project "$ABI_PROJECT"
+      - run: python -m abi.cli test "$ABI_PROJECT"

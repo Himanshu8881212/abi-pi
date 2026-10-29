@@ -8,3 +8,8 @@ workspaces/*
 .DS_Store
 scripts/video/node_modules/
 .env
+data/
+engine/backend/.venv/
+engine/backend/static/
+engine/frontend/node_modules/
+workspaces.old-abi/

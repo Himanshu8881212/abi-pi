@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.abi.invalid/v1/descriptions.json",
+  "title": "Description marks",
+  "description": "docs/descriptions.json: marks on the explanatory layer (PRD §8, DC-5). The texts stay in their objects' own `description` fields (project.json, model tables, measures, datasets, reports, ML models); a mark says who wrote the text (`agent` = drafted by the Documenter, unreviewed; `human` = written or reviewed by a person) and holds SHA-256 hashes of the text and of the object's definition when it was marked. A changed definition hash flags the text \"may be outdated\"; a changed text hash voids the mark.",
+  "type": "object",
+  "required": ["$schema", "descriptions"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {"const": "https://schema.abi.invalid/v1/descriptions.json"},
+    "descriptions": {
+      "type": "object",
+      "propertyNames": {"pattern": "^(project|table|measure|dataset|report|ml):.+$"},
+      "additionalProperties": {
+        "type": "object",
+        "required": ["by", "text", "definition"],
+        "additionalProperties": false,
+        "properties": {
+          "by": {"enum": ["agent", "human"]},
+          "text": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "definition": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    }
+  },
+  "examples": [
+    {"$schema": "https://schema.abi.invalid/v1/descriptions.json",
+     "descriptions": {"measure:sales": {"by": "agent",
+                                        "text": "0f343b0931126a20f133d67c2b018a3b1a3f8e8c9f1e9e4c2f7c8b6a5d4e3f21",
+                                        "definition": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"}}}
+  ]
+}

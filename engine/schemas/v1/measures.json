@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.abi.invalid/v1/measures.json",
+  "title": "Measures",
+  "description": "model/measures.json: measures written in the Measure Expression Language (MEL, PRD SE-3, §6.6). `[id]` in an expression refers to another measure by its stable ID (PC-1), as glossary terms do; renaming a measure changes only its `name`.",
+  "type": "object",
+  "required": ["$schema", "measures"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {"const": "https://schema.abi.invalid/v1/measures.json"},
+    "measures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "expression"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$"},
+          "name": {"type": "string", "minLength": 1, "description": "Display name, shown to users"},
+          "expression": {"type": "string", "minLength": 1, "description": "MEL, e.g. SUM(sales.amount) or DIVIDE([sales], [customers])"},
+          "description": {"type": "string"},
+          "tests": {
+            "type": "array",
+            "description": "Run by the readiness check (§3 \"passes its tests\"): the measure, grouped by `dimensions` under `filters` (semantic query format, schemas/v1/datasets.json), must return exactly `rows`.",
+            "items": {
+              "type": "object",
+              "required": ["rows"],
+              "additionalProperties": false,
+              "properties": {
+                "description": {"type": "string"},
+                "dimensions": {"type": "array", "items": {"type": "string", "pattern": "^[^.\\s][^.]*\\.[^.]+$"}},
+                "filters": {"type": "array", "items": {"$ref": "#/$defs/filter"}},
+                "rows": {"type": "array", "items": {"type": "array"}, "description": "Expected rows in any order: dimension values, then the measure value. Numbers compare to 6 decimals, dates as ISO text."}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "filter": {
+      "type": "object",
+      "required": ["column", "op", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "column": {"type": "string", "pattern": "^[^.\\s][^.]*\\.[^.]+$", "description": "table.column"},
+        "op": {"enum": ["=", "<>", "<", "<=", ">", ">=", "in"]},
+        "value": {"description": "One value; a list for `in`", "anyOf": [{"type": ["string", "number", "boolean"]}, {"type": "array", "items": {"type": ["string", "number", "boolean", "null"]}}]}
+      }
+    }
+  },
+  "examples": [
+    {"$schema": "https://schema.abi.invalid/v1/measures.json",
+     "measures": [
+       {"id": "sales", "name": "Sales", "expression": "SUM(sales.amount)", "description": "Order line amounts",
+        "tests": [{"description": "2024 total", "filters": [{"column": "calendar.year", "op": "=", "value": 2024}], "rows": [[1250.5]]},
+                  {"dimensions": ["products.category"], "filters": [{"column": "calendar.year", "op": "in", "value": [2024]}],
+                   "rows": [["Bikes", 1000], ["Parts", 250.5]]}]},
+       {"id": "customers", "name": "Customers", "expression": "DISTINCT_COUNT(sales.customer_id)"},
+       {"id": "sales-per-customer", "name": "Sales per Customer", "expression": "DIVIDE([sales], [customers])"},
+       {"id": "bikes-sales", "name": "Bikes Sales", "expression": "WHERE([sales], products.category = 'Bikes')"},
+       {"id": "sales-ytd", "name": "Sales YTD", "expression": "YTD([sales])"}
+     ]}
+  ]
+}

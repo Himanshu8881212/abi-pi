@@ -1,0 +1,914 @@
+"""Add data: upload, server path, S3/MinIO, HTTP URL, Postgres/MySQL table → DuckLake. PRD §6.2 IN-1, IN-2,
+IN-6 (files on change, databases daily), SC-4, §6.4 TR-4.
+
+Every load is `storage.refresh` (one atomic snapshot) inside the `add_data` action; uploads are just a
+transport that stores the file and then calls that action. The worker re-runs a load when the
+source's files change (`refresh_changed`, IN-6). Credentials only enter as `${secret:NAME}`.
+
+Sources are project files (D-9): `add_data` writes `sources/<table>.json`, and that file ID is the
+source ID a `source` step names. Every load reads the definition from the repo (`_source`); the
+Postgres `sources` table keeps only runtime state per loaded table (the files' fingerprint). A table
+with steps (tables/<t>.json, `set_steps`) loads its source's location into raw.<t> and builds
+model.<t> with `transform.compile`. Every load refreshes what reads the table, in dependency order
+(`refresh`, TR-4).
+"""
+
+import contextlib
+import fcntl
+import json
+import logging
+import os
+import re
+import shutil
+import time
+import uuid
+from datetime import UTC, datetime, timedelta
+from graphlib import TopologicalSorter
+from pathlib import Path as FsPath
+from typing import Annotated, Literal
+
+import duckdb
+import psycopg
+import pyarrow as pa
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Request, Response
+from fastapi.concurrency import run_in_threadpool
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import best_match
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    ValidationError,
+)
+
+from abi import actions, db, flows, ml, semantic, storage, transform, writeback
+from abi.actions import ActionFailed, action, audit, current_user, production_refusal
+from abi.agent import notify_change
+from abi.project import SCHEMA, SCHEMAS, git, imports
+from abi.project.bundle import bundle, loads
+from abi.security import Role, User, credentials, role_in, usage
+from abi.semantic import detect, lineage, live, model
+from abi.storage import TABLE, _lit, _q
+
+from . import fetch, quality
+
+READERS = {"parquet": "read_parquet", "csv": "read_csv", "json": "read_json", "xlsx": "read_xlsx", "avro": "read_avro",
+           "arrow": "read_arrow",  # IN-4 (nanoarrow; uncompressed IPC only, so server paths use pyarrow: `_arrow`)
+           "delta": "delta_scan", "iceberg": "iceberg_scan", "sqlite": "sqlite_scan"}  # IN-4, see `_reader`
+ALIASES = {"tsv": "csv", "ndjson": "json", "jsonl": "json", "feather": "arrow", "ipc": "arrow", "sqlite3": "sqlite",
+           "db": "sqlite"}  # read_csv/read_json auto-detect the rest
+FOLDERS = {"_delta_log": "delta", "metadata": "iceberg"}  # IN-4: a server folder holding this subfolder
+SECRET_ONLY = rf"^{credentials.REF}$"
+SOURCE_SCHEMA = Draft202012Validator(json.loads((SCHEMAS / "source.json").read_text()))
+
+
+class S3(BaseModel):
+    """S3/MinIO options (DuckDB `TYPE s3` secret); credential fields accept only ${secret:NAME}."""
+
+    key_id: str | None = Field(None, pattern=SECRET_ONLY)
+    secret: str | None = Field(None, pattern=SECRET_ONLY)
+    region: str | None = Field(None, pattern=r"^[a-z0-9-]{1,50}$")  # it becomes part of the host (D-2)
+    endpoint: str | None = Field(None, pattern=r"^[A-Za-z0-9.-]+(:[0-9]+)?$")  # host[:port] only, no scheme (D-2)
+    url_style: Literal["path", "vhost"] | None = None
+    use_ssl: bool | None = None
+
+
+class Database(BaseModel):
+    """IN-2 database source: the table to read, and the login only as ${secret:NAME}, both required (D-27)."""
+
+    table: str = Field(pattern=r"^([A-Za-z_][A-Za-z0-9_]{0,62}\.)?[A-Za-z_][A-Za-z0-9_]{0,62}$", description="schema.table or table")
+    user: str = Field(pattern=SECRET_ONLY)
+    password: str = Field(pattern=SECRET_ONLY)
+    incremental: str | None = Field(None, pattern=TABLE, description="IN-6 monotonic column; default: the auto-increment key")
+    sync: bool = Field(False, description="WB-10: Owners may write edits back to this table (sync_edits); the login then"
+                                          " needs UPDATE, INSERT and DELETE rights on it")
+
+
+class SQLite(BaseModel):
+    """IN-4 SQLite file source: the table to read (sqlite_scan, read-only, never ATTACH)."""
+
+    table: str = Field(pattern=TABLE)
+
+
+class Csv(BaseModel):
+    """IN-2 CSV dialect for files DuckDB's sniffer rejects; only what is set overrides auto-detect (IN-5).
+    Whitelisted values only: they become read_csv options, never free text in SQL."""
+
+    model_config = ConfigDict(extra="forbid")
+    quote: Literal['"', "'"] | None = None
+    escape: Literal['"', "'", "\\"] | None = None
+    delimiter: Literal[",", ";", "|", "\t"] | None = None
+    header: bool | None = None
+    strict_mode: bool | None = None  # false: read rows that break RFC 4180 (e.g. `"a"|"b"` in one field)
+
+
+# SC-4: a login typed into a location (user:password@ after any '://', or a '?' anywhere, even past '#' or a newline,
+# in a location that doesn't start with http(s)://: DuckDB reads s3_secret_access_key and friends from an s3:// query)
+# is refused at input validation, before audit_log, Git or a log sees it. Unanchored, so leading whitespace doesn't
+# hide it. The same pattern is the `not` of source.json's location
+LOGIN = r"://[^/?#]*@|^(?![hH][tT][tT][pP][sS]?://)[\s\S]*://[\s\S]*\?"
+
+
+def _no_login(loc: str) -> str:
+    if re.search(LOGIN, loc):
+        raise ValueError("A location can't carry a login (user:password@) or, except http(s)://, a '?' query; put"
+                         " logins in `headers`, `s3` or `database` as ${secret:NAME} and endpoint/region in `s3`.")
+    return loc
+
+
+class Source(storage.ProjectRef):
+    table: str = Field(pattern=TABLE)
+    location: Annotated[str, AfterValidator(_no_login)] = Field(min_length=1, description="Server path (under the files root), s3://…, http(s)://…,"
+                                                    " or postgres|mysql|clickhouse(s)://host[:port]/database")
+    format: Literal[*READERS] | None = None  # default: from the file extension, or a server folder's _delta_log/ or metadata/
+    s3: S3 | None = None
+    sqlite: SQLite | None = None  # IN-4: with format sqlite
+    # HTTP; each value must use a secret; no CR/LF, so no injected header lines (D-2)
+    headers: dict[Annotated[str, Field(pattern=r"^[A-Za-z0-9-]{1,100}$")],
+                  Annotated[str, Field(pattern=rf"^[^\r\n]*{credentials.REF}[^\r\n]*$")]] = Field({})
+    database: Database | None = None  # IN-2: with a postgres:// or mysql:// location
+    csv: Csv | None = None  # IN-2: CSV dialect, with format csv
+    api: fetch.Api | None = None  # API-SRC: an https location that is a REST/JSON or CSV API
+    _sid: str | None = PrivateAttr(None)  # sources/<id>.json when it isn't `table` (a stepped table's source)
+
+    @property
+    def sid(self) -> str:
+        return self._sid or self.table
+
+    def spec(self) -> dict:
+        """The definition; without `database`/`sqlite` exactly as before D-01.1, so file sources keep their fingerprints."""
+        # `sync` off (the default) leaves it out, so database sources from before WB-10 keep their fingerprints too
+        d = self.model_dump(mode="json", exclude={"database": {"sync"}} if self.database and not self.database.sync else None)
+        return {k: v for k, v in d.items() if v is not None or k not in ("database", "sqlite", "csv", "api")}
+
+
+DATABASES = {"postgres": 5432, "mysql": 3306}  # IN-2, D-27
+MYSQL_MAX_PORT = 65353  # DuckDB's mysql extension refuses higher ports ("port must be between 0 and 65353")
+# IN-1 connection string: no userinfo, query or secret (the login is in `database`); host[:port] as plain as F-09 `_host`
+DB_LOCATION = r"(postgres|mysql)://([A-Za-z0-9.-]+)(?::(\d{1,5}))?/([A-Za-z0-9_-]{1,63})"
+ORDERABLE = r"U?(TINY|SMALL|BIG|HUGE)?INT(EGER)?|DECIMAL\(.*\)|FLOAT|DOUBLE|DATE|TIME.*|VARCHAR"  # IN-6 incremental column types
+
+
+def files_root() -> FsPath:
+    return FsPath(os.environ.get("ABI_FILES_PATH", "/data/files")).resolve()
+
+
+@action(Role.editor, definition=True)
+def add_data(conn, user: User, args: Source) -> dict:
+    """Loads a file, folder, database or HTTP API into the project's table as a new snapshot, replacing that table's data, saves the source as sources/<table>.json, then refreshes the tables that read it. A REST/JSON or CSV API is an https `location` (the endpoint, fixed query parameters in `api.query`) with an `api` object: `records` is the JSON pointer to the array of records (e.g. /data/items), `pagination` how to get the next page (page or offset number in `param`, a cursor at `pointer` sent as `param`, or a next link at `pointer` or in the Link header), `auth` takes only ${secret:NAME} references (names from list_secrets, never a typed key), `columns` maps and types fields, `incremental` {field, param} sends the largest loaded value of `field` to load only new records, and `every_hours` sets the schedule (default daily). Loading from a host the project hasn't loaded from yet waits for the person's Confirm click."""
+    if args.table in transform.inputs(args.project):  # D-20: an input table's name is reserved; a load would drop its edits
+        raise ActionFailed(409, f"'{args.table}' is an input table (its rows are edits), so no data loads into it. Load"
+                                " under another name, or delete the input table first.")
+    try:
+        steps = transform.tables(args.project).get(args.table)
+    except ValueError as e:
+        raise ActionFailed(400, str(e))
+    if steps and steps[0].source != args.table:
+        raise ActionFailed(409, f"Table '{args.table}' is built by steps from source '{steps[0].source}';"
+                                " add data to that source or change the table's source step.")
+    if actions.needs_click() and (targets := hosts(args.spec())):  # §5 #3: the load (and every refresh) connects there
+        from abi.tools import builtin  # not at top: builtin imports this module
+
+        builtin._first_send(conn, args.project, targets, {"hosts": sorted(t[7:] for t in targets), "source": args.spec()})
+    _lock(conn, args.project, args.table)  # before the file: a worker check seeing it waits for this load (IN-6)
+    _write(args)  # a failed load rolls the file back (git.change)
+    snap = _load(conn, args, user.name)
+    conn.commit()  # the load is in; downstream loads use their own connections and must see this row (and its secret binding)
+    refresh(conn, args.project, {args.table}, user.name)
+    return storage.made(snap)
+
+
+class TableSteps(storage.ProjectRef):
+    table: str = Field(pattern=TABLE)
+    steps: list[transform.Step] = Field(min_length=1)
+
+
+@action(Role.editor, definition=True)
+def set_steps(conn, user: User, args: TableSteps) -> dict:
+    """Saves a table's transform steps (the first one names a loaded source), loads the table through them, then refreshes the tables that read it. On an input table (schema-first, declared columns) the steps map a source onto it: they must output exactly its declared column names with values that cast to the declared types; its hand-entered rows stay as edits."""
+    t = args.table
+    try:
+        transform.compile(t, args.steps)
+        TopologicalSorter(_graph({**transform.tables(args.project), t: args.steps}, {})).prepare()  # CycleError is a ValueError
+    except ValueError as e:
+        raise ActionFailed(400, str(e))
+    for x in {t} | transform.reads(args.steps):  # IN-3: steps run in DuckDB over loaded data
+        live.refuse(args.project, x)
+    src = _source(args.project, args.steps[0].source, t)
+    f = git.path(args.project) / "tables" / f"{t}.json"
+    old = json.loads(f.read_text()) if f.exists() else {}
+    steps = args.steps
+    # PC-15: mapping a source onto an input table (D-20: its edits stay). A final set_type keeps the declared types on
+    # every later refresh; `_model_sql` checks the steps before it
+    if declared := old["columns"] if old.get("steps") == [] else None:
+        steps = steps + [transform.SetType(type="set_type", columns={c["name"]: c["type"] for c in declared})]
+
+    def write(columns):
+        imports.write(args.project, {f"tables/{t}.json": {"$schema": SCHEMA + "table.json", **old, "id": t, "columns": columns,
+                                                          "steps": [s.model_dump(mode="json") for s in steps]}})
+
+    # ponytail: the load and downstream refresh run inside git.change's global repo lock, so a long load blocks other
+    # definition actions; refresh after the change (and roll back the file on failure) if that starts to hurt
+    _lock(conn, args.project, t)  # as add_data
+    write(old.get("columns", []))  # _load builds model.<t> from the file's steps
+    snap = _load(conn, src, user.name, declared=declared)
+    write(semantic.columns(args.project, t))
+    conn.commit()  # as in add_data
+    refresh(conn, args.project, {t}, user.name)
+    return storage.made(snap)
+
+
+class TableRef(storage.ProjectRef):
+    table: str = Field(pattern=TABLE)
+
+
+class SourceRef(storage.ProjectRef):
+    source: str = Field(pattern=TABLE, description="source ID: the file sources/<id>.json")
+
+
+def _without(files: dict, t: str | None, *paths: str) -> dict:
+    """`files` less `paths` and, when `t` is given, the model.json entries naming table `t`."""
+    out = {k: v for k, v in files.items() if k not in paths}
+    if t and (m := out.get("model/model.json")):
+        m = {k: v for k, v in m.items() if not (k == "date_table" and v["table"] == t)}
+        for k in ("tables", "entities", "relationships"):
+            if k in m:
+                m[k] = [x for x in m[k] if t not in (x.get("table"), x.get("from", {}).get("table"), x.get("to", {}).get("table"))]
+        out["model/model.json"] = m
+    return out
+
+
+def _delete(conn, user: User, project: str, old: dict, files: dict, node: str) -> dict:
+    """E-14: `files` (the project without `node`) through the import checks, so a dangling use is refused 422 with its
+    file and fix, after one confirmation (§5 #3) whose signed preview lists what reads `node` (SE-11, from the
+    definitions only). Removed tables leave IN-6 refresh and go to the 30-day archive (PC-7)."""
+    impact = lineage.reach(lineage.graph(old), {node}, "downstream")
+    why = f"It deletes {node.replace(':', ' ', 1)}." + (f" Objects that read it: {', '.join(impact)}." if impact else "")
+    return git.apply_tree(conn, user, project, files, f"Deleting {node}", [why], {"delete": node, "impact": impact})
+
+
+@action(Role.editor, definition=True, confirms=True)
+def delete_table(conn, user: User, args: TableRef) -> dict:
+    """Deletes a table (also an input table): its table and source files and the model entries naming it (relationships, entities, date table). Refused while a measure, report, dataset, tool or another table uses it; otherwise asks a confirmation listing everything that reads it. Its data is archived for 30 days; undo brings the definition back."""
+    t, old = args.table, bundle(git.path(args.project))
+    files = _without(old, t, f"tables/{t}.json", f"sources/{t}.json")
+    if files.keys() == old.keys():
+        raise ActionFailed(404, f"No table '{t}' in project '{args.project}'.")
+    return _delete(conn, user, args.project, old, files, f"table:{t}")
+
+
+@action(Role.editor, definition=True, confirms=True)
+def delete_source(conn, user: User, args: SourceRef) -> dict:
+    """Deletes a source (sources/<id>.json). Refused while a table's steps load it; the table of the same name that no steps build goes with it (data archived for 30 days). Asks a confirmation listing everything that reads it."""
+    s, old = args.source, bundle(git.path(args.project))
+    if f"sources/{s}.json" not in old:
+        raise ActionFailed(404, f"No source '{s}' in project '{args.project}'.")
+    try:
+        users = sorted(t for t, steps in transform.tables(args.project).items() if steps[0].source == s)
+    except ValueError as e:
+        raise ActionFailed(400, str(e))
+    if users:
+        raise ActionFailed(409, f"Source '{s}' is loaded by table(s) {', '.join(users)}; change their source step or"
+                                " delete them first.", tables=users)
+    files = _without(old, None if f"tables/{s}.json" in old else s, f"sources/{s}.json")
+    return _delete(conn, user, args.project, old, files, f"source:{s}")
+
+
+def _graph(steps: dict, sources) -> dict[str, set[str]]:
+    """TR-4: every source or stepped table -> what it reads (a table with no steps reads only its own source's files)."""
+    return {t: set() for t in sources} | {t: transform.reads(s) - {t} for t, s in steps.items()}
+
+
+def _no_pgservice(kind: str) -> None:
+    if kind == "postgres" and "PGSERVICE" in os.environ:  # a service file outranks the env and can set hostaddr (D-27)
+        raise ActionFailed(500, "PGSERVICE is set on the server, so a Postgres source could connect elsewhere; unset it.")
+
+
+def _write(src: Source) -> None:
+    """sources/<table>.json (D-9): credentials stay `${secret:NAME}` references, never values (SC-4)."""
+    f = git.path(src.project) / "sources" / f"{src.table}.json"
+    doc = src.model_dump(mode="json", exclude_defaults=True, exclude={"project", "table"})
+    # IN-6: databases and APIs daily, files on change, ClickHouse live (IN-3)
+    refresh = "live" if re.match(live.LOCATION, src.location) else "daily" if src.database or src.api else "on_change"
+    with contextlib.suppress(ValueError):  # IN-8: a person's freshness setting stays (a broken old file is replaced)
+        if f.is_file() and (q := loads(f.read_text()).get("quality")):
+            doc["quality"] = q
+    imports.write(src.project, {f"sources/{src.table}.json": {"$schema": SCHEMA + "source.json", "id": src.table,
+                                                               "refresh": refresh, **doc}})
+
+
+def _source(project: str, sid: str, table: str) -> Source:
+    """D-9: sources/<sid>.json as the spec that loads `table`, checked on every load: schemas/v1/source.json, then the
+    `Source` model (secret-only credentials, F-09 host rules). Messages never echo a value from the file (SC-4)."""
+    f = git.path(project) / "sources" / f"{sid}.json"
+    if not re.fullmatch(TABLE, sid) or not f.is_file():  # a step's source is free text: never build a path from it unchecked
+        raise ActionFailed(404, f"No source '{sid}' (sources/<id>.json) in project '{project}'; add data first.")
+    try:
+        doc = loads(f.read_text())
+        env = git.path(project) / "environments" / f"{git.environment(project)}.json"
+        if env.is_file():  # PC-9: this environment's connection settings replace the file's top-level keys
+            doc |= loads(env.read_text()).get("sources", {}).get(sid, {})
+        if err := best_match(SOURCE_SCHEMA.iter_errors(doc)):  # err.message would echo the value
+            raise ActionFailed(400, f"sources/{sid}.json: {imports.json_path(err, 'source')} fails '{err.validator}' in schemas/v1/source.json.")
+        if doc["id"] != sid:
+            raise ActionFailed(400, f"sources/{sid}.json: its id must be '{sid}', the file name.")
+        src = Source.model_validate({**doc, "project": project, "table": table})
+        src._sid = sid
+        return src
+    except ValidationError as e:
+        raise ActionFailed(400, f"sources/{sid}.json: " + "; ".join(
+            f"{'.'.join(map(str, x['loc']))}: {x['msg']}" for x in actions.invalid(e)))
+    except ValueError as e:  # not JSON, duplicate key
+        raise ActionFailed(400, f"sources/{sid}.json: {e}")
+
+
+def _migrate(conn, project: str, steps: dict) -> None:
+    """D-9: write pre-M-10 definitions (the Postgres `spec`) to sources/<id>.json; `refresh` NULLs each `spec` once
+    that table's replay passed (so a failed first refresh can still bind a legacy secret later, F-09).
+
+    Worker only (`refresh_changed`, never `refresh`, which revert/add_data call inside git.change), as plain file writes
+    (uncommitted changes, PC-6): inside an action's change, `undo` would delete a definition whose Postgres copy is gone."""
+    rows = conn.execute("SELECT table_name, spec FROM sources WHERE project = %s AND spec IS NOT NULL", [project]).fetchall()
+    if rows:
+        git.repo(project)  # 404 when the project has no repo: nowhere to put the files
+    for r in rows:
+        t = r["table_name"]
+        if (t in steps and steps[t][0].source != t) or (git.path(project) / "sources" / f"{t}.json").exists():
+            continue  # a stepped table's copy of its source's spec, or already a file
+        _write(Source.model_validate(r["spec"]))
+
+
+# ponytail: per process, so a worker restart retries at once; keep it in the `sources` row if several workers refresh
+BACKOFF: dict[tuple[str, str], tuple[int, float]] = {}  # (project, table) -> (failures in a row, next try, unix time)
+
+
+def refresh(conn, project: str, after: set[str] | None, author: str, reload: set[str] = frozenset()) -> dict[str, str]:
+    """TR-4: reload tables in dependency order, each as its own snapshot. Returns each failed table's error.
+
+    `after`: tables just loaded (or removed); reload everything that reads them, directly or not, plus the
+    tables in `reload` (a revert changed their steps, PC-7). None (IN-6 worker):
+    reload every table whose files changed, and everything downstream of a reloaded table. A failure is
+    audited and notified (MA-7) and skips the table's dependents; their previous snapshots stay live (ST-2).
+    """
+    steps = transform.tables(project)
+    prints = {r["table_name"]: r["fingerprint"] for r in conn.execute(
+        "SELECT table_name, fingerprint FROM sources WHERE project = %s", [project]).fetchall()}
+    graph = _graph(steps, {f.stem for f in (git.path(project) / "sources").glob("*.json")})
+    done, failed = set(after or ()), {}
+    for t in TopologicalSorter(graph).static_order():
+        if t in done or t not in graph:  # just loaded, or a name only read (e.g. a missing table)
+            continue
+        up = graph[t]
+        if bad := sorted(up & failed.keys()):
+            failed[t] = f"It reads {bad}, which failed."
+            continue
+        forced = bool(up & done) or t in reload
+        if after is not None and not forced:
+            continue
+        source = steps[t][0].source if t in steps else t
+        spec = {"project": project, "table": t, "source": source}  # audited; the definition itself is in Git
+        used: dict = {}  # the secrets this load resolved, to scrub the log (SC-4)
+        is_db, key, now = False, (project, t), datetime.now(UTC).timestamp()
+        try:
+            src = _source(project, source, t)
+            is_db = src.database is not None or src.api is not None
+            if is_db and not forced and now < BACKOFF.get(key, (0, 0))[1]:
+                continue  # IN-6: a failing database load waits, so a wrong login doesn't hit the source every minute
+            with db.connect() as c:
+                if not forced:  # a load already running (add_data, set_steps, a sync) is this one; re-read what it wrote
+                    if not _lock(c, project, t, wait=False):
+                        continue
+                    prints[t] = (c.execute("SELECT fingerprint FROM sources WHERE project = %s AND table_name = %s",
+                                           [project, t]).fetchone() or {}).get("fingerprint")
+                snap = _load(c, src, author, unless=None if forced else prints.get(t), used=used)
+                # replayed (legacy secrets bound in `allow`, same transaction): drop the pre-M-10 spec, the file holds it now
+                c.execute("UPDATE sources SET spec = NULL WHERE project = %s AND table_name = %s", [project, t])
+                BACKOFF.pop(key, None)
+                if snap is not None:
+                    done.add(t)
+                    audit(c, None, "worker", "refresh_source", project, spec, 200, f"snapshot {snap} by {author}")
+        except (ActionFailed, duckdb.Error, psycopg.Error, ValueError) as e:  # ValueError: invalid steps (TR-1)
+            if isinstance(e, (duckdb.Error, psycopg.Error)):  # T-03.5: raw text (paths, SQL) to the server log only
+                logging.getLogger(__name__).error("Refreshing %s/%s failed: %s", project, t, credentials.log_text(e, used))
+                e = ActionFailed(500, f"Loading failed ({type(e).__name__}); the details are in the server log.")
+            failed[t] = str(e)
+            if is_db:  # 1 min, doubling to 1 h
+                n = BACKOFF.get(key, (0, 0))[0] + 1
+                BACKOFF[key] = (n, now + min(60 * 2 ** (n - 1), 3600))
+            with db.connect() as c:
+                audit(c, None, "worker", "refresh_source", project, spec, getattr(e, "status", 500), str(e))
+            notify_change("refresh", project, f"Refreshing table '{t}': ", f"{e} The previous snapshot stays live.",
+                          "works again.", t)  # §5, MA-7, D-10: once per distinct error
+    return failed
+
+
+def probe(conn, project: str, sid: str) -> None:
+    """PC-3 import of sources/<sid>.json: refuse a hand-set incremental column the source table lacks (IN-6), now."""
+    if (src := _source(project, sid, sid)).database and src.database.incremental:
+        _load(conn, src, "import", probe=True)
+
+
+def _lock(conn, project: str, table: str, wait: bool = True) -> bool:
+    """IN-6, API-SRC.4-fix-1: one load of a table at a time, held until `conn` ends its transaction (re-entrant)."""
+    f = "pg_advisory_xact_lock" if wait else "pg_try_advisory_xact_lock"
+    return conn.execute(f"SELECT {f}(hashtext(%s)) AS ok", [f"load:{project}/{table}"]).fetchone()["ok"]
+
+
+def _load(conn, src: Source, author: str, unless: str | None = None, used: dict | None = None, probe: bool = False,
+          hook=None, declared: list[dict] | None = None) -> int | None:
+    """Load `src`; skip (return None) when its files' fingerprint equals `unless`. `used` collects the resolved secrets.
+    `probe`: a database source only connects and checks `incremental`, then returns None. `hook`: `storage.refresh`'s."""
+    if not probe:
+        _lock(conn, src.project, src.table)
+    used = {} if used is None else used
+    # the scheme comes from the unresolved location, so no message can echo a secret value (SC-4)
+    kind = src.location.split("://", 1)[0].lower() if "://" in src.location else "path"
+    if re.search(credentials.REF, kind):
+        raise ActionFailed(403, "A secret can't be the location's scheme.")
+    if kind in live.SCHEMES:  # IN-3: never copied, only its columns are recorded
+        return live.register(conn, src, unless)
+    name = f"abi_{uuid.uuid4().hex}"  # the temporary secret, and the attached database's alias
+    if kind in DATABASES or src.database:
+        m = re.fullmatch(DB_LOCATION, src.location)
+        if not m or not src.database:
+            raise ActionFailed(400, "A database source needs location postgres://host[:port]/database or"
+                                    " mysql://host[:port]/database (no user, password or options) and a `database` object.")
+        if kind == "mysql" and int(m[3] or 0) > MYSQL_MAX_PORT:
+            raise ActionFailed(400, f"A MySQL source's port must be at most {MYSQL_MAX_PORT}; DuckDB's MySQL driver"
+                                    " can't connect to a higher one.")
+        _no_pgservice(kind)
+        loc, host = None, m[2].lower()
+        # D-27: every setting explicit, never the PG*/MYSQL_* env (the catalog's own PGPASSWORD is there)
+        opts = {"TYPE": kind, "HOST": m[2], "PORT": m[3] or str(DATABASES[kind]), "DATABASE": m[4],
+                "USER": credentials.resolve(conn, src.database.user, used, src.project),
+                "PASSWORD": credentials.resolve(conn, src.database.password, used, src.project)}
+        schema, _, table = src.database.table.rpartition(".")
+        raw_sql = f"SELECT * FROM {name}.{_q(schema) + '.' if schema else ''}{_q(table)}"
+    elif src.api:  # API-SRC.1: fetched page by page in the load, after the D-2 check below
+        loc, opts, raw_sql = credentials.resolve(conn, src.location, used, src.project), {}, None
+        if kind != "https" or src.format or (src.csv and src.api.format != "csv"):
+            raise ActionFailed(400, "An API source needs an https:// location, its format in `api.format` and `csv`"
+                                    " options only with api.format csv.")
+        headers, query, hide = fetch.request(conn, src, used)
+        host = _host(kind, loc, opts)
+    else:
+        loc = credentials.resolve(conn, src.location, used, src.project)
+        if kind == "path":
+            loc = str(files_root() / loc)
+            if not FsPath(loc).resolve().is_relative_to(files_root()):
+                raise ActionFailed(400, "Server paths must be inside the files folder.")
+        elif kind not in ("s3", "http", "https"):
+            raise ActionFailed(400, f"Unsupported location '{kind}://'; use a server path, s3://, http(s)://,"
+                                    " postgres://, mysql:// or clickhouse(s)://.")
+        elif kind == "s3" and "?" in loc:  # DuckDB reads ?s3_endpoint=, ?s3_region=, … from it past the `s3` options (D-2)
+            raise ActionFailed(400, "An s3:// location can't have a '?' query; put endpoint, region and keys in `s3`.")
+        ext = re.sub(r"[?#].*", "", loc).rsplit(".", 1)[-1].lower()
+        folder = kind == "path" and FsPath(loc).is_dir()
+        fmt = src.format or next((f for d, f in FOLDERS.items() if folder and (FsPath(loc) / d).is_dir()), None) or ALIASES.get(ext, ext)
+        if fmt not in READERS:
+            raise ActionFailed(400, f"Can't tell the format of '{src.location}'; set format to one of {list(READERS)}.")
+        if fmt == "sqlite" and (kind != "path" or not src.sqlite):
+            raise ActionFailed(400, "A SQLite source needs a server path and the table to read (`sqlite`: {\"table\": …}).")
+        if src.csv and fmt != "csv":
+            raise ActionFailed(400, f"`csv` options apply to CSV files only; '{src.location}' is read as {fmt}.")
+        if fmt in ("delta", "iceberg") and (kind not in ("path", "s3") or fmt == "delta" and kind == "s3" and not (
+                src.s3 and src.s3.endpoint and src.s3.url_style == "path")):
+            # D-2: Delta's own S3 client sends vhost requests to the bare endpoint, not <bucket>.<endpoint> as `_host` says
+            raise ActionFailed(400, f"A {fmt} table must be a server folder or an s3:// folder"
+                                    + (" (Delta on S3: set s3.endpoint and url_style 'path')." if fmt == "delta" else "."))
+        opts = {}
+        if kind == "s3" and src.s3:
+            opts = {"TYPE": "s3", **{k.upper(): credentials.resolve(conn, str(v).lower() if isinstance(v, bool) else v, used, src.project)
+                                     for k, v in src.s3.model_dump(exclude_none=True).items()}}
+        if kind.startswith("http") and src.headers:
+            opts = {"TYPE": "http", "EXTRA_HTTP_HEADERS": {k: credentials.resolve(conn, v, used, src.project)
+                                                           for k, v in src.headers.items()}}
+        host = _host(kind, loc, opts)
+        raw_sql = _reader(fmt, loc, src)
+        if fmt == "arrow" and kind == "path":  # pyarrow on the load's own cursor (also LZ4/ZSTD Feather, which nanoarrow can't)
+            raw_sql, before = f"SELECT * FROM {name}", hook
+            hook = lambda cur: (before and before(cur), cur.register(name, _arrow(loc)))
+        elif fmt == "arrow":
+            storage.lake(src.project).execute("LOAD nanoarrow")  # a community extension: never autoloaded
+    con = storage.lake(src.project)
+    # F-09 replay: only a pre-M-10 spec still in Postgres (NULL once migrated), so no source file picks a legacy secret's host
+    stored = conn.execute("SELECT spec FROM sources WHERE project = %s AND table_name = %s", [src.project, src.table]).fetchone()
+    credentials.allow(conn, used, host, replay=stored is not None and stored["spec"] == src.spec())  # before any connection
+    tmp = None
+    try:
+        if opts:
+            if loc:
+                opts["SCOPE"] = loc.split("*", 1)[0]  # this source only
+            con.execute(f"CREATE TEMPORARY SECRET {name} ({', '.join(f'{k} {_sql(v)}' for k, v in opts.items())})")
+        # the definition too (source with only ${secret:NAME} refs, and the table's steps): an undo, revert or edit of
+        # sources/<id>.json or tables/<t>.json reloads the table (no steps: same print as before M-15, no mass reload)
+        steps = transform.tables(src.project).get(src.table)
+        defn = json.dumps(src.spec() | ({"steps": [s.model_dump(mode="json") for s in steps]} if steps else {}), sort_keys=True)
+        same = bool(unless and unless.startswith(defn))  # same definition as the last load, a later day (or hours)
+        if src.api and src.api.every_hours:  # API-SRC.2: the load time; due again `every_hours` after it
+            fingerprint = defn + datetime.now(UTC).isoformat()
+            if same and not _due(unless[len(defn):], src.api.every_hours):
+                return None
+        else:
+            fingerprint = defn + (
+                datetime.now(UTC).date().isoformat() if src.database or src.api  # IN-6 databases daily, checked without connecting
+                else credentials.scrub(con.cursor().execute(
+                    "SELECT string_agg(concat_ws('|', filename, size, last_modified::varchar), ',' ORDER BY filename)"
+                    # IN-4 folders: every file under them. Filenames can hold a secret from the URL: scrubbed
+                    f" FROM read_blob('{_lit(loc.rstrip('/') + '/**' if fmt in FOLDERS.values() else loc)}')"
+                ).fetchone()[0] or "", used))
+            # ponytail: size + Last-Modified; an HTTP server without Last-Modified that keeps the size hides a change
+            if unless is not None and fingerprint == unless:
+                return None
+        append = truncated = None
+        if src.api:  # pages go to files in this lake's own temp folder (LOAD-MEMORY), read in one snapshot below
+            tmp = f"{con.execute("SELECT current_setting('temp_directory')").fetchone()[0]}/api-{uuid.uuid4().hex}"
+            inc = src.api.incremental
+            since = _since(con.cursor(), src.table, inc.field) if same and inc else None  # IN-6: past the stored max
+            raw_sql, append, truncated = _api(con, src, loc, (headers, query, hide), tmp, since)
+        if src.database:  # hostaddr='' stops libpq taking PGHOSTADDR from the env and connecting there (D-27)
+            con.execute(f"ATTACH '{_lit("hostaddr=''") if kind == "postgres" else ""}' AS {name} (TYPE {kind}, SECRET {name}, READ_ONLY)")
+            col, bad = src.database.incremental, None
+            if col:  # principle 7: a hand-set column that isn't there is an error, or (gone since) a visible full reload
+                have = {r[0]: r[1] for r in con.execute(f"DESCRIBE {raw_sql}").fetchall()}
+                if not re.fullmatch(ORDERABLE, have.get(col, "")):
+                    bad = f"incremental column {col} {f'is {have[col]}, not orderable,' if col in have else 'missing'} in {src.database.table}"
+                if same:  # posted once per change (D-10), and once more when the column is back
+                    notify_change("refresh", src.project, f"Incremental refresh of '{src.table}': ", bad and bad + "; full reload.",
+                                  "appends again.", src.table)
+                elif bad:
+                    sid = f"sources/{steps[0].source if steps else src.table}.json"
+                    raise ActionFailed(400, f"{sid}: $.database.incremental: {bad}.", errors=[{
+                        "file": sid, "path": "$.database.incremental", "error": bad + ".",
+                        "fix": f"Name a numeric, date/time or text column of {src.database.table}, or remove `incremental`."}])
+            if probe:
+                return None
+            # IN-6: append past the monotonic column, if there is one
+            if same and not bad and (col := col or _monotonic(con, kind, name, m[4], schema, table)):
+                append = lambda cur: _append(cur, raw_sql, src.table, col)
+        snap = raw_sql and storage.refresh(con, src.table, raw_sql, author=author, append=append, hook=hook,
+                                           model_sql=lambda cur: _model_sql(cur, src.project, src.table, declared))
+    except duckdb.OutOfMemoryException:  # actions.run says so (503); the worker's `refresh` logs it like any load error
+        raise
+    except (duckdb.Error, pa.ArrowException) as e:  # T-03.5: DuckDB's text holds server paths and SQL; server log only
+        logging.getLogger(__name__).warning("Loading %s into %s/%s failed: %s", src.location, src.project, src.table,
+                                            credentials.scrub(str(e), used))
+        raise ActionFailed(400, f"Loading '{src.location}' failed ({type(e).__name__}); the details are in the server log.") from None
+    except ValueError as e:  # the table's steps don't compile (TR-1): our message about the user's own steps
+        raise ActionFailed(400, f"Loading '{src.location}' failed: {credentials.scrub(str(e), used)}")
+    finally:
+        if tmp:
+            shutil.rmtree(tmp, ignore_errors=True)
+        if src.database:
+            con.execute(f"DETACH DATABASE IF EXISTS {name}")
+        if opts:
+            con.execute(f"DROP SECRET IF EXISTS {name}")
+    conn.execute(
+        "INSERT INTO sources (project, table_name, fingerprint) VALUES (%s, %s, %s) ON CONFLICT (project, table_name)"
+        " DO UPDATE SET fingerprint = excluded.fingerprint",
+        [src.project, src.table, fingerprint],
+    )
+    if src.api:  # API-SRC.2: a load cut off at max_pages says so once (D-10), and once when it is whole again
+        notify_change("refresh", src.project, f"API source of table '{src.table}': ", truncated and (
+            f"the load stopped at max_pages ({src.api.pagination.max_pages}) with pages left, so the table is partial."),
+            "loads every page again.", src.table)
+    notify_change("refresh", src.project, f"Refreshing table '{src.table}': ", None, "works again.", src.table)  # D-10 recovery
+    if snap is None:  # incremental, nothing new: a successful load for IN-8 freshness, no snapshot, not metered
+        quality.capture(src.project, src.table)
+        return None
+    usage.record(None, "refresh", src.project)  # SC-11: one committed load (own connection: the snapshot is committed)
+    model.extend_calendar(src.project, src.table, author)  # IN-5: new dates get calendar rows
+    writeback.review(src.project, src.table)  # WB-6: the refresh may orphan edits or conflict with them
+    flows.after_refresh(src.project, src.table, snap)  # FL-2
+    ml.after_refresh(src.project, src.table, snap)  # ML-6: score the models reading it
+    quality.capture(src.project, src.table)  # IN-8: this load's stats (never raises)
+    return snap
+
+
+def _reader(fmt: str, loc: str, src: Source) -> str:
+    """The raw SELECT of a file source. IN-4 Delta/Iceberg: their log/manifests name the data files and may name any
+    file (absolute or ../ paths, measured), so a data file outside the table's location fails the load before commit."""
+    if fmt == "sqlite":  # the table name is identifier-validated (`SQLite.table`)
+        return f"SELECT * FROM sqlite_scan('{_lit(loc)}', '{src.sqlite.table}')"
+    if fmt not in FOLDERS.values():
+        csv = src.csv.model_dump(exclude_none=True) if src.csv else {}  # whitelisted values only (`Csv`)
+        opts = "".join(f", {'delim' if k == 'delimiter' else k} = {str(v).lower() if isinstance(v, bool) else f"'{_lit(v)}'"}"
+                       for k, v in csv.items())
+        return f"SELECT * FROM {READERS[fmt]}('{_lit(loc)}'{opts})"
+    moved = ", allow_moved_paths = true" if fmt == "iceberg" else ""  # a copied table reads under its new location
+    return (f"SELECT * EXCLUDE (__abi_file) FROM {READERS[fmt]}('{_lit(loc)}'{moved}, filename = '__abi_file')"
+            f" WHERE CASE WHEN starts_with(__abi_file, '{_lit(loc.rstrip('/'))}/') AND NOT contains(__abi_file, '/..')"
+            f" THEN true ELSE error('the {fmt} table names a data file outside its location') END")
+
+
+def _arrow(path: str) -> pa.RecordBatchReader:
+    """IN-4 Arrow IPC file (Feather v2, any compression) or IPC stream, batch by batch from a memory map (D-17)."""
+    try:
+        f = pa.ipc.open_file(pa.memory_map(path))
+    except pa.ArrowInvalid:
+        return pa.ipc.open_stream(pa.memory_map(path))
+    return pa.RecordBatchReader.from_batches(f.schema, (f.get_batch(i) for i in range(f.num_record_batches)))
+
+
+def _monotonic(con, kind: str, name: str, database: str, schema: str, table: str) -> str | None:
+    """IN-6: the source table's auto-increment column from its own catalog (Postgres identity/serial, MySQL AUTO_INCREMENT).
+    The names are identifier-validated (`DB_LOCATION`, `Database.table`), so they can't break out of the quotes."""
+    where = (f"table_schema = '{schema or 'public'}' AND (is_identity = 'YES' OR column_default LIKE 'nextval(%')"
+             if kind == "postgres" else f"table_schema = '{schema or database}' AND extra LIKE '%auto_increment%'")
+    sql = (f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table}' AND {where}"
+           " ORDER BY ordinal_position LIMIT 1")
+    row = con.execute(f"SELECT * FROM {kind}_query('{name}', '{_lit(sql)}')").fetchone()
+    return row and row[0]
+
+
+def _append(cur, src_sql: str, table: str, col: str) -> str | None:
+    """IN-6 incremental: a SELECT of the source rows with `col` past raw.<table>'s max, or None for a full reload (no
+    stored rows, a changed column set, or a source whose max fell below the stored max: truncated or reset).
+    Runs inside the load's transaction, so a retried commit recomputes it."""
+    # ponytail: append-only; rows updated or deleted in place at the source, or a lower key committed after a higher one
+    # was loaded, stay as loaded until a full reload (a
+    # definition change or the fallbacks below); add a periodic full reload or CDC if sources start editing old rows
+    have = _raw_columns(cur, table)
+    if col not in dict(have) or have != [r[:2] for r in cur.execute(f"DESCRIBE {src_sql}").fetchall()]:
+        return None
+    c = _q(col)
+    top, typ = cur.execute(f"SELECT max({c})::varchar, typeof(max({c})) FROM lake.raw.{_q(table)}").fetchone()
+    if top is None:
+        return None
+    bound = f"'{_lit(top)}'::{typ}"  # a constant, so the scanner pushes the filter to the source
+    if not cur.execute(f"SELECT 1 FROM ({src_sql}) WHERE {c} >= {bound} LIMIT 1").fetchone():
+        return None
+    return f"{src_sql} WHERE {c} > {bound}"
+
+
+def _raw_columns(cur, table: str) -> list[tuple[str, str]]:
+    return cur.execute("SELECT column_name, data_type FROM duckdb_columns() WHERE database_name = 'lake'"
+                       " AND schema_name = 'raw' AND table_name = ? ORDER BY column_index", [table]).fetchall()
+
+
+def _due(last: str, hours: int) -> bool:
+    """API-SRC.2 `every_hours`: the last load (ISO time from the fingerprint) is at least `hours` ago."""
+    try:
+        return datetime.now(UTC) - datetime.fromisoformat(last) >= timedelta(hours=hours)
+    except (ValueError, TypeError):  # a print without a time (it was daily): due
+        return True
+
+
+def _since(cur, table: str, col: str) -> tuple[str, str] | None:
+    """IN-6 incremental API: raw.<table>'s max of `col` as (the request parameter, a typed SQL constant), or None
+    (no such column or no rows: a full load). Times go out as ISO 8601 to the second, UTC with Z for TIMESTAMPTZ;
+    cut-off fractions only re-fetch records the `> constant` filter drops."""
+    if col not in dict(_raw_columns(cur, table)):
+        return None
+    c = _q(col)
+    top, typ = cur.execute(f"SELECT max({c})::varchar, typeof(max({c})) FROM lake.raw.{_q(table)}").fetchone()
+    if top is None:
+        return None
+    bound = f"'{_lit(top)}'::{typ}"
+    iso = ("strftime(timezone('UTC', {b}), '%Y-%m-%dT%H:%M:%SZ')" if typ == "TIMESTAMP WITH TIME ZONE"
+           else "strftime({b}, '%Y-%m-%dT%H:%M:%S')" if typ.startswith("TIMESTAMP") else None)
+    return (cur.execute(f"SELECT {iso.format(b=bound)}").fetchone()[0] if iso else top), bound
+
+
+def _api(con, src: Source, loc: str, request: tuple, tmp: str, since: tuple | None) -> tuple[str | None, object, bool]:
+    """API-SRC: fetch the pages into `tmp` and return (the raw SELECT, or None when an incremental load found nothing
+    new; `storage.refresh`'s append callback or None; whether it stopped at max_pages). With `since` (IN-6) only the
+    records past it are fetched and appended; if their columns differ from the stored ones, everything is fetched again."""
+    headers, query, hide = request
+    inc = src.api.incremental
+    shutil.rmtree(tmp, ignore_errors=True)
+    os.makedirs(tmp)
+    files, truncated = fetch.pages(src, loc, headers, query | ({inc.param: since[0]} if since else {}), hide, tmp)
+    if os.path.getsize(files[0]) == 0:
+        if since:
+            return None, None, truncated
+        raise ActionFailed(400, f"API source '{src.table}' returned no records.")
+    reader = (_reader("csv", f"{tmp}/*.csv", src) if src.api.format == "csv"
+              else f"SELECT * FROM read_json('{_lit(files[0])}', format = 'newline_delimited')")
+    casts = ", ".join(f"CAST({_q(c)} AS {col.type}) AS {_q(c)}" for c, col in src.api.columns.items())
+    raw_sql = reader.replace("SELECT *", f"SELECT * REPLACE ({casts})", 1) if casts else reader
+    if not since:
+        return raw_sql, None, truncated
+    cur = con.cursor()
+    stored = _raw_columns(cur, src.table)
+    if {c for c, _ in stored} != {r[0] for r in cur.execute(f"DESCRIBE {raw_sql}").fetchall()}:
+        return _api(con, src, loc, request, tmp, None)
+    new = (f"SELECT * FROM (SELECT {', '.join(f'CAST({_q(c)} AS {t}) AS {_q(c)}' for c, t in stored)}"
+           f" FROM ({raw_sql})) WHERE {_q(inc.field)} > {since[1]}")
+    return raw_sql, lambda _cur: new, truncated
+
+
+def _model_sql(cur, project: str, table: str, declared: list[dict] | None = None) -> str:
+    """model.<table>: the IN-5 typed raw (text dates), through the table's steps (TR-2) when it has any.
+    `declared` (PC-15 mapping onto an input table; set_steps added a final set_type to them): the steps before it must
+    output exactly these column names, with every value castable to its declared type; else 400, and the load's
+    transaction rolls back."""
+    typed = detect.typed_sql(cur, table)
+    steps = transform.tables(project).get(table)
+    if declared:
+        sql = transform.compile(table, steps[:-1], source_sql=typed)
+        have, want = [r[0] for r in cur.execute(f"DESCRIBE {sql}").fetchall()], [c["name"] for c in declared]
+        if set(have) != set(want):
+            raise ActionFailed(400, f"The steps must output exactly the declared columns of '{table}' ({', '.join(want)});"
+                                    f" missing: {sorted(set(want) - set(have))}, extra: {sorted(set(have) - set(want))}."
+                                    " Add select/rename steps.")
+        bad = cur.execute("SELECT " + ", ".join(
+            f"count(*) FILTER ({_q(c['name'])} IS NOT NULL AND TRY_CAST({_q(c['name'])} AS {transform._type(c['type'])}) IS NULL)"
+            for c in declared) + f" FROM ({sql})").fetchone()
+        if bad := [f"{c['name']} ({n} value(s) not {c['type']})" for c, n in zip(declared, bad) if n]:
+            raise ActionFailed(400, f"Values don't cast to the declared types of '{table}': {', '.join(bad)}. Fix them with"
+                                    " steps (e.g. filter or add_column).")
+    return transform.compile(table, steps, source_sql=typed) if steps else typed
+
+
+def refresh_changed() -> None:
+    """IN-6: reload every table whose files changed or whose database source last loaded before today (UTC; incremental
+    past a monotonic column when there is one), and what reads it (TR-4). Run by the worker every minute."""
+    with db.connect() as conn:
+        projects = {r["project"] for r in conn.execute("SELECT DISTINCT project FROM sources")}
+        for p in sorted(projects | {g.parent.name for g in git._root().glob("*/.git")}):  # D-9: files never loaded yet too
+            error = None
+            try:
+                _migrate(conn, p, transform.tables(p))
+                refresh(conn, p, None, "worker")
+            except (ValueError, ActionFailed) as e:  # invalid tables/*.json, a cycle, legacy rows without a repo
+                error = f"{e} The previous snapshots stay live."
+            notify_change("refresh", p, "Refreshing tables: ", error, "works again.")  # D-10
+
+
+router = APIRouter(prefix="/api")
+
+
+# IN-1 file uploads are IN-7 sessions (the single-request PUT wrote before its role check: H-01.2-fix-2).
+# IN-7 resumable chunked upload, tus 1.0 core semantics (work/validation/D-05.md): POST starts, HEAD tells the offset,
+# PATCH appends at it. A session is files/uploads/<id>/ with `.part` (the bytes) and `.upload.json` (who, where, size).
+UPLOAD_MAX = 500 * 1024**3  # §9 Scale: hundreds of GB; the free-disk check is the real bound
+CHUNK_MAX = 256 * 1024**2  # one PATCH body
+STALE = 24 * 3600  # a session with no write for this long is deleted when another upload starts
+UID = Annotated[str, Path(pattern=r"^[0-9a-f]{32}$")]
+OCTETS = "application/offset+octet-stream"
+
+
+def _fail(status: int, message: str, **headers) -> HTTPException:
+    return HTTPException(status, {"message": message}, headers=headers or None)
+
+
+@router.post("/uploads/{project}/{table}/{filename}", status_code=201)
+def start_upload(
+    project: Annotated[str, Path(pattern=storage.PROJECT)],
+    table: Annotated[str, Path(pattern=TABLE)],
+    filename: Annotated[str, Path(pattern=r"^\w[\w .-]{0,199}$")],  # no '/', no leading dot, fits a file name
+    length: Annotated[int, Header(alias="Upload-Length", ge=1, le=UPLOAD_MAX)],
+    user: Annotated[User, Depends(current_user)],
+    response: Response,
+):
+    """IN-7: starts a resumable upload of `length` bytes (Editor, as add_data); returns its id and Location."""
+    with db.connect() as conn:
+        have = role_in(conn, user, project)
+        refused = have is None or have < Role.editor  # checked now, so a Viewer can't fill the disk before add_data refuses
+        message = f"Uploading data needs the editor role in project '{project}'."
+        if not refused and (why := production_refusal("add_data", project)):  # D-56: the upload ends in add_data
+            refused, message = True, why
+        if refused:  # SC-6; raised after the block, which would roll the audit row back
+            audit(conn, user, "rest", "upload", project, {"table": table, "filename": filename, "length": length}, 403, message)
+    if refused:
+        raise _fail(403, message)
+    root = files_root() / "uploads"
+    root.mkdir(parents=True, exist_ok=True)
+    for meta in root.glob("*/.upload.json"):  # abandoned sessions; `.part` exists while `.upload.json` does
+        with contextlib.suppress(OSError):  # finished meanwhile, or the folder holds a loaded file (crash after add_data)
+            if time.time() - (meta.parent / ".part").stat().st_mtime > STALE:
+                meta.unlink()
+                (meta.parent / ".part").unlink()
+                meta.parent.rmdir()  # only if empty: never a source's file
+    if shutil.disk_usage(root).free < length:
+        raise _fail(507, f"Not enough disk space for {length} bytes.")
+    uid = uuid.uuid4().hex
+    (root / uid).mkdir()
+    (root / uid / ".part").touch()
+    (root / uid / ".upload.json").write_text(json.dumps(
+        {"user": user.id, "project": project, "table": table, "filename": filename, "length": length}))
+    response.headers.update({"Location": f"/api/uploads/{uid}", "Upload-Offset": "0"})
+    return {"id": uid}
+
+
+def _session(uid: str, user: User) -> tuple[dict, FsPath]:
+    folder = files_root() / "uploads" / uid
+    try:
+        meta = json.loads((folder / ".upload.json").read_text())
+    except FileNotFoundError:
+        meta = None
+    if not meta or meta["user"] != user.id:  # someone else's upload doesn't exist for you
+        raise _fail(404, "No such upload.")
+    return meta, folder
+
+
+@router.head("/uploads/{uid}")
+def upload_offset(uid: UID, user: Annotated[User, Depends(current_user)]):
+    """IN-7: the bytes already stored (durable), where a resumed PATCH starts."""
+    meta, folder = _session(uid, user)
+    return Response(status_code=204, headers={"Upload-Offset": str((folder / ".part").stat().st_size),
+                                              "Upload-Length": str(meta["length"]), "Cache-Control": "no-store"})
+
+
+@router.patch("/uploads/{uid}")
+async def upload_chunk(
+    uid: UID,
+    offset: Annotated[int, Header(alias="Upload-Offset", ge=0)],
+    content_type: Annotated[str, Header()],
+    request: Request,
+    user: Annotated[User, Depends(current_user)],
+    csv: str | None = None,  # query parameter: E-16.1 CSV options as JSON, for the load
+):
+    """IN-7: appends the body at `offset`. When the file is complete, loads it with add_data (with `csv`, UI-2); if
+    that fails the bytes stay, and an empty PATCH at the final offset retries the load, also with other options."""
+    if content_type != OCTETS:
+        raise _fail(415, f"Content-Type must be {OCTETS}.")
+    try:
+        options = {} if csv is None else {"csv": json.loads(csv)}  # add_data validates them (422/400)
+    except json.JSONDecodeError:
+        raise _fail(422, "csv must be a JSON object of CSV options.")
+    meta, folder = _session(uid, user)
+    with (folder / ".part").open("r+b") as f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)  # held through the load: one writer per upload
+        except BlockingIOError:
+            raise _fail(409, "Another request is writing this upload; retry after it ends.")
+        size = f.seek(0, os.SEEK_END)
+        if offset != size:
+            raise _fail(409, f"The upload is at byte {size}, not {offset}.", **{"Upload-Offset": str(size)})
+        room = min(CHUNK_MAX, meta["length"] - size)
+        too_big = _fail(413, f"At most {room} bytes fit in this request.", **{"Upload-Offset": str(size)})
+        if int(request.headers.get("content-length") or 0) > room:
+            raise too_big
+        try:
+            async for chunk in request.stream():  # streamed to disk, never held whole (D-17)
+                if f.tell() + len(chunk) > size + room:
+                    f.truncate(size)
+                    raise too_big
+                f.write(chunk)
+        finally:  # a dropped connection keeps what arrived: the resume starts after it
+            f.flush()
+            os.fsync(f.fileno())
+        if f.tell() < meta["length"]:
+            return Response(status_code=204, headers={"Upload-Offset": str(f.tell())})
+        final = folder / meta["filename"]
+        final.unlink(missing_ok=True)  # left by a crash during an earlier load
+        os.link(folder / ".part", final)  # the real name (format from the extension), no copy
+        payload = {"project": meta["project"], "table": meta["table"], "location": str(final.relative_to(files_root())), **options}
+        try:
+            result = await run_in_threadpool(actions.run, "add_data", payload, user, "rest")
+        except ActionFailed as e:
+            final.unlink()
+            raise HTTPException(e.status, e.body)
+    (folder / ".upload.json").unlink()  # first, so `.part` exists whenever `.upload.json` does
+    (folder / ".part").unlink()
+    return result
+
+
+def _host(kind: str, loc: str, opts: dict) -> str | None:
+    """The host a load's requests go to (D-2), from the resolved location; None for a server path or an unclear URL.
+
+    Only plain `scheme://host[:port]/…` counts: userinfo, backslashes, IPv6 or no `/` after the host give None
+    (refused with secrets), so a parser difference with DuckDB can't send a secret elsewhere, and the secret's
+    SCOPE (the location prefix) can't match another host's URL."""
+    host = r"([A-Za-z0-9.-]+)(?::\d+)?"
+    m = re.match(rf"\w+://{host}/", loc)
+    if not m:  # includes every server path (no "://")
+        return None
+    if kind != "s3":
+        return m[1].lower()
+    if "?" in loc:  # DuckDB reads ?s3_endpoint=, ?s3_url_style=, … from an s3:// URL and lets them override the options
+        return None
+    # DuckDB 1.5.6 without ENDPOINT uses s3.<region, default us-east-1>.amazonaws.com (checked via a proxy)
+    # an endpoint with a scheme is refused: DuckDB keeps it as part of the host ("x://a.com" goes to host "x")
+    ep = re.fullmatch(host, opts.get("ENDPOINT", f"s3.{opts.get('REGION', 'us-east-1')}.amazonaws.com"))
+    if not ep:
+        return None
+    return ep[1].lower() if opts.get("URL_STYLE") == "path" else f"{m[1]}.{ep[1]}".lower()  # vhost: bucket in the host
+
+
+def hosts(doc: dict) -> set[str]:
+    """H-01.5-fix-8: the outside hosts a load of source definition `doc` contacts (FL-6 targets `source:<host>`), read
+    from its unresolved text (a ${secret:NAME} host counts as written): the location's host (S3 as `_host` derives it,
+    database and ClickHouse hosts too) and an OAuth token endpoint's. None for a server path."""
+    loc = doc.get("location") or ""
+    if "://" not in loc:
+        return set()
+    if m := re.fullmatch(DB_LOCATION, loc) or re.fullmatch(live.LOCATION, loc):
+        out = {m[2].lower()}
+    else:
+        kind = loc.split("://", 1)[0].lower()
+        s3 = {k.upper(): v for k, v in (doc.get("s3") or {}).items() if k in ("region", "endpoint", "url_style")}
+        out = {_host(kind, loc, s3) or re.split(r"[/?#]", loc.split("://", 1)[1])[0].lower()}
+    if url := ((doc.get("api") or {}).get("auth") or {}).get("token_url"):
+        out.add(re.split(r"[/?#]", url.split("://", 1)[-1])[0].lower())
+    return {"source:" + h for h in out}
+
+
+def _sql(v) -> str:
+    if isinstance(v, dict):
+        return "MAP {" + ", ".join(f"'{_lit(k)}': '{_lit(x)}'" for k, x in v.items()) + "}"
+    return f"'{_lit(v)}'"

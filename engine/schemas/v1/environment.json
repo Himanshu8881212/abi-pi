@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.abi.invalid/v1/environment.json",
+  "title": "Environment",
+  "description": "environments/<branch>.json (PRD PC-9): the connection settings of the environment bound to <branch> (set_environment). Each entry's top-level keys replace those of sources/<id>.json, and the merged source must pass source.json, so credentials stay ${secret:NAME} (SC-4). The kind of source (refresh) stays the file's.",
+  "type": "object",
+  "required": ["$schema", "sources"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {"const": "https://schema.abi.invalid/v1/environment.json"},
+    "sources": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$"},
+      "additionalProperties": {
+        "type": "object",
+        "minProperties": 1,
+        "propertyNames": {"enum": ["location", "format", "s3", "headers", "database"]}
+      }
+    }
+  },
+  "examples": [
+    {"$schema": "https://schema.abi.invalid/v1/environment.json", "sources": {
+      "orders": {"location": "postgres://erp-prod.example.com:5432/erp",
+                 "database": {"table": "sales.orders", "user": "${secret:ERP_PROD_USER}", "password": "${secret:ERP_PROD_PASSWORD}"}},
+      "targets": {"location": "s3://prod-exports/targets.parquet", "s3": {"key_id": "${secret:PROD_KEY}", "secret": "${secret:PROD_SECRET}", "region": "eu-central-1"}}
+    }}
+  ]
+}

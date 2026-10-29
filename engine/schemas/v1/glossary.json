@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.abi.invalid/v1/glossary.json",
+  "title": "Glossary",
+  "description": "model/glossary.json: business terms linked to the measures and columns that implement them (PRD §6.6, §8 item 7, SE-1). Memory entries link to terms by ID (§5 #6).",
+  "type": "object",
+  "required": ["$schema", "terms"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {"const": "https://schema.abi.invalid/v1/glossary.json"},
+    "terms": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "term", "definition"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$"},
+          "term": {"type": "string", "minLength": 1},
+          "definition": {"type": "string", "minLength": 1},
+          "measures": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "Measure IDs"},
+          "columns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["table", "column"],
+              "additionalProperties": false,
+              "properties": {"table": {"type": "string"}, "column": {"type": "string"}}
+            }
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    {"$schema": "https://schema.abi.invalid/v1/glossary.json",
+     "terms": [{"id": "consumption-value", "term": "Consumption value", "definition": "Value of material consumed, net of reversals.",
+                "measures": ["consumption_value"], "columns": [{"table": "consumption", "column": "amount"}]}]}
+  ]
+}

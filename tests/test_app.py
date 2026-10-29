@@ -1,4 +1,4 @@
-"""app.html and its local server (needs ABI at :8770, no LLM): the build, and every guard on the server."""
+"""app.html and its local server (needs the engine at :8780, no LLM): the build, and every guard on the server."""
 import json
 import os
 import re
@@ -255,7 +255,7 @@ def test_vpn_mode_asks_for_the_passphrase_first(srv):
 
 def _account(name):
     """A test account's password, read like scripts/creds.py does (never printed)."""
-    acc = Path(os.environ.get("ABI_ACCOUNTS", "~/abi-preview/accounts.txt")).expanduser()
+    acc = Path(os.environ.get("ABI_ACCOUNTS", Path(__file__).resolve().parent.parent / "data/accounts.txt")).expanduser()
     line = next((x for x in acc.read_text().splitlines() if re.match(rf"\s*{re.escape(name)}\b", x)), None) if acc.exists() else None
     return line.split()[-1] if line else None
 
@@ -408,3 +408,11 @@ def test_abi_down_answers_503_not_a_hung_request(srv, monkeypatch):
     with pytest.raises(urllib.error.HTTPError) as e:
         urllib.request.urlopen(req, timeout=30)
     assert e.value.code == 503 and "ABI" in json.loads(e.value.read())["error"]
+
+
+def test_odd_numbers_and_missing_vault_documents_get_answers(srv):
+    port, key, _ = srv
+    code, r = post(port, "/edits/rows", {"table": "orders", "limit": 1e309}, key)
+    assert code == 400 and "error" in r
+    code, r = post(port, "/vault/read", {"name": "../../no-such.md"}, key)
+    assert code in (400, 404) and "error" in r
