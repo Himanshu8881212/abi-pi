@@ -416,3 +416,11 @@ def test_odd_numbers_and_missing_vault_documents_get_answers(srv):
     assert code == 400 and "error" in r
     code, r = post(port, "/vault/read", {"name": "../../no-such.md"}, key)
     assert code in (400, 404) and "error" in r
+
+
+def test_report_pdf_is_landscape_a4_so_charts_are_not_cut_off(srv):
+    """The engine draws charts for a 1280 px viewport; a portrait Letter sheet cut their right side off (REPORT #39)."""
+    s = abi.call("report_snapshot", project=P, report="overview", format="pdf", pages=["overview"])
+    pdf = abi.artifact(s["snapshot"])
+    w, h = map(float, re.search(rb"/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)", pdf).groups())
+    assert (int(w), int(h)) == (842, 595), (w, h)  # A4 landscape in points (Chrome: 842.88 x 595.92)

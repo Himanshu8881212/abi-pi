@@ -187,7 +187,7 @@ Before hosting on the local infrastructure:
 - [ ] Put the app behind an HTTPS reverse proxy (it speaks HTTP; the proxy should send `X-Forwarded-Proto: https`) and run it with `--open` only behind that proxy.
 - [ ] Configure ABI's email delivery so Users & access invitations and flow emails reach people.
 - [x] ABI preview updated on 29 Oct 2026 (owner's approval) from 87018dff to fcc3aa35 with ABI's own `preview.sh` (backup first: Postgres dump and the old UI in `~/abi-preview-backups/`): PPTX (16:9, a slide per page, speaker notes say how each number is calculated) and several pages in one PDF work, also from the app's Export.
-- [ ] ABI's PDF renderer still clips line charts on the right (ABI's code; use PPTX for board material until ABI fixes it).
+- [x] PDF charts no longer cut off: the own engine prints landscape A4 at 0.8 (Release loop #39).
 - [x] Remotion's licence (video export): the owner confirmed on 29 Oct 2026 that they qualify for Remotion's free licence (individuals and companies up to 3 people). A larger company needs Remotion's company licence.
 - [x] ABI's worker runs with `ABI_SNAPSHOT_RETENTION_DAYS=7` (was 30): the nightly purge (03:17) keeps a week. A restart of the preview by `preview.sh` needs the variable again.
 
@@ -219,3 +219,4 @@ The release is now the ABI-PI container (self-hosted like n8n). Container checks
 | 36 | Fuzz | `limit: 1e309` on `/edits/rows` answered 500 (OverflowError); a missing vault document dropped the connection (FileNotFoundError taken for a closed browser). | 400 and 404 with a message. Test: `test_odd_numbers_and_missing_vault_documents_get_answers`. |
 | 37 | Container (first start) | Loading data into the attached project failed inside the container: git had no author, so the copy's rebase stopped halfway. Pids from before a restart could keep the engine from starting. | The image sets a git identity for the copies' local commits; the entrypoint clears old pids. |
 | 38 | Agent (data leak) | With the engine inside the repo, the agent's file tools and uploads could reach `data/` (Postgres files, the lake, `accounts.txt`) and `engine/`. | Both are refused by the file-tool guard and by uploads. Test: `test_the_agents_file_tools_and_uploads_refuse_the_engines_data`. |
+| 39 | Exports (PDF) | Every PDF export cut off the right side of its charts (bar and line alike): the engine draws them for a 1280 px viewport and printed on a portrait Letter sheet (816 px). An ABI gap until now; the engine is ABI-PI's own copy, so fixed there. | `report_snapshot` prints landscape A4 at scale 0.8 (laid out 1309 px wide): one-pagers and board packs show whole charts. Test: `test_report_pdf_is_landscape_a4_so_charts_are_not_cut_off`. |

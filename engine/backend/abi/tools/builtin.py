@@ -286,7 +286,10 @@ def render_snapshot(user: User, project: str, report: str, pages: list[str], vis
                 path = _new_artifact(project, fmt, user)
                 if fmt == "pdf":
                     pg.emulate_media(media="screen")
-                    pg.pdf(path=path, print_background=True, tagged=True, outline=True)  # outline: page <h1>s
+                    # ABI-PI: the charts are drawn for the 1280 px viewport; a portrait Letter sheet (816 px) cut off
+                    # their right side. Landscape A4 at 0.8 lays the page out 1309 px wide, so every chart fits.
+                    pg.pdf(path=path, print_background=True, tagged=True, outline=True,  # outline: page <h1>s
+                           format="A4", landscape=True, scale=0.8, margin={k: "10mm" for k in ("top", "right", "bottom", "left")})
                 elif fmt == "pptx":
                     shots = []
                     for i in range(len(pages)):  # each page alone under the brand bar (SC-9), one picture apiece
