@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && git config --system --add safe.directory '*'
 
 RUN npm install -g --no-audit --no-fund @earendil-works/pi-coding-agent@1.3.0
-RUN pip install --no-cache-dir duckdb jsonschema
+RUN pip install --no-cache-dir duckdb jsonschema "cryptography>=44,<47"
 
 WORKDIR /app
 COPY scripts/video/package.json scripts/video/package-lock.json* scripts/video/

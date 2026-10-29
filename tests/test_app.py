@@ -361,3 +361,22 @@ def test_idle_chat_agents_and_old_sessions_are_swept():
     assert app.idle([busy, idle, fresh], now=10_000 + 60, limit=1800) == [idle]
     people = {"s1": {"t": 0, "token": "x"}, "s2": {"t": 50_000, "token": "y"}}
     assert app.stale_sessions(people, now=50_000, ttl=12 * 3600) == ["s1"]
+
+
+def test_settings_take_a_key_and_never_give_it_back(srv):
+    port, key, _ = srv
+    prov = {"id": "e2e-prov", "name": "E2E", "api": "openai-completions", "base_url": "http://127.0.0.1:9/v1", "models": ["m1"]}
+    try:
+        code, r = post(port, "/admin/settings/provider", {"provider": prov, "key": "sk-e2e-secret-4321"}, key)
+        assert code == 200 and "sk-e2e-secret" not in json.dumps(r) and any(p["key_ends"] == "4321" for p in r["result"]["providers"])
+        _, r = post(port, "/admin/settings", {}, key)
+        assert "sk-e2e-secret" not in json.dumps(r)
+        code, r = post(port, "/admin/settings/provider", {"provider": {**prov, "api": "nope"}}, key)
+        assert code == 400 and "error" in r
+        _, r = post(port, "/admin/settings/test", {"id": "e2e-prov"}, key)
+        assert r["result"]["ok"] is False and "sk-e2e" not in json.dumps(r), "an unreachable provider says so, without the key"
+        post(port, "/mode", {"mode": "viewer"}, key)
+        assert post(port, "/admin/settings", {}, key)[0] == 403
+    finally:
+        post(port, "/mode", {"mode": "developer"}, key)
+        post(port, "/admin/settings/remove", {"id": "e2e-prov"}, key)

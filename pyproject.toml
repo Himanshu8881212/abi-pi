@@ -2,7 +2,12 @@
 name = "abi-pi"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["duckdb", "jsonschema", "pytest"]
+dependencies = [
+    "cryptography>=44,<47",
+    "duckdb",
+    "jsonschema",
+    "pytest",
+]
 
 [tool.pytest.ini_options]
 markers = ["live: drives GPT-6.1 Sol through Pi (ABI_PI_LIVE=1)"]

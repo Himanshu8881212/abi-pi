@@ -17,8 +17,7 @@ You need a running ABI (its URL and its projects folder) and an OpenAI-compatibl
    ABI_PI_PROJECT=my_project                    # the project to open first (created in ABI if missing)
    ABI_USER=service-account                     # an ABI account the app syncs project copies with
    ABI_PASSWORD=...
-   ABI_PI_LLM_BASE=https://your-proxy/v1        # the model endpoint for the agent
-   ABI_PI_LLM_KEY=...
+   ABI_PI_SECRET_KEY=...                        # optional: encrypts the API keys admins save (Fernet key)
    ```
 
 2. Start it:
@@ -27,8 +26,11 @@ You need a running ABI (its URL and its projects folder) and an OpenAI-compatibl
    docker compose up -d
    ```
 
-3. Open <http://localhost:8790> and sign in with your ABI account. Workspace owners find Govern › Users & access to give
-   people roles, sections and reports.
+3. Open <http://localhost:8790> and sign in with your ABI account. As a workspace owner:
+   - **Govern › Settings**: connect the agent's model provider (OpenAI, Anthropic, OpenRouter, Ollama, Gemini or any
+     OpenAI-compatible endpoint), pick the model and how hard it reasons. API keys are stored encrypted and never shown
+     again. (Or pass one endpoint as `ABI_PI_LLM_BASE` / `ABI_PI_LLM_KEY`.)
+   - **Govern › Users & access**: give people roles, sections and reports.
 
 The container keeps its data (project copies, vault, chats, board packs) in the `abi-pi-data` volume. For other
 devices, put it behind an HTTPS reverse proxy that sends `X-Forwarded-Proto: https`.

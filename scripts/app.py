@@ -384,6 +384,26 @@ async function usersPage(box){if(!LIVE){box.append(h('p','empty','Users & access
   row.append(h('div','',`${u.name}${u.workspace_owner?' · workspace owner (sees everything)':''}${u.tenant?' · tenant '+u.tenant:''}`),h('label','l','Role in this project'),sel,
    h('label','l','Sections'),sx,h('label','l','Reports'),rx,save,m);t.append(row)});
  const note=card('What this controls','and what it does not');note.append(h('p','','Role, sign-in and row-level security are ABI\'s: they decide what data a person can read or change, everywhere. Sections and reports decide what this app shows them and the app\'s own routes refuse the rest. Row and column rules are on the Security page.'));g.append(note)}
+// Settings (admins): the agent's model and reasoning, and the providers (API keys go in, never come out)
+const PRESETS={openai:['OpenAI','openai-responses','https://api.openai.com/v1','gpt-5'],anthropic:['Anthropic','anthropic-messages','https://api.anthropic.com','claude-sonnet-4-5'],
+ openrouter:['OpenRouter','openai-completions','https://openrouter.ai/api/v1','anthropic/claude-sonnet-4.5'],ollama:['Ollama (local)','openai-completions','http://host.docker.internal:11434/v1','llama3.1'],
+ gemini:['Google Gemini','google-generative-ai','https://generativelanguage.googleapis.com/v1beta','gemini-2.5-pro'],custom:['OpenAI-compatible','openai-completions','https://','model-id']};
+async function settingsPage(box){if(!LIVE){box.append(h('p','empty','Settings work with the live app.'));return}
+ const post=(op,b)=>fetch('/admin/'+op,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json());
+ let r=await post('settings');if(r.error){box.append(h('p','bad',r.error));return}let S=r.result;const g=h('div','cards');box.append(g);
+ const draw=()=>{g.innerHTML='';
+  const def=card('Agent','the model every chat and specialist uses'),ms=h('select','f'),th=h('select','f');ms.append(new Option('the built-in default',''));
+  S.providers.forEach(p=>p.models.forEach(m=>ms.append(new Option(`${p.name} · ${m}`,`${p.id}/${m}`))));ms.value=S.model||'';S.levels.forEach(l=>th.append(new Option(l,l)));th.value=S.thinking||'medium';
+  def.append(h('label','l','Model'),ms,h('label','l','Reasoning'),th);act(def,'Save',async()=>{const x=await post('settings/default',{model:ms.value||null,thinking:th.value});if(x.error)throw new Error(x.error);S=x.result;return 'Saved: new chats and specialists use it.'},1);g.append(def);
+  S.providers.forEach(p=>{const c=card(p.name,`${p.id} · ${S.apis[p.api]||p.api}`);c.append(h('p','file',p.base_url),h('p','',`Models: ${p.models.join(', ')}`),h('p',p.key_set?'ok':'',p.key_set?`API key set, ends in ${p.key_ends}`:'No API key'));
+   act(c,'Test connection',async()=>{const x=await post('settings/test',{id:p.id});if(x.error)throw new Error(x.error);if(!x.result.ok)throw new Error(x.result.message);return x.result.message});
+   act(c,'Remove',async()=>{const x=await post('settings/remove',{id:p.id});S=x.result;draw()});g.append(c)});
+  const add=card('Connect a provider','OpenAI, Anthropic, OpenRouter, Ollama, Gemini or any OpenAI-compatible endpoint'),pre=h('select','f'),id=h('input','f'),nm=h('input','f'),api=h('select','f'),base=h('input','f'),key=h('input','f'),mods=h('input','f');
+  Object.entries(PRESETS).forEach(([k,v])=>pre.append(new Option(v[0],k)));Object.entries(S.apis).forEach(([k,v])=>api.append(new Option(v,k)));key.type='password';key.autocomplete='off';key.placeholder='API key (stored encrypted; leave empty to keep the stored one)';mods.placeholder='model IDs, comma separated';
+  const fill=()=>{const v=PRESETS[pre.value];id.value=pre.value==='custom'?'':pre.value;nm.value=v[0];api.value=v[1];base.value=v[2];mods.value=v[3]};pre.onchange=fill;fill();
+  add.append(h('label','l','Preset'),pre,h('label','l','ID'),id,h('label','l','Name'),nm,h('label','l','API'),api,h('label','l','Base URL'),base,h('label','l','API key'),key,h('label','l','Models'),mods);
+  act(add,'Save provider',async()=>{const x=await post('settings/provider',{provider:{id:id.value.trim(),name:nm.value,api:api.value,base_url:base.value.trim(),models:mods.value.split(',').map(s=>s.trim()).filter(Boolean)},key:key.value});
+   key.value='';if(x.error)throw new Error(x.error);S=x.result;draw();return 'Saved.'},1);g.append(add)};draw()}
 function transferPage(box){if(!LIVE||MODE==='viewer'){box.append(h('p','empty','Export and import work in Developer mode with the live app.'));return}
  const ex=card('Export','the whole project as one zip'),im=card('Import','replace this project with a zip; ABI checks it first'),g=h('div','cards');
  ex.append(h('p','','ABI\'s committed files (sources, tables, model, measures, glossary, queries, reports, flows, ML, tools, agents, security, environments, docs), the app\'s JSON (Monitor settings, saved analyses), the vault\'s documents and the team\'s plan. Not inside: the data (refresh the sources after an import), secret values, people\'s roles, chats, uncommitted changes.'));
@@ -693,7 +713,7 @@ function vaultPage(box){if(!LIVE){box.append(h('p','empty','The vault opens with
 const PENDING={filters:null,explore:null};
 const LEDE={vault:'Your business documents: definitions, finance rules, KPI specs. The agents search them before they define or check a measure.',home:'Start here: ask anything, see what needs attention, and every part of the project at a glance.',datasets:'Saved questions to the model (measures by dimensions, with filters). Each run returns a fresh table; nothing is stored. Reports, flows and ML reuse them. Preview their rows.',
  measures:'The business numbers. Edit a formula and ABI checks it before it saves; Test shows the total.',model:'Tables and how they join. Facts are black, dimensions are outlined.',
- chat:'Talk to the agent: ask a question, ask where something is, or ask for a change. When it shows you a page, the chat moves to the side and goes on.',boardpack:'Board packs: the documents, data and explainer video a review needs, made from ABI by the board-pack agent and checked before they leave. Nothing is sent from here.',documents:'A report, some of its pages or one view, as ABI renders it: PDF, PNG, PowerPoint (with a newer ABI).',onepager:'One page for the board: a report page with the headline numbers, two charts and the caveats. The agent builds it in ABI; export it here.',dataexport:'The rows behind any view, as CSV or Excel, or a query\'s rows as CSV.',video:'A silent explainer of report views: the numbers from ABI, animated, with a caption per slide, in the app\'s theme.',people:'Who may sign in to this project, as what (Viewer, Editor, Owner), and which sections and reports each person sees.',transfer:'The whole project as one zip, so it can be kept, reviewed, moved or rebuilt. Import goes through ABI, which checks it and makes it one undoable commit.',edits:'Write-back: people correct or add rows of the gold tables. Edits apply on top of the table by row key (the loaded data is never changed), survive refreshes, can be undone, and every query sees the edited table.',reports:'The saved reports of this project. Open one to filter it and click through.',monitor:'Is anything wrong right now: data freshness, model readiness, ML runs and flows. Reports show the business; this shows the system.',explore:'Your own analysis: pick measures, a dimension and a filter; the numbers come from the model, so they match the reports. Keep the ones you want: they are saved with the app, the project itself doesn\'t change.',glossary:'What the business words mean and which measures implement them.',sources:'Bronze: the data as it landed, one source per file or bucket folder. Reload, add or delete a source.',
+ chat:'Talk to the agent: ask a question, ask where something is, or ask for a change. When it shows you a page, the chat moves to the side and goes on.',boardpack:'Board packs: the documents, data and explainer video a review needs, made from ABI by the board-pack agent and checked before they leave. Nothing is sent from here.',documents:'A report, some of its pages or one view, as ABI renders it: PDF, PNG, PowerPoint (with a newer ABI).',onepager:'One page for the board: a report page with the headline numbers, two charts and the caveats. The agent builds it in ABI; export it here.',dataexport:'The rows behind any view, as CSV or Excel, or a query\'s rows as CSV.',video:'A silent explainer of report views: the numbers from ABI, animated, with a caption per slide, in the app\'s theme.',settings:'The agent\'s model and how hard it thinks, and the providers it may use. API keys are stored encrypted and never shown again.',people:'Who may sign in to this project, as what (Viewer, Editor, Owner), and which sections and reports each person sees.',transfer:'The whole project as one zip, so it can be kept, reviewed, moved or rebuilt. Import goes through ABI, which checks it and makes it one undoable commit.',edits:'Write-back: people correct or add rows of the gold tables. Edits apply on top of the table by row key (the loaded data is never changed), survive refreshes, can be undone, and every query sees the edited table.',reports:'The saved reports of this project. Open one to filter it and click through.',monitor:'Is anything wrong right now: data freshness, model readiness, ML runs and flows. Reports show the business; this shows the system.',explore:'Your own analysis: pick measures, a dimension and a filter; the numbers come from the model, so they match the reports. Keep the ones you want: they are saved with the app, the project itself doesn\'t change.',glossary:'What the business words mean and which measures implement them.',sources:'Bronze: the data as it landed, one source per file or bucket folder. Reload, add or delete a source.',
  staged:'Silver: the cleaned and combined tables between the sources and the final tables. Hidden from the model; edit their steps here.',tables:'Gold: the final business tables the model and measures are built on. Edit kind, key, description and steps.',flows:'Automations. Run one now and follow its steps, or switch it on or off.',
  ml:'Forecasts, segments and anomaly models. Train, score and read the latest run.',tools:'Calculations your agents can call. Run one with inputs or run its tests.',
  agents:'Custom agents for this project. Ask one a question or run its evaluation set.',docs:'The project documentation ABI writes from its definitions.',
@@ -707,7 +727,7 @@ function navAll(){return [['Start',[['home','Home',home],['chat','Chat',chatPage
  ['Export',[['boardpack','Board pack',boardPage,(D.app?.packs||[]).length],['documents','Documents',documentsPage],['onepager','One-pager',onePagerPage],['dataexport','Data',dataExportPage],['video','Video',videoPage],['transfer','Project',transferPage]]],
  ['Automate',[['flows','Flows',flows,D.flows.length],['ml','ML models',ml,D.ml.length],['tools','Tools',tools,D.tools.length],['agents','Agents',agents,D.agents.length]]],
  ['Knowledge',[['vault','Vault',vaultPage,(VAULT||[]).length],['docs','Docs',docs]]],
- ['Govern',[['security','Security',security],['environments','Environments',b=>b.insertAdjacentHTML('beforeend',D.sections.Environments)],['history','History',commits,(D.history||[]).length],...((window.ME||{admin:true}).admin?[['people','Users & access',usersPage]]:[])]]]}
+ ['Govern',[['security','Security',security],['environments','Environments',b=>b.insertAdjacentHTML('beforeend',D.sections.Environments)],['history','History',commits,(D.history||[]).length],...((window.ME||{admin:true}).admin?[['people','Users & access',usersPage],['settings','Settings',settingsPage]]:[])]]]}
 let MODE='developer',VAULT=[];
 let FOLD={};try{FOLD=JSON.parse(localStorage.getItem('abi-fold')||'{}')}catch(e){}
 function sidebar(){side.innerHTML='';PAGES={};nav().forEach(([g,items])=>{const sec=h('div','sec'),hd=h('button','grp'),list=h('div','items');
@@ -1060,7 +1080,11 @@ class Hub:
             env = {**os.environ, "ABI_TOKEN": self.token or abi.token(), "ABI_APP_URL": self.url, "ABI_APP_PROJECT": self.project,
                    "ABI_APP_AGENT_KEY": self.agent_key, "ABI_APP_CLIENT": self.hid}
             session = str(self.chats_dir / f"{self.chat_id}.session.jsonl")  # Pi's own transcript: this chat's context
-            self.pi = subprocess.Popen(["pi", "--mode", "rpc", "--session", session], cwd=abi.ROOT, env=env, text=True, bufsize=1,
+            import settings  # noqa: PLC0415 (sibling script): the admin's model and reasoning, also for the specialists
+            conf = settings.load()
+            flags = (["--model", conf["model"]] if conf["model"] else []) + ["--thinking", conf["thinking"]]
+            env |= {"ABI_PI_MODEL": conf["model"] or "", "ABI_PI_THINKING": conf["thinking"]}
+            self.pi = subprocess.Popen(["pi", "--mode", "rpc", "--session", session, *flags], cwd=abi.ROOT, env=env, text=True, bufsize=1,
                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
             threading.Thread(target=self.read, daemon=True).start()
         if self.mode == "viewer":
@@ -1712,6 +1736,26 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
             return 200, json.dumps({"result": {"project": p, "users": users, "sections": SECTIONS, "published": bool(abi.folder(pub)),
                                                "reports": [{"id": r["id"], "name": r.get("name") or r["id"]} for r in reps],
                                                "access": (render.j(app_dir(p) / "people.json", {}) or {}).get("users") or {}}}, default=str).encode()
+        if op.startswith("settings"):  # the agent's model, reasoning and providers (keys go in, never come out)
+            import settings  # noqa: PLC0415 (sibling script)
+            try:
+                if op == "settings/provider":
+                    out = settings.save_provider(body.get("provider") or {}, str(body.get("key") or "") or None)
+                elif op == "settings/remove":
+                    out = settings.remove_provider(str(body.get("id", "")))
+                elif op == "settings/default":
+                    out = settings.set_default(body.get("model") or None, str(body.get("thinking") or "medium"))
+                elif op == "settings/test":
+                    out = settings.test(str(body.get("id", "")))
+                else:
+                    out = settings.public()
+            except ValueError as e:
+                return 400, json.dumps({"error": str(e)}).encode()
+            for h in HUBS.values():  # the next message starts each chat's agent with the new settings
+                if h.pi and h.pi.poll() is None and not h.busy:
+                    h.pi.terminate()
+                    h.pi = None
+            return 200, json.dumps({"result": out}).encode()
         who = str(body.get("user") or "").strip()
         if op == "role":
             role = body.get("role")

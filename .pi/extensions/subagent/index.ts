@@ -297,8 +297,10 @@ async function runSingleAgent(
 
 	const args: string[] = ["--mode", "json", "-p", "--no-session"];
 	const inheritsDispatchConfig = !agent.model;
-	const model = agent.model ?? dispatchDefaults.model;
+	// the admin's choice in the app (Govern › Settings) applies to the specialists too
+	const model = process.env.ABI_PI_MODEL || (agent.model ?? dispatchDefaults.model);
 	if (model) args.push("--model", model);
+	if (process.env.ABI_PI_THINKING) args.push("--thinking", process.env.ABI_PI_THINKING);
 	if (inheritsDispatchConfig && dispatchDefaults.thinkingLevel) {
 		args.push("--thinking", dispatchDefaults.thinkingLevel);
 	}

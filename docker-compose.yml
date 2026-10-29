@@ -1,5 +1,5 @@
 # docker compose up -d   then open http://localhost:8790 and sign in with your ABI account.
-# Put the secrets in a .env file next to this one (never committed): ABI_PASSWORD, ABI_PI_LLM_KEY.
+# Put the secrets in a .env file next to this one (never committed): ABI_PASSWORD, and ABI_PI_SECRET_KEY if you set one.
 services:
   abi-pi:
     build: .
@@ -11,8 +11,9 @@ services:
       ABI_PI_WORKSPACE: ${ABI_PI_WORKSPACE:-main}
       ABI_USER: ${ABI_USER:-}
       ABI_PASSWORD: ${ABI_PASSWORD:-}
-      ABI_PI_LLM_BASE: ${ABI_PI_LLM_BASE:?set ABI_PI_LLM_BASE in .env}
-      ABI_PI_LLM_KEY: ${ABI_PI_LLM_KEY:?set ABI_PI_LLM_KEY in .env}
+      ABI_PI_LLM_BASE: ${ABI_PI_LLM_BASE:-}       # optional: or connect providers in the app (Govern › Settings)
+      ABI_PI_LLM_KEY: ${ABI_PI_LLM_KEY:-}
+      ABI_PI_SECRET_KEY: ${ABI_PI_SECRET_KEY:-}   # encrypts the API keys admins save; empty: a key file in the volume
     volumes:
       - abi-pi-data:/data
       - ${ABI_PROJECTS_DIR:?set ABI_PROJECTS_DIR to ABI's projects folder}:/abi-projects:ro

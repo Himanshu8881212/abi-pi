@@ -127,6 +127,21 @@ export default async function abi(pi: ExtensionAPI) {
 	} catch (e) {
 		log({ event: "provider_unavailable", error: String(e).slice(0, 200) });
 	}
+	// ---------- the providers an admin connected in the app (Govern › Settings); keys read at call time ----------
+	try {
+		const SETTINGS = path.join(ROOT, "scripts", "settings.py");
+		const conf = JSON.parse(execFileSync(PY, [SETTINGS, "public"], { encoding: "utf8" }));
+		for (const p of conf.providers ?? []) {
+			pi.registerProvider(p.id, {
+				name: p.name, baseUrl: p.base_url, api: p.api,
+				apiKey: p.key_set ? `!${PY} ${SETTINGS} key ${p.id}` : "none",
+				models: p.models.map((id: string) => ({ id, name: `${id} (${p.name})`, reasoning: true, input: ["text", "image"],
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 200000, maxTokens: 32000 })),
+			});
+		}
+	} catch (e) {
+		log({ event: "settings_unavailable", error: String(e).slice(0, 200) });
+	}
 
 	const allowed = process.env.ABI_PI_ALLOWED ? new Set(process.env.ABI_PI_ALLOWED.split(",").filter(Boolean)) : null;
 	const sub = !!process.env.ABI_PI_AGENT;
