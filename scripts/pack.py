@@ -24,6 +24,11 @@ import abi
 import video
 
 ID = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
+PART = re.compile(r"^[A-Za-z0-9_-]{1,80}$")  # a report, page or view ID in a file name: nothing that climbs out
+
+
+def safe_id(x) -> bool:
+    return isinstance(x, str) and bool(PART.match(x))
 DOC, DATA = {"pdf", "png", "pptx"}, {"csv", "xlsx"}
 
 
@@ -60,7 +65,11 @@ def make(project: str, spec: dict) -> dict:
     done = []
     for n, it in enumerate(items, 1):
         k, rep = it.get("kind"), it.get("report")
-        name = f"{n:02d}-{rep}-{it.get('visual') or it.get('page') or 'pages'}.{'mp4' if k == 'video' else k}"
+        part = it.get("visual") or it.get("page") or "pages"
+        if not (safe_id(rep) and safe_id(part) and k in DOC | DATA | {"video"}):
+            done.append({"kind": k, "report": rep, "status": "failed", "file": None, "error": "report, page and view are IDs (letters, digits, _ and -)"})
+            continue
+        name = f"{n:02d}-{rep}-{part}.{'mp4' if k == 'video' else k}"
         rec = {**{x: it[x] for x in it if x != "captions"}, "file": name}
         try:
             if k in DOC:

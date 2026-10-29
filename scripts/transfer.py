@@ -27,6 +27,7 @@ from pathlib import Path
 import abi
 
 FORMAT = "abi-pi-export/1"
+MAX_UNPACKED, MAX_FILES = 256 << 20, 5000  # a zip bomb is refused from its listing, before anything is read
 SECRET = re.compile(r"\$\{secret:([^}]+)\}")
 
 
@@ -76,6 +77,9 @@ def export(project: str) -> bytes:
 
 def read_zip(data: bytes) -> dict:
     with zipfile.ZipFile(io.BytesIO(data)) as z:
+        infos = z.infolist()
+        if len(infos) > MAX_FILES or sum(i.file_size for i in infos) > MAX_UNPACKED:
+            raise ValueError(f"The zip is too large: at most {MAX_FILES} files and {MAX_UNPACKED >> 20} MB unpacked.")
         man = json.loads(z.read("manifest.json"))
         if man.get("format") != FORMAT:
             raise ValueError(f"Not an {FORMAT} zip.")
