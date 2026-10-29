@@ -327,7 +327,7 @@ def test_chats_are_each_persons_own():
 def test_pages_cannot_be_framed_or_sniffed(srv):
     port, _, _ = srv
     h = urllib.request.urlopen(f"http://127.0.0.1:{port}/").headers
-    assert h["X-Frame-Options"] == "DENY" and "frame-ancestors 'none'" in h["Content-Security-Policy"]
+    assert h["X-Frame-Options"] == "SAMEORIGIN" and "frame-ancestors 'self'" in h["Content-Security-Policy"]
     assert h["X-Content-Type-Options"] == "nosniff" and h["Referrer-Policy"] == "no-referrer"
 
 

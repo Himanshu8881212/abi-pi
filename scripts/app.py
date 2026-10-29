@@ -1296,7 +1296,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
             pass
 
         def end_headers(self):  # every answer: never inside another site's frame (clickjacking), no sniffing, no referrer
-            for k, v in (("X-Frame-Options", "DENY"), ("Content-Security-Policy", "frame-ancestors 'none'"),
+            for k, v in (("X-Frame-Options", "SAMEORIGIN"), ("Content-Security-Policy", "frame-ancestors 'self'"),
                          ("X-Content-Type-Options", "nosniff"), ("Referrer-Policy", "no-referrer")):
                 self.send_header(k, v)
             super().end_headers()
