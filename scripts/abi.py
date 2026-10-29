@@ -9,6 +9,7 @@ project repository (read-only).
   abi.py load <ws> <project> <folder|file>...    upload every data file, build the model, starter measures + report
   abi.py sync <project>                          git pull ABI's commits, re-render the HTML views and <project>/app.html
   abi.py app <project> [port]                    app.html live: run flows, edit measures, filter reports (as you)
+  abi.py pack make|list <project> ...            a board pack (scripts/pack.py)
   abi.py call <action> '<json>'                  one action (a 409 is printed as needs-confirmation, never confirmed)
   abi.py cli validate|diff|apply|watch <project> ABI's own CLI on the folder (bundle without .gitkeep)
 
@@ -453,6 +454,9 @@ def main(argv: list[str]) -> None:
             raise SystemExit(app.main(args))
         elif cmd == "validate-files":
             out = {"errors": validate_files(folder(args[0]) or Path(args[0]))}
+        elif cmd == "pack":
+            import pack  # noqa: PLC0415 (sibling script)
+            return pack.main(argv[1:])
         elif cmd == "call":
             out = call(args[0], **json.loads(args[1] if len(args) > 1 else "{}"))
         elif cmd == "cli":

@@ -53,6 +53,7 @@ Be brief. Lead with the answer, then what you did, then what is left.
   | data lands (files, buckets, streams), layers, cleaning | load-data, medallion, profile-clean, practice-data-engineering |
   | the model, keys, joins, readiness, measures, glossary | build-model, measures, practice-data-engineering |
   | a question, a "why", a report or dashboard | practice-analyst, build-report |
+  | a board pack, one-pager, deck, PDF/PPT export or explainer video for leadership | board-pack, build-report |
   | forecasts, anomalies, segments | forecast-ml, practice-analyst |
   | schedules, alerts, sends | flows-alerts, practice-automation |
   | custom agents and tools | custom-agent, practice-agentic |

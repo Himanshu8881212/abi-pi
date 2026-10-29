@@ -30,7 +30,7 @@ const AREAS: { core: string[]; areas: Record<string, { about: string; words: str
 // each group's playbooks (.pi/skills): they come with the group's notes, so no extra turn reads them
 // the build playbook and the practice of the role that does that work, together, when the group's tools are activated
 const PLAYBOOKS: Record<string, string[]> = { data: ["load-data", "medallion", "profile-clean", "practice-data-engineering"],
-	model: ["build-model", "measures", "practice-data-engineering"], reports: ["build-report", "practice-analyst"],
+	model: ["build-model", "measures", "practice-data-engineering"], reports: ["build-report", "practice-analyst", "board-pack"],
 	writeback: ["writeback-planning"], ml: ["forecast-ml", "practice-analyst"], flows: ["flows-alerts", "practice-automation"],
 	agents: ["custom-agent", "practice-agentic"], tools: ["practice-agentic"], project: ["promote"] };
 // ABI's keyword routing (agent.areas, D-71); "project" alone is left out: every harness prompt names one
@@ -190,6 +190,15 @@ export default async function abi(pi: ExtensionAPI) {
 		(p) => ["load", p.workspace, p.project, ...p.paths]);
 	py("abi_sync", "Sync project folder", "Pulls ABI's commits into the project folder and re-renders the HTML views (app.html in the project folder: everything in one page with a sidebar; plus index.html and one page per report). Run after changes. The person opens app.html live with `python scripts/app.py <project>`.",
 		Type.Object({ project: Type.String() }), (p) => ["sync", p.project]);
+	py("abi_pack", "Make a board pack", "Renders a board pack through ABI and keeps it with the project (workspaces/<ws>/_app/<project>/packs/<id>/): documents (report_snapshot: pdf, png, pptx), data extracts (export_visual: csv, xlsx) and a silent explainer video of report views (the app's theme). The notes (your commentary, Markdown) may only use numbers that appear in the rows of the pack's report views, else the pack is refused; so may video captions. What ABI can't render is listed with its reason. Never sends anything: sending is a step for the person's yes.",
+		Type.Object({ project: Type.String({ pattern: "^[a-z][a-z0-9_]{0,62}$" }), spec: Type.Object({
+			id: Type.String({ pattern: "^[a-z][a-z0-9_]{0,62}$" }), title: Type.String(), audience: Type.Optional(Type.String()), as_of: Type.Optional(Type.String()),
+			notes: Type.Optional(Type.String({ description: "the commentary: every number from the pack's report views" })),
+			items: Type.Array(Type.Object({ kind: Type.String({ enum: ["pdf", "png", "pptx", "csv", "xlsx", "video"] }), report: Type.String(),
+				page: Type.Optional(Type.String()), pages: Type.Optional(Type.Any()), visual: Type.Optional(Type.String()), views: Type.Optional(Type.Array(Type.String())),
+				filters: Type.Optional(Type.Array(Type.Any())), theme: Type.Optional(Type.String({ enum: ["paper", "ink"] })),
+				captions: Type.Optional(Type.Record(Type.String(), Type.String())) }), { minItems: 1 }) }) }),
+		(p) => ["pack", "make", p.project, JSON.stringify(p.spec)]);
 	py("abi_health", "ABI health", "Checks ABI is up, the person is signed in, MCP answers and GPT-6.1 Sol is reachable.", Type.Object({}), () => ["health"]);
 	py("abi_cli", "ABI CLI", "ABI's own CLI on the project folder: validate or diff (dry runs) or apply (import the folder's hand edits through ABI's checks).",
 		Type.Object({ command: Type.String({ enum: ["validate", "diff"] }), project: Type.String() }), (p) => ["cli", p.command, p.project]);

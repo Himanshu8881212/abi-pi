@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Write .pi/agents/<name>.md for the eight specialists of harness/team.json: each gets only its ABI tool groups (from
+"""Write .pi/agents/<name>.md for the specialists of harness/team.json: each gets only its ABI tool groups (from
 harness/areas.json), its skills, the team tools (abi_handoff, abi_vault) and no subagent tool, so it can't delegate.
 The subagent extension passes the list as --tools and ABI_PI_ALLOWED, so abi_tools can't widen it."""
 import json
@@ -14,7 +14,7 @@ READS = ["semantic_model", "semantic_query", "visual_data", "dataset_data", "dat
          "how_calculated", "list_reports", "list_flows", "flow_runs", "ml_models", "list_tools", "list_agents", "changes",
          "history", "diff", "rls_rules", "preview_steps", "test_tool", "test_agent"]
 EXTRA = {"analyst": ["run_agent", "list_agents", "agent_runs"], "release-ops": ["data_quality", "flow_runs", "refresh"]}
-HARNESS = {"data-engineer": ["abi_load", "abi_project"], "release-ops": ["abi_cli"]}
+HARNESS = {"data-engineer": ["abi_load", "abi_project"], "release-ops": ["abi_cli"], "board-pack": ["abi_pack"]}
 
 
 def main() -> None:

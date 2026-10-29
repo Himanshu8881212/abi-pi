@@ -289,6 +289,21 @@ def check(project: str, name: str, done: list[dict], h: dict) -> dict:
     elif name == "review_findings":
         if not h.get("checks"):
             bad.append("a review lists what it checked (checks: [{what, result}])")
+    elif name == "pack_ready":
+        import pack  # noqa: PLC0415 (sibling script)
+        packs = {m["id"]: m for m in pack.listing(project)}
+        for pid in ids("pack"):
+            m = packs.get(pid)
+            if not m:
+                bad.append(f"pack {pid} wasn't made (abi_pack)")
+                continue
+            for it in m["items"]:
+                if it["status"] == "ok" and not (pack.home(project) / pid / it["file"]).exists():
+                    bad.append(f"pack {pid}: {it['file']} is missing")
+            if not any(it["status"] == "ok" for it in m["items"]):
+                bad.append(f"pack {pid}: nothing could be rendered")
+        if not ids("pack"):
+            bad.append("the handoff lists no pack (done: [{kind: 'pack', id}])")
     elif name == "committed":
         r = _rows("changes", project=project)
         if r.get("files"):

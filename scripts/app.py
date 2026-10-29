@@ -45,13 +45,14 @@ ALLOWED = {"semantic_model", "semantic_query", "readiness", "rls_rules", "data_q
            "list_tools", "test_tool", "run_tool", "list_agents", "test_agent", "run_agent", "changes", "commit", "undo",
            "add_data", "delete_source", "delete_table", "set_table", "add_relationship", "remove_relationship", "save_dataset",
            "delete_dataset", "save_report", "delete_report", "save_flow", "delete_flow", "save_ml_model", "delete_ml_model",
-           "save_tool", "publish_tool", "delete_tool", "save_agent", "publish_agent", "delete_agent", "preview_steps", "set_steps"}
+           "save_tool", "publish_tool", "delete_tool", "save_agent", "publish_agent", "delete_agent", "preview_steps", "set_steps",
+           "edit_cells", "edit_history", "edit_proposals", "approve_edit", "reject_edit", "undo_edits", "create_input_table", "report_snapshot", "export_visual"}
 KEY_SLOT = "__ABI_APP_KEY__"
 READS_ONLY = {"run_flow", "run_agent"}  # not changes to the project, but they act (send, call tools): Developer only
 WRITES = {"set_measure", "delete_measure", "set_glossary_term", "delete_glossary_term", "enable_flow", "train_model", "score_model", "refresh",
           "commit", "undo", "add_data", "delete_source", "delete_table", "set_table", "add_relationship", "remove_relationship",
           "save_dataset", "delete_dataset", "save_report", "delete_report", "save_flow", "delete_flow", "save_ml_model",
-          "delete_ml_model", "save_tool", "publish_tool", "delete_tool", "save_agent", "publish_agent", "delete_agent", "set_steps"}
+          "delete_ml_model", "save_tool", "publish_tool", "delete_tool", "save_agent", "publish_agent", "delete_agent", "set_steps", "edit_cells", "approve_edit", "reject_edit", "undo_edits", "create_input_table"}
 STATIC = ["Model", "Sources", "Tables", "Security", "Environments"]  # explorer sections shown as they are
 
 CSS = """
@@ -99,7 +100,7 @@ dialog{border:2px solid var(--ink);background:var(--sheet);color:var(--ink);max-
 dialog h3{margin:0 0 12px;font:700 18px var(--display);text-transform:uppercase}dialog .row{margin-top:18px}dialog pre{white-space:pre-wrap;max-height:40vh}dialog::backdrop{background:color-mix(in srgb,var(--ink) 55%,transparent)}
 .trace{margin:12px 0 0;padding-left:20px}.trace li{margin:3px 0}.trace:empty{display:none}
 .stat{font:700 38px/1 var(--display);margin:4px 0 8px;text-transform:uppercase}
-.checks{display:flex;flex-wrap:wrap;gap:6px 16px}.chk{display:flex;gap:6px;align-items:center;font-size:13px}.areas{display:grid;gap:6px}.areas .lk{display:flex;gap:16px;text-align:left;width:100%}.areas .lk b{min-width:9.5em}.areas .lk span{color:var(--mute)}
+.ed-cell{cursor:text}.ed-cell:hover{outline:1px dashed var(--ink)}td.changed{background:color-mix(in srgb,var(--ink) 10%,transparent)}.checks{display:flex;flex-wrap:wrap;gap:6px 16px}.chk{display:flex;gap:6px;align-items:center;font-size:13px}.areas{display:grid;gap:6px}.areas .lk{display:flex;gap:16px;text-align:left;width:100%}.areas .lk b{min-width:9.5em}.areas .lk span{color:var(--mute)}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:12px}.kv b{font-weight:500;color:var(--mute)}
 pre{margin:10px 0 0}.pg .grid{gap:20px}.pg>section>h2{display:none}
 #chat{position:fixed;top:60px;right:0;bottom:0;margin:0;width:420px;max-width:100vw;background:var(--sheet);border-left:2px solid var(--ink);border-top:2px solid var(--ink);display:flex;flex-direction:column;
@@ -287,6 +288,76 @@ function datasets(box){const g=h('div','cards');const bar=h('div','row bar top')
  D.datasets.forEach(d=>g.append(dsForm(d,false)))}
 
 // ---------- Model ----------
+// Edits: ABI's write-back on the gold tables (edit_cells; history, undo, proposals, input tables)
+function editsPage(box){const T=D.model?.tables||{},keyed=Object.keys(T).filter(t=>(T[t].key||[]).length&&!t.startsWith('ml_')).sort();
+ const top=h('div','row'),sel=h('select','f');keyed.forEach(t=>sel.append(new Option(`${t} (${T[t].kind||''})`,t)));top.append(h('label','l','Table'),sel);box.append(top);
+ const grid=card('Rows','the edited table, as every query sees it'),hist=card('Edit history','who changed what; undo a batch'),prop=card('Waiting for approval','edits the agent proposed'),g=h('div','cards');
+ grid.style.gridColumn=hist.style.gridColumn='1/-1';g.append(grid,prop,hist);box.append(g);let off=0,staged=[];
+ const msg=h('div','msg'),body=h('div','body'),pager=h('div','row'),save=h('div','row');grid.append(pager,body,save,msg);
+ async function rowsPage(){body.innerHTML='';pager.innerHTML='';save.innerHTML='';staged=[];const t=sel.value,key=T[t]?.key||[];
+  const r=await fetch('/edits/rows',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({table:t,offset:off,limit:50})}).then(x=>x.json());
+  if(r.error){say(msg,r.error,1);return}const d=r.result,cols=d.columns.map(c=>c.name),tb=h('table');tb.insertRow().append(...cols.map(c=>h('th','',c+(key.includes(c)?' (key)':''))));
+  d.rows.forEach(row=>{const tr=tb.insertRow();row.forEach((v,i)=>{const td=tr.insertCell();td.textContent=v===null?'—':v;
+   if(MODE==='developer'&&!key.includes(cols[i])){td.className='ed-cell';td.title='click to edit';td.onclick=()=>{if(td.querySelector('input'))return;const inp=h('input','f');inp.value=v??'';td.textContent='';td.append(inp);inp.focus();
+    const done=()=>{const nv=inp.value;td.textContent=nv||'—';if((nv||null)!==(v===null?null:String(v))){staged=staged.filter(x=>!(x.column===cols[i]&&JSON.stringify(x.key)===JSON.stringify(key.map(k=>row[cols.indexOf(k)]))));
+     staged.push({key:key.map(k=>row[cols.indexOf(k)]),column:cols[i],value:nv===''?null:nv,old:v});td.classList.add('changed');sv()}};inp.onblur=done;inp.onkeydown=e=>{if(e.key==='Enter')inp.blur()}}}})});
+  if(MODE==='developer'){const tr=tb.insertRow(),ins=cols.map(c=>{const i=h('input','f');i.placeholder=c;tr.insertCell().append(i);return i});
+   tr.insertCell().append(btn('Add row',async()=>{const row=Object.fromEntries(cols.map((c,i)=>[c,ins[i].value===''?null:ins[i].value]));
+    try{await api('edit_cells',{table:sel.value,add:[row],comment:'row added in the app'});say(msg,'Row added through ABI.');await rowsPage();await history()}catch(e){say(msg,e.message,1)}}))}
+  const sc=h('div','scroll');sc.append(tb);body.append(sc);pager.append(h('span','file',`rows ${off+1}–${off+d.rows.length} of ${d.total}`),
+   btn('Previous',async()=>{off=Math.max(0,off-50);await rowsPage()}),btn('Next',async()=>{if(off+50<d.total){off+=50;await rowsPage()}}))}
+ function sv(){save.innerHTML='';if(!staged.length)return;const cm=h('input','f');cm.placeholder='why (kept in the history)';
+  save.append(h('span','',`${staged.length} change${staged.length>1?'s':''} not saved`),cm,btn('Save edits',async()=>{try{await api('edit_cells',{table:sel.value,edits:staged,comment:cm.value||null});say(msg,'Saved through ABI. Every query now sees the edit.');await rowsPage();await history()}catch(e){say(msg,e.message,1)}}))}
+ async function history(){hist.querySelectorAll(':scope>:not(h3)').forEach(x=>x.remove());let r;try{r=await api('edit_history',{table:sel.value,limit:50})}catch(e){hist.append(h('p','bad',e.message));return}
+  if(!r.rows.length){hist.append(h('p','empty','No edits on this table yet.'));return}const ix=c=>r.columns.indexOf(c),tb=h('table');tb.insertRow().append(...['when','who','row','column','old → new','status','flag',''].map(x=>h('th','',x)));
+  const seen=new Set();r.rows.forEach(x=>{const tr=tb.insertRow();[cell(x[ix('timestamp')]),x[ix('user')],x[ix('row_key')],x[ix('column')]||'(row)',`${x[ix('old_value')]??'—'} → ${x[ix('new_value')]??'—'}`,x[ix('status')],x[ix('flag')]||''].forEach(v=>tr.insertCell().textContent=v??'');
+   const b=x[ix('batch_id')],c=tr.insertCell();if(MODE==='developer'&&x[ix('status')]==='active'&&!seen.has(b)){seen.add(b);c.append(btn('Undo batch',async()=>{try{await api('undo_edits',{table:sel.value,batch:b});await rowsPage();await history()}catch(e){toast(e.message)}}))}});
+  const sc=h('div','scroll');sc.append(tb);hist.append(sc)}
+ async function proposals(){prop.querySelectorAll(':scope>:not(h3)').forEach(x=>x.remove());let r;try{r=await api('edit_proposals',{})}catch(e){prop.append(h('p','bad',e.message));return}
+  const list=r.proposals||[];if(!list.length){prop.append(h('p','empty','Nothing waiting. Edits the agent suggests wait here for a person.'));return}
+  list.forEach(p=>{const c=h('div','hit');c.append(h('div','',`${p.table} · ${p.changes?.length||p.rows?.length||''} change(s) · ${p.user||''} · ${p.comment||''}`));
+   if(MODE==='developer')c.append(btn('Approve',async()=>{try{await api('approve_edit',{table:p.table,batch:p.batch});await proposals();await rowsPage()}catch(e){toast(e.message)}},1),btn('Reject',async()=>{try{await api('reject_edit',{table:p.table,batch:p.batch});await proposals()}catch(e){toast(e.message)}}));prop.append(c)})}
+ if(MODE==='developer'){const it=card('New input table','rows entered by people only, e.g. targets or a budget'),nm=h('input','f ed'),cs=h('input','f ed'),ky=h('input','f ed');
+  nm.placeholder='targets_2026';cs.placeholder='channel_id:VARCHAR, month:DATE, target_revenue:DOUBLE';ky.placeholder='channel_id, month';it.append(h('label','l','Name'),nm,h('label','l','Columns (name:TYPE, …)'),cs,h('label','l','Key'),ky);
+  act(it,'Create',async()=>{const columns=cs.value.split(',').map(x=>x.trim()).filter(Boolean).map(x=>{const[n,t]=x.split(':').map(y=>y.trim());return{name:n,type:t||'VARCHAR'}});
+   await api('create_input_table',{table:nm.value.trim(),columns,key:ky.value.split(',').map(x=>x.trim()).filter(Boolean)});return 'Created through ABI. Pick it above and add its rows.'});g.append(it)}
+ sel.onchange=()=>{off=0;rowsPage();history()};if(keyed.length){rowsPage();history();proposals()}else box.append(h('p','empty','No keyed tables: a table needs a key to be edited.'))}
+// ---------- Export ----------
+const dl=(blob,name)=>{const a=h('a');a.href=URL.createObjectURL(blob);a.download=name;a.click()};
+async function fileOf(url,body){const r=await fetch(url,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw new Error((await r.json()).error);return r.blob()}
+function repPicker(box,onPick,filter){const sel=h('select','f'),list=D.reports.filter(filter||(()=>true));list.forEach(r=>sel.append(new Option(r.name||r.id,r.id)));
+ const slot=h('div');box.append(h('label','l','Report'),sel,slot);const go=()=>{slot.innerHTML='';const r=D.reports.find(x=>x.id===sel.value);if(r)onPick(slot,r)};sel.onchange=go;go();
+ if(!list.length)box.append(h('p','empty','No reports here yet.'))}
+function documentsPage(box){const c=card('Document','rendered by ABI, as you');repPicker(c,(slot,r)=>slot.append(exportCard(r,()=>[],()=>r.pages[0])));box.append(c)}
+function onePagerPage(box){const g=h('div','cards'),c=card('Make a one-pager','the board-pack agent builds it as an ABI report');g.append(c);box.append(g);
+ if(MODE==='developer'){const ta=h('textarea','f ed');ta.rows=3;ta.value='A one-pager for the board: partner revenue, views, RPM and net subscribers for the last complete months, the trend by month, the top channels, and the caveats.';
+  c.append(ta);act(c,'Ask the agent',async()=>{openChat(true);inp.value='Use the board-pack specialist to build a one-pager report in ABI: '+ta.value;sendChat();return 'Asked: follow it in the chat.'},1)}
+ else c.append(h('p','empty','Switch to Developer to have one made.'));
+ const ex=card('Export a one-pager','reports with a single page');repPicker(ex,(slot,r)=>slot.append(exportCard(r,()=>[],()=>r.pages[0])),r=>r.pages.length===1);g.append(ex)}
+function dataExportPage(box){const g=h('div','cards'),c=card('A view\'s rows','ABI\'s export_visual: the same rows the view shows');g.append(c);box.append(g);
+ repPicker(c,(slot,r)=>{const pg=h('select','f'),vs=h('select','f'),fm=h('select','f');r.pages.forEach(p=>pg.append(new Option(p.name||p.id,p.id)));['csv','xlsx'].forEach(f=>fm.append(new Option(f.toUpperCase(),f)));
+  const fill=()=>{vs.innerHTML='';r.pages.find(p=>p.id===pg.value).visuals.filter(v=>v.text===undefined).forEach(v=>vs.append(new Option(v.title||v.id,v.id)))};pg.onchange=fill;fill();
+  slot.append(h('label','l','Page'),pg,h('label','l','View'),vs,h('label','l','Format'),fm);
+  act(slot,'Download',async()=>{dl(await fileOf('/data/export',{report:r.id,page:pg.value,visual:vs.value,format:fm.value}),`${r.id}-${vs.value}.${fm.value}`);return 'Downloaded.'},1)});
+ const q=card('A query\'s rows','every row the query returns, as CSV'),qs=h('select','f');D.datasets.forEach(d=>qs.append(new Option(d.name||d.id,d.id)));q.append(h('label','l','Query'),qs);
+ act(q,'Download CSV',async()=>{const d=await api('dataset_data',{dataset:qs.value});d.id=qs.value;csv(d);return 'Downloaded.'},1);g.append(q)}
+function videoPage(box){const c=card('Explainer video','silent, one slide per view, captions from the rows; rendered on this machine');
+ repPicker(c,(slot,r)=>{const pg=h('div','checks'),th=h('select','f'),sz=h('select','f'),sec=h('input','f');
+  r.pages.forEach((p,i)=>{const l=h('label','chk'),x=h('input');x.type='checkbox';x.value=p.id;x.checked=i===0;l.append(x,h('span','',p.name||p.id));pg.append(l)});
+  [['paper','Paper (light)'],['ink','Ink (dark)']].forEach(([v,t])=>th.append(new Option(t,v)));th.value=document.documentElement.dataset.theme==='dark'?'ink':'paper';
+  [['1920x1080','1080p · 16:9'],['1280x720','720p · 16:9'],['1080x1920','phone · 9:16']].forEach(([v,t])=>sz.append(new Option(t,v)));sec.type='number';sec.min=2;sec.max=15;sec.value=6;
+  slot.append(h('label','l','Pages'),pg,h('label','l','Theme'),th,h('label','l','Size'),sz,h('label','l','Seconds per slide'),sec);
+  act(slot,'Render and download',async m=>{const pages=[...pg.querySelectorAll('input:checked')].map(x=>x.value);if(!pages.length)return 'Pick at least one page.';say(m,'Rendering… about 5 seconds per slide.');
+   dl(await fileOf('/video/export',{report:r.id,pages,theme:th.value,size:sz.value,seconds:+sec.value}),`${r.id}.mp4`);return 'Downloaded.'},1)});box.append(c)}
+function boardPage(box){const g=h('div','cards');box.append(g);const P=D.app?.packs||[];
+ if(MODE==='developer'){const c=card('Prepare a board pack','the board-pack agent picks, checks, writes and renders; you send'),ta=h('textarea','f ed');ta.rows=4;
+  ta.value='For the board review: the executive overview and monetization for the last complete months, a one-pager, the channel table as Excel, and a short explainer video. Commentary on what moved and what is open.';
+  c.append(ta);act(c,'Ask the agent',async()=>{openChat(true);inp.value='Use the board-pack specialist to prepare a board pack: '+ta.value;sendChat();return 'Asked: follow it in the chat; the pack appears here.'},1);g.append(c)}
+ if(!P.length)g.append(h('p','empty','No board packs yet.'));
+ P.slice().reverse().forEach(m=>{const c=card(m.title||m.id,`${m.status} · made ${cell(m.made)}${m.audience?' · for '+m.audience:''}`);
+  c.append(h('p',m.notes_grounded?'ok':'bad',m.notes_grounded?'Every number in the notes is in the pack\'s report views.':'Notes not checked.'));
+  const fl=h('div','areas');[...m.items,{file:'notes.md',kind:'notes',status:'ok'}].forEach(it=>{const b=h('button','lk');b.append(h('b','',it.kind),h('span','',it.status==='ok'?it.file:'not made: '+(it.error||'')));
+   if(it.status==='ok')b.onclick=async()=>{try{dl(await fileOf('/packs/file',{pack:m.id,file:it.file}),it.file)}catch(e){toast(e.message)}};fl.append(b)});c.append(fl);g.append(c)})}
 function transferPage(box){if(!LIVE||MODE==='viewer'){box.append(h('p','empty','Export and import work in Developer mode with the live app.'));return}
  const ex=card('Export','the whole project as one zip'),im=card('Import','replace this project with a zip; ABI checks it first'),g=h('div','cards');
  ex.append(h('p','','ABI\'s committed files (sources, tables, model, measures, glossary, queries, reports, flows, ML, tools, agents, security, environments, docs), the app\'s JSON (Monitor settings, saved analyses), the vault\'s documents and the team\'s plan. Not inside: the data (refresh the sources after an import), secret values, people\'s roles, chats, uncommitted changes.'));
@@ -595,19 +666,20 @@ function vaultPage(box){if(!LIVE){box.append(h('p','empty','The vault opens with
 const PENDING={filters:null,explore:null};
 const LEDE={vault:'Your business documents: definitions, finance rules, KPI specs. The agents search them before they define or check a measure.',home:'Start here: ask anything, see what needs attention, and every part of the project at a glance.',datasets:'Saved questions to the model (measures by dimensions, with filters). Each run returns a fresh table; nothing is stored. Reports, flows and ML reuse them. Preview their rows.',
  measures:'The business numbers. Edit a formula and ABI checks it before it saves; Test shows the total.',model:'Tables and how they join. Facts are black, dimensions are outlined.',
- chat:'Talk to the agent: ask a question, ask where something is, or ask for a change. When it shows you a page, the chat moves to the side and goes on.',transfer:'The whole project as one zip, so it can be kept, reviewed, moved or rebuilt. Import goes through ABI, which checks it and makes it one undoable commit.',reports:'The saved reports of this project. Open one to filter it and click through.',monitor:'Is anything wrong right now: data freshness, model readiness, ML runs and flows. Reports show the business; this shows the system.',explore:'Your own analysis: pick measures, a dimension and a filter; the numbers come from the model, so they match the reports. Keep the ones you want: they are saved with the app, the project itself doesn\'t change.',glossary:'What the business words mean and which measures implement them.',sources:'Bronze: the data as it landed, one source per file or bucket folder. Reload, add or delete a source.',
+ chat:'Talk to the agent: ask a question, ask where something is, or ask for a change. When it shows you a page, the chat moves to the side and goes on.',boardpack:'Board packs: the documents, data and explainer video a review needs, made from ABI by the board-pack agent and checked before they leave. Nothing is sent from here.',documents:'A report, some of its pages or one view, as ABI renders it: PDF, PNG, PowerPoint (with a newer ABI).',onepager:'One page for the board: a report page with the headline numbers, two charts and the caveats. The agent builds it in ABI; export it here.',dataexport:'The rows behind any view, as CSV or Excel, or a query\'s rows as CSV.',video:'A silent explainer of report views: the numbers from ABI, animated, with a caption per slide, in the app\'s theme.',transfer:'The whole project as one zip, so it can be kept, reviewed, moved or rebuilt. Import goes through ABI, which checks it and makes it one undoable commit.',edits:'Write-back: people correct or add rows of the gold tables. Edits apply on top of the table by row key (the loaded data is never changed), survive refreshes, can be undone, and every query sees the edited table.',reports:'The saved reports of this project. Open one to filter it and click through.',monitor:'Is anything wrong right now: data freshness, model readiness, ML runs and flows. Reports show the business; this shows the system.',explore:'Your own analysis: pick measures, a dimension and a filter; the numbers come from the model, so they match the reports. Keep the ones you want: they are saved with the app, the project itself doesn\'t change.',glossary:'What the business words mean and which measures implement them.',sources:'Bronze: the data as it landed, one source per file or bucket folder. Reload, add or delete a source.',
  staged:'Silver: the cleaned and combined tables between the sources and the final tables. Hidden from the model; edit their steps here.',tables:'Gold: the final business tables the model and measures are built on. Edit kind, key, description and steps.',flows:'Automations. Run one now and follow its steps, or switch it on or off.',
  ml:'Forecasts, segments and anomaly models. Train, score and read the latest run.',tools:'Calculations your agents can call. Run one with inputs or run its tests.',
  agents:'Custom agents for this project. Ask one a question or run its evaluation set.',docs:'The project documentation ABI writes from its definitions.',
  security:'Who sees which rows. Roles are set in ABI itself.',environments:'Where each environment reads its data from.',history:'Every change is a commit in ABI. Newest first.'};let PAGES={},CUR='home';const side=$('aside');
 function nav(){return [['Start',[['home','Home',home],['chat','Chat',chatPage]]],
- ['Data',[['sources','Sources',sources,D.sources.length],['staged','Staged',stagedPage,(D.layers||[]).filter(t=>t.layer==='silver').length],['tables','Tables',tablesPage,(D.model?Object.keys(D.model.tables||{}).length:D.tables.length)]]],
+ ['Data',[['sources','Sources',sources,D.sources.length],['staged','Staged',stagedPage,(D.layers||[]).filter(t=>t.layer==='silver').length],['tables','Tables',tablesPage,(D.model?Object.keys(D.model.tables||{}).length:D.tables.length)],['edits','Edits',editsPage]]],
  ['Data Model',[['model','Diagram',modelCanvas],['measures','Measures',measures,D.measures.length],
  ['glossary','Glossary',glossary,D.glossary.length],['datasets','Queries',datasets,D.datasets.length]]],
  ['Visualizations',[['reports','Reports',reportsPage,D.reports.length],['monitor','Monitor',monitorPage],['explore','Explore',explore,MINE.length||'']]],
+ ['Export',[['boardpack','Board pack',boardPage,(D.app?.packs||[]).length],['documents','Documents',documentsPage],['onepager','One-pager',onePagerPage],['dataexport','Data',dataExportPage],['video','Video',videoPage],['transfer','Project',transferPage]]],
  ['Automate',[['flows','Flows',flows,D.flows.length],['ml','ML models',ml,D.ml.length],['tools','Tools',tools,D.tools.length],['agents','Agents',agents,D.agents.length]]],
  ['Knowledge',[['vault','Vault',vaultPage,(VAULT||[]).length],['docs','Docs',docs]]],
- ['Govern',[['security','Security',security],['environments','Environments',b=>b.insertAdjacentHTML('beforeend',D.sections.Environments)],['history','History',commits,(D.history||[]).length],['transfer','Export & import',transferPage]]]]}
+ ['Govern',[['security','Security',security],['environments','Environments',b=>b.insertAdjacentHTML('beforeend',D.sections.Environments)],['history','History',commits,(D.history||[]).length]]]]}
 let MODE='developer',VAULT=[];
 let FOLD={};try{FOLD=JSON.parse(localStorage.getItem('abi-fold')||'{}')}catch(e){}
 function sidebar(){side.innerHTML='';PAGES={};nav().forEach(([g,items])=>{const sec=h('div','sec'),hd=h('button','grp'),list=h('div','items');
@@ -776,7 +848,9 @@ def snapshot(dest: Path, project: str) -> dict:
     out["layers"] = [{"table": r[qi["table"]], "rows": r[qi["rows"]], "layer": layer(r[qi["table"]])} for r in q.get("rows") or []] if qi else []
     out["summary"] = {k: len(out[k]) for k in ("sources", "tables", "measures", "reports", "datasets", "flows", "ml", "tools", "agents")}
     base = project.removesuffix("_pub")
-    out["app"] = {"analyses": j(app_dir(base) / "analyses.json", []) or [], "monitor": MONITOR | (j(app_dir(base) / "monitor.json", {}) or {})}
+    import pack  # noqa: PLC0415 (sibling script)
+    out["app"] = {"analyses": j(app_dir(base) / "analyses.json", []) or [], "monitor": MONITOR | (j(app_dir(base) / "monitor.json", {}) or {}),
+                  "packs": pack.listing(base)}
     return out
 
 
@@ -1166,6 +1240,13 @@ def serve(project: str, port: int = 8790, open_browser: bool = True, remote: str
                         out = {"error": str(e.body.get("message") if isinstance(e.body, dict) else e.body)}
                 changed(project)
                 return self.reply(200, json.dumps(out, default=str).encode())
+            if self.path == "/edits/rows":
+                q = urllib.parse.urlencode({"offset": max(0, int(body.get("offset") or 0)), "limit": min(200, int(body.get("limit") or 50))})
+                try:
+                    t = urllib.parse.quote(str(body.get("table", "")), safe="")
+                    return self.reply(200, json.dumps({"result": abi._open("GET", f"/api/projects/{hub.current()}/tables/{t}/rows?{q}")[1]}, default=str).encode())
+                except abi.ActionError as e:
+                    return self.reply(200, json.dumps({"error": (e.body or {}).get("message") if isinstance(e.body, dict) else str(e.body)}).encode())
             if self.path == "/report/export":  # ABI renders the report (report_snapshot); the page gets the file
                 args = {k: body[k] for k in ("report", "page", "pages", "visual", "filters", "format") if body.get(k) not in (None, [], "")}
                 try:
@@ -1177,6 +1258,32 @@ def serve(project: str, port: int = 8790, open_browser: bool = True, remote: str
                     old = any(x.get("loc") in (["page"], ["format"]) for x in b.get("errors") or [] if isinstance(x, dict))
                     return self.reply(400, json.dumps({"error": "This ABI renders one page at a time as PDF or PNG. Several pages in one"
                                                        " file and PPTX need a newer ABI (MULTI-EXPORT)." if old else b.get("message") or str(e.body)}).encode())
+            if self.path == "/data/export":  # one view's rows as CSV or Excel (ABI's export_visual, as the person)
+                try:
+                    link = abi.call("export_visual", project=hub.current(), **{k: body.get(k) for k in ("report", "page", "visual", "format")},
+                                    filters=body.get("filters") or [])["link"]
+                    return self.reply(200, abi.artifact(link.removeprefix("/api/artifacts/")), "text/csv" if body.get("format") == "csv" else
+                                      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                except abi.ActionError as e:
+                    return self.reply(400, json.dumps({"error": (e.body or {}).get("message") if isinstance(e.body, dict) else str(e.body)}).encode())
+            if self.path == "/video/export":  # a silent explainer of report views (scripts/video.py: ABI's rows, the app's theme)
+                import tempfile  # noqa: PLC0415
+                import video  # noqa: PLC0415 (sibling script)
+                try:
+                    w, ht = (int(x) for x in str(body.get("size") or "1920x1080").split("x"))
+                    props = video.build(hub.current(), str(body.get("report")), body.get("pages") or None, body.get("views") or None,
+                                        "ink" if body.get("theme") == "ink" else "paper", min(15.0, max(2.0, float(body.get("seconds") or 6))), (w, ht))
+                    with tempfile.TemporaryDirectory() as tmp:
+                        return self.reply(200, video.render(props, Path(tmp) / "deck.mp4").read_bytes(), "video/mp4")
+                except (SystemExit, abi.ActionError, ValueError, subprocess.CalledProcessError) as e:
+                    return self.reply(400, json.dumps({"error": str(getattr(e, "body", None) or e)[:400]}).encode())
+            if self.path == "/packs/file":  # a file of a board pack, only one its manifest lists
+                import pack  # noqa: PLC0415 (sibling script)
+                m = next((x for x in pack.listing(project) if x["id"] == body.get("pack")), None)
+                names = {i["file"] for i in (m or {}).get("items", []) if i.get("file")} | {"notes.md", "manifest.json"}
+                if not m or body.get("file") not in names:
+                    return self.reply(404, b'{"error":"no such file in that pack"}')
+                return self.reply(200, (pack.home(project) / m["id"] / body["file"]).read_bytes(), "application/octet-stream")
             if self.path == "/analyses":  # Explore's saved analyses: the app's file, not the project, so Viewer may keep them too
                 items = body.get("analyses")
                 if not isinstance(items, list) or len(items) > 100 or len(raw) > 200_000:
