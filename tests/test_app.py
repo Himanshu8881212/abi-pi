@@ -150,6 +150,14 @@ def test_viewer_mode_is_read_only_on_the_server(srv):
         post(port, "/mode", {"mode": "developer"}, key)
 
 
+def test_switcher_lists_workspaces_and_their_projects(srv):
+    port, key, _ = srv
+    _, r = post(port, "/projects", {}, key)
+    ws = r["result"]["workspaces"]
+    assert r["result"]["current"] == P and P in [p["id"] for p in ws["demo"]]
+    assert not any(p["id"].endswith("_pub") for ps in ws.values() for p in ps), "published copies aren't projects to pick"
+
+
 def test_team_answer_only_for_a_waiting_step(srv):
     port, key, _ = srv
     assert post(port, "/team/answer", {"id": "no_such_step", "decision": "approve"}, key)[0] == 410

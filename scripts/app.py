@@ -100,7 +100,7 @@ dialog{border:2px solid var(--ink);background:var(--sheet);color:var(--ink);max-
 dialog h3{margin:0 0 12px;font:700 18px var(--display);text-transform:uppercase}dialog .row{margin-top:18px}dialog pre{white-space:pre-wrap;max-height:40vh}dialog::backdrop{background:color-mix(in srgb,var(--ink) 55%,transparent)}
 .trace{margin:12px 0 0;padding-left:20px}.trace li{margin:3px 0}.trace:empty{display:none}
 .stat{font:700 38px/1 var(--display);margin:4px 0 8px;text-transform:uppercase}
-.ed-cell{cursor:text}.ed-cell:hover{outline:1px dashed var(--ink)}td.changed{background:color-mix(in srgb,var(--ink) 10%,transparent)}.checks{display:flex;flex-wrap:wrap;gap:6px 16px}.chk{display:flex;gap:6px;align-items:center;font-size:13px}.areas{display:grid;gap:6px}.areas .lk{display:flex;gap:16px;text-align:left;width:100%}.areas .lk b{min-width:9.5em}.areas .lk span{color:var(--mute)}
+.ed-cell{cursor:text}.ed-cell:hover{outline:1px dashed var(--ink)}td.changed{background:color-mix(in srgb,var(--ink) 10%,transparent)}.checks{display:flex;flex-wrap:wrap;gap:6px 16px}.chk{display:flex;gap:6px;align-items:center;font-size:13px}.crumb{background:none;border:0;color:inherit;font:inherit;cursor:pointer;display:flex;gap:6px;align-items:baseline}.crumb .car{font-style:normal;opacity:.6}#switcher{position:fixed;top:64px;left:max(16px,env(safe-area-inset-left,0px));z-index:20;width:min(420px,calc(100vw - 32px));max-height:70vh;overflow:auto}.areas .lk.on{background:var(--ink);color:var(--paper)}.areas .lk.on span{color:inherit}.areas{display:grid;gap:6px}.areas .lk{display:flex;gap:16px;text-align:left;width:100%}.areas .lk b{min-width:9.5em}.areas .lk span{color:var(--mute)}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:12px}.kv b{font-weight:500;color:var(--mute)}
 pre{margin:10px 0 0}.pg .grid{gap:20px}.pg>section>h2{display:none}
 #chat{position:fixed;top:60px;right:0;bottom:0;margin:0;width:420px;max-width:100vw;background:var(--sheet);border-left:2px solid var(--ink);border-top:2px solid var(--ink);display:flex;flex-direction:column;
@@ -182,7 +182,7 @@ JS = r"""
 const D=window.APP, KEY='__ABI_APP_KEY__', LIVE=location.protocol.startsWith('http')&&!KEY.startsWith('__');
 const MOBILE=matchMedia('(max-width: 820px), (pointer: coarse) and (max-width: 1100px)').matches;
 let CID='';try{CID=localStorage.getItem('abi-client')||'';if(!CID){CID=Math.random().toString(36).slice(2,12);localStorage.setItem('abi-client',CID)}}catch(e){CID=Math.random().toString(36).slice(2,12)}
-{const f0=window.fetch.bind(window);window.fetch=(u,o={})=>{if(typeof u==='string'&&u.startsWith('/')){o.headers={...(o.headers||{}),'X-Abi-Client':CID,'X-Abi-Mobile':MOBILE?'1':'0'}}return f0(u,o)}}
+{const f0=window.fetch.bind(window);window.fetch=(u,o={})=>{if(typeof u==='string'&&u.startsWith('/')){o.headers={...(o.headers||{}),'X-Abi-Client':CID,'X-Abi-Mobile':MOBILE?'1':'0','X-Abi-Project':D.project}}return f0(u,o)}}
 if(MOBILE)document.documentElement.classList.add('mobile');
 const $=(s,r=document)=>r.querySelector(s), h=(t,c,x)=>{const e=document.createElement(t);if(c)e.className=c;if(x!==undefined)e.textContent=x;return e};
 const wait=ms=>new Promise(z=>setTimeout(z,ms));
@@ -718,12 +718,18 @@ $('#publish').onclick=async()=>{if(!LIVE)return;if(!await ask({message:'Publish 
  let r=await post('/publish');if(r.confirm){if(!await ask(r.confirm)){toast('Not published.');return}r=await post('/confirm/'+r.confirm.id)}
  toast(r.error?`Publish failed: ${r.error}`:`Published ${r.result.commit}`)};
 $('#menu').onclick=()=>document.body.classList.toggle('menu-open');side.addEventListener('click',e=>{if(e.target.closest('button.it'))document.body.classList.remove('menu-open')});
-$('#m-dev').onclick=()=>pickMode('developer');$('#m-view').onclick=()=>pickMode('viewer');
+$('#switch').onclick=switcher;$('#m-dev').onclick=()=>pickMode('developer');$('#m-view').onclick=()=>pickMode('viewer');
 let first=decodeURIComponent(location.hash.slice(1));if(!first)try{first=localStorage.getItem('abi-app-'+D.project)}catch(e){}show(first||'home');
 boot.then(()=>{sidebar();show(CUR)});setMode('developer');vc();
 window.addEventListener('hashchange',()=>{const k=decodeURIComponent(location.hash.slice(1));if(k&&k!==CUR)show(k)});
 
 // ---------- the agent: it steers this page, the page follows its changes, and the person talks to it here ----------
+async function switcher(){if(!LIVE){toast('Snapshot: start the app to switch projects.');return}let d=$('#switcher');if(d){d.remove();return}
+ const r=(await fetch('/projects',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(x=>x.json())).result;
+ d=h('div','card');d.id='switcher';const ws=h('select','f'),list=h('div','areas');Object.keys(r.workspaces).forEach(w=>ws.append(new Option(w,w)));ws.value=r.workspace;
+ const fill=()=>{list.innerHTML='';(r.workspaces[ws.value]||[]).forEach(p=>{const b=h('button','lk');b.append(h('b','',p.id),h('span','',p.name===p.id?'':p.name));
+  if(p.id===r.current)b.classList.add('on');b.onclick=()=>{location.href='/?p='+encodeURIComponent(p.id)+'#home'};list.append(b)})};ws.onchange=fill;fill();
+ d.append(h('label','l','Workspace'),ws,h('label','l','Projects in it'),list);document.body.append(d)}
 function toast(t){const x=h('div','toast',t);document.body.append(x);setTimeout(()=>x.remove(),6000)}
 function highlight(item){if(!item)return;const want=String(item).toLowerCase();
  const c=[...document.querySelectorAll('main .card')].find(c=>c.textContent.toLowerCase().includes(want));if(c){c.classList.add('hl');c.scrollIntoView({behavior:'smooth',block:'center'});setTimeout(()=>c.classList.remove('hl'),4000)}}
@@ -759,7 +765,7 @@ async function sendChat(){const t=inp.value.trim();if(!t)return;if(!LIVE){bubble
  await fetch('/chat',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({message:t,page:CUR})})}
 $('#chat .send').onclick=sendChat;inp.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChat()}};
 $('#chat .stop').onclick=()=>fetch('/chat/stop',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'});
-if(LIVE){const es=new EventSource('/events?k='+encodeURIComponent(KEY)+'&c='+CID+'&m='+(MOBILE?1:0));
+if(LIVE){const es=new EventSource('/events?k='+encodeURIComponent(KEY)+'&c='+CID+'&m='+(MOBILE?1:0)+'&p='+encodeURIComponent(D.project));
  es.onmessage=async ev=>{const e=JSON.parse(ev.data);
   if(e.type==='show'){PENDING.filters=e.filters||null;if(e.page==='explore'&&e.query){const q={measures:e.query.measures||[],dimensions:(e.query.dimensions||[]).slice(0,1),filters:e.query.filters||[]};PENDING.explore={...q,chart:e.chart};MINE.unshift({name:'Agent: '+(e.note||q.measures.join(', ')),q,type:e.chart||'bar',at:new Date().toISOString().slice(0,16).replace('T',' ')});saveMine();sidebar()}const nv=h('div','m nav','→ '+(e.page==='report'?'report '+e.report:e.page)+(e.note?' · '+e.note:''));nv.onclick=()=>show(e.page==='report'?'rep:'+e.report:e.page);log.append(nv);log.scrollTop=log.scrollHeight;const wasFull=chatBox.classList.contains('full');const k=e.page==='report'?'rep:'+e.report:e.page;show(k);if(wasFull)openChat(true);setTimeout(()=>highlight(e.item),400);if(e.note)toast('Agent: '+e.note)}
   else if(e.type==='data'){Object.assign(D,e.data);const k=CUR;sidebar();show(k);vc()}
@@ -892,7 +898,7 @@ def build(project: str) -> Path:
     data = json.dumps(snapshot(dest, project), default=str).replace("</", "<\\/")
     name = (render.j(dest / "project.json", {}) or {}).get("name", project)
     page = render.shell(name, "", "", "")
-    head = (f"<header><button class=btn id=menu aria-label=Menu>Menu</button><span class=brand>ABI</span><span class=crumb>{render.esc(dest.parent.name)}<i>/</i><b>{render.esc(project)}</b></span>"
+    head = (f"<header><button class=btn id=menu aria-label=Menu>Menu</button><span class=brand>ABI</span><button class=crumb id=switch title='Switch workspace or project'>{render.esc(dest.parent.name)}<i>/</i><b>{render.esc(project)}</b><i class=car>▾</i></button>"
             "<span class=snap hidden>snapshot</span><span class=right><span class='vc w'><button class=btn id=changes>No changes</button>"
             "<button class=btn id=publish title='Make the last commit what Viewer sees'>Publish</button></span><span class=modes role=group aria-label=Mode>"
             "<button id=m-dev class=on title='Build and change: you and the agent'>Developer</button>"
@@ -936,6 +942,16 @@ class Hub:
         self.chats_dir = abi.folder(project).parent / "_views" / project / "chats"
         self.chats_dir.mkdir(parents=True, exist_ok=True)
         self.chat_id = None
+
+    def use(self, project: str) -> None:
+        """This browser switched project: its chat agent stops, its chats are that project's."""
+        if project == self.project:
+            return
+        if self.pi and self.pi.poll() is None:
+            self.pi.terminate()
+        self.pi, self.busy, self.chat_id, self.project = None, False, None, project
+        self.chats_dir = abi.folder(project).parent / "_views" / project / "chats"
+        self.chats_dir.mkdir(parents=True, exist_ok=True)
 
     def chat_file(self, cid: str) -> Path:
         return self.chats_dir / f"{cid}.json"
@@ -1086,26 +1102,45 @@ input,button{font:inherit;padding:10px;border:2px solid currentColor;background:
 <button>Open</button><span>%s</span></form>"""
 
 
-def serve(project: str, port: int = 8790, open_browser: bool = True, remote: str | None = None, tailnet: bool = False) -> ThreadingHTTPServer:
+def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str | None = None, tailnet: bool = False) -> ThreadingHTTPServer:
     """remote: a passphrase; then the app listens on every interface (your VPN) and asks for it before anything loads.
     tailnet: listen on every interface but answer only this machine and Tailscale devices (100.64.0.0/10, your tailnet)."""
     import ipaddress  # noqa: PLC0415
-    try:  # Developer works uncommitted: Commit is the person's (or the agent's, when asked); Publish feeds Viewer
-        abi.call("set_auto_commit", project=project, on=False)
-    except abi.ActionError:
-        pass
-    path, key, pending = build(project), secrets.token_urlsafe(24), {}
+    project, opened = default, set()
+
+    def known(p: str | None) -> bool:
+        return bool(p) and bool(abi.PROJECT_ID.match(p)) and not p.endswith("_pub") and abi.folder(p) is not None
+
+    def opening(p: str) -> None:
+        if p in opened:
+            return
+        opened.add(p)
+        try:  # Developer works uncommitted: Commit is the person's (or the agent's, when asked); Publish feeds Viewer
+            abi.call("set_auto_commit", project=p, on=False)
+        except abi.ActionError:
+            pass
+
+    def page_of(p: str) -> Path:
+        f = abi.folder(p) / "app.html"
+        return f if f.exists() else build(p)
+
+    opening(default)
+    build(default)
+    key, pending = secrets.token_urlsafe(24), {}
     agent_key = os.environ.get("ABI_APP_AGENT_KEY") or secrets.token_urlsafe(24)
     host = f"127.0.0.1:{port}"
     url = ""
     cookies: set = set()  # sessions that gave the passphrase (memory only)
     fails = {"n": 0}
 
-    def hub_for(cid: str, mobile: bool = False) -> Hub:
+    def hub_for(cid: str, mobile: bool = False, want: str | None = None) -> Hub:
         cid = re.sub(r"[^\w-]", "", cid)[:40] or "default"
         h = HUBS.get(cid)
         if not h:
-            h = HUBS[cid] = Hub(project, url, agent_key, cid, mobile)
+            h = HUBS[cid] = Hub(default, url, agent_key, cid, mobile)
+        if known(want):
+            opening(want)
+            h.use(want)
         if mobile and not h.mobile:
             h.mobile, h.mode = True, "viewer"
         return h
@@ -1147,7 +1182,8 @@ def serve(project: str, port: int = 8790, open_browser: bool = True, remote: str
             if route == "/events":  # EventSource can't send headers: the page key and this browser's id come in the query
                 if not secrets.compare_digest(qs.get("k", ""), key):
                     return self.reply(403, b"{}")
-                hub = hub_for(qs.get("c", ""), qs.get("m") == "1")
+                hub = hub_for(qs.get("c", ""), qs.get("m") == "1", urllib.parse.unquote(qs.get("p", "")))
+                project = hub.project
                 self.send_response(200)
                 for k, v in (("Content-Type", "text/event-stream"), ("Cache-Control", "no-store"), ("Connection", "keep-alive")):
                     self.send_header(k, v)
@@ -1174,7 +1210,10 @@ def serve(project: str, port: int = 8790, open_browser: bool = True, remote: str
                 return None
             if route not in ("/", "/app.html"):
                 return self.reply(404, b"{}")
-            self.reply(200, path.read_text().replace(KEY_SLOT, key, 1).encode(), "text/html; charset=utf-8")
+            want = urllib.parse.unquote(qs.get("p", ""))
+            p = want if known(want) else default
+            opening(p)
+            self.reply(200, page_of(p).read_text().replace(KEY_SLOT, key, 1).encode(), "text/html; charset=utf-8")
 
         def do_POST(self):
             raw = self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}"
@@ -1193,6 +1232,7 @@ def serve(project: str, port: int = 8790, open_browser: bool = True, remote: str
                 time.sleep(min(30, 2 ** min(fails["n"], 5)))  # a slow wrong passphrase
                 return self.reply(200, (LOGIN % "Wrong passphrase.").encode(), "text/html; charset=utf-8")
             body = json.loads(raw)
+            project = default
             if self.path.startswith("/agent/"):  # the harness on this machine, with the agent key: steer pages, data changed
                 if self.client_address[0] != "127.0.0.1" or not secrets.compare_digest(self.headers.get("X-Abi-Agent", ""), agent_key):
                     return self.reply(403, b'{"error":"forbidden"}')
@@ -1200,19 +1240,28 @@ def serve(project: str, port: int = 8790, open_browser: bool = True, remote: str
                 targets = [HUBS[cid]] if cid in HUBS else [h for h in HUBS.values() if h.mode == "developer"]
                 if self.path == "/agent/mode":
                     h0 = targets[0] if targets else None
-                    return self.reply(200, json.dumps({"mode": h0.mode if h0 else "developer", "project": h0.current() if h0 else project}).encode())
-                if self.path == "/agent/show" and body.get("project") in (project, pub_id(project)):
-                    for h0 in targets:
+                    return self.reply(200, json.dumps({"mode": h0.mode if h0 else "developer", "project": h0.current() if h0 else default}).encode())
+                if self.path == "/agent/show":
+                    for h0 in [h for h in targets if body.get("project") in (h.project, pub_id(h.project))]:
                         h0.emit({"type": "show", **{k: body.get(k) for k in ("page", "report", "filters", "item", "note", "query", "chart")}})
                 elif self.path == "/agent/changed":
-                    changed(project)
+                    changed(body["project"].removesuffix("_pub") if known(str(body.get("project", "")).removesuffix("_pub")) else default)
                 return self.reply(200, b"{}")
             if not self.authed():
                 return self.reply(403, b'{"error":"forbidden"}')
-            hub = hub_for(self.headers.get("X-Abi-Client", ""), self.headers.get("X-Abi-Mobile") == "1")
+            hub = hub_for(self.headers.get("X-Abi-Client", ""), self.headers.get("X-Abi-Mobile") == "1", self.headers.get("X-Abi-Project"))
+            project = hub.project
             # the page: a local Host (no DNS rebinding) and the per-start key (a custom header other sites can't send)
             if not secrets.compare_digest(self.headers.get("X-Abi-App", ""), key):
                 return self.reply(403, b'{"error":"forbidden"}')
+            if self.path == "/projects":  # the switcher: every workspace folder and its projects (ABI's synced copies here)
+                out = {}
+                for ws in sorted(abi.WORKSPACES.iterdir()) if abi.WORKSPACES.exists() else []:
+                    if ws.is_dir() and not ws.name.startswith((".", "_")):
+                        ps = [d.name for d in sorted(ws.iterdir()) if d.is_dir() and known(d.name)]
+                        if ps:
+                            out[ws.name] = [{"id": x, "name": (render.j(ws / x / "project.json", {}) or {}).get("name") or x} for x in ps]
+                return self.reply(200, json.dumps({"result": {"workspaces": out, "current": project, "workspace": abi.folder(project).parent.name}}).encode())
             if self.path == "/mode":  # the person's switch (the agent can't call this: it has no page key); a phone stays Viewer
                 hub.mode = "viewer" if body.get("mode") == "viewer" or hub.mobile else "developer"
                 hub.emit({"type": "mode", "mode": hub.mode, "mobile": hub.mobile, "published": bool(abi.folder(pub_id(project)))})
@@ -1380,19 +1429,19 @@ def serve(project: str, port: int = 8790, open_browser: bool = True, remote: str
             return 403, b'{"error":"Viewer mode is read-only. Switch to Developer to add or remove documents."}'
         try:
             if op == "list":
-                out = vault.listing(project)
+                out = vault.listing(hub.project)
             elif op == "search":
-                out = vault.search(project, str(body.get("query", "")), int(body.get("k") or 6))
+                out = vault.search(hub.project, str(body.get("query", "")), int(body.get("k") or 6))
             elif op == "read":
-                out = vault.read(project, Path(str(body.get("name"))).name)
+                out = vault.read(hub.project, Path(str(body.get("name"))).name)
             elif op == "add":
                 name = Path(str(body.get("name"))).name
                 with tempfile.TemporaryDirectory() as d:
                     f = Path(d) / name
                     f.write_bytes(base64.b64decode(body.get("data") or ""))
-                    out = vault.add(project, f, name)
+                    out = vault.add(hub.project, f, name)
             elif op == "rm":
-                out = vault.remove(project, Path(str(body.get("name"))).name)
+                out = vault.remove(hub.project, Path(str(body.get("name"))).name)
             else:
                 return 404, b"{}"
         except SystemExit as e:  # vault's own messages (unsupported type, missing pypdf)
@@ -1408,7 +1457,7 @@ def serve(project: str, port: int = 8790, open_browser: bool = True, remote: str
             if after:
                 out["result"] = after()
             if (token and action in WRITES) or after:
-                changed(project)
+                changed(str(args.get("project") or default).removesuffix("_pub"))
             return out
         except abi.ActionError as e:
             b = e.body if isinstance(e.body, dict) else {"message": str(e.body)}
@@ -1428,14 +1477,15 @@ def serve(project: str, port: int = 8790, open_browser: bool = True, remote: str
     srv.hubs = HUBS
 
     def watch() -> None:  # changes made outside this app (an agent team in a terminal, ABI's own app): follow ABI's history
-        last = None
+        last: dict = {}
         while True:
             try:
-                head = ((abi.call("history", project=project).get("commits") or [{}])[0].get("id"),
-                        len((abi.call("changes", project=project) or {}).get("files") or []))
-                if last is not None and head != last:
-                    changed(project)
-                last = head
+                for p in {h.project for h in HUBS.values()} | {default}:
+                    head = ((abi.call("history", project=p).get("commits") or [{}])[0].get("id"),
+                            len((abi.call("changes", project=p) or {}).get("files") or []))
+                    if p in last and head != last[p]:
+                        changed(p)
+                    last[p] = head
             except Exception:  # noqa: BLE001 (ABI busy or restarting: try again next round)
                 pass
             time.sleep(30)
