@@ -349,3 +349,15 @@ def test_a_restricted_person_gets_the_team_status_without_its_journal():
     t = {"tasks": [{"id": "a", "status": "passed"}], "pending": [], "journal": [{"kind": "handoff", "handoff": {"summary": "revenue 37.3m"}}], "brief": "x"}
     assert app.team_view(t, {"reports": ["r1"]}) == {"tasks": t["tasks"], "pending": [], "journal": [], "brief": ""}
     assert app.team_view(t, {}) == t
+
+
+def test_idle_chat_agents_and_old_sessions_are_swept():
+    class Proc:
+        def poll(self):
+            return None
+    busy, idle, fresh = (app.Hub(P, "", "k", c) for c in "abc")
+    for h, last, b in ((busy, 0, True), (idle, 0, False), (fresh, 10_000, False)):
+        h.pi, h.busy, h.last = Proc(), b, last
+    assert app.idle([busy, idle, fresh], now=10_000 + 60, limit=1800) == [idle]
+    people = {"s1": {"t": 0, "token": "x"}, "s2": {"t": 50_000, "token": "y"}}
+    assert app.stale_sessions(people, now=50_000, ttl=12 * 3600) == ["s1"]

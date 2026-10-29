@@ -973,6 +973,7 @@ class Hub:
         self.lock = threading.Lock()
         self.pi = None
         self.busy = False
+        self.last = time.time()  # the chat's last activity: an idle agent is stopped
         self.mode = "viewer" if mobile else "developer"  # this browser's switch (a phone is always Viewer)
         # chats: one Pi session each (its own context), kept on this machine next to the views; one runs at a time
         self.user = user
@@ -1069,6 +1070,7 @@ class Hub:
                      " until the person commits them, and Viewer sees them only after Publish")
         text = f"[In the app for {where}; the person is on its '{page}' page.] {message}"
         self.chat_note("me", message)
+        self.last = time.time()
         self.send({"type": "follow_up" if self.busy else "prompt", "message": text})
         self.busy = True
         self.emit({"type": "busy", "on": True})
@@ -1197,6 +1199,17 @@ def viewed(d: dict, acc: dict) -> dict:
     if "Export" in hidden:
         d["app"] = {**(d.get("app") or {}), "packs": []}
     return d
+
+
+def idle(hubs, now: float, limit: float = 1800) -> list:
+    """Chat agents with nothing to do for `limit` seconds: each holds a process and an ABI session; the next message
+    starts the chat's agent again from its own session file."""
+    return [h for h in hubs if h.pi and h.pi.poll() is None and not h.busy and now - h.last > limit]
+
+
+def stale_sessions(people: dict, now: float, ttl: float) -> list:
+    """Sign-ins older than the app's 12 hours, also of browsers that never came back."""
+    return [sid for sid, s in people.items() if s.get("dead") or now - s["t"] > ttl]
 
 
 def team_view(t: dict, acc: dict) -> dict:
@@ -1799,6 +1812,14 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
         last: dict = {}
         while True:
             try:
+                now = time.time()
+                for h in idle(list(HUBS.values()), now):  # an idle chat agent: its process and session go
+                    h.pi.terminate()
+                    h.pi = None
+                for sid in stale_sessions(people, now, 12 * 3600):
+                    gone = people.pop(sid, None)
+                    if gone:
+                        abi.logout(gone["token"])
                 for p in {h.project for h in HUBS.values()} | {default}:
                     head = ((abi.call("history", project=p).get("commits") or [{}])[0].get("id"),
                             len((abi.call("changes", project=p) or {}).get("files") or []))
