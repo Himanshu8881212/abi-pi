@@ -349,6 +349,7 @@ async function runSingleAgent(
 				stdio: ["ignore", "pipe", "pipe"],
 			});
 			let buffer = "";
+			let handoffTimer: ReturnType<typeof setTimeout> | undefined;
 
 			const processLine = (line: string) => {
 				if (!line.trim()) return;
@@ -384,6 +385,13 @@ async function runSingleAgent(
 				if (event.type === "tool_result_end" && event.message) {
 					currentResult.messages.push(event.message as Message);
 					emitUpdate();
+					// abi-pi: a specialist whose handoff passed its checks is done; its work is saved and checked in ABI.
+					// If its process doesn't exit (a hung final model reply), end it so the Lead isn't left waiting.
+					const m: any = event.message;
+					const body = JSON.stringify(m.content ?? "");
+					if (m.toolName === "abi_handoff" && /\\"result\\":\s*\\"passed\\"/.test(body) && !handoffTimer) {
+						handoffTimer = setTimeout(() => { if (!proc.killed) proc.kill("SIGTERM"); }, 90000);
+					}
 				}
 			};
 
@@ -399,6 +407,7 @@ async function runSingleAgent(
 			});
 
 			proc.on("close", (code) => {
+				if (handoffTimer) clearTimeout(handoffTimer);
 				if (buffer.trim()) processLine(buffer);
 				resolve(code ?? 0);
 			});

@@ -213,7 +213,7 @@ def sections(dest: Path) -> dict[str, str]:
                      + "".join(f"<tr class=m><td><code>{esc(m.get('id'))}</code></td><td>{esc(m.get('name'))}</td><td><code>{esc(m.get('expression'))}</code></td><td>{esc(m.get('description') or '')}</td></tr>" for m in meas)
                      + "</table><div class=file>edit: model/measures.json</div></div>") if meas else "<p class=empty>None yet.</p>",
         "Glossary": "".join(f"<span class=chip title='{esc(t.get('definition'))}'>{esc(t.get('term') or t.get('id'))}</span>" for t in gloss) or "<p class=empty>None yet.</p>",
-        "Datasets": "".join(f"<span class=chip>{esc(d.get('id'))}</span>" for d in sets) or "<p class=empty>None yet.</p>",
+        "Queries": "".join(f"<span class=chip>{esc(d.get('id'))}</span>" for d in sets) or "<p class=empty>None yet.</p>",
         "Reports": cards(g("reports"), dest, lambda f, x: f"<h3><a href='reports/{esc(f.stem)}.html'>{esc(x.get('name') or f.stem)}</a></h3>"
                          f"{len(x.get('pages', []))} page(s), {sum(len(p.get('visuals', [])) for p in x.get('pages', []))} visual(s)"),
         "ML models": cards(g("ml"), dest, lambda f, x: f"<h3>{esc(x.get('name') or x.get('id'))}</h3>{esc(x.get('task'))}" + (f" of <code>{esc(x.get('target'))}</code>" if x.get("target") else "") +

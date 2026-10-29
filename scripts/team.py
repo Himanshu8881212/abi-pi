@@ -243,6 +243,8 @@ def check(project: str, name: str, done: list[dict], h: dict) -> dict:
     elif name == "measures_work":
         for m in ids("measure"):
             r = _rows("semantic_query", project=project, measures=[m], limit=1)
+            if "error" in r and "date dimension" in r["error"]:  # time intelligence (PREVIOUS_YEAR, YTD…) needs a date grain
+                r = _rows("semantic_query", project=project, measures=[m], dimensions=["calendar.year", "calendar.month"], limit=1)
             if "error" in r:
                 bad.append(f"measure {m}: {r['error'][:200]}")
     elif name == "reports_work":
@@ -319,12 +321,15 @@ def handoff(project: str, agent: str, h: dict) -> dict:
                      "args": p.get("args") or {}, "why": p.get("why", ""), "status": "waiting", "t": now()})
     write(project, "pending.json", pend)
     results = [check(project, c, h.get("done") or [], h) for c in AGENTS[agent]["checks"]]
-    ok = h["status"] == "done" and all(r["passed"] for r in results)
-    result = "passed" if ok else ("failed" if h["status"] == "done" else h["status"])
-    set_status(project, t["id"], "passed" if ok else "failed")
+    checks_ok = all(r["passed"] for r in results)
+    waits = checks_ok and h["status"] == "partial" and bool(h.get("pending_confirmations"))
+    ok = h["status"] == "done" and checks_ok
+    result = "passed" if ok else "waiting" if waits else ("failed" if h["status"] == "done" else h["status"])
+    set_status(project, t["id"], "passed" if ok else "waiting" if waits else "failed")
     log(project, {"kind": "handoff", "agent": agent, "task": t["id"], "result": result, "handoff": h, "checks": results})
     return {"accepted": True, "task": t["id"], "result": result, "checks": results,
             "next": "Passed: the Lead can start what depends on it." if ok else
+                    "Checks passed; waiting only for the person's yes on the pending steps (the Lead runs them with abi_pending)." if waits else
                     "Not passed: fix the problems listed (or say why you can't) and hand off again."}
 
 
@@ -339,6 +344,13 @@ def pending_done(project: str, pid: str, outcome: str) -> None:
             p["status"], p["outcome"] = "done" if outcome == "ok" else outcome, outcome
     write(project, "pending.json", pend)
     log(project, {"kind": "confirmation", "agent": "lead", "pending": pid, "outcome": outcome})
+    task = next((p["task"] for p in pend if p["id"] == pid), None)
+    mine = [p for p in pend if p["task"] == task]
+    if task and mine and all(p["status"] == "done" for p in mine):  # every step it waited for ran: the task passes
+        plan = read(project, "plan.json", {})
+        if any(t["id"] == task and t["status"] in ("waiting", "failed") for t in plan.get("tasks", [])):
+            set_status(project, task, "passed")
+            log(project, {"kind": "passed_after_yes", "agent": "lead", "task": task})
 
 
 def status(project: str) -> dict:

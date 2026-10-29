@@ -3,7 +3,7 @@
 
 A sidebar with everything, by category:
   Overview   Home (readiness, data quality, latest changes)
-  Analyze    every report (pages; filters; click a bar or point to cross-filter), Datasets (preview rows)
+  Analyze    every report (pages; filters; click a bar or point to cross-filter), Queries (preview rows)
   Model      Measures (edit, test, add, delete), Model (diagram), Glossary (edit, add, delete)
   Data       Sources and Tables (refresh, data quality)
   Automate   Flows (run now with the trace, enable/disable), ML models (train, score, latest run), Tools (test, run),
@@ -146,6 +146,8 @@ body[data-mode=viewer] .pghead{border-bottom-style:dashed}
 .tbl .cols{max-height:230px;overflow:auto}.tbl .col{display:grid;grid-template-columns:14px 1fr auto;gap:6px;align-items:center;padding:3px 10px;font-size:11.5px;border-bottom:1px solid var(--faint)}
 .tbl .col .ty{color:var(--mute);font-size:10px}.tbl .dot{width:9px;height:9px;border:2px solid var(--ink);border-radius:50%;cursor:crosshair}.tbl .dot:hover{background:var(--ink)}
 .cards>.wide{grid-column:1/-1}
+.layers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}.layer h4{margin:0}.layer table{margin-top:8px}
+.mobile .layers{grid-template-columns:1fr}
 .hits{display:flex;flex-direction:column;gap:10px;margin-top:12px}.hit{border-left:2px solid var(--ink);padding:2px 0 2px 12px;white-space:pre-wrap}.hit .file{margin:0 0 4px}
 .toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:10px 16px;font-size:12px;z-index:9;max-width:calc(100vw - 32px)}
 .card.hl{outline:4px solid var(--ink);outline-offset:3px}
@@ -213,7 +215,7 @@ function home(box){const rd=D.readiness||{},q=D.quality||{},ix=c=>(q.columns||[]
  if(!al.children.length)al.append(h('li','ok','Nothing: the model is ready and the data is fresh.'));at.append(al);
  act(at,'Check again',async()=>{D.quality=await api('data_quality',{});D.readiness=await api('readiness',{});show('home')});g.append(at);
  // what is in the project, as links
- const ct=card('In this project'),cl=h('div','links');[['measures','measures'],['reports','rep:'+(D.reports[0]?.id||'')],['datasets','datasets'],['sources','sources'],['tables','tables'],
+ const ct=card('In this project'),cl=h('div','links');[['measures','measures'],['reports','rep:'+(D.reports[0]?.id||'')],['queries','datasets'],['sources','sources'],['tables','tables'],
   ['flows','flows'],['ml','ml'],['tools','tools'],['agents','agents']].forEach(([k,to])=>{const n=D.summary[k]||0;const a=h('button','lk');a.append(h('b','',String(n)),h('span','',{ml:'ML models'}[k]||k));a.onclick=()=>show(to);cl.append(a)});
  const vb=h('button','lk');vb.append(h('b','',String((VAULT||[]).length)),h('span','','vault documents'));vb.onclick=()=>show('vault');cl.append(vb);ct.append(cl);g.append(ct);
  // ask the agent: starting points that fit the mode
@@ -256,7 +258,7 @@ function report(box,rep){let flt=PENDING.filters||[];PENDING.filters=null;
  rep.pages.forEach(p=>{const b=h('button','',p.name||p.id);b.dataset.id=p.id;b.onclick=()=>page(p);tabs.append(b)});flt.length?draw():page(cur)}
 function multi(opts,sel){const m=h('select','f ed');m.multiple=true;m.size=Math.min(8,Math.max(3,opts.length));opts.forEach(o=>{const op=new Option(o,o);op.selected=(sel||[]).includes(o);m.append(op)});return m}
 const ALLCOLS=()=>Object.entries(D.columns||{}).flatMap(([t,cols])=>Object.keys(cols).map(c=>`${t}.${c}`)).sort();
-function dsForm(d,isNew){const c=card(isNew?'New dataset':(d.name||d.id),isNew?'':`model/datasets.json · ${d.id}`),id=h('input','f ed'),nm=h('input','f ed'),de=h('input','f ed');
+function dsForm(d,isNew){const c=card(isNew?'New query':(d.name||d.id),isNew?'':`model/datasets.json · ${d.id}`),id=h('input','f ed'),nm=h('input','f ed'),de=h('input','f ed');
  id.value=d.id||'';id.readOnly=!isNew;nm.value=d.name||'';de.value=d.description||'';const q=d.query||{};
  const ms=multi(D.measures.map(m=>m.id),q.measures),dm=multi(ALLCOLS(),q.dimensions),lim=h('input','f ed');lim.type='number';lim.value=q.limit||'';lim.placeholder='no limit';
  c.append(h('label','l','ID'),id,h('label','l','Name'),nm,h('label','l','Description'),de,h('label','l','Measures'),ms,h('label','l','Grain (dimensions)'),dm,h('label','l','Row limit'),lim);
@@ -264,11 +266,62 @@ function dsForm(d,isNew){const c=card(isNew?'New dataset':(d.name||d.id),isNew?'
  act(c,isNew?'Create':'Save',async()=>{await KIND.dataset.save({id:id.value,name:nm.value,description:de.value,query:query()});return 'Saved through ABI.'},1);
  if(!isNew){act(c,'Preview rows',async()=>{rows(out,await api('dataset_data',{dataset:d.id}))});act(c,'Delete',async()=>{await KIND.dataset.del(d);return 'Deleted.'})}
  c.append(out);return c}
-function datasets(box){const g=h('div','cards');const bar=h('div','row bar top');bar.append(btn('New dataset',()=>g.prepend(dsForm({},true)),1));box.append(bar,g);
- if(!D.datasets.length)box.append(h('p','empty','No datasets yet: a dataset is a saved query at a fixed grain, used by reports, flows and ML.'));
+function datasets(box){const g=h('div','cards');const bar=h('div','row bar top');bar.append(btn('New query',()=>g.prepend(dsForm({},true)),1));box.append(bar,g);
+ if(!D.datasets.length)box.append(h('p','empty','No queries yet: a query asks the model for measures by dimensions and returns a fresh table each run; reports, flows and ML use them.'));
  D.datasets.forEach(d=>g.append(dsForm(d,false)))}
 
 // ---------- Model ----------
+function reportsPage(box){const bar=h('div','row bar top');bar.append(btn('New report',()=>{const c=editor('report',KIND.report.tpl,true);g.prepend(c)},1));box.append(bar);
+ const g=h('div','cards');box.append(g);if(!D.reports.length){box.append(h('p','empty','No reports yet. Ask the agent to build one.'));return}
+ D.reports.forEach(r=>{const c=card(r.name||r.id,`reports/${r.id}.json`),n=r.pages.reduce((a,p)=>a+p.visuals.length,0);
+  c.append(h('p','',r.spec?.description||r.description||''),h('p','file',`${r.pages.length} page${r.pages.length===1?'':'s'}: ${r.pages.map(p=>p.name||p.id).join(', ')} · ${n} visuals`));
+  act(c,'Open',async()=>{show('rep:'+r.id)},1);g.append(c)})}
+// Monitor: is anything wrong right now? Only what reports can't show: data freshness, model readiness, ML runs, flows
+function monitorPage(box){const g=h('div','cards');box.append(g);const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),rs=q.rows||[],when=t=>t?String(t).slice(0,16).replace('T',' '):'—';
+ const fr=card('Data freshness','ABI data quality, per table'),bad=rs.filter(r=>(r[ix('problems')]||[]).length||r[ix('missing_periods')]);
+ fr.append(h('p',bad.length?'bad':'ok',bad.length?`${bad.length} of ${rs.length} tables have problems`:`All ${rs.length} tables without problems`));
+ const t=h('table');t.insertRow().append(...['table','last load','rows','missing periods','problems'].map(x=>h('th','',x)));
+ [...bad,...rs.filter(r=>/stream/.test(r[0])&&!bad.includes(r))].forEach(r=>{const tr=t.insertRow();[r[0],when(r[ix('last_load')]),fmt(r[ix('rows')]),r[ix('missing_periods')]||0,(r[ix('problems')]||[]).map(p=>p.message||p.kind||JSON.stringify(p)).join('; ')||'—'].forEach(v=>tr.insertCell().textContent=v)});
+ const sc=h('div','scroll');sc.append(t);fr.append(h('p','file','tables with problems, then the stream tables'),sc);
+ const rd=D.readiness||{},mo=card('Model','readiness');mo.append(h('p',rd.ready?'ok':'bad',rd.ready?'Ready':'Not ready'),...(rd.missing||[]).map(m=>h('p','file',typeof m==='string'?m:JSON.stringify(m))));
+ const ml=card('ML models','latest training and scoring');if(!D.ml.length)ml.append(h('p','empty','No ML models yet.'));
+ D.ml.forEach(m=>{const tr=m.latest_run||{},sc2=m.latest_score||{};ml.append(h('h4','',m.name||m.id),
+  h('p',tr.status==='ok'?'ok':'bad',`trained: ${tr.status||'never'} · ${when(tr.finished||tr.created)}`),h('p',sc2.status==='ok'?'ok':'bad',`scored: ${sc2.status||'never'} · ${when(sc2.finished||sc2.created)}`))});
+ const fl=card('Flows','switched on or off, last run');if(!D.flows.length)fl.append(h('p','empty','No flows yet.'));
+ D.flows.forEach(f=>{const l=h('p','file','last run: …');fl.append(h('h4','',f.name||f.id),h('p',f.enabled?'ok':'',f.enabled?'on':'off'),l);
+  if(LIVE)api('flow_runs',{flow:f.id}).then(x=>{const r=(x.runs||[])[0];l.textContent=r?`last run: ${r.status} · ${when(r.finished||r.started||r.created)}`:'last run: never'}).catch(e=>l.textContent='last run: '+e.message)});
+ g.append(fr,mo,ml,fl);fr.style.gridColumn='1/-1'}
+// Explore: anyone's own analysis on the governed model (reads only, so Viewer can use it); kept analyses stay in this browser
+let MINE=[];try{MINE=JSON.parse(localStorage.getItem('abi-explore')||'[]')}catch(e){}
+function explore(box){const q0=PENDING.explore||{};PENDING.explore=null;
+ const c=card('New analysis','measures by a dimension, from the model'),ms=multi(D.measures.map(m=>m.id),q0.measures),dm=h('select','f'),ty=h('select','f'),
+  fc=h('select','f'),fv=h('select','f'),out=h('div','body'),msg=h('div','msg');ms.classList.remove('ed');fv.multiple=true;fv.hidden=true;
+ ms.querySelectorAll('option').forEach(o=>o.text=D.measures.find(m=>m.id===o.value)?.name||o.value);
+ dm.append(new Option('— total only —',''));fc.append(new Option('no filter',''));D.dims.forEach(d=>{dm.append(new Option(d,d));fc.append(new Option(d,d))});dm.value=(q0.dimensions||[])[0]||'';
+ ['bar','line','table'].forEach(t=>ty.append(new Option(t,t)));ty.value=q0.chart||'bar';let flt=q0.filters||[];
+ fc.onchange=async()=>{fv.innerHTML='';fv.hidden=!fc.value;if(!fc.value)return;
+  try{const r=await api('semantic_query',{measures:[D.measures[0]?.id],dimensions:[fc.value],order_by:[{field:fc.value}],limit:500});
+   r.rows.forEach(x=>fv.append(new Option(String(x[0]),JSON.stringify(x[0]))));fv.size=Math.min(6,r.rows.length)}catch(e){say(msg,e.message,1)}};
+ const query=()=>{const f=fc.value&&fv.selectedOptions.length?[{column:fc.value,op:'in',value:[...fv.selectedOptions].map(o=>JSON.parse(o.value))}]:flt;
+  return {measures:[...ms.selectedOptions].map(o=>o.value),dimensions:dm.value?[dm.value]:[],filters:f}};
+ async function run(q,type){out.innerHTML='';msg.textContent='';if(!q.measures.length){say(msg,'Pick at least one measure.',1);return}
+  try{const d=await api('semantic_query',{...q,...(q.dimensions.length?{order_by:[{field:q.dimensions[0]}]}:{}),limit:500});d.format=d.format||{};d.type=type;d.id='analysis';
+   out.append(h('p','file',(q.filters||[]).map(f=>`${f.column} ${f.op} ${[].concat(f.value).join(', ')}`).join(' · ')||'no filter'));
+   const b=h('div');out.append(b);requestAnimationFrame(()=>type==='table'?table(b,d):chart(b,d));return d}catch(e){say(msg,e.message,1)}}
+ c.append(h('label','l','Measures'),ms,h('label','l','By'),dm,h('label','l','Filter'),fc,fv,h('label','l','Chart'),ty);
+ act(c,'Run',async()=>{await run(query(),ty.value)},1);
+ act(c,'Keep',async()=>{const q=query();if(!q.measures.length)return 'Pick at least one measure.';
+  const nm=q.measures.map(m=>D.measures.find(x=>x.id===m)?.name||m).join(', ')+(q.dimensions[0]?' by '+q.dimensions[0]:'');
+  MINE.unshift({name:nm,q,type:ty.value,at:new Date().toISOString().slice(0,16).replace('T',' ')});MINE=MINE.slice(0,30);
+  try{localStorage.setItem('abi-explore',JSON.stringify(MINE))}catch(e){}mine();return 'Kept in My analyses (this browser only).'});
+ act(c,'Save as query',async()=>{const q=query();if(!q.measures.length)return 'Pick at least one measure.';
+  const id=('q_'+q.measures.join('_')+(q.dimensions[0]?'_by_'+q.dimensions[0].split('.').pop():'')).toLowerCase().replace(/[^a-z0-9_]/g,'_').slice(0,60);
+  await KIND.dataset.save({id,name:id,description:'Saved from Explore',query:q});return `Saved as query ${id} through ABI.`});
+ c.append(msg,out);const g=h('div','cards'),my=card('My analyses','kept in this browser; numbers rerun from the model when opened'),list=h('div');my.append(list);c.style.gridColumn=my.style.gridColumn='1/-1';ms.style.width='100%';g.append(c,my);box.append(g);
+ function mine(){list.innerHTML='';if(!MINE.length){list.append(h('p','empty','Nothing kept yet. Run an analysis and press Keep; charts the agent shows you land here too.'));return}
+  MINE.forEach((a,i)=>{const r=h('div','row');const o=h('button','btn',a.name);o.onclick=()=>{[...ms.options].forEach(x=>x.selected=a.q.measures.includes(x.value));dm.value=a.q.dimensions[0]||'';ty.value=a.type;flt=a.q.filters||[];fc.value='';fv.hidden=true;run(a.q,a.type)};
+   const x=h('button','btn','forget');x.onclick=()=>{MINE.splice(i,1);try{localStorage.setItem('abi-explore',JSON.stringify(MINE))}catch(e){}mine()};r.append(o,h('span','file',a.at||''),x);list.append(r)})}
+ mine();if(q0.measures)run(query(),ty.value)}
 function measures(box){const top=h('div','row bar top'),q=h('input','f');q.placeholder='Search measures';const list=h('div','cards');box.append(top,list);
  const edit=(m,isNew)=>{const c=card(isNew?'New measure':(m.name||m.id),isNew?'':m.id),name=h('input','f'),id=h('input','f'),ex=h('textarea','f'),de=h('input','f');
   [name,id,ex,de].forEach(e=>e.classList.add('ed'));name.value=m.name||'';id.value=m.id||'';ex.value=m.expression||'';de.value=m.description||'';
@@ -312,7 +365,21 @@ function sources(box){const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),qr=
    .forEach(([a,b])=>k.append(h('b','',a),h('span','',String(b))));c.append(k);
   const p=r?(r[ix('problems')]||[]):[];if(p.length)c.append(h('div','bad',p.join('; ')));
   act(c,'Reload '+id,async()=>{await api('refresh',{table:id});return 'Reloaded: a new snapshot.'});act(c,'Delete',async()=>{await api('delete_source',{source:id});return 'Deleted.'});g.append(c)})}
-function tablesPage(box){const g=h('div','cards'),bar=h('div','row bar top');box.append(bar,g);
+function stagedPage(box){const sv=(D.layers||[]).filter(t=>t.layer==='silver').sort((a,b)=>a.table.localeCompare(b.table));
+ const g=h('div','cards');box.append(g);if(!sv.length){box.append(h('p','empty','Nothing staged yet: silver tables appear here once a transform builds them.'));return}
+ sv.forEach(t=>{const c=card(t.table,`${fmt(t.rows)} rows · hidden from the model`);const st=(D.table_steps||{})[t.table]||[];
+  const reads=st.filter(x=>x.type==='source'||x.type==='append'||x.type==='merge').map(x=>x.source||(x.tables||[]).join(', ')||x.table).filter(Boolean);
+  if(reads.length)c.append(h('div','file','reads '+reads.join(', ')));
+  const ol=h('ol','steps');st.forEach(x=>ol.append(h('li','',`${x.type}${x.columns?': '+(Array.isArray(x.columns)?x.columns.join(', '):Object.keys(x.columns).join(', ')):''}${x.name?': '+x.name:''}`)));if(st.length)c.append(ol);
+  const pre=h('pre');pre.hidden=true;c.append(pre);act(c,'Show steps (JSON)',()=>{pre.hidden=!pre.hidden;pre.textContent=JSON.stringify(st,null,2)});
+  let ed=null;act(c,'Edit steps',()=>{if(ed){ed.remove();ed=null;return}const tmp=h('div');tablesStepsEditor(tmp,t.table,st);ed=tmp.firstChild;c.after(ed)});g.append(c)})}
+function tablesStepsEditor(box,t,steps){const c=card(`Steps of ${t}`,`tables/${t}.json`);c.classList.add('editor');
+ const ta=h('textarea','f ed code');ta.value=JSON.stringify(steps||[],null,2);ta.rows=Math.min(24,ta.value.split('\n').length+1);const out=h('div');c.append(ta);
+ const parse=()=>{try{return JSON.parse(ta.value)}catch(e){throw new Error('Not valid JSON: '+e.message)}};
+ act(c,'Preview',async()=>{rows(out,await api('preview_steps',{steps:parse()}))});
+ act(c,'Save steps',async()=>{await api('set_steps',{table:t,steps:parse()});return 'Saved and loaded through the steps.'},1);c.append(out);box.append(c)}
+function tablesPage(box){
+ const g=h('div','cards'),bar=h('div','row bar top');box.append(bar,g);
  const stepsEd=(t,steps,isNew)=>{const c=card(isNew?'New table (transform)':`Steps of ${t}`,isNew?'starts from a loaded source or table':`tables/${t}.json`);c.classList.add('editor');
   const id=h('input','f ed');id.value=isNew?'':t;id.readOnly=!isNew;id.placeholder='table id, e.g. silver_orders';
   const ta=h('textarea','f ed code');ta.value=JSON.stringify(steps||[{type:'source',source:D.sources[0]||''}],null,2);ta.rows=Math.min(24,ta.value.split('\n').length+1);
@@ -387,8 +454,8 @@ const KIND={
  agent:{label:'agent',save:o=>{const {cases,...a}=o;return api('save_agent',cases?{agent:a,cases}:{agent:a})},del:o=>api('delete_agent',{agent:o.id}),extra:[['Publish',o=>api('publish_agent',{agent:o.id})]],
   tpl:{$schema:'https://schema.abi.invalid/v1/agent.json',id:'new_agent',name:'New agent',purpose:'',instructions:'',mode:'tools_only',grounding:true,channels:[{type:'in_app'}],
    scope:{measures:[],tables:[]},tools:['semantic_query'],cases:[{question:'',expect:{contains:[]}}]}},
- dataset:{label:'dataset',save:o=>api('save_dataset',{id:o.id,name:o.name,description:o.description||null,query:o.query}),del:o=>api('delete_dataset',{id:o.id}),
-  tpl:{id:'new_dataset',name:'New dataset',description:'',query:{measures:[],dimensions:[]}}},
+ dataset:{label:'query',save:o=>api('save_dataset',{id:o.id,name:o.name,description:o.description||null,query:o.query}),del:o=>api('delete_dataset',{id:o.id}),
+  tpl:{id:'new_dataset',name:'New query',description:'',query:{measures:[],dimensions:[]}}},
  report:{label:'report',save:o=>api('save_report',{report:o}),del:o=>api('delete_report',{report:o.id}),
   tpl:{$schema:'https://schema.abi.invalid/v1/report.json',id:'new_report',name:'New report',pages:[{id:'main',name:'Main',visuals:[{id:'kpi-1',type:'kpi',title:'',query:{measures:[],dimensions:[]},layout:{x:0,y:0,w:3,h:3}}]}]}}};
 function clean(o){const x=JSON.parse(JSON.stringify(o));SERVER_KEYS.forEach(k=>delete x[k]);return x}
@@ -416,8 +483,8 @@ function flows(box){newBtn(box,'flow');const g=h('div','cards');box.append(g);if
     (one.steps||[]).forEach(s=>tr.append(h('li',s.status==='ok'?'ok':s.status==='failed'?'bad':'',`${s.step||s.id}: ${s.status}${s.error?' · '+s.error:''}`)));
     if(['ok','failed','stopped','rejected','waiting'].includes(one.status))return `run ${one.status}`}return 'still running; see ABI\'s flow runs'},1);
   act(c,f.enabled?'Disable':'Enable',async()=>{await api('enable_flow',{flow:f.id,enabled:!f.enabled});f.enabled=!f.enabled;show('flows')});editBtns(c,'flow',f);g.append(c)})}
-function ml(box){newBtn(box,'ml');const g=h('div','cards');box.append(g);if(!D.ml.length)box.append(h('p','empty','No ML models yet: New ML model needs a dataset.'));
- D.ml.forEach(m=>{const c=card(m.name||m.id,`ml/${m.id}.json`);c.append(h('div','file',`${m.task}${m.target?' of '+m.target:''} on ${m.dataset}${m.horizon?`, ${m.horizon} ahead`:''}`));
+function ml(box){newBtn(box,'ml');const g=h('div','cards');box.append(g);if(!D.ml.length)box.append(h('p','empty','No ML models yet: New ML model needs a query.'));
+ D.ml.forEach(m=>{const c=card(m.name||m.id,`ml/${m.id}.json`);c.append(h('div','file',`${m.task}${m.target?' of '+m.target:''} on query ${m.dataset}${m.horizon?`, ${m.horizon} ahead`:''}`));
   const st=h('div','kv');st.style.marginTop='12px';const lr=()=>{const r=m.latest_run||{};st.innerHTML='';
    [['latest run',r.kind||'—'],['status',r.status||'—'],['finished',cell(r.finished)||'—'],...Object.entries(r.metrics||{}).map(([a,b])=>[a,typeof b==='number'?fmt(b):cell(b)])].forEach(([a,b])=>st.append(h('b','',a),h('span',a==='status'?(b==='ok'?'ok':b==='failed'?'bad':''):'',String(b))))};lr();c.append(st);
   const follow=async(kind,m2)=>{await api(kind,{model:m.id});say(m2,`${kind==='train_model'?'training':'scoring'}…`);
@@ -493,19 +560,19 @@ async function teamPage(box){if(!LIVE){box.append(h('p','empty','The team view o
  if(!list.children.length)list.append(h('p','empty','Nothing yet.'));jc.append(list);g.append(jc)}
 
 // ---------- sidebar ----------
-const PENDING={filters:null};
-const LEDE={team:'The agent team: the Lead\'s plan, who works on what, every handoff and the checks the harness ran on it, and the steps waiting for your yes.',vault:'Your business documents: definitions, finance rules, KPI specs. The agents search them before they define or check a measure.',home:'Is the model ready, is the data fresh, and what changed last.',datasets:'Saved queries at a fixed grain, reused by reports, flows and ML. Preview their rows.',
+const PENDING={filters:null,explore:null};
+const LEDE={team:'The agent team: the Lead\'s plan, who works on what, every handoff and the checks the harness ran on it, and the steps waiting for your yes.',vault:'Your business documents: definitions, finance rules, KPI specs. The agents search them before they define or check a measure.',home:'Is the model ready, is the data fresh, and what changed last.',datasets:'Saved questions to the model (measures by dimensions, with filters). Each run returns a fresh table; nothing is stored. Reports, flows and ML reuse them. Preview their rows.',
  measures:'The business numbers. Edit a formula and ABI checks it before it saves; Test shows the total.',model:'Tables and how they join. Facts are black, dimensions are outlined.',
- glossary:'What the business words mean and which measures implement them.',sources:'Where the data comes from. Reload a source to take a new snapshot.',
- tables:'The tables built from the sources, with their transform steps.',flows:'Automations. Run one now and follow its steps, or switch it on or off.',
+ reports:'The saved reports of this project. Open one to filter it and click through.',monitor:'Is anything wrong right now: data freshness, model readiness, ML runs and flows. Reports show the business; this shows the system.',explore:'Your own analysis: pick measures, a dimension and a filter; the numbers come from the model, so they match the reports. Keep the ones you want; nothing in the project changes.',glossary:'What the business words mean and which measures implement them.',sources:'Bronze: the data as it landed, one source per file or bucket folder. Reload, add or delete a source.',
+ staged:'Silver: the cleaned and combined tables between the sources and the final tables. Hidden from the model; edit their steps here.',tables:'Gold: the final business tables the model and measures are built on. Edit kind, key, description and steps.',flows:'Automations. Run one now and follow its steps, or switch it on or off.',
  ml:'Forecasts, segments and anomaly models. Train, score and read the latest run.',tools:'Calculations your agents can call. Run one with inputs or run its tests.',
  agents:'Custom agents for this project. Ask one a question or run its evaluation set.',docs:'The project documentation ABI writes from its definitions.',
  security:'Who sees which rows. Roles are set in ABI itself.',environments:'Where each environment reads its data from.',history:'Every change is a commit in ABI. Newest first.'};let PAGES={},CUR='home';const side=$('aside');
 function nav(){return [['Start',[['home','Home',home]]],
- ['Reports',D.reports.length?D.reports.map(r=>['rep:'+r.id,r.name||r.id,b=>report(b,r)]):[['noreports','No reports yet',b=>b.append(h('p','empty','Ask the agent to build one.'))]]],
- ['Model',[['measures','Measures',measures,D.measures.length],['datasets','Datasets',datasets,D.datasets.length],
- ['model','Model',modelCanvas],['glossary','Glossary',glossary,D.glossary.length]]],
- ['Data',[['sources','Sources',sources,D.sources.length],['tables','Tables',tablesPage,D.tables.length]]],
+ ['Data',[['sources','Sources',sources,D.sources.length],['staged','Staged',stagedPage,(D.layers||[]).filter(t=>t.layer==='silver').length],['tables','Tables',tablesPage,(D.model?Object.keys(D.model.tables||{}).length:D.tables.length)]]],
+ ['Data Model',[['model','Diagram',modelCanvas],['measures','Measures',measures,D.measures.length],
+ ['glossary','Glossary',glossary,D.glossary.length],['datasets','Queries',datasets,D.datasets.length]]],
+ ['Visualizations',[['reports','Reports',reportsPage,D.reports.length],['monitor','Monitor',monitorPage],['explore','Explore',explore,MINE.length||'']]],
  ['Automate',[['flows','Flows',flows,D.flows.length],['ml','ML models',ml,D.ml.length],['tools','Tools',tools,D.tools.length],['agents','Agents',agents,D.agents.length]]],
  ['Knowledge',[['team','Team',teamPage],['vault','Vault',vaultPage,(VAULT||[]).length],['docs','Docs',docs]]],
  ['Govern',[['security','Security',security],['environments','Environments',b=>b.insertAdjacentHTML('beforeend',D.sections.Environments)],['history','History',commits,(D.history||[]).length]]]]}
@@ -516,8 +583,8 @@ function sidebar(){side.innerHTML='';PAGES={};nav().forEach(([g,items])=>{const 
  hd.onclick=()=>{FOLD[g]=!FOLD[g];sec.classList.toggle('folded',FOLD[g]);hd.setAttribute('aria-expanded',String(!FOLD[g]));try{localStorage.setItem('abi-fold',JSON.stringify(FOLD))}catch(e){}};
  items.forEach(([k,label,fn,n])=>{PAGES[k]=[label,fn];const b=h('button','it');b.dataset.k=k;
   b.append(h('span','',label));if(n!==undefined&&n!=='')b.append(h('span','n',String(n)));b.onclick=()=>show(k);list.append(b)});
- sec.append(hd,list);side.append(sec)})}
-function show(k){if(!PAGES[k])k='home';CUR=k;side.querySelectorAll('button.it').forEach(b=>b.classList.toggle('on',b.dataset.k===k));
+ sec.append(hd,list);side.append(sec)});D.reports.forEach(r=>PAGES['rep:'+r.id]=[r.name||r.id,b=>report(b,r)])}
+function show(k){if(!PAGES[k])k='home';CUR=k;const sk=k.startsWith('rep:')?'reports':k;side.querySelectorAll('button.it').forEach(b=>b.classList.toggle('on',b.dataset.k===sk));
  const act=side.querySelector('button.it.on');if(act)act.closest('.sec').classList.remove('folded');
  const box=$('main');box.innerHTML='';const pg=h('div','pg'),head=h('div','pghead'),t=h('div');t.append(h('h2','',PAGES[k][0]));
  const lede=k.startsWith('rep:')?'Filter the report or click a bar to filter by it. Every number comes from ABI.':LEDE[k];if(lede)t.append(h('p','',lede));head.append(t);pg.append(head);box.append(pg);PAGES[k][1](pg);
@@ -577,7 +644,7 @@ $('#chat .send').onclick=sendChat;inp.onkeydown=e=>{if(e.key==='Enter'&&!e.shift
 $('#chat .stop').onclick=()=>fetch('/chat/stop',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'});
 if(LIVE){const es=new EventSource('/events?k='+encodeURIComponent(KEY)+'&c='+CID+'&m='+(MOBILE?1:0));
  es.onmessage=async ev=>{const e=JSON.parse(ev.data);
-  if(e.type==='show'){PENDING.filters=e.filters||null;const k=e.page==='report'?'rep:'+e.report:e.page;show(k);setTimeout(()=>highlight(e.item),400);if(e.note)toast('Agent: '+e.note)}
+  if(e.type==='show'){PENDING.filters=e.filters||null;if(e.page==='explore'&&e.query){const q={measures:e.query.measures||[],dimensions:(e.query.dimensions||[]).slice(0,1),filters:e.query.filters||[]};PENDING.explore={...q,chart:e.chart};MINE.unshift({name:'Agent: '+(e.note||q.measures.join(', ')),q,type:e.chart||'bar',at:new Date().toISOString().slice(0,16).replace('T',' ')});MINE=MINE.slice(0,30);try{localStorage.setItem('abi-explore',JSON.stringify(MINE))}catch(x){}sidebar()}const k=e.page==='report'?'rep:'+e.report:e.page;show(k);setTimeout(()=>highlight(e.item),400);if(e.note)toast('Agent: '+e.note)}
   else if(e.type==='data'){Object.assign(D,e.data);const k=CUR;sidebar();show(k);vc()}
   else if(e.type==='busy'){busy.hidden=!e.on;$('#chat .stop').hidden=!e.on}
   else if(e.type==='step'){if(!steps){steps=h('div','m steps');log.append(steps)}const last=[...steps.children].reverse().find(x=>x.dataset.t===e.tool&&x.dataset.s==='run');
@@ -644,6 +711,16 @@ def snapshot(dest: Path, project: str) -> dict:
            "quality": read("data_quality", project), "rls": read("rls_rules", project), "history": (read("history", project) or {}).get("commits", []),
            "docs": read("docs", project), "sections": sections, "published": published(project.removesuffix("_pub")),
            "stamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
+    q = out["quality"] or {}
+    qi = {c: i for i, c in enumerate(q.get("columns") or [])}
+    model_t = set(model["tables"])
+    def layer(t: str) -> str:
+        if t in model_t:
+            return "gold"
+        if t in sources or t.startswith(("bronze", "ref_")):
+            return "bronze"
+        return "silver"
+    out["layers"] = [{"table": r[qi["table"]], "rows": r[qi["rows"]], "layer": layer(r[qi["table"]])} for r in q.get("rows") or []] if qi else []
     out["summary"] = {k: len(out[k]) for k in ("sources", "tables", "measures", "reports", "datasets", "flows", "ml", "tools", "agents")}
     return out
 
@@ -881,8 +958,10 @@ input,button{font:inherit;padding:10px;border:2px solid currentColor;background:
 <button>Open</button><span>%s</span></form>"""
 
 
-def serve(project: str, port: int = 8790, open_browser: bool = True, remote: str | None = None) -> ThreadingHTTPServer:
-    """remote: a passphrase; then the app listens on every interface (your VPN) and asks for it before anything loads."""
+def serve(project: str, port: int = 8790, open_browser: bool = True, remote: str | None = None, tailnet: bool = False) -> ThreadingHTTPServer:
+    """remote: a passphrase; then the app listens on every interface (your VPN) and asks for it before anything loads.
+    tailnet: listen on every interface but answer only this machine and Tailscale devices (100.64.0.0/10, your tailnet)."""
+    import ipaddress  # noqa: PLC0415
     try:  # Developer works uncommitted: Commit is the person's (or the agent's, when asked); Publish feeds Viewer
         abi.call("set_auto_commit", project=project, on=False)
     except abi.ActionError:
@@ -914,7 +993,17 @@ def serve(project: str, port: int = 8790, open_browser: bool = True, remote: str
             self.end_headers()
             self.wfile.write(body)
 
+        def allowed(self) -> bool:
+            if not tailnet or tailnet == "open":
+                return True
+            ip = ipaddress.ip_address(self.client_address[0])
+            return ip.is_loopback or ip in ipaddress.ip_network("100.64.0.0/10")
+
         def authed(self) -> bool:
+            if not self.allowed():
+                return False
+            if tailnet and not remote:
+                return True  # Tailscale authenticated the device; the page key still guards every action
             if not remote:
                 return self.headers.get("Host") == host
             c = re.search(r"abi_s=([\w-]+)", self.headers.get("Cookie", ""))
@@ -986,7 +1075,7 @@ def serve(project: str, port: int = 8790, open_browser: bool = True, remote: str
                     return self.reply(200, json.dumps({"mode": h0.mode if h0 else "developer", "project": h0.current() if h0 else project}).encode())
                 if self.path == "/agent/show" and body.get("project") in (project, pub_id(project)):
                     for h0 in targets:
-                        h0.emit({"type": "show", **{k: body.get(k) for k in ("page", "report", "filters", "item", "note")}})
+                        h0.emit({"type": "show", **{k: body.get(k) for k in ("page", "report", "filters", "item", "note", "query", "chart")}})
                 elif self.path == "/agent/changed":
                     changed(project)
                 return self.reply(200, b"{}")
@@ -1120,12 +1209,26 @@ def serve(project: str, port: int = 8790, open_browser: bool = True, remote: str
             detail = "\n".join(f"{x.get('error')} {x.get('fix') or ''}".strip() for x in b.get("errors") or [] if isinstance(x, dict))
             return {"error": "\n".join(filter(None, [b.get("message"), detail])) or json.dumps(b)[:500]}
 
-    srv = ThreadingHTTPServer(("0.0.0.0" if remote else "127.0.0.1", port), H)
+    srv = ThreadingHTTPServer(("0.0.0.0" if remote or tailnet else "127.0.0.1", port), H)
     srv.daemon_threads = True
     host = f"127.0.0.1:{srv.server_address[1]}"  # port 0 = any free port
     url = f"http://{host}"
     srv.hub = hub_for("default")
     srv.hubs = HUBS
+
+    def watch() -> None:  # changes made outside this app (an agent team in a terminal, ABI's own app): follow ABI's history
+        last = None
+        while True:
+            try:
+                head = ((abi.call("history", project=project).get("commits") or [{}])[0].get("id"),
+                        len((abi.call("changes", project=project) or {}).get("files") or []))
+                if last is not None and head != last:
+                    changed(project)
+                last = head
+            except Exception:  # noqa: BLE001 (ABI busy or restarting: try again next round)
+                pass
+            time.sleep(30)
+    threading.Thread(target=watch, daemon=True).start()
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     if open_browser:
         webbrowser.open(f"http://{host}/")
@@ -1136,7 +1239,9 @@ def main(argv: list[str]) -> int:
     if not argv:
         raise SystemExit(__doc__)
     remote = os.environ.pop("ABI_APP_PASS", None) or None  # read once, then out of the environment (children don't get it)
-    s = serve(argv[0], int(argv[1]) if len(argv) > 1 else 8790, open_browser=not remote, remote=remote)
+    tailnet = "open" if "--open" in argv else "--tailnet" in argv  # --open: any device that can reach this machine
+    argv = [a for a in argv if a not in ("--tailnet", "--open")]
+    s = serve(argv[0], int(argv[1]) if len(argv) > 1 else 8790, open_browser=not (remote or tailnet), remote=remote, tailnet=tailnet)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     atexit.register(lambda: [h.pi.terminate() for h in HUBS.values() if h.pi and h.pi.poll() is None])  # the chats' agents stop with the app
     print(f"{abi.folder(argv[0]) / 'app.html'} · live at http://127.0.0.1:{s.server_address[1]}/ (Ctrl+C to stop)", flush=True)

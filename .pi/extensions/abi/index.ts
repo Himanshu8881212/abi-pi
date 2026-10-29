@@ -245,11 +245,11 @@ export default async function abi(pi: ExtensionAPI) {
 		} catch {}
 		return modeNow;
 	}
-	const PAGES = ["home", "report", "datasets", "measures", "model", "glossary", "sources", "tables", "flows", "ml", "tools", "agents", "docs", "security", "environments", "history"];
+	const PAGES = ["home", "report", "datasets", "measures", "model", "glossary", "explore", "sources", "staged", "tables", "flows", "ml", "tools", "agents", "docs", "security", "environments", "history"];
 	pi.registerTool({
 		name: "abi_show",
 		label: "Show in the app",
-		description: "Shows the person something in their open ABI app (workspaces/<ws>/<project>/app.html, live): a page of its sidebar, a report with filters, or one item (a measure, flow, ML model, tool, agent, term) highlighted. Starts the app if it isn't open. Use it when the person asks to see something, after you built or changed something they should look at, and to point at the rows behind an answer (a report with the filters you used). Filters: [{column: 'table.column', op: '=', '<>', '<', '<=', '>', '>=' or 'in', value}].",
+		description: "Shows the person something in their open ABI app (workspaces/<ws>/<project>/app.html, live): a page of its sidebar, a report with filters, a chart of measures by a dimension in Explore (page 'explore' with query), or one item (a measure, flow, ML model, tool, agent, term) highlighted. Starts the app if it isn't open. Use it when the person asks to see something, after you built or changed something they should look at, and to point at the rows behind an answer (a report with the filters you used). Filters: [{column: 'table.column', op: '=', '<>', '<', '<=', '>', '>=' or 'in', value}].",
 		parameters: Type.Object({
 			project: Type.String({ pattern: "^[a-z][a-z0-9_]{0,62}$" }),
 			page: Type.String({ enum: PAGES }),
@@ -257,6 +257,8 @@ export default async function abi(pi: ExtensionAPI) {
 			filters: Type.Optional(Type.Array(Type.Object({ column: Type.String(), op: Type.String({ enum: ["=", "<>", "<", "<=", ">", ">=", "in"] }), value: Type.Any() }))),
 			item: Type.Optional(Type.String({ description: "ID or name of the card to highlight on that page" })),
 			note: Type.Optional(Type.String({ description: "one short line shown with it, e.g. what to look at" })),
+			query: Type.Optional(Type.Object({ measures: Type.Array(Type.String()), dimensions: Type.Optional(Type.Array(Type.String())), filters: Type.Optional(Type.Array(Type.Any())) }, { description: "with page: 'explore': the chart behind your answer (at most one dimension); it opens in Explore and is kept in the person's My analyses" })),
+			chart: Type.Optional(Type.String({ enum: ["bar", "line", "table"] })),
 		}),
 		async execute(_id, p) {
 			if (p.page === "report" && !p.report) return text("Name the report (report ID) to show.");

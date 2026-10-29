@@ -91,7 +91,7 @@ def test_rejected_change_shows_abis_fix(srv):
 
 def test_agent_steers_the_page_only_with_its_key(srv):
     port, key, _ = srv
-    show = {"project": P, "page": "measures", "item": "amount", "note": "look here"}
+    show = {"project": P, "page": "measures", "item": "amount", "note": "look here", "query": None, "chart": None}
     req = lambda k: urllib.request.Request(f"http://127.0.0.1:{port}/agent/show", json.dumps(show).encode(),  # noqa: E731
                                            {"X-Abi-Agent": k, "Content-Type": "application/json"})
     with pytest.raises(urllib.error.HTTPError) as e:
@@ -108,7 +108,7 @@ def test_agent_steers_the_page_only_with_its_key(srv):
             ev = json.loads(line[5:])
             if ev["type"] == "show":
                 break
-    assert ev == {"type": "show", "page": "measures", "report": None, "filters": None, "item": "amount", "note": "look here"}
+    assert ev == {"type": "show", "page": "measures", "report": None, "filters": None, "item": "amount", "note": "look here", "query": None, "chart": None}
 
 
 @pytest.mark.live
