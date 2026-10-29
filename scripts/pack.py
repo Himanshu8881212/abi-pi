@@ -14,6 +14,7 @@ The notes (the commentary, Markdown) may only use numbers that appear in the row
 the pack is refused. Whatever ABI can't render is listed with its reason, never replaced by something made here.
 """
 import json
+import os
 import re
 import sys
 from datetime import datetime, timezone
@@ -87,7 +88,9 @@ def make(project: str, spec: dict) -> dict:
     ok = all(x["status"] == "ok" for x in done)
     man = {"id": spec["id"], "title": spec.get("title"), "audience": spec.get("audience"), "as_of": spec.get("as_of"), "project": project,
            "made": datetime.now(timezone.utc).isoformat(timespec="seconds"), "status": "ready" if ok else "partial",
-           "notes_grounded": True, "items": done, "sent": False}
+           "notes_grounded": True, "items": done, "sent": False,
+           # rendered under this person's row-level security: the app shows it to them, project owners and admins only
+           "made_by": (os.environ.get("ABI_APP_CLIENT", "").split("/")[0] if "/" in os.environ.get("ABI_APP_CLIENT", "") else None)}
     (d / "manifest.json").write_text(json.dumps(man, indent=1) + "\n")
     return man
 

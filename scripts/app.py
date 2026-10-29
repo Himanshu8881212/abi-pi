@@ -793,7 +793,7 @@ $('#chat .send').onclick=sendChat;inp.onkeydown=e=>{if(e.key==='Enter'&&!e.shift
 $('#chat .stop').onclick=()=>fetch('/chat/stop',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'});
 if(LIVE){const es=new EventSource('/events?k='+encodeURIComponent(KEY)+'&c='+CID+'&m='+(MOBILE?1:0)+'&p='+encodeURIComponent(D.project));
  es.onmessage=async ev=>{const e=JSON.parse(ev.data);
-  if(e.type==='show'){PENDING.filters=e.filters||null;if(e.page==='explore'&&e.query){const q={measures:e.query.measures||[],dimensions:(e.query.dimensions||[]).slice(0,1),filters:e.query.filters||[]};PENDING.explore={...q,chart:e.chart};MINE.unshift({name:'Agent: '+(e.note||q.measures.join(', ')),q,type:e.chart||'bar',at:new Date().toISOString().slice(0,16).replace('T',' ')});saveMine();sidebar()}const nv=h('div','m nav','→ '+(e.page==='report'?'report '+e.report:e.page)+(e.note?' · '+e.note:''));nv.onclick=()=>show(e.page==='report'?'rep:'+e.report:e.page);log.append(nv);log.scrollTop=log.scrollHeight;const wasFull=chatBox.classList.contains('full');const k=e.page==='report'?'rep:'+e.report:e.page;show(k);if(wasFull)openChat(true);setTimeout(()=>highlight(e.item),400);if(e.note)toast('Agent: '+e.note)}
+  if(e.type==='show'){PENDING.filters=e.filters||null;if(e.page==='explore'&&e.query){const q={measures:e.query.measures||[],dimensions:(e.query.dimensions||[]).slice(0,1),filters:e.query.filters||[]};PENDING.explore={...q,chart:e.chart};MINE.unshift({name:'Agent: '+q.measures.join(', ')+(q.dimensions[0]?' by '+q.dimensions[0]:''),q,type:e.chart||'bar',at:new Date().toISOString().slice(0,16).replace('T',' ')});saveMine();sidebar()}const nv=h('div','m nav','→ '+(e.page==='report'?'report '+e.report:e.page)+(e.note?' · '+e.note:''));nv.onclick=()=>show(e.page==='report'?'rep:'+e.report:e.page);log.append(nv);log.scrollTop=log.scrollHeight;const wasFull=chatBox.classList.contains('full');const k=e.page==='report'?'rep:'+e.report:e.page;show(k);if(wasFull)openChat(true);setTimeout(()=>highlight(e.item),400);if(e.note)toast('Agent: '+e.note)}
   else if(e.type==='data'){Object.assign(D,e.data);const k=CUR;sidebar();show(k);vc()}
   else if(e.type==='busy'){busy.hidden=!e.on;$('#chat .stop').hidden=!e.on}
   else if(e.type==='step'){if(!steps){steps=h('div','m steps');log.append(steps)}const last=[...steps.children].reverse().find(x=>x.dataset.t===e.tool&&x.dataset.s==='run');
@@ -971,8 +971,8 @@ class Hub:
         self.busy = False
         self.mode = "viewer" if mobile else "developer"  # this browser's switch (a phone is always Viewer)
         # chats: one Pi session each (its own context), kept on this machine next to the views; one runs at a time
-        self.chats_dir = abi.folder(project).parent / "_views" / project / "chats"
-        self.chats_dir.mkdir(parents=True, exist_ok=True)
+        self.user = user
+        self.chats_dir = self.chats_of(project)
         self.chat_id = None
 
     def use(self, project: str) -> None:
@@ -982,8 +982,15 @@ class Hub:
         if self.pi and self.pi.poll() is None:
             self.pi.terminate()
         self.pi, self.busy, self.chat_id, self.project = None, False, None, project
-        self.chats_dir = abi.folder(project).parent / "_views" / project / "chats"
-        self.chats_dir.mkdir(parents=True, exist_ok=True)
+        self.chats_dir = self.chats_of(project)
+
+    def chats_of(self, project: str) -> Path:
+        """Each person's own chats (their answers were made under their row-level security); one person: as before."""
+        d = abi.folder(project).parent / "_views" / project / "chats"
+        if self.user:
+            d = d / (re.sub(r"[^\w.@-]", "_", self.user).strip(".") or "_")
+        d.mkdir(parents=True, exist_ok=True)
+        return d
 
     def chat_file(self, cid: str) -> Path:
         return self.chats_dir / f"{cid}.json"
@@ -1209,6 +1216,15 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
             return {}
         return ((render.j(app_dir(p) / "people.json", {}) or {}).get("users") or {}).get(sess["name"]) or {}
 
+    def may_see_pack(sess: dict | None, p: str, m: dict) -> bool:
+        """A pack was rendered under its maker's row-level security: theirs, and the project owners' and admins'."""
+        return not sess or sess["admin"] or m.get("made_by") == sess["name"] or role_of(sess, p) == "owner"
+
+    def own_packs(d: dict, sess: dict | None, p: str) -> dict:
+        if not sess:
+            return d
+        return {**d, "app": {**(d.get("app") or {}), "packs": [m for m in (d.get("app") or {}).get("packs", []) if may_see_pack(sess, p, m)]}}
+
     def mine(sess: dict | None) -> list[str]:
         return [d.name for ws in sorted(abi.WORKSPACES.iterdir()) if ws.is_dir() and not ws.name.startswith((".", "_"))
                 for d in sorted(ws.iterdir()) if d.is_dir() and known(d.name) and role_of(sess, d.name)]
@@ -1254,7 +1270,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
             h.mobile, h.mode = True, "viewer"
         if role_of(sess, h.project) not in ("editor", "owner"):
             h.mode = "viewer"  # a viewer's browser has no Developer
-        h.view = lambda d, p=h.project: viewed(d, access(sess, p))
+        h.view = lambda d, p=h.project: own_packs(viewed(d, access(sess, p)), sess, p)
         return h
 
     class H(BaseHTTPRequestHandler):
@@ -1367,7 +1383,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
             me = {"name": self.sess["name"] if self.sess else None, "admin": bool(not self.sess or self.sess["admin"]), "signin": signin,
                   "role": role_of(self.sess, p), **access(self.sess, p)}
             if self.sess:  # the page's data as this person: their row-level security, their sections and reports
-                page = page_html(p, viewed(cached(p, self.sess["name"]), access(self.sess, p)))
+                page = page_html(p, own_packs(viewed(cached(p, self.sess["name"]), access(self.sess, p)), self.sess, p))
             else:
                 page = page_of(p).read_text()
             self.reply(200, page.replace(KEY_SLOT, key, 1).replace(ME_SLOT, json.dumps(me).replace("</", "<\\/"), 1).encode(), "text/html; charset=utf-8")
@@ -1539,7 +1555,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
                 import pack  # noqa: PLC0415 (sibling script)
                 m = next((x for x in pack.listing(project) if x["id"] == body.get("pack")), None)
                 names = {i["file"] for i in (m or {}).get("items", []) if i.get("file")} | {"notes.md", "manifest.json"}
-                if not m or body.get("file") not in names:
+                if not m or body.get("file") not in names or not may_see_pack(self.sess, project, m):
                     return self.reply(404, b'{"error":"no such file in that pack"}')
                 return self.reply(200, (pack.home(project) / m["id"] / body["file"]).read_bytes(), "application/octet-stream")
             if self.path == "/analyses":  # Explore's saved analyses: the app's file, not the project, so Viewer may keep them too

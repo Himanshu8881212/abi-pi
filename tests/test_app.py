@@ -315,3 +315,10 @@ def test_no_html_template_puts_text_in_unescaped():
     bad = [m.group(0)[:80] for m in re.finditer(r"(?:innerHTML|outerHTML|insertAdjacentHTML\([^,]+,)\s*=?\s*`[^`]*", src)
            if re.search(r"\$\{(?!E\()", m.group(0))]
     assert not bad, bad
+
+
+def test_chats_are_each_persons_own():
+    a, b = app.Hub(P, "", "k", "c1", user="ann"), app.Hub(P, "", "k", "c1", user="bob")
+    assert a.chats_dir != b.chats_dir and a.chats_dir.name == "ann" and b.chats_dir.name == "bob"
+    assert app.Hub(P, "", "k", "c1").chats_dir.name == "chats", "one person on this machine: as before"
+    assert app.Hub(P, "", "k", "c1", user="../../x").chats_dir.parent.name == "chats", "a name can't climb out"
