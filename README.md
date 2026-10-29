@@ -34,6 +34,24 @@ agent and the app. You need only a model endpoint (or connect one in the app).
 All data (the engine's database and lake, projects, vault, chats, board packs) lives in the `abi-pi-data` volume:
 back it up as a whole. For other devices, put it behind an HTTPS reverse proxy that sends `X-Forwarded-Proto: https`.
 
+## Back up and restore
+
+```
+docker exec abi-pi scripts/backup.sh backup > abi-pi-backup.tar   # the database dump + all files, checksummed
+docker exec abi-pi scripts/backup.sh keys   > abi-pi-keys.tar     # the two key files: keep them somewhere else
+```
+
+The app keeps serving during a backup (the worker pauses). To restore, into a new, empty volume (the same `/data` path):
+
+```
+docker run --rm -i -v abi-pi-data:/data -v $PWD/abi-pi-keys.tar:/keys.tar:ro --entrypoint scripts/backup.sh \
+  abi-pi:latest restore /keys.tar < abi-pi-backup.tar
+docker compose up -d
+```
+
+Without the keys the data, reports, history and logins come back, but stored source secrets and the API keys saved in
+Settings must be entered again.
+
 ## Run it on a machine
 
 ```
