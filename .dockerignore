@@ -1,0 +1,12 @@
+.git
+.venv
+**/node_modules
+**/__pycache__
+.pytest_cache
+workspaces
+scratch
+logs
+bench
+.env
+*.zip
+*.mp4

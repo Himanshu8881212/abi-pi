@@ -1,0 +1,22 @@
+# docker compose up -d   then open http://localhost:8790 and sign in with your ABI account.
+# Put the secrets in a .env file next to this one (never committed): ABI_PASSWORD, ABI_PI_LLM_KEY.
+services:
+  abi-pi:
+    build: .
+    image: abi-pi:latest
+    ports: ["8790:8790"]
+    environment:
+      ABI_URL: ${ABI_URL:-http://host.docker.internal:8770}
+      ABI_PI_PROJECT: ${ABI_PI_PROJECT:?set ABI_PI_PROJECT in .env}
+      ABI_PI_WORKSPACE: ${ABI_PI_WORKSPACE:-main}
+      ABI_USER: ${ABI_USER:-}
+      ABI_PASSWORD: ${ABI_PASSWORD:-}
+      ABI_PI_LLM_BASE: ${ABI_PI_LLM_BASE:?set ABI_PI_LLM_BASE in .env}
+      ABI_PI_LLM_KEY: ${ABI_PI_LLM_KEY:?set ABI_PI_LLM_KEY in .env}
+    volumes:
+      - abi-pi-data:/data
+      - ${ABI_PROJECTS_DIR:?set ABI_PROJECTS_DIR to ABI's projects folder}:/abi-projects:ro
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    restart: unless-stopped
+volumes:
+  abi-pi-data:

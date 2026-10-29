@@ -7,3 +7,4 @@ workspaces/*
 !workspaces/.gitkeep
 .DS_Store
 scripts/video/node_modules/
+.env
