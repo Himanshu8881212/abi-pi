@@ -390,3 +390,11 @@ def test_an_agent_that_dies_gives_an_answer_not_silence():
     h.busy, h.pi = True, type("Proc", (), {"stdout": io.StringIO("")})()
     h.read()
     assert not h.busy and any(e.get("type") == "answer" and "stopped" in e["text"] for e in events)
+
+
+def test_a_silent_model_is_reported_after_two_minutes():
+    h = app.Hub(P, "", "k", "slow")
+    h.busy, h.heard = True, 0
+    assert app.silent([h], now=121) == [h] and app.silent([h], now=60) == []
+    h.busy = False
+    assert app.silent([h], now=500) == []
