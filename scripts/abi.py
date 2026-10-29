@@ -72,6 +72,13 @@ def _open(method: str, path: str, body=None, headers: dict | None = None, raw: b
         raise ActionError(e.code, detail if isinstance(detail, dict) else {"message": str(detail)}) from None
 
 
+def artifact(snapshot: str) -> bytes:
+    """The bytes of a file ABI rendered (report_snapshot's `artifact:<project>/<file>`), as the person."""
+    req = urllib.request.Request(f"{URL}/api/artifacts/{snapshot.removeprefix('artifact:')}", headers={"Authorization": f"Bearer {token()}"})
+    with urllib.request.urlopen(req, timeout=900) as r:
+        return r.read()
+
+
 def call(action: str, confirm: str | None = None, **args) -> dict:
     """One action as the person (SDK semantics). A 409 with a confirm token raises ActionError: callers show it."""
     return _open("POST", f"/api/actions/{action}", args, {"X-Abi-Confirm": confirm} if confirm else None)[1]

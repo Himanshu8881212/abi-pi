@@ -141,6 +141,7 @@ def test_viewer_mode_is_read_only_on_the_server(srv):
         assert post(port, "/api/run_flow", {"project": P, "flow": "x"}, key)[0] == 403
         assert post(port, "/vault/add", {"name": "x.md", "data": ""}, key)[0] == 403
         assert post(port, "/team/answer", {"id": "p1", "decision": "approve"}, key)[0] == 403, "no approvals in Viewer"
+        assert post(port, "/transfer/export", {}, key)[0] == 403, "no export or import in Viewer"
         code, r = post(port, "/api/semantic_model", {"project": P}, key)
         assert code == 200 and "result" in r, "reads still work"
         req = urllib.request.Request(f"http://127.0.0.1:{port}/agent/mode", b"{}", {"X-Abi-Agent": HUB.agent_key, "X-Abi-Client": "default"})

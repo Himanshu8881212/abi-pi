@@ -99,7 +99,7 @@ dialog{border:2px solid var(--ink);background:var(--sheet);color:var(--ink);max-
 dialog h3{margin:0 0 12px;font:700 18px var(--display);text-transform:uppercase}dialog .row{margin-top:18px}dialog pre{white-space:pre-wrap;max-height:40vh}dialog::backdrop{background:color-mix(in srgb,var(--ink) 55%,transparent)}
 .trace{margin:12px 0 0;padding-left:20px}.trace li{margin:3px 0}.trace:empty{display:none}
 .stat{font:700 38px/1 var(--display);margin:4px 0 8px;text-transform:uppercase}
-.areas{display:grid;gap:6px}.areas .lk{display:flex;gap:16px;text-align:left;width:100%}.areas .lk b{min-width:9.5em}.areas .lk span{color:var(--mute)}
+.checks{display:flex;flex-wrap:wrap;gap:6px 16px}.chk{display:flex;gap:6px;align-items:center;font-size:13px}.areas{display:grid;gap:6px}.areas .lk{display:flex;gap:16px;text-align:left;width:100%}.areas .lk b{min-width:9.5em}.areas .lk span{color:var(--mute)}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:12px}.kv b{font-weight:500;color:var(--mute)}
 pre{margin:10px 0 0}.pg .grid{gap:20px}.pg>section>h2{display:none}
 #chat{position:fixed;top:60px;right:0;bottom:0;margin:0;width:420px;max-width:100vw;background:var(--sheet);border-left:2px solid var(--ink);border-top:2px solid var(--ink);display:flex;flex-direction:column;
@@ -244,7 +244,8 @@ function home(box){const rd=D.readiness||{},q=D.quality||{},ix=c=>(q.columns||[]
 function report(box,rep){let flt=PENDING.filters||[];PENDING.filters=null;
  {const tb=h('div','row bar top');let ed=null;tb.append(btn('Edit report',()=>{if(ed){ed.remove();ed=null;return}ed=editor('report',rep.spec||{id:rep.id,name:rep.name},false);box.querySelector('.pghead').after(ed)}),
   btn('New report',()=>{const c=editor('report',KIND.report.tpl,true);box.querySelector('.pghead').after(c)}),
-  btn('Delete report',async()=>{try{await KIND.report.del({id:rep.id});toast('Deleted.')}catch(e){toast(e.message)}}));box.append(tb)}const top=h('div','row bar'),col=h('select','f');col.append(new Option('filter by…',''));D.dims.forEach(c=>col.append(new Option(c,c)));
+  btn('Delete report',async()=>{try{await KIND.report.del({id:rep.id});toast('Deleted.')}catch(e){toast(e.message)}}));box.append(tb)}
+ {const tb=box.querySelector(':scope>.bar.top');let ex=null;const eb=h('button','btn pri','Export');eb.onclick=()=>{if(ex){ex.remove();ex=null;return}ex=exportCard(rep,()=>flt,()=>cur);box.querySelector('.pghead').after(ex)};tb.prepend(eb)}const top=h('div','row bar'),col=h('select','f');col.append(new Option('filter by…',''));D.dims.forEach(c=>col.append(new Option(c,c)));
  const val=h('select','f');val.multiple=true;val.hidden=true;const add=h('button','btn','add filter');add.hidden=true;const chips=h('span');
  top.append(col,val,add,chips);const tabs=h('nav','tabs'),grid=h('div','grid'),msg=h('div','msg');box.append(top,msg,tabs,grid);
  col.onchange=async()=>{val.innerHTML='';if(!col.value){val.hidden=add.hidden=true;return}
@@ -264,6 +265,7 @@ function report(box,rep){let flt=PENDING.filters||[];PENDING.filters=null;
    $('h3 span',c).textContent=v.title||v.id;grid.append(c);const body=$('.body',c),d=v.live||v.data;
    if(v.text!==undefined){$('.tools',c).remove();body.textContent=v.text;body.style.whiteSpace='pre-wrap';return}
    if(!d||d.error||v.error){body.append(h('div','bad',d?.error||v.error||'no data'));return}
+   if(flt.length&&(!d.rows.length||d.rows.every(r=>r.every(x=>x===null||typeof x!=='number')))){body.append(h('p','empty','No rows for these filters: they fall outside what this visual covers (the report\'s period or population). Remove a filter to see it again.'));return}
    let asTable=false;const dr=()=>{body.innerHTML='';asTable?table(body,d):chart(body,d);
     if(v.dim){const nm=Math.max(1,Object.keys(d.measures).length),rs=d.rows.filter(r=>r.slice(1).some(x=>typeof x==='number'));
      body.querySelectorAll('rect,circle').forEach((e,i)=>{e.style.cursor='pointer';e.onclick=()=>{const r=rs[e.tagName==='rect'?Math.floor(i/nm):i%rs.length];if(r)cross(v.dim,r[0])}})}};
@@ -285,6 +287,38 @@ function datasets(box){const g=h('div','cards');const bar=h('div','row bar top')
  D.datasets.forEach(d=>g.append(dsForm(d,false)))}
 
 // ---------- Model ----------
+function transferPage(box){if(!LIVE||MODE==='viewer'){box.append(h('p','empty','Export and import work in Developer mode with the live app.'));return}
+ const ex=card('Export','the whole project as one zip'),im=card('Import','replace this project with a zip; ABI checks it first'),g=h('div','cards');
+ ex.append(h('p','','ABI\'s committed files (sources, tables, model, measures, glossary, queries, reports, flows, ML, tools, agents, security, environments, docs), the app\'s JSON (Monitor settings, saved analyses), the vault\'s documents and the team\'s plan. Not inside: the data (refresh the sources after an import), secret values, people\'s roles, chats, uncommitted changes.'));
+ act(ex,'Download zip',async()=>{const r=await fetch('/transfer/export',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'});if(!r.ok)throw new Error((await r.json()).error);
+  const a=h('a');a.href=URL.createObjectURL(await r.blob());a.download=`${D.project}.abi.zip`;a.click();return 'Downloaded.'},1);
+ const f=h('input','f');f.type='file';f.accept='.zip';const out=h('div','body');im.append(f,out);let data=null;
+ const post=b=>fetch('/transfer/import',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b)}).then(r=>r.json());
+ act(im,'Check',async()=>{if(!f.files[0])return 'Pick a zip first.';data=await new Promise(r=>{const fr=new FileReader();fr.onload=()=>r(fr.result.split(',')[1]);fr.readAsDataURL(f.files[0])});
+  const r=await post({data});if(r.error)throw new Error(r.error);const ch=r.result?.changes||[],m=r.manifest||{};out.innerHTML='';
+  out.append(h('p','file',`${m.name||m.project} · exported ${m.exported} · ABI commit ${String(m.abi_commit||'').slice(0,8)}`),
+   ...(ch.length?ch.map(c=>h('p','',typeof c==='string'?c:JSON.stringify(c))):[h('p','ok','No changes: this project already matches the zip.')]),
+   ...(m.needs?.secrets?.length?[h('p','bad','Create these secrets in ABI first: '+m.needs.secrets.join(', '))]:[]));return ch.length?`${ch.length} changes. Apply to replace the project.`:'Nothing to apply.'});
+ act(im,'Apply',async()=>{if(!data)return 'Check the zip first.';let r=await post({data,apply:true});
+  if(r.confirm){if(!await ask(r.confirm))throw new Error('You declined. Nothing changed.');r=await fetch('/confirm/'+r.confirm.id,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(x=>x.json())}
+  if(r.error)throw new Error(r.error);return 'Imported through ABI (one undoable commit). Refresh the sources to load the data.'});
+ g.append(ex,im);box.append(g)}
+// Export: ABI renders the report as the person (PDF, PNG; PPTX and several pages in one file with a newer ABI)
+function exportCard(rep,filters,curPage){const c=card('Export',`rendered by ABI · ${rep.name||rep.id}`),fm=h('select','f'),vs=h('select','f'),pg=h('div','checks'),ap=h('input');
+ ['pdf','pptx','png'].forEach(f=>fm.append(new Option({pdf:'PDF',pptx:'PowerPoint (PPTX)',png:'Image (PNG)'}[f],f)));ap.type='checkbox';ap.checked=true;
+ rep.pages.forEach(p=>{const l=h('label','chk'),x=h('input');x.type='checkbox';x.value=p.id;x.checked=p.id===curPage().id;l.append(x,h('span','',p.name||p.id));pg.append(l)});
+ const fill=()=>{const sel=[...pg.querySelectorAll('input:checked')];vs.innerHTML='';vs.append(new Option('the whole page',''));vs.disabled=sel.length!==1;
+  if(sel.length===1)rep.pages.find(p=>p.id===sel[0].value).visuals.forEach(v=>vs.append(new Option(v.title||v.id,v.id)))};pg.onchange=fill;fill();
+ const al=h('label','chk');al.append(ap,h('span','','with the filters set now'));
+ c.append(h('label','l','Format'),fm,h('label','l','Pages'),pg,h('label','l','Only one view (one page selected)'),vs,al);
+ act(c,'Download',async()=>{const pages=[...pg.querySelectorAll('input:checked')].map(x=>x.value);if(!pages.length)return 'Pick at least one page.';
+  const one=pages.length===1,body={report:rep.id,format:fm.value,filters:ap.checked?filters():[],...(one?{page:pages[0],visual:vs.value||null}:{pages})};
+  const get=async b=>{const r=await fetch('/report/export',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b)});if(!r.ok)throw new Error((await r.json()).error);return r.blob()};
+  const save=(blob,name)=>{const a=h('a');a.href=URL.createObjectURL(blob);a.download=name;a.click()};
+  try{save(await get(body),`${rep.id}${one?'-'+pages[0]:''}.${fm.value}`);return 'Downloaded.'}
+  catch(e){if(one||fm.value==='pptx')throw e;for(const p of pages)save(await get({...body,pages:undefined,page:p}),`${rep.id}-${p}.${fm.value}`);
+   return `This ABI makes one file per page: downloaded ${pages.length}.`}},1);
+ c.classList.add('editor');return c}
 function reportsPage(box){const bar=h('div','row bar top');bar.append(btn('New report',()=>{const c=editor('report',KIND.report.tpl,true);g.prepend(c)},1));box.append(bar);
  const g=h('div','cards');box.append(g);if(!D.reports.length){box.append(h('p','empty','No reports yet. Ask the agent to build one.'));return}
  D.reports.forEach(r=>{const c=card(r.name||r.id,`reports/${r.id}.json`),n=r.pages.reduce((a,p)=>a+p.visuals.length,0);
@@ -292,11 +326,12 @@ function reportsPage(box){const bar=h('div','row bar top');bar.append(btn('New r
   act(c,'Open',async()=>{show('rep:'+r.id)},1);g.append(c)})}
 // Monitor: is anything wrong right now? Only what reports can't show: data freshness, model readiness, ML runs, flows
 function monitorPage(box){const g=h('div','cards');box.append(g);const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),rs=q.rows||[],when=t=>t?String(t).slice(0,16).replace('T',' '):'—';
- const fr=card('Data freshness','ABI data quality, per table'),bad=rs.filter(r=>(r[ix('problems')]||[]).length||r[ix('missing_periods')]);
+ const M=D.app?.monitor||{watch:[],fresh_within_hours:36},watch=t=>M.watch?.length?M.watch.includes(t):/stream/.test(t),old=r=>watch(r[0])&&(!r[ix('last_load')]||Date.now()-Date.parse(r[ix('last_load')])>M.fresh_within_hours*3600e3);
+ const fr=card('Data freshness',`ABI data quality; watched tables must load within ${M.fresh_within_hours} h (monitor.json)`),bad=rs.filter(r=>(r[ix('problems')]||[]).length||r[ix('missing_periods')]||old(r));
  fr.append(h('p',bad.length?'bad':'ok',bad.length?`${bad.length} of ${rs.length} tables have problems`:`All ${rs.length} tables without problems`));
  const t=h('table');t.insertRow().append(...['table','last load','rows','missing periods','problems'].map(x=>h('th','',x)));
- [...bad,...rs.filter(r=>/stream/.test(r[0])&&!bad.includes(r))].forEach(r=>{const tr=t.insertRow();[r[0],when(r[ix('last_load')]),fmt(r[ix('rows')]),r[ix('missing_periods')]||0,(r[ix('problems')]||[]).map(p=>p.message||p.kind||JSON.stringify(p)).join('; ')||'—'].forEach(v=>tr.insertCell().textContent=v)});
- const sc=h('div','scroll');sc.append(t);fr.append(h('p','file','tables with problems, then the stream tables'),sc);
+ [...bad,...rs.filter(r=>watch(r[0])&&!bad.includes(r))].forEach(r=>{const tr=t.insertRow();[r[0],when(r[ix('last_load')]),fmt(r[ix('rows')]),r[ix('missing_periods')]||0,[...(r[ix('problems')]||[]).map(p=>p.message||p.kind||JSON.stringify(p)),...(old(r)?[`no load for over ${M.fresh_within_hours} h`]:[])].join('; ')||'—'].forEach(v=>tr.insertCell().textContent=v)});
+ const sc=h('div','scroll');sc.append(t);fr.append(h('p','file','tables with problems, then the watched tables'),sc);
  const rd=D.readiness||{},mo=card('Model','readiness');mo.append(h('p',rd.ready?'ok':'bad',rd.ready?'Ready':'Not ready'),...(rd.missing||[]).map(m=>h('p','file',typeof m==='string'?m:JSON.stringify(m))));
  const ml=card('ML models','latest training and scoring');if(!D.ml.length)ml.append(h('p','empty','No ML models yet.'));
  D.ml.forEach(m=>{const tr=m.latest_run||{},sc2=m.latest_score||{};ml.append(h('h4','',m.name||m.id),
@@ -306,7 +341,8 @@ function monitorPage(box){const g=h('div','cards');box.append(g);const q=D.quali
   if(LIVE)api('flow_runs',{flow:f.id}).then(x=>{const r=(x.runs||[])[0];l.textContent=r?`last run: ${r.status} · ${when(r.finished||r.started||r.created)}`:'last run: never'}).catch(e=>l.textContent='last run: '+e.message)});
  g.append(fr,mo,ml,fl);fr.style.gridColumn='1/-1'}
 // Explore: anyone's own analysis on the governed model (reads only, so Viewer can use it); kept analyses stay in this browser
-let MINE=[];try{MINE=JSON.parse(localStorage.getItem('abi-explore')||'[]')}catch(e){}
+let MINE=D.app?.analyses||[];if(!MINE.length)try{MINE=JSON.parse(localStorage.getItem('abi-explore')||'[]');if(MINE.length)setTimeout(saveMine,0)}catch(e){}
+function saveMine(){MINE=MINE.slice(0,100);if(LIVE)fetch('/analyses',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({analyses:MINE})}).catch(()=>{})}
 function explore(box){const q0=PENDING.explore||{};PENDING.explore=null;
  const c=card('New analysis','measures by a dimension, from the model'),ms=multi(D.measures.map(m=>m.id),q0.measures),dm=h('select','f'),ty=h('select','f'),
   fc=h('select','f'),fv=h('select','f'),out=h('div','body'),msg=h('div','msg');ms.classList.remove('ed');fv.multiple=true;fv.hidden=true;
@@ -326,15 +362,14 @@ function explore(box){const q0=PENDING.explore||{};PENDING.explore=null;
  act(c,'Run',async()=>{await run(query(),ty.value)},1);
  act(c,'Keep',async()=>{const q=query();if(!q.measures.length)return 'Pick at least one measure.';
   const nm=q.measures.map(m=>D.measures.find(x=>x.id===m)?.name||m).join(', ')+(q.dimensions[0]?' by '+q.dimensions[0]:'');
-  MINE.unshift({name:nm,q,type:ty.value,at:new Date().toISOString().slice(0,16).replace('T',' ')});MINE=MINE.slice(0,30);
-  try{localStorage.setItem('abi-explore',JSON.stringify(MINE))}catch(e){}mine();return 'Kept in My analyses (this browser only).'});
+  MINE.unshift({name:nm,q,type:ty.value,at:new Date().toISOString().slice(0,16).replace('T',' ')});saveMine();mine();return 'Kept in Saved analyses, for everyone on this app.'});
  act(c,'Save as query',async()=>{const q=query();if(!q.measures.length)return 'Pick at least one measure.';
   const id=('q_'+q.measures.join('_')+(q.dimensions[0]?'_by_'+q.dimensions[0].split('.').pop():'')).toLowerCase().replace(/[^a-z0-9_]/g,'_').slice(0,60);
   await KIND.dataset.save({id,name:id,description:'Saved from Explore',query:q});return `Saved as query ${id} through ABI.`});
- c.append(msg,out);const g=h('div','cards'),my=card('My analyses','kept in this browser; numbers rerun from the model when opened'),list=h('div');my.append(list);c.style.gridColumn=my.style.gridColumn='1/-1';ms.style.width='100%';g.append(c,my);box.append(g);
+ c.append(msg,out);const g=h('div','cards'),my=card('Saved analyses','kept with the project for everyone; numbers rerun from the model when opened'),list=h('div');my.append(list);c.style.gridColumn=my.style.gridColumn='1/-1';ms.style.width='100%';g.append(c,my);box.append(g);
  function mine(){list.innerHTML='';if(!MINE.length){list.append(h('p','empty','Nothing kept yet. Run an analysis and press Keep; charts the agent shows you land here too.'));return}
   MINE.forEach((a,i)=>{const r=h('div','row');const o=h('button','btn',a.name);o.onclick=()=>{[...ms.options].forEach(x=>x.selected=a.q.measures.includes(x.value));dm.value=a.q.dimensions[0]||'';ty.value=a.type;flt=a.q.filters||[];fc.value='';fv.hidden=true;run(a.q,a.type)};
-   const x=h('button','btn','forget');x.onclick=()=>{MINE.splice(i,1);try{localStorage.setItem('abi-explore',JSON.stringify(MINE))}catch(e){}mine()};r.append(o,h('span','file',a.at||''),x);list.append(r)})}
+   const x=h('button','btn','forget');x.onclick=()=>{MINE.splice(i,1);saveMine();mine()};r.append(o,h('span','file',a.at||''),x);list.append(r)})}
  mine();if(q0.measures)run(query(),ty.value)}
 function measures(box){const top=h('div','row bar top'),q=h('input','f');q.placeholder='Search measures';const list=h('div','cards');box.append(top,list);
  const edit=(m,isNew)=>{const c=card(isNew?'New measure':(m.name||m.id),isNew?'':m.id),name=h('input','f'),id=h('input','f'),ex=h('textarea','f'),de=h('input','f');
@@ -560,7 +595,7 @@ function vaultPage(box){if(!LIVE){box.append(h('p','empty','The vault opens with
 const PENDING={filters:null,explore:null};
 const LEDE={vault:'Your business documents: definitions, finance rules, KPI specs. The agents search them before they define or check a measure.',home:'Start here: ask anything, see what needs attention, and every part of the project at a glance.',datasets:'Saved questions to the model (measures by dimensions, with filters). Each run returns a fresh table; nothing is stored. Reports, flows and ML reuse them. Preview their rows.',
  measures:'The business numbers. Edit a formula and ABI checks it before it saves; Test shows the total.',model:'Tables and how they join. Facts are black, dimensions are outlined.',
- chat:'Talk to the agent: ask a question, ask where something is, or ask for a change. When it shows you a page, the chat moves to the side and goes on.',reports:'The saved reports of this project. Open one to filter it and click through.',monitor:'Is anything wrong right now: data freshness, model readiness, ML runs and flows. Reports show the business; this shows the system.',explore:'Your own analysis: pick measures, a dimension and a filter; the numbers come from the model, so they match the reports. Keep the ones you want; nothing in the project changes.',glossary:'What the business words mean and which measures implement them.',sources:'Bronze: the data as it landed, one source per file or bucket folder. Reload, add or delete a source.',
+ chat:'Talk to the agent: ask a question, ask where something is, or ask for a change. When it shows you a page, the chat moves to the side and goes on.',transfer:'The whole project as one zip, so it can be kept, reviewed, moved or rebuilt. Import goes through ABI, which checks it and makes it one undoable commit.',reports:'The saved reports of this project. Open one to filter it and click through.',monitor:'Is anything wrong right now: data freshness, model readiness, ML runs and flows. Reports show the business; this shows the system.',explore:'Your own analysis: pick measures, a dimension and a filter; the numbers come from the model, so they match the reports. Keep the ones you want: they are saved with the app, the project itself doesn\'t change.',glossary:'What the business words mean and which measures implement them.',sources:'Bronze: the data as it landed, one source per file or bucket folder. Reload, add or delete a source.',
  staged:'Silver: the cleaned and combined tables between the sources and the final tables. Hidden from the model; edit their steps here.',tables:'Gold: the final business tables the model and measures are built on. Edit kind, key, description and steps.',flows:'Automations. Run one now and follow its steps, or switch it on or off.',
  ml:'Forecasts, segments and anomaly models. Train, score and read the latest run.',tools:'Calculations your agents can call. Run one with inputs or run its tests.',
  agents:'Custom agents for this project. Ask one a question or run its evaluation set.',docs:'The project documentation ABI writes from its definitions.',
@@ -572,7 +607,7 @@ function nav(){return [['Start',[['home','Home',home],['chat','Chat',chatPage]]]
  ['Visualizations',[['reports','Reports',reportsPage,D.reports.length],['monitor','Monitor',monitorPage],['explore','Explore',explore,MINE.length||'']]],
  ['Automate',[['flows','Flows',flows,D.flows.length],['ml','ML models',ml,D.ml.length],['tools','Tools',tools,D.tools.length],['agents','Agents',agents,D.agents.length]]],
  ['Knowledge',[['vault','Vault',vaultPage,(VAULT||[]).length],['docs','Docs',docs]]],
- ['Govern',[['security','Security',security],['environments','Environments',b=>b.insertAdjacentHTML('beforeend',D.sections.Environments)],['history','History',commits,(D.history||[]).length]]]]}
+ ['Govern',[['security','Security',security],['environments','Environments',b=>b.insertAdjacentHTML('beforeend',D.sections.Environments)],['history','History',commits,(D.history||[]).length],['transfer','Export & import',transferPage]]]]}
 let MODE='developer',VAULT=[];
 let FOLD={};try{FOLD=JSON.parse(localStorage.getItem('abi-fold')||'{}')}catch(e){}
 function sidebar(){side.innerHTML='';PAGES={};nav().forEach(([g,items])=>{const sec=h('div','sec'),hd=h('button','grp'),list=h('div','items');
@@ -654,7 +689,7 @@ $('#chat .send').onclick=sendChat;inp.onkeydown=e=>{if(e.key==='Enter'&&!e.shift
 $('#chat .stop').onclick=()=>fetch('/chat/stop',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'});
 if(LIVE){const es=new EventSource('/events?k='+encodeURIComponent(KEY)+'&c='+CID+'&m='+(MOBILE?1:0));
  es.onmessage=async ev=>{const e=JSON.parse(ev.data);
-  if(e.type==='show'){PENDING.filters=e.filters||null;if(e.page==='explore'&&e.query){const q={measures:e.query.measures||[],dimensions:(e.query.dimensions||[]).slice(0,1),filters:e.query.filters||[]};PENDING.explore={...q,chart:e.chart};MINE.unshift({name:'Agent: '+(e.note||q.measures.join(', ')),q,type:e.chart||'bar',at:new Date().toISOString().slice(0,16).replace('T',' ')});MINE=MINE.slice(0,30);try{localStorage.setItem('abi-explore',JSON.stringify(MINE))}catch(x){}sidebar()}const nv=h('div','m nav','→ '+(e.page==='report'?'report '+e.report:e.page)+(e.note?' · '+e.note:''));nv.onclick=()=>show(e.page==='report'?'rep:'+e.report:e.page);log.append(nv);log.scrollTop=log.scrollHeight;const wasFull=chatBox.classList.contains('full');const k=e.page==='report'?'rep:'+e.report:e.page;show(k);if(wasFull)openChat(true);setTimeout(()=>highlight(e.item),400);if(e.note)toast('Agent: '+e.note)}
+  if(e.type==='show'){PENDING.filters=e.filters||null;if(e.page==='explore'&&e.query){const q={measures:e.query.measures||[],dimensions:(e.query.dimensions||[]).slice(0,1),filters:e.query.filters||[]};PENDING.explore={...q,chart:e.chart};MINE.unshift({name:'Agent: '+(e.note||q.measures.join(', ')),q,type:e.chart||'bar',at:new Date().toISOString().slice(0,16).replace('T',' ')});saveMine();sidebar()}const nv=h('div','m nav','→ '+(e.page==='report'?'report '+e.report:e.page)+(e.note?' · '+e.note:''));nv.onclick=()=>show(e.page==='report'?'rep:'+e.report:e.page);log.append(nv);log.scrollTop=log.scrollHeight;const wasFull=chatBox.classList.contains('full');const k=e.page==='report'?'rep:'+e.report:e.page;show(k);if(wasFull)openChat(true);setTimeout(()=>highlight(e.item),400);if(e.note)toast('Agent: '+e.note)}
   else if(e.type==='data'){Object.assign(D,e.data);const k=CUR;sidebar();show(k);vc()}
   else if(e.type==='busy'){busy.hidden=!e.on;$('#chat .stop').hidden=!e.on}
   else if(e.type==='step'){if(!steps){steps=h('div','m steps');log.append(steps)}const last=[...steps.children].reverse().find(x=>x.dataset.t===e.tool&&x.dataset.s==='run');
@@ -684,6 +719,14 @@ def pub_id(project: str) -> str:
 def published(project: str) -> dict:
     f = abi.folder(project).parent / "_views" / project / "published.json"
     return json.loads(f.read_text()) if f.exists() else {}
+
+
+MONITOR = {"watch": [], "fresh_within_hours": 36}  # watch: tables that must stay fresh ([] = every table named *stream*)
+
+
+def app_dir(project: str) -> Path:
+    """The app's own JSON for a project (Monitor settings, shared analyses): next to ABI's folder, in the export zip."""
+    return abi.folder(project).parent / "_app" / project
 
 
 def snapshot(dest: Path, project: str) -> dict:
@@ -732,6 +775,8 @@ def snapshot(dest: Path, project: str) -> dict:
         return "silver"
     out["layers"] = [{"table": r[qi["table"]], "rows": r[qi["rows"]], "layer": layer(r[qi["table"]])} for r in q.get("rows") or []] if qi else []
     out["summary"] = {k: len(out[k]) for k in ("sources", "tables", "measures", "reports", "datasets", "flows", "ml", "tools", "agents")}
+    base = project.removesuffix("_pub")
+    out["app"] = {"analyses": j(app_dir(base) / "analyses.json", []) or [], "monitor": MONITOR | (j(app_dir(base) / "monitor.json", {}) or {})}
     return out
 
 
@@ -1121,6 +1166,41 @@ def serve(project: str, port: int = 8790, open_browser: bool = True, remote: str
                         out = {"error": str(e.body.get("message") if isinstance(e.body, dict) else e.body)}
                 changed(project)
                 return self.reply(200, json.dumps(out, default=str).encode())
+            if self.path == "/report/export":  # ABI renders the report (report_snapshot); the page gets the file
+                args = {k: body[k] for k in ("report", "page", "pages", "visual", "filters", "format") if body.get(k) not in (None, [], "")}
+                try:
+                    snap = abi.call("report_snapshot", project=hub.current(), **args)["snapshot"]
+                    return self.reply(200, abi.artifact(snap), {"pdf": "application/pdf", "png": "image/png"}.get(args.get("format"),
+                                      "application/vnd.openxmlformats-officedocument.presentationml.presentation"))
+                except abi.ActionError as e:
+                    b = e.body if isinstance(e.body, dict) else {}
+                    old = any(x.get("loc") in (["page"], ["format"]) for x in b.get("errors") or [] if isinstance(x, dict))
+                    return self.reply(400, json.dumps({"error": "This ABI renders one page at a time as PDF or PNG. Several pages in one"
+                                                       " file and PPTX need a newer ABI (MULTI-EXPORT)." if old else b.get("message") or str(e.body)}).encode())
+            if self.path == "/analyses":  # Explore's saved analyses: the app's file, not the project, so Viewer may keep them too
+                items = body.get("analyses")
+                if not isinstance(items, list) or len(items) > 100 or len(raw) > 200_000:
+                    return self.reply(400, b'{"error":"at most 100 analyses"}')
+                app_dir(project).mkdir(parents=True, exist_ok=True)
+                (app_dir(project) / "analyses.json").write_text(json.dumps(items, indent=1) + "\n")
+                return self.reply(200, b'{"result":"saved"}')
+            if self.path.startswith("/transfer/"):  # the whole project as one zip, and back (Developer only)
+                import base64  # noqa: PLC0415
+                import transfer  # noqa: PLC0415 (sibling script)
+                if hub.mode == "viewer":
+                    return self.reply(403, json.dumps({"error": "Export and import are in Developer mode."}).encode())
+                if self.path == "/transfer/export":
+                    return self.reply(200, transfer.export(project), "application/zip")
+                try:
+                    data = base64.b64decode(body.get("data", ""))
+                    z = transfer.read_zip(data)
+                except Exception as e:  # noqa: BLE001 (any unreadable upload)
+                    return self.reply(400, json.dumps({"error": f"Not an export zip: {e}"}).encode())
+                if not body.get("apply"):
+                    return self.reply(200, json.dumps(run("import_project", {"project": project, "bundle": z["abi"], "dry_run": True}, None)
+                                                      | {"manifest": z["manifest"]}, default=str).encode())
+                return self.reply(200, json.dumps(run("import_project", {"project": project, "bundle": z["abi"]}, None,
+                                                      lambda: transfer.extras(project, z)), default=str).encode())
             if self.path == "/team/answer":  # the person's Approve/Decline on Home: the step runs through ABI (and its confirmation)
                 import team  # noqa: PLC0415 (sibling script)
                 if hub.mode == "viewer":
