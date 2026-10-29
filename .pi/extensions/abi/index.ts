@@ -210,15 +210,23 @@ export default async function abi(pi: ExtensionAPI) {
 				status(ctx);
 				return { content: [{ type: "text", text: JSON.stringify(r) }], isError: !("result" in r) };
 			}
-			if (out && "result" in out) state.results.push(out.result);
-			else if (out) state.notes.push(out);
-		} else if (name.startsWith("abi_") && out) {
-			state.results.push({ rows: [[raw]] }); // harness output: its figures were written by ABI or the scripts
-		} else if (name === "subagent" && !event.isError) {
-			state.results.push({ rows: [[raw]] }); // ponytail: a subagent's answer passed its own grounding check
 		}
+		ingest(name, raw, event.isError);
 		status(ctx);
 	});
+
+	/** A tool result as a grounding source: ABI results ground figures from their rows, refusals only words. */
+	function ingest(name: string, raw: string, isError: boolean) {
+		let out: any;
+		try { out = JSON.parse(raw); } catch { out = undefined; }
+		if (name.startsWith(MCP)) {
+			if (out && "result" in out) state.results.push(out.result);
+			else if (out) state.notes.push(out);
+		} else if ((name.startsWith("abi_") && out) || (name === "subagent" && !isError)) {
+			// harness output (figures written by ABI or the scripts); a subagent's answer passed its own check
+			state.results.push({ rows: [[raw]] }); // ponytail: subagent text grounds as a whole; pass its rows up if it matters
+		}
+	}
 
 	async function confirmBridge(tool: string, input: unknown, ctx: ExtensionContext) {
 		if (PERSON_CLICK.has(tool)) return { status: "This changes access or where the project goes: the person does it in ABI's app, never from an agent." };
@@ -322,8 +330,31 @@ export default async function abi(pi: ExtensionAPI) {
 		}
 	}
 
+	// ---------- provider payload: OpenAI rejects regex lookarounds in tool schemas (ABI's edit_total has two) ----------
+	// ABI validates every input itself, so dropping such a `pattern` loosens nothing that matters.
+	pi.on("before_provider_request", (event: any) => {
+		const strip = (x: any): void => {
+			if (Array.isArray(x)) x.forEach(strip);
+			else if (x && typeof x === "object") {
+				if (typeof x.pattern === "string" && /\(\?<?[=!]/.test(x.pattern)) delete x.pattern;
+				Object.values(x).forEach(strip);
+			}
+		};
+		if (event.payload?.tools) strip(event.payload.tools);
+		return event.payload;
+	});
+
 	// ---------- session ----------
 	pi.on("session_start", async (_e, ctx) => {
+		// a resumed session: rebuild the grounding sources and the person's words from the active branch
+		for (const e of ctx.sessionManager.getBranch() as any[]) {
+			const m = e.type === "message" ? e.message : undefined;
+			const t = (m?.content ?? []).map((c: any) => (c.type === "text" ? c.text : "")).join("");
+			if (m?.role === "user") state.asked += "\n" + t;
+			else if (m?.role === "assistant") {
+				for (const c of m.content ?? []) if (c.type === "toolCall" && typeof c.arguments?.project === "string") state.project = c.arguments.project;
+			} else if (m?.role === "toolResult") ingest(m.toolName, t, !!m.isError);
+		}
 		if (allowed) pi.setActiveTools(pi.getActiveTools().filter((t) => allowed.has(t) || t === "abi_tools"));
 		status(ctx);
 	});
