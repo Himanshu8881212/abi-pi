@@ -5,3 +5,4 @@ __pycache__/
 logs/
 workspaces/*
 !workspaces/.gitkeep
+.DS_Store
