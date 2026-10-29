@@ -189,7 +189,7 @@ def index_html(dest: Path, project: str, reports: list[str]) -> str:
         "Datasets": "".join(f"<span class=chip>{esc(d.get('id'))}</span>" for d in sets) or "<p class=empty>None yet.</p>",
         "Reports": cards(g("reports"), dest, lambda f, x: f"<h3><a href='reports/{esc(f.stem)}.html'>{esc(x.get('name') or f.stem)}</a></h3>"
                          f"{len(x.get('pages', []))} page(s), {sum(len(p.get('visuals', [])) for p in x.get('pages', []))} visual(s)"),
-        "ML models": cards(g("ml"), dest, lambda f, x: f"<h3>{esc(x.get('name') or x.get('id'))}</h3>{esc(x.get('task'))} of <code>{esc(x.get('target'))}</code>"
+        "ML models": cards(g("ml"), dest, lambda f, x: f"<h3>{esc(x.get('name') or x.get('id'))}</h3>{esc(x.get('task'))}" + (f" of <code>{esc(x.get('target'))}</code>" if x.get("target") else "") +
                            f" on {esc(x.get('dataset'))}" + (f", by {esc(x.get('time'))}, {esc(x.get('horizon'))} ahead" if x.get("horizon") else "")),
         "Flows": cards(g("flows"), dest, lambda f, x: flow(x)),
         "Agents": cards([f for f in g("agents") if not f.name.endswith(".eval.json")], dest, lambda f, x: f"<h3>{esc(x.get('name') or x.get('id'))}</h3>"
