@@ -168,7 +168,9 @@ body[data-mode=viewer] .pghead{border-bottom-style:dashed}
 .mobile .strip{grid-template-columns:repeat(2,minmax(0,1fr))}.mobile .pghead h2{font-size:24px}.mobile .kpi .v{font-size:30px}
 .mobile #chat{top:0;width:100vw;z-index:11}.mobile body.chat-open main{padding-right:14px}.mobile .canvas{height:60vh}
 .mobile .card h3 .tools{display:none}.mobile nav.tabs{width:100%;overflow-x:auto;flex-wrap:nowrap}
-@media (max-width:820px){body{grid-template-columns:1fr}header{grid-column:1}
+select.f{max-width:100%;min-width:0}.card h3{flex-wrap:wrap}.file,.kv span{overflow-wrap:anywhere;min-width:0}.kv{grid-template-columns:auto minmax(0,1fr)}
+#chat.full{box-sizing:border-box;max-width:100%}#chat:not(.open):not(.full){visibility:hidden}
+@media (max-width:820px){html,body{overflow-x:clip}.card table{display:block;overflow-x:auto;max-width:100%}body{grid-template-columns:1fr}header{grid-column:1}
  aside{position:static;height:auto;border-right:0;border-bottom:2px solid var(--ink);display:flex;flex-wrap:wrap;padding:10px max(16px,env(safe-area-inset-left,0px))}
  aside .sec{display:contents}aside button.grp{display:none}aside .folded .items,aside .items{display:contents}aside button.it,aside button.it.sub{width:auto;padding:5px 10px;margin:0;border:0}
  main{padding:20px max(16px,env(safe-area-inset-right,0px)) 48px max(16px,env(safe-area-inset-left,0px))}body.chat-open main{padding-right:16px}
@@ -580,7 +582,7 @@ function sidebar(){side.innerHTML='';PAGES={};nav().forEach(([g,items])=>{const 
   b.append(h('span','',label));if(n!==undefined&&n!=='')b.append(h('span','n',String(n)));b.onclick=()=>show(k);list.append(b)});
  sec.append(hd,list);side.append(sec)});D.reports.forEach(r=>PAGES['rep:'+r.id]=[r.name||r.id,b=>report(b,r)])}
 let PREV='home';
-function show(k){if(!PAGES[k])k='home';if(k!=='chat'&&CUR!=='chat')PREV=k;else if(k==='chat'&&CUR!=='chat')PREV=CUR;{const cb=$('#chat');if(cb.classList.contains('full')){cb.classList.remove('full');$('#chat .wide-t').textContent='Full page';document.body.append(cb);if(k!=='chat')openChat(true)}}CUR=k;setTimeout(ctx);const sk=k.startsWith('rep:')?'reports':k;side.querySelectorAll('button.it').forEach(b=>b.classList.toggle('on',b.dataset.k===sk));
+function show(k){if(!PAGES[k])k='home';if(k!=='chat'&&CUR!=='chat')PREV=k;else if(k==='chat'&&CUR!=='chat')PREV=CUR;{const cb=$('#chat');if(cb.classList.contains('full')){cb.classList.remove('full');$('#chat .wide-t').textContent='Full page';document.body.append(cb);cb.classList.remove('open');document.body.classList.remove('chat-open')}}CUR=k;setTimeout(ctx);const sk=k.startsWith('rep:')?'reports':k;side.querySelectorAll('button.it').forEach(b=>b.classList.toggle('on',b.dataset.k===sk));
  const act=side.querySelector('button.it.on');if(act)act.closest('.sec').classList.remove('folded');
  const box=$('main');box.innerHTML='';const pg=h('div','pg'),head=h('div','pghead'),t=h('div');t.append(h('h2','',PAGES[k][0]));
  const lede=k.startsWith('rep:')?'Filter the report or click a bar to filter by it. Every number comes from ABI.':LEDE[k];if(lede)t.append(h('p','',lede));head.append(t);pg.append(head);box.append(pg);PAGES[k][1](pg);
@@ -644,7 +646,7 @@ async function chats(sel){if(!LIVE)return;const r=await cpost('/chat/list'),pk=$
 function paint(c){log.innerHTML='';steps=null;(c.messages||[]).forEach(m=>bubble(m.role==='me'?'me':'ai',m.text));if(!log.children.length)log.append(hello())}
 $('#chat-new').onclick=async()=>{const c=await cpost('/chat/new');paint(c);chats(c.id);inp.focus()};
 $('#chat-pick').onchange=async e=>{if(!e.target.value)return;const c=await cpost('/chat/open',{id:e.target.value});paint(c);chats(c.id)};
-$('#chat-toggle').onclick=()=>openChat();$('#chat .wide-t').onclick=()=>show(chatBox.classList.contains('full')?(PREV||'home'):'chat');$('#chat .x').onclick=()=>openChat(false);
+$('#chat-toggle').onclick=()=>openChat();$('#chat .wide-t').onclick=()=>{if(chatBox.classList.contains('full')){show(PREV||'home');openChat(true)}else show('chat')};$('#chat .x').onclick=()=>openChat(false);
 async function sendChat(){const t=inp.value.trim();if(!t)return;if(!LIVE){bubble('sys','Snapshot: start `python scripts/app.py '+D.project+'` to talk to the agent.');return}
  log.querySelector('.hello')?.remove();bubble('me',t);inp.value='';steps=null;
  await fetch('/chat',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({message:t,page:CUR})})}
@@ -652,7 +654,7 @@ $('#chat .send').onclick=sendChat;inp.onkeydown=e=>{if(e.key==='Enter'&&!e.shift
 $('#chat .stop').onclick=()=>fetch('/chat/stop',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'});
 if(LIVE){const es=new EventSource('/events?k='+encodeURIComponent(KEY)+'&c='+CID+'&m='+(MOBILE?1:0));
  es.onmessage=async ev=>{const e=JSON.parse(ev.data);
-  if(e.type==='show'){PENDING.filters=e.filters||null;if(e.page==='explore'&&e.query){const q={measures:e.query.measures||[],dimensions:(e.query.dimensions||[]).slice(0,1),filters:e.query.filters||[]};PENDING.explore={...q,chart:e.chart};MINE.unshift({name:'Agent: '+(e.note||q.measures.join(', ')),q,type:e.chart||'bar',at:new Date().toISOString().slice(0,16).replace('T',' ')});MINE=MINE.slice(0,30);try{localStorage.setItem('abi-explore',JSON.stringify(MINE))}catch(x){}sidebar()}const nv=h('div','m nav','→ '+(e.page==='report'?'report '+e.report:e.page)+(e.note?' · '+e.note:''));nv.onclick=()=>show(e.page==='report'?'rep:'+e.report:e.page);log.append(nv);log.scrollTop=log.scrollHeight;const k=e.page==='report'?'rep:'+e.report:e.page;show(k);setTimeout(()=>highlight(e.item),400);if(e.note)toast('Agent: '+e.note)}
+  if(e.type==='show'){PENDING.filters=e.filters||null;if(e.page==='explore'&&e.query){const q={measures:e.query.measures||[],dimensions:(e.query.dimensions||[]).slice(0,1),filters:e.query.filters||[]};PENDING.explore={...q,chart:e.chart};MINE.unshift({name:'Agent: '+(e.note||q.measures.join(', ')),q,type:e.chart||'bar',at:new Date().toISOString().slice(0,16).replace('T',' ')});MINE=MINE.slice(0,30);try{localStorage.setItem('abi-explore',JSON.stringify(MINE))}catch(x){}sidebar()}const nv=h('div','m nav','→ '+(e.page==='report'?'report '+e.report:e.page)+(e.note?' · '+e.note:''));nv.onclick=()=>show(e.page==='report'?'rep:'+e.report:e.page);log.append(nv);log.scrollTop=log.scrollHeight;const wasFull=chatBox.classList.contains('full');const k=e.page==='report'?'rep:'+e.report:e.page;show(k);if(wasFull)openChat(true);setTimeout(()=>highlight(e.item),400);if(e.note)toast('Agent: '+e.note)}
   else if(e.type==='data'){Object.assign(D,e.data);const k=CUR;sidebar();show(k);vc()}
   else if(e.type==='busy'){busy.hidden=!e.on;$('#chat .stop').hidden=!e.on}
   else if(e.type==='step'){if(!steps){steps=h('div','m steps');log.append(steps)}const last=[...steps.children].reverse().find(x=>x.dataset.t===e.tool&&x.dataset.s==='run');
