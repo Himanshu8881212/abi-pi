@@ -245,7 +245,7 @@ export default async function abi(pi: ExtensionAPI) {
 		} catch {}
 		return modeNow;
 	}
-	const PAGES = ["home", "report", "datasets", "measures", "model", "glossary", "explore", "sources", "staged", "tables", "flows", "ml", "tools", "agents", "docs", "security", "environments", "history"];
+	const PAGES = ["home", "report", "reports", "monitor", "vault", "datasets", "measures", "model", "glossary", "explore", "sources", "staged", "tables", "flows", "ml", "tools", "agents", "docs", "security", "environments", "history"];
 	pi.registerTool({
 		name: "abi_show",
 		label: "Show in the app",

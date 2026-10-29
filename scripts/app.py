@@ -99,11 +99,16 @@ dialog{border:2px solid var(--ink);background:var(--sheet);color:var(--ink);max-
 dialog h3{margin:0 0 12px;font:700 18px var(--display);text-transform:uppercase}dialog .row{margin-top:18px}dialog pre{white-space:pre-wrap;max-height:40vh}dialog::backdrop{background:color-mix(in srgb,var(--ink) 55%,transparent)}
 .trace{margin:12px 0 0;padding-left:20px}.trace li{margin:3px 0}.trace:empty{display:none}
 .stat{font:700 38px/1 var(--display);margin:4px 0 8px;text-transform:uppercase}
+.areas{display:grid;gap:6px}.areas .lk{display:flex;gap:16px;text-align:left;width:100%}.areas .lk b{min-width:9.5em}.areas .lk span{color:var(--mute)}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:12px}.kv b{font-weight:500;color:var(--mute)}
 pre{margin:10px 0 0}.pg .grid{gap:20px}.pg>section>h2{display:none}
 #chat{position:fixed;top:60px;right:0;bottom:0;width:420px;max-width:100vw;background:var(--sheet);border-left:2px solid var(--ink);display:flex;flex-direction:column;
  transform:translateX(100%);transition:transform .18s ease-out;z-index:7;padding-bottom:env(safe-area-inset-bottom,0px)}
 #chat.open{transform:none}body.chat-open main{padding-right:452px}
+#chat.full{position:static;width:auto;max-width:none;height:calc(100vh - 230px);min-height:420px;transform:none;border:2px solid var(--ink)}
+#chat.full .log,#chat.full .compose,#chat.full .ctx,#chat.full .busy{width:100%;max-width:880px;margin:0 auto}#chat.full .m{font-size:14px}#chat.full .x{display:none}
+#chat .ctx{padding:6px 18px 0;font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.08em}#chat .busy{display:flex;align-items:center;gap:10px}#chat .busy[hidden]{display:none!important}
+#chat .hello{display:flex;flex-direction:column;gap:8px}#chat .hello p{margin:0 0 4px;color:var(--mute);font-size:13px}#chat .m.nav{align-self:flex-start;border:0;padding:0;font-size:11px;color:var(--mute);cursor:pointer;text-decoration:underline}
 #chat header{position:static;display:flex;align-items:center;gap:8px;min-height:0;padding:14px 18px;border-bottom:2px solid var(--ink);background:none}
 #chat header h3{margin:0;font:700 16px var(--display);text-transform:uppercase;flex:1}#chat-pick{flex:1;min-width:0}
 #chat .log{flex:1;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:12px}
@@ -133,7 +138,7 @@ body[data-mode=viewer] .pghead{border-bottom-style:dashed}
 .list{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px}
 .links{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.lk{display:flex;gap:10px;align-items:baseline;text-align:left;border:1px solid var(--ink);background:none;color:var(--ink);padding:8px 10px;cursor:pointer;font:inherit}
 .lk:hover{background:var(--ink);color:var(--paper)}.lk b{font:700 18px var(--display);min-width:2ch}
-.sugg{display:flex;flex-direction:column;gap:8px}.sg{text-align:left;border:1px dashed var(--ink);background:none;color:var(--ink);padding:9px 12px;cursor:pointer;font:inherit}.sg:hover{border-style:solid;background:var(--paper)}
+.ask0{width:100%;font-size:1.05em}.sugg{display:flex;flex-direction:column;gap:8px}.sg{text-align:left;border:1px dashed var(--ink);background:none;color:var(--ink);padding:9px 12px;cursor:pointer;font:inherit}.sg:hover{border-style:solid;background:var(--paper)}
 @media (max-width:1100px){.home{grid-template-columns:1fr}.home .wide{grid-column:auto}.strip{grid-template-columns:repeat(2,minmax(0,1fr))}.strip .cell{border-bottom:1px solid var(--faint)}}
 .canvas{position:relative;height:min(70vh,720px);overflow:auto;border:2px solid var(--ink);background:
  radial-gradient(circle,var(--faint) 1px,transparent 1.2px) 0 0/22px 22px,var(--paper)}
@@ -210,33 +215,28 @@ async function team(at,al){let T;try{T=(await fetch('/team',{method:'POST',heade
    btn('Decline',async()=>{try{await answer(p.id,'decline');say(m,'Declined; the team will see it.');li.className=''}catch(e){say(m,e.message,1)}}));li.append(r,m);al.append(li)})}
 function home(box){const rd=D.readiness||{},q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),rowsQ=q.rows||[];
  const last=rowsQ.map(r=>r[ix('last_load')]).filter(Boolean).sort().pop(),problems=rowsQ.flatMap(r=>(r[ix('problems')]||[]).map(p=>`${r[ix('table')]}: ${p}`));
- // status strip: the four things to know before anything else
- const st=h('div','strip');[[rd.ready?'Ready':'Not ready',rd.ready?'ok':'bad','model'],[last?cell(last):'never','','last data load'],
-  [String(D.pending?.files?.length||0),D.pending?.files?.length?'warn':'','uncommitted changes'],[D.published?.at?cell(D.published.at):'not yet','','published'],
-  [MODE==='viewer'?'Viewer':'Developer','','mode']].forEach(([v,c,l])=>{const x=h('div','cell');x.append(h('div','v '+c,v),h('div','l',l));st.append(x)});box.append(st);
+ // the front door: ask first; the conversation moves to the side chat and the agent takes the person where things are
+ const ask0=card(MODE==='viewer'?'Ask anything about the numbers':'Ask, build or find anything'),ta=h('textarea','f ask0');ta.rows=2;
+ ta.placeholder=MODE==='viewer'?'e.g. Which channels grew fastest last quarter? Where do I see RPM by country?':'e.g. Add a measure for revenue per subscriber. Where are the flows?';
+ const go=()=>{const t=ta.value.trim();if(!t)return;openChat(true);inp.value=t;ta.value='';sendChat()};ta.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();go()}};
+ const sl=h('div','sugg');(MODE==='viewer'?['What changed last month, and why?','Where do I see revenue by country?','Is RPM defined the way the vault says?']
+  :['Where are the flows, and what do they do?','Check every measure against the vault definitions','Build a report of revenue by country and month']).forEach(t=>{const b=h('button','sg',t);b.onclick=()=>{ta.value=t;go()};sl.append(b)});
+ ask0.append(ta,sl);act(ask0,'Ask',go,1);ask0.classList.add('wide');box.append(ask0);
  const g=h('div','home');box.append(g);
- // headline numbers: the first report's KPI visuals, as ABI computed them
- const kp=card('Headline numbers',D.reports[0]?`from ${D.reports[0].name||D.reports[0].id}`:''),kb=h('div','kpis');kp.append(kb);kp.classList.add('wide');
- const kpis=(D.reports[0]?.pages||[]).flatMap(p=>p.visuals).filter(v=>v.data&&(v.data.type==='kpi'||(v.data.rows?.length===1&&v.data.columns.length===Object.keys(v.data.measures).length)));
- if(!kpis.length)kb.append(h('p','empty','No KPIs yet: ask the agent for a report with headline numbers.'));
- kpis.slice(0,4).forEach(v=>{const x=h('div','kpi');const m=v.data.columns[0];x.append(h('div','v',fmt(v.data.rows[0]?.[0],v.data.format?.[m])),h('div','l',v.title||v.data.measures[m]||m));kb.append(x)});
- if(D.reports[0])act(kp,'Open the report',()=>show('rep:'+D.reports[0].id));g.append(kp);
  // what needs attention
  const at=card('Needs attention');const al=h('ul','list');[...(rd.missing||[]).map(x=>typeof x==='string'?x:JSON.stringify(x)),...problems].forEach(t=>al.append(h('li','bad',t)));
  if(MODE==='developer'&&LIVE)team(at,al);
  if(!al.children.length)al.append(h('li','ok','Nothing: the model is ready and the data is fresh.'));at.append(al);
  act(at,'Check again',async()=>{D.quality=await api('data_quality',{});D.readiness=await api('readiness',{});show('home')});g.append(at);
- // what is in the project, as links
- const ct=card('In this project'),cl=h('div','links');[['measures','measures'],['reports','rep:'+(D.reports[0]?.id||'')],['queries','datasets'],['sources','sources'],['tables','tables'],
-  ['flows','flows'],['ml','ml'],['tools','tools'],['agents','agents']].forEach(([k,to])=>{const n=D.summary[k]||0;const a=h('button','lk');a.append(h('b','',String(n)),h('span','',{ml:'ML models'}[k]||k));a.onclick=()=>show(to);cl.append(a)});
- const vb=h('button','lk');vb.append(h('b','',String((VAULT||[]).length)),h('span','','vault documents'));vb.onclick=()=>show('vault');cl.append(vb);ct.append(cl);g.append(ct);
- // ask the agent: starting points that fit the mode
- const ag=card(MODE==='viewer'?'Ask the analyst':'Build with the agent'),sl=h('div','sugg');
- (MODE==='viewer'?['What changed last month, and why?','Which segment grew fastest? Show me.','Is revenue defined the way the vault says?']
-  :['Add a measure for average order value and show it','Build a report of revenue by region and month','Check every measure against the vault definitions']).forEach(t=>{const b=h('button','sg',t);b.onclick=()=>{openChat(true);inp.value=t;inp.focus()};sl.append(b)});
- ag.append(sl);g.append(ag);
- const c=card('Latest changes','History has all'),k=h('div','kv');(D.history||[]).slice(0,6).forEach(x=>k.append(h('b','',new Date(x.time*1000).toLocaleString([],{dateStyle:'short',timeStyle:'short'})),h('span','',x.message)));
- c.append(k);act(c,'All changes',()=>show('history'));g.append(c)}
+ // the map: every sidebar group with its pages and one line of status, in pipeline order
+ const mlok=D.ml.filter(m=>m.latest_score?.status==='ok').length,on=D.flows.filter(f=>f.enabled).length,lastC=(D.history||[])[0];
+ const line={Data:problems.length?`${problems.length} data problems`:`fresh · last load ${last?cell(last):'never'}`,'Data Model':rd.ready?'Ready':'Not ready',
+  Visualizations:`${D.reports.length} reports · ${MINE.length} of your analyses`,Automate:`${mlok} of ${D.ml.length} ML models scored · ${on} of ${D.flows.length} flows on`,
+  Knowledge:`${(VAULT||[]).length} vault documents`,Govern:`${D.pending?.files?.length||0} uncommitted · ${D.published?.at?'published '+cell(D.published.at):'not published'}${lastC?' · last: '+(lastC.message.length>70?lastC.message.slice(0,70)+'…':lastC.message):''}`};
+ const map=card('Where things stand','one line per area; open it to go there'),tb=h('div','areas');
+ line['Data Model']=(rd.ready?'Ready':'Not ready')+` · ${D.measures.length} measures`;
+ nav().filter(([gname])=>gname!=='Start').forEach(([gname,items])=>{const b=h('button','lk');b.append(h('b','',gname),h('span','',line[gname]||''));b.onclick=()=>show(items[0][0]);tb.append(b)});
+ map.append(tb);at.classList.add('wide');map.classList.add('wide'); map.style.gridColumn='1/-1';g.append(map)}
 
 // ---------- Analyze: one report per entry; filters and cross-filter ----------
 function report(box,rep){let flt=PENDING.filters||[];PENDING.filters=null;
@@ -556,14 +556,14 @@ function vaultPage(box){if(!LIVE){box.append(h('p','empty','The vault opens with
 // ---------- Knowledge: the agent team ----------
 // ---------- sidebar ----------
 const PENDING={filters:null,explore:null};
-const LEDE={vault:'Your business documents: definitions, finance rules, KPI specs. The agents search them before they define or check a measure.',home:'Is the model ready, is the data fresh, and what changed last.',datasets:'Saved questions to the model (measures by dimensions, with filters). Each run returns a fresh table; nothing is stored. Reports, flows and ML reuse them. Preview their rows.',
+const LEDE={vault:'Your business documents: definitions, finance rules, KPI specs. The agents search them before they define or check a measure.',home:'Start here: ask anything, see what needs attention, and every part of the project at a glance.',datasets:'Saved questions to the model (measures by dimensions, with filters). Each run returns a fresh table; nothing is stored. Reports, flows and ML reuse them. Preview their rows.',
  measures:'The business numbers. Edit a formula and ABI checks it before it saves; Test shows the total.',model:'Tables and how they join. Facts are black, dimensions are outlined.',
- reports:'The saved reports of this project. Open one to filter it and click through.',monitor:'Is anything wrong right now: data freshness, model readiness, ML runs and flows. Reports show the business; this shows the system.',explore:'Your own analysis: pick measures, a dimension and a filter; the numbers come from the model, so they match the reports. Keep the ones you want; nothing in the project changes.',glossary:'What the business words mean and which measures implement them.',sources:'Bronze: the data as it landed, one source per file or bucket folder. Reload, add or delete a source.',
+ chat:'Talk to the agent: ask a question, ask where something is, or ask for a change. When it shows you a page, the chat moves to the side and goes on.',reports:'The saved reports of this project. Open one to filter it and click through.',monitor:'Is anything wrong right now: data freshness, model readiness, ML runs and flows. Reports show the business; this shows the system.',explore:'Your own analysis: pick measures, a dimension and a filter; the numbers come from the model, so they match the reports. Keep the ones you want; nothing in the project changes.',glossary:'What the business words mean and which measures implement them.',sources:'Bronze: the data as it landed, one source per file or bucket folder. Reload, add or delete a source.',
  staged:'Silver: the cleaned and combined tables between the sources and the final tables. Hidden from the model; edit their steps here.',tables:'Gold: the final business tables the model and measures are built on. Edit kind, key, description and steps.',flows:'Automations. Run one now and follow its steps, or switch it on or off.',
  ml:'Forecasts, segments and anomaly models. Train, score and read the latest run.',tools:'Calculations your agents can call. Run one with inputs or run its tests.',
  agents:'Custom agents for this project. Ask one a question or run its evaluation set.',docs:'The project documentation ABI writes from its definitions.',
  security:'Who sees which rows. Roles are set in ABI itself.',environments:'Where each environment reads its data from.',history:'Every change is a commit in ABI. Newest first.'};let PAGES={},CUR='home';const side=$('aside');
-function nav(){return [['Start',[['home','Home',home]]],
+function nav(){return [['Start',[['home','Home',home],['chat','Chat',chatPage]]],
  ['Data',[['sources','Sources',sources,D.sources.length],['staged','Staged',stagedPage,(D.layers||[]).filter(t=>t.layer==='silver').length],['tables','Tables',tablesPage,(D.model?Object.keys(D.model.tables||{}).length:D.tables.length)]]],
  ['Data Model',[['model','Diagram',modelCanvas],['measures','Measures',measures,D.measures.length],
  ['glossary','Glossary',glossary,D.glossary.length],['datasets','Queries',datasets,D.datasets.length]]],
@@ -579,7 +579,8 @@ function sidebar(){side.innerHTML='';PAGES={};nav().forEach(([g,items])=>{const 
  items.forEach(([k,label,fn,n])=>{PAGES[k]=[label,fn];const b=h('button','it');b.dataset.k=k;
   b.append(h('span','',label));if(n!==undefined&&n!=='')b.append(h('span','n',String(n)));b.onclick=()=>show(k);list.append(b)});
  sec.append(hd,list);side.append(sec)});D.reports.forEach(r=>PAGES['rep:'+r.id]=[r.name||r.id,b=>report(b,r)])}
-function show(k){if(!PAGES[k])k='home';CUR=k;const sk=k.startsWith('rep:')?'reports':k;side.querySelectorAll('button.it').forEach(b=>b.classList.toggle('on',b.dataset.k===sk));
+let PREV='home';
+function show(k){if(!PAGES[k])k='home';if(k!=='chat'&&CUR!=='chat')PREV=k;else if(k==='chat'&&CUR!=='chat')PREV=CUR;{const cb=$('#chat');if(cb.classList.contains('full')){cb.classList.remove('full');$('#chat .wide-t').textContent='Full page';document.body.append(cb);if(k!=='chat')openChat(true)}}CUR=k;setTimeout(ctx);const sk=k.startsWith('rep:')?'reports':k;side.querySelectorAll('button.it').forEach(b=>b.classList.toggle('on',b.dataset.k===sk));
  const act=side.querySelector('button.it.on');if(act)act.closest('.sec').classList.remove('folded');
  const box=$('main');box.innerHTML='';const pg=h('div','pg'),head=h('div','pghead'),t=h('div');t.append(h('h2','',PAGES[k][0]));
  const lede=k.startsWith('rep:')?'Filter the report or click a bar to filter by it. Every number comes from ABI.':LEDE[k];if(lede)t.append(h('p','',lede));head.append(t);pg.append(head);box.append(pg);PAGES[k][1](pg);
@@ -590,7 +591,7 @@ const R=document.documentElement,TB=$('#theme');const dark=()=>R.dataset.theme?R
 const setTheme=t=>{if(t)R.dataset.theme=t;TB.textContent=dark()?'Paper':'Ink'};try{setTheme(localStorage.getItem('abi-theme'))}catch(e){setTheme()}
 TB.onclick=()=>{const t=dark()?'light':'dark';setTheme(t);try{localStorage.setItem('abi-theme',t)}catch(e){}};
 $('.snap').hidden=LIVE;$('.snap').title=`Snapshot of ${D.stamp}. Run scripts/app.py ${D.project} to work live.`;
-function setMode(md){MODE=md;document.body.dataset.mode=md;$('#m-dev').classList.toggle('on',md==='developer');$('#m-view').classList.toggle('on',md==='viewer');
+function setMode(md){MODE=md;setTimeout(()=>{ctx();const g=log.querySelector('.hello');if(g)g.replaceWith(hello())});document.body.dataset.mode=md;$('#m-dev').classList.toggle('on',md==='developer');$('#m-view').classList.toggle('on',md==='viewer');
  $('#chat textarea').placeholder=md==='viewer'?'Ask a question. In Viewer the agent only reads.':'Ask a question or for a change.'}
 async function pickMode(md){if(!LIVE){toast('Snapshot: start the app to switch modes.');return}
  await fetch('/mode',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({mode:md})})}
@@ -621,30 +622,42 @@ const chatBox=$('#chat'),log=$('#chat .log'),inp=$('#chat textarea'),busy=$('#ch
 const md=t=>t.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])).replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>');
 function bubble(cls,text){const b=h('div','m '+cls);if(cls==='ai')b.innerHTML=md(text);else b.textContent=text;log.append(b);log.scrollTop=log.scrollHeight;return b}
 let steps=null;
+// Chat page: the same conversation as the side panel, full width; leaving the page (or the agent showing one) puts it back at the side
+function chatPage(box){$('#chat .wide-t').textContent='Side panel';chatBox.classList.add('full','open');document.body.classList.remove('chat-open');box.append(chatBox);inp.focus()}
 function openChat(on){chatBox.classList.toggle('open',on??!chatBox.classList.contains('open'));document.body.classList.toggle('chat-open',chatBox.classList.contains('open'));if(chatBox.classList.contains('open'))inp.focus()}
-const INTRO=log.innerHTML;
+const STEP={abi_show:'opened a page',semantic_query:'asked the model',visual_data:'read a chart',abi_vault:'searched the vault',abi_tools:'picked tools',
+ semantic_model:'read the model',readiness:'checked readiness',data_quality:'checked data quality',how_calculated:'looked up a formula',set_measure:'saved a measure',
+ save_report:'saved a report',save_flow:'saved a flow',commit:'committed',changes:'listed changes',subagent:'asked the team',abi_prefs:'read your preferences',read:'read a file'};
+const stepName=t=>{const k=String(t).replace('mcp__abi__','');return STEP[k]||k.replace(/_/g,' ')};
+function hello(){const d=h('div','hello'),pg=PAGES[CUR]?.[0]||'this page';d.append(h('p','',MODE==='viewer'
+  ?'Ask about the numbers. I read the published project only, and every number comes from ABI.'
+  :'Ask a question, ask where something is, or say what to build or change. Changes stay uncommitted until you commit them.'));
+ [`What is on ${pg}, and what should I look at?`,...(MODE==='viewer'?['What changed last month, and why?','Where do I see revenue by country?']
+  :['What is still open in this project?','Where are the flows, and what do they do?'])].forEach(t=>{const b=h('button','sg',t);b.onclick=()=>{inp.value=t;sendChat()};d.append(b)});return d}
+function ctx(){const c=$('#chat .ctx'),g=log.querySelector('.hello');if(c)c.textContent=`${MODE==='viewer'?'Viewer · read-only':'Developer'} · on ${PAGES[CUR]?.[0]||CUR}`;if(g&&CUR!=='chat')g.replaceWith(hello())}
+const INTRO='';log.append(hello());
 async function cpost(u,b){return fetch(u,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json())}
 async function chats(sel){if(!LIVE)return;const r=await cpost('/chat/list'),pk=$('#chat-pick');pk.innerHTML='';
  const cur=sel||r.current;if(!r.chats.some(c=>c.id===cur))pk.append(new Option('New chat',cur||''));
  r.chats.forEach(c=>pk.append(new Option(`${c.title||'Chat'} · ${c.messages}`,c.id)));pk.value=cur||'';
  const del=$('#chat-del');if(del)del.hidden=!r.chats.length}
-function paint(c){log.innerHTML=INTRO;steps=null;(c.messages||[]).forEach(m=>bubble(m.role==='me'?'me':'ai',m.text));}
+function paint(c){log.innerHTML='';steps=null;(c.messages||[]).forEach(m=>bubble(m.role==='me'?'me':'ai',m.text));if(!log.children.length)log.append(hello())}
 $('#chat-new').onclick=async()=>{const c=await cpost('/chat/new');paint(c);chats(c.id);inp.focus()};
 $('#chat-pick').onchange=async e=>{if(!e.target.value)return;const c=await cpost('/chat/open',{id:e.target.value});paint(c);chats(c.id)};
-$('#chat-toggle').onclick=()=>{openChat();chats()};$('#chat .x').onclick=()=>openChat(false);
+$('#chat-toggle').onclick=()=>{openChat();chats()};$('#chat .wide-t').onclick=()=>show(chatBox.classList.contains('full')?(PREV||'home'):'chat');$('#chat .x').onclick=()=>openChat(false);
 async function sendChat(){const t=inp.value.trim();if(!t)return;if(!LIVE){bubble('sys','Snapshot: start `python scripts/app.py '+D.project+'` to talk to the agent.');return}
- bubble('me',t);inp.value='';steps=null;
+ log.querySelector('.hello')?.remove();bubble('me',t);inp.value='';steps=null;
  await fetch('/chat',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({message:t,page:CUR})})}
 $('#chat .send').onclick=sendChat;inp.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChat()}};
 $('#chat .stop').onclick=()=>fetch('/chat/stop',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'});
 if(LIVE){const es=new EventSource('/events?k='+encodeURIComponent(KEY)+'&c='+CID+'&m='+(MOBILE?1:0));
  es.onmessage=async ev=>{const e=JSON.parse(ev.data);
-  if(e.type==='show'){PENDING.filters=e.filters||null;if(e.page==='explore'&&e.query){const q={measures:e.query.measures||[],dimensions:(e.query.dimensions||[]).slice(0,1),filters:e.query.filters||[]};PENDING.explore={...q,chart:e.chart};MINE.unshift({name:'Agent: '+(e.note||q.measures.join(', ')),q,type:e.chart||'bar',at:new Date().toISOString().slice(0,16).replace('T',' ')});MINE=MINE.slice(0,30);try{localStorage.setItem('abi-explore',JSON.stringify(MINE))}catch(x){}sidebar()}const k=e.page==='report'?'rep:'+e.report:e.page;show(k);setTimeout(()=>highlight(e.item),400);if(e.note)toast('Agent: '+e.note)}
+  if(e.type==='show'){PENDING.filters=e.filters||null;if(e.page==='explore'&&e.query){const q={measures:e.query.measures||[],dimensions:(e.query.dimensions||[]).slice(0,1),filters:e.query.filters||[]};PENDING.explore={...q,chart:e.chart};MINE.unshift({name:'Agent: '+(e.note||q.measures.join(', ')),q,type:e.chart||'bar',at:new Date().toISOString().slice(0,16).replace('T',' ')});MINE=MINE.slice(0,30);try{localStorage.setItem('abi-explore',JSON.stringify(MINE))}catch(x){}sidebar()}const nv=h('div','m nav','→ '+(e.page==='report'?'report '+e.report:e.page)+(e.note?' · '+e.note:''));nv.onclick=()=>show(e.page==='report'?'rep:'+e.report:e.page);log.append(nv);log.scrollTop=log.scrollHeight;const k=e.page==='report'?'rep:'+e.report:e.page;show(k);setTimeout(()=>highlight(e.item),400);if(e.note)toast('Agent: '+e.note)}
   else if(e.type==='data'){Object.assign(D,e.data);const k=CUR;sidebar();show(k);vc()}
   else if(e.type==='busy'){busy.hidden=!e.on;$('#chat .stop').hidden=!e.on}
   else if(e.type==='step'){if(!steps){steps=h('div','m steps');log.append(steps)}const last=[...steps.children].reverse().find(x=>x.dataset.t===e.tool&&x.dataset.s==='run');
-   if(e.state==='run'||!last){const l=h('div','',`${e.state==='run'?'…':e.state==='ok'?'✓':'✗'} ${e.tool}`);l.dataset.t=e.tool;l.dataset.s=e.state;steps.append(l)}
-   else{last.textContent=`${e.state==='ok'?'✓':'✗'} ${e.tool}`;last.dataset.s=e.state;last.className=e.state==='ok'?'':'bad'}log.scrollTop=log.scrollHeight}
+   if(e.state==='run'||!last){const l=h('div','',`${e.state==='run'?'…':e.state==='ok'?'✓':'✗'} ${stepName(e.tool)}`);l.dataset.t=e.tool;l.dataset.s=e.state;steps.append(l)}
+   else{last.textContent=`${e.state==='ok'?'✓':'✗'} ${stepName(e.tool)}`;last.dataset.s=e.state;last.className=e.state==='ok'?'':'bad'}log.scrollTop=log.scrollHeight}
   else if(e.type==='answer'){steps=null;bubble('ai',e.text);chats();if(!chatBox.classList.contains('open'))toast('The agent answered')}
   else if(e.type==='ask'){const yes=await ask({message:e.title||'ABI asks for your confirmation',preview:e.message});bubble('sys',yes?'You confirmed.':'You declined.');
    fetch('/chat/answer',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({id:e.id,yes})})}
@@ -767,10 +780,9 @@ def build(project: str) -> Path:
     page = re.sub(r"<header>.*?</header>", lambda _: head, page, count=1, flags=re.S)
     page = page.replace("<main></main>", "<aside></aside><main></main>"
                         "<section id=chat><header><select class=f id=chat-pick aria-label='Chats'></select><button class=btn id=chat-new>New chat</button>"
-                        "<button class='btn stop' hidden>Stop</button><button class='btn x'>Close</button></header>"
-                        "<div class=log><div class='m sys'>Ask about this project, or ask for a change. Every number comes from ABI; changes"
-                        " that need your yes show ABI's dialog here.</div></div><div class=busy hidden>working…</div>"
-                        "<div class=compose><textarea class=f placeholder='e.g. which videos gained the most subscribers? show me'></textarea>"
+                        "<button class='btn wide-t' title='Full page or side panel'>Full page</button><button class='btn x'>Close</button></header>"
+                        "<div class=log></div><div class=busy hidden><span>working…</span><button class='btn stop'>Stop</button></div><div class=ctx></div>"
+                        "<div class=compose><textarea class=f placeholder='Ask, or say what to change. Enter sends, Shift+Enter is a new line.'></textarea>"
                         "<button class='btn pri send'>Send</button></div></section>"
                         "<dialog id=commit><h3>Changes not committed yet</h3><div class=files></div><label class=l for=c-message>Commit message</label>"
                         "<input class=f id=c-message><div class=row><button class='btn pri' id=c-commit>Commit</button><button class=btn id=c-undo>Undo last change</button>"
