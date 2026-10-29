@@ -1165,6 +1165,20 @@ SECTIONS = ["Data", "Data Model", "Visualizations", "Export", "Automate", "Knowl
 ROUTE_SECTION = {"/edits/rows": "Data", "/upload": "Data", "/report/export": "Export", "/data/export": "Export", "/video/export": "Export",
                  "/packs/file": "Export", "/transfer/": "Export", "/vault/": "Knowledge", "/analyses": "Visualizations"}
 REPORT_ACTIONS = {"visual_data", "report_snapshot", "export_visual", "save_report", "delete_report"}
+_SEC = {"Data": "add_data delete_source delete_table set_steps preview_steps refresh edit_cells approve_edit reject_edit undo_edits create_input_table",
+        "Data Model": "add_relationship remove_relationship set_measure delete_measure set_glossary_term delete_glossary_term save_dataset delete_dataset",
+        "Visualizations": "save_report delete_report", "Export": "export_visual report_snapshot", "Govern": "commit undo",
+        "Automate": "save_flow delete_flow enable_flow run_flow save_ml_model delete_ml_model train_model score_model save_tool publish_tool"
+                    " delete_tool run_tool test_tool save_agent publish_agent delete_agent run_agent test_agent"}
+ACTION_SECTION: dict[str, tuple] = {a: (sec,) for sec, acts in _SEC.items() for a in acts.split()} | {"set_table": ("Data", "Data Model")}
+
+
+def section_of(path: str) -> str | tuple | None:
+    """The sidebar section a request acts in (an admin can close it per person); None: reads every section uses."""
+    if path.startswith("/api/"):
+        hit = ACTION_SECTION.get(path.removeprefix("/api/"))
+        return hit[0] if hit and len(hit) == 1 else hit
+    return next((v for k, v in ROUTE_SECTION.items() if path.startswith(k)), None)
 HIDDEN_DATA = {"Data": ("sources", "source_specs", "table_steps", "layers"), "Knowledge": ("docs",), "Govern": ("history", "rls")}
 
 
@@ -1476,9 +1490,14 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, remote: str
             hub = hub_for(self.headers.get("X-Abi-Client", ""), self.headers.get("X-Abi-Mobile") == "1", self.headers.get("X-Abi-Project"), self.sess)
             project, asking.hid = hub.project, hub.hid
             acc = access(self.sess, project)
-            sec = next((v for k, v in ROUTE_SECTION.items() if self.path.startswith(k)), None)
-            if acc.get("sections") is not None and sec and sec not in acc["sections"]:
-                return self.reply(403, json.dumps({"error": f"{sec} isn't open to you in this project; ask an admin."}).encode())
+            sec = section_of(self.path)
+            if self.path == "/team/answer" and acc.get("sections") is not None:  # a step the team left runs in its own section
+                import team  # noqa: PLC0415 (sibling script)
+                with contextlib.suppress(SystemExit):  # no team in this project: nothing waits
+                    sec = section_of("/api/" + next((x["action"] for x in team.pending(project) if x["id"] == body.get("id")), ""))
+            secs = sec if isinstance(sec, tuple) else (sec,) if sec else ()
+            if acc.get("sections") is not None and secs and not set(secs) & set(acc["sections"]):
+                return self.reply(403, json.dumps({"error": f"{' / '.join(secs)} isn't open to you in this project; ask an admin."}).encode())
             rid = body.get("report")
             if acc.get("reports") is not None and rid and (self.path.split("/")[-1] in REPORT_ACTIONS or sec == "Export") and rid not in acc["reports"]:
                 return self.reply(403, json.dumps({"error": "That report isn't open to you; ask an admin."}).encode())

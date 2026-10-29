@@ -329,3 +329,12 @@ def test_pages_cannot_be_framed_or_sniffed(srv):
     h = urllib.request.urlopen(f"http://127.0.0.1:{port}/").headers
     assert h["X-Frame-Options"] == "DENY" and "frame-ancestors 'none'" in h["Content-Security-Policy"]
     assert h["X-Content-Type-Options"] == "nosniff" and h["Referrer-Policy"] == "no-referrer"
+
+
+def test_every_change_belongs_to_a_section_the_admin_can_close():
+    assert app.section_of("/api/set_measure") == "Data Model" and app.section_of("/api/add_data") == "Data"
+    assert app.section_of("/api/save_flow") == "Automate" and app.section_of("/api/save_report") == "Visualizations"
+    assert app.section_of("/api/commit") == "Govern" and app.section_of("/edits/rows") == "Data"
+    assert app.section_of("/api/semantic_query") is None, "reads serve every section"
+    unmapped = sorted(a for a in app.WRITES if app.section_of(f"/api/{a}") is None)
+    assert not unmapped, unmapped
