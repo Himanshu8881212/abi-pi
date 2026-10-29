@@ -1834,8 +1834,10 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                                  f"{'.'.join(map(str, x.get('loc') or []))}: {x.get('msg')}").strip() for x in b.get("errors") or [] if isinstance(x, dict))
             return {"error": "\n".join(filter(None, [b.get("message"), detail])) or json.dumps(b)[:500]}
 
-    srv = ThreadingHTTPServer(("0.0.0.0" if tailnet else "127.0.0.1", port), H)
-    srv.daemon_threads = True
+    class Server(ThreadingHTTPServer):
+        daemon_threads = True
+        request_queue_size = 128  # socketserver's 5: Linux resets the 6th waiting connection (a burst from one page)
+    srv = Server(("0.0.0.0" if tailnet else "127.0.0.1", port), H)
     host = f"127.0.0.1:{srv.server_address[1]}"  # port 0 = any free port
     url = f"http://{host}"
     srv.hub = hub_for("default")
