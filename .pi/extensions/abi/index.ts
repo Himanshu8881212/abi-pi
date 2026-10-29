@@ -437,7 +437,7 @@ export default async function abi(pi: ExtensionAPI) {
 				: DATA_FILE.test(real) ? `${p} is a data file; read data only through ABI (semantic_query)`
 				: /[\\/](scratch|\.venv|logs)([\\/]|$)/.test(path.relative(ROOT, real).replace(/^/, "/")) ? `${p} is not a definitions folder`
 				// the admin's API keys and everyone's chats: never through the agent's file tools
-				: /[\\/]workspaces[\\/](_settings|[^\\/]+[\\/]_views)([\\/]|$)|secret\.key$/.test(real) ? `${p} holds keys or other people's chats`
+				: /[\\/]workspaces[\\/](_settings|[^\\/]+[\\/](_views|_team|_app[\\/][^\\/]+[\\/]packs))([\\/]|$)|secret\.key$/.test(real) ? `${p} holds keys, other people's chats, packs or the team's journal (the team reads it through its tools)`
 				: (name === "write" || name === "edit") && /[\\/]workspaces[\\/][^\\/]+[\\/][a-z][a-z0-9_]*[\\/]/.test(real)
 					? `${p} is in a project folder; ABI is the source of truth, change it through ABI actions` : null;
 			if (why) return { block: true, reason: `Refused: ${why}.` };

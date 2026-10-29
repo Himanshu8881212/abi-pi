@@ -81,6 +81,7 @@ def test_the_agents_file_tools_refuse_keys_and_chats():
     m = re.search(r"/(\[\\\\/\]workspaces\[\\\\/\]\(_settings\|.*?secret\\\.key\$)/\.test\(real\)", src)
     assert m, "the guard names the settings folder, the chats and key files"
     rx = re.compile(m.group(1).replace("\\\\", "\\"))
-    for bad in ("/x/workspaces/_settings/settings.json", "/x/workspaces/_settings/secret.key", "/x/workspaces/youtube/_views/yt_cms/chats/ann/a.json"):
+    for bad in ("/x/workspaces/_settings/settings.json", "/x/workspaces/_settings/secret.key", "/x/workspaces/youtube/_views/yt_cms/chats/ann/a.json",
+                "/x/workspaces/youtube/_team/yt_cms/journal.jsonl", "/x/workspaces/youtube/_app/yt_cms/packs/p1/01-r-v.csv"):
         assert rx.search(bad), bad
-    assert not rx.search("/x/workspaces/youtube/yt_cms/model/model.json")
+    assert not rx.search("/x/workspaces/youtube/yt_cms/model/model.json") and not rx.search("/x/workspaces/youtube/_vault/yt_cms/files/d.md")
