@@ -531,3 +531,29 @@ def test_parquet_is_the_only_input(tmp_path):
     (tmp_path / "x.csv").write_text("a\n1\n")
     with pytest.raises(abi.ActionError, match="S3 folder of Parquet"):
         abi.upload("p", "t", tmp_path / "x.csv")
+
+
+def test_the_agent_makes_monitor_checks_and_explore_analyses(srv):
+    """abi_monitor and abi_explore: the app's own Monitor checks and Explore analyses, through the agent's channel."""
+    port, _, _ = srv
+
+    def agent(route, body):
+        req = urllib.request.Request(f"http://127.0.0.1:{port}{route}", json.dumps({"project": P, **body}).encode(),
+                                     {"X-Abi-Agent": HUB.agent_key, "Content-Type": "application/json"})
+        try:
+            return 200, json.loads(urllib.request.urlopen(req).read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read())
+    week = {"name": "Revenue down on last week", "kind": "measure", "measure": "revenue", "op": "<", "against": "prev", "value": -15,
+            "period": "calendar.week"}
+    code, r = agent("/agent/monitor", {"action": "save", "check": week})
+    assert code == 200 and any(c["id"] == "revenue_down_on_last_week" and c["period"] == "calendar.week" for c in r["result"])
+    code, r = agent("/agent/monitor", {"action": "save", "check": {"name": "x", "kind": "measure", "measure": "revenue", "op": "<", "against": "measure"}})
+    assert code == 400 and "other" in r["error"], "a target check names the other measure"
+    assert all(c["id"] != "revenue_down_on_last_week" for c in agent("/agent/monitor", {"action": "delete", "id": "revenue_down_on_last_week"})[1]["result"])
+    code, r = agent("/agent/analysis", {"action": "save", "name": "Revenue by region", "query": {"measures": ["revenue"], "dimensions": ["orders.region"]}, "chart": "bar"})
+    assert code == 200 and r["result"][0]["name"] == "Revenue by region" and r["result"][0]["q"]["dimensions"] == ["orders.region"]
+    assert agent("/agent/analysis", {"action": "save", "name": "", "query": {"measures": []}})[0] == 400
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/agent/monitor", b"{}", {"X-Abi-Agent": "wrong"})
+    with pytest.raises(urllib.error.HTTPError):
+        urllib.request.urlopen(req)

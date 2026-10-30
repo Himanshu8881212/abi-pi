@@ -1581,6 +1581,61 @@ def team_view(t: dict, acc: dict) -> dict:
     return {**t, "journal": [], "brief": ""} if acc else t
 
 
+OPS = ("<", "<=", ">", ">=", "=", "!=")
+
+
+def agent_monitor(project: str, body: dict, by: str) -> list:
+    """abi_monitor: list, save or delete one of Monitor's checks (monitor.json "checks", what the page evaluates).
+    measure: {measure, op, against: value|measure|prev, value | other | period (calendar column), by?, filters?};
+    fresh: {table, hours}; flow: {flow}."""
+    mon = render.j(app_dir(project) / "monitor.json", {}) or {}
+    checks = mon.get("checks") or []
+    if body.get("action") == "delete":
+        checks = [c for c in checks if c.get("id") != body.get("id")]
+    elif body.get("action") == "save":
+        c = body.get("check") or {}
+        cid = re.sub(r"[^a-z0-9]+", "_", str(c.get("name") or c.get("id") or "").lower()).strip("_")[:60]
+        if not cid:
+            raise ValueError("Give the check a name.")
+        kind, ag = c.get("kind"), c.get("against", "value")
+        need = {"measure": ["measure", "op"] + {"value": ["value"], "measure": ["other"], "prev": ["value", "period"]}.get(ag, ["?"]),
+                "fresh": ["table", "hours"], "flow": ["flow"]}.get(kind)
+        if need is None or any(c.get(k) in (None, "") for k in need) or (kind == "measure" and c["op"] not in OPS):
+            raise ValueError(f"A {kind or '?'} check needs {', '.join(need or ['kind: measure, fresh or flow'])}"
+                             + (f"; op is one of {' '.join(OPS)}" if kind == "measure" else "") + ".")
+        keep = ("measure", "op", "against", "value", "other", "period", "by", "filters", "table", "hours", "flow")
+        c = {"id": cid, "name": str(c.get("name") or cid)[:120], "kind": kind} | {k: c[k] for k in keep if c.get(k) not in (None, "")}
+        checks = [x for x in checks if x.get("id") != cid] + [c]
+        if len(checks) > 50:
+            raise ValueError("At most 50 checks.")
+    if body.get("action") in ("save", "delete"):
+        app_save(project, "monitor.json", mon | {"checks": checks}, by)
+    return checks
+
+
+def agent_analysis(project: str, body: dict, by: str) -> list:
+    """abi_explore: keep an analysis in Explore's saved analyses (analyses.json, shared in the project), or list them."""
+    items = render.j(app_dir(project) / "analyses.json", []) or []
+    if body.get("action") == "save":
+        q, name = body.get("query") or {}, str(body.get("name") or "").strip()[:120]
+        if not name or not q.get("measures"):
+            raise ValueError("Give the analysis a name and at least one measure.")
+        a = {"name": name, "q": {"measures": q["measures"], "dimensions": (q.get("dimensions") or [])[:1], "filters": q.get("filters") or []},
+             "type": body.get("chart") if body.get("chart") in ("bar", "line", "table") else "bar", "at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")}
+        items = ([a] + [x for x in items if x.get("name") != name])[:100]
+        app_save(project, "analyses.json", items, by)
+    return items
+
+
+def engine_model() -> None:
+    """ABI's engine gets the agent's model (settings.engine_sync), so the custom agents people build can answer."""
+    import settings  # noqa: PLC0415 (sibling script)
+    try:
+        print("abi-pi:", settings.engine_sync(), file=sys.stderr)
+    except (abi.ActionError, OSError, ValueError) as e:
+        print("abi-pi: engine model not set:", getattr(e, "body", None) or e, file=sys.stderr)
+
+
 def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bool | str = False, signin: bool = False) -> ThreadingHTTPServer:
     """tailnet: listen on every interface but answer only this machine and Tailscale devices (100.64.0.0/10, your tailnet).
     signin: everyone signs in with their own ABI account; the app then acts as them (their roles, row-level security,
@@ -1866,6 +1921,19 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                         page = f"rep:{body['report']}" if body.get("page") == "report" and body.get("report") else str(body.get("page") or "home")
                         for h0 in [h for h in targets if p not in (h.project, pub_id(h.project))]:
                             h0.emit({"type": "open", "project": p, "page": page})
+                elif self.path in ("/agent/monitor", "/agent/analysis"):  # the app's own files the agent may write (abi_monitor, abi_explore)
+                    p = str(body.get("project", "")).removesuffix("_pub")
+                    if not known(p):
+                        return self.reply(400, b'{"error":"no such project"}')
+                    if self.path == "/agent/monitor" and any(h.mode == "viewer" for h in targets):
+                        return self.reply(403, b'{"error":"Viewer mode is read-only: monitors are made in Developer."}')
+                    by = next((h.user for h in targets if h.user), "")
+                    try:
+                        out = agent_monitor(p, body, by) if self.path == "/agent/monitor" else agent_analysis(p, body, by)
+                    except ValueError as e:
+                        return self.reply(400, json.dumps({"error": str(e)}).encode())
+                    changed(p)
+                    return self.reply(200, json.dumps({"result": out}).encode())
                 elif self.path == "/agent/changed":
                     changed(body["project"].removesuffix("_pub") if known(str(body.get("project", "")).removesuffix("_pub")) else default)
                 return self.reply(200, b"{}")
@@ -2132,6 +2200,8 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                     out = settings.public()
             except ValueError as e:
                 return 400, json.dumps({"error": str(e)}).encode()
+            if op in ("settings/provider", "settings/remove", "settings/default"):  # ABI's custom agents use the same model
+                threading.Thread(target=engine_model, daemon=True).start()
             for h in HUBS.values():  # the next message starts each chat's agent with the new settings
                 if h.pi and h.pi.poll() is None and not h.busy:
                     h.pi.terminate()
@@ -2237,6 +2307,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
     host = f"127.0.0.1:{srv.server_address[1]}"  # port 0 = any free port
     url = f"http://{host}"
     srv.hub = hub_for("default")
+    threading.Thread(target=engine_model, daemon=True).start()
     srv.hubs = HUBS
 
     def watch() -> None:  # changes made outside this app (an agent team in a terminal, ABI's own app): follow ABI's history

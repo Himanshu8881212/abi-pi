@@ -80,12 +80,23 @@ class MainModel(BaseModel):
     model: str = Field(pattern=ID, description="a provider model alias (small, large, …) or auto")
 
 
+def _private(url: str) -> bool:
+    """ABI-PI: a model server on the same machine or LAN (an IP literal, private or loopback) may be plain http; the key
+    then never crosses the internet. Host names don't count: they can point anywhere."""
+    import ipaddress  # noqa: PLC0415
+    try:
+        ip = ipaddress.ip_address(urllib.parse.urlsplit(url).hostname or "")
+    except ValueError:
+        return False
+    return ip.is_private or ip.is_loopback
+
+
 @action(Role.owner)
 def set_llm_provider(conn, user: User, args: Provider) -> dict:
     """Adds or changes a workspace LLM provider (AG-6); agent prompts go to its base URL, its key is a ${secret:NAME} reference."""
     if args.api_key:
-        if args.base_url.startswith("http://"):
-            raise ActionFailed(400, "A provider with an api_key needs an https:// base URL.")
+        if args.base_url.startswith("http://") and not _private(args.base_url):
+            raise ActionFailed(400, "A provider with an api_key needs an https:// base URL (http:// only on a private or loopback address).")
         name = args.api_key[len("${secret:"):-1]
         if not conn.execute("SELECT 1 FROM secrets WHERE name = %s AND tenant IS NULL", [name]).fetchone():  # SC-9: platform only
             raise ActionFailed(400, credentials.UNKNOWN)

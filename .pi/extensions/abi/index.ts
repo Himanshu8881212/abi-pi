@@ -241,7 +241,7 @@ export default async function abi(pi: ExtensionAPI) {
 		"data_quality", "list_reports", "list_tools", "list_agents", "list_flows", "ml_models", "changes", "visual_data", "dataset_data", "rls_rules",
 		"list_snapshots", "preview_steps", "edit_history", "edit_proposals", "flow_runs", "agent_runs", "history", "diff", "ml_history", "get_sharing",
 		"list_share_links", "shared_with_me", "test_tool", "run_tool", "test_agent", "sql_query", "project_locale", "remote_settings", "check_condition"]);
-	const READ_STEPS = new Set(["abi_tools", "abi_show", "abi_sync", "abi_health", "abi_cli", "abi_prefs", "abi_vault", "read", "ls", "grep", "find", "subagent", "tool_search"]);
+	const READ_STEPS = new Set(["abi_tools", "abi_show", "abi_explore", "abi_sync", "abi_health", "abi_cli", "abi_prefs", "abi_vault", "read", "ls", "grep", "find", "subagent", "tool_search"]);
 	let readsFrom: string | undefined;
 	let modeAt = 0, modeNow = process.env.ABI_PI_MODE === "viewer" ? "viewer" : "developer";
 	async function mode(): Promise<string> {
@@ -277,6 +277,44 @@ export default async function abi(pi: ExtensionAPI) {
 			const a = await appFor(p.project);
 			return text(ok && a ? `Shown in the person's app: ${a.url}/#${p.page === "report" ? `rep:${p.report}` : p.page}` : "The app couldn't be opened; give the person the path workspaces/<ws>/" + p.project + "/app.html instead.");
 		},
+	});
+	// ---------- the app's own Monitor checks and Explore analyses (files of the app, not ABI actions) ----------
+	async function appCall(project: string, route: string, body: unknown): Promise<string> {
+		const a = await appFor(project);
+		if (!a) return "No ABI-PI app is running for this project; monitors and saved analyses live in the app.";
+		try {
+			const r = await fetch(`${a.url}${route}`, { method: "POST", headers: { "X-Abi-Agent": a.key, "X-Abi-Client": process.env.ABI_APP_CLIENT ?? "", "Content-Type": "application/json" }, body: JSON.stringify({ project, ...(body as object) }) });
+			return JSON.stringify(await r.json());
+		} catch (e) { return `The app could not be reached: ${String(e).slice(0, 120)}`; }
+	}
+	pi.registerTool({
+		name: "abi_monitor",
+		label: "Monitor checks",
+		description: "The app's Monitor page: list, save or delete a check; the page evaluates it live and turns it red when the condition holds (people pin it to Home). Use it for 'tell me when / alert me / watch'. Kinds: measure — {measure, op (< <= > >= = !=), against: 'value' + value | 'measure' + other (a measure ID, e.g. a target) | 'prev' + value (% change) + period (a calendar column, e.g. calendar.week: the latest period against the one before)}, optional by (a column: alert per member, e.g. each region) and filters [{column, op:'=', value}]; fresh — {table, hours} (no load within that many hours); flow — {flow} (its last run failed). Test the measure with semantic_query first. Developer mode only.",
+		parameters: Type.Object({
+			project: Type.String({ pattern: "^[a-z][a-z0-9_]{0,62}$" }),
+			action: Type.String({ enum: ["list", "save", "delete"] }),
+			check: Type.Optional(Type.Object({ name: Type.String(), kind: Type.String({ enum: ["measure", "fresh", "flow"] }), measure: Type.Optional(Type.String()),
+				op: Type.Optional(Type.String()), against: Type.Optional(Type.String({ enum: ["value", "measure", "prev"] })), value: Type.Optional(Type.Number()),
+				other: Type.Optional(Type.String()), period: Type.Optional(Type.String()), by: Type.Optional(Type.String()),
+				filters: Type.Optional(Type.Array(Type.Object({ column: Type.String(), op: Type.String(), value: Type.Any() }))),
+				table: Type.Optional(Type.String()), hours: Type.Optional(Type.Number()), flow: Type.Optional(Type.String()) })),
+			id: Type.Optional(Type.String({ description: "the check's ID, with action delete" })),
+		}),
+		async execute(_id, p) { return text(await appCall(p.project, "/agent/monitor", p)); },
+	});
+	pi.registerTool({
+		name: "abi_explore",
+		label: "Explore analyses",
+		description: "Explore's saved analyses (shared in the project, people open and pin them): list them, or save one — a name, a query {measures, dimensions (at most one), filters} and a chart (bar, line or table). Run the query with semantic_query first. Use it when asked to explore, save or keep an analysis.",
+		parameters: Type.Object({
+			project: Type.String({ pattern: "^[a-z][a-z0-9_]{0,62}$" }),
+			action: Type.String({ enum: ["list", "save"] }),
+			name: Type.Optional(Type.String()),
+			query: Type.Optional(Type.Object({ measures: Type.Array(Type.String()), dimensions: Type.Optional(Type.Array(Type.String())), filters: Type.Optional(Type.Array(Type.Any())) })),
+			chart: Type.Optional(Type.String({ enum: ["bar", "line", "table"] })),
+		}),
+		async execute(_id, p) { return text(await appCall(p.project, "/agent/analysis", p)); },
 	});
 	// a change through ABI: the open page reloads its data (no-op when no app is open for that project)
 	const CHANGES = /^(set_|save_|delete_|add_|build_|create_|edit_|propose_|approve_|reject_|enable_|run_|train_|score_|refresh|publish_|import_|revert|undo|commit|remove_|rename_|undo_edits|sync_edits)/;

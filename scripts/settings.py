@@ -8,6 +8,7 @@ as n8n does with its encryption key. The page only ever sees "set, ends in 1234"
 
     settings.py public            the settings without keys (JSON)
     settings.py key <provider>    that provider's API key (for Pi's apiKey command; never shown to a person)
+    settings.py engine            give ABI's engine the agent's model (its custom agents use it)
 """
 import json
 import os
@@ -133,6 +134,42 @@ def _builtin(base: str) -> str:
         return ""
 
 
+def engine_sync() -> str:
+    """ABI's engine runs the custom agents people build (and flows' agent steps) with its own LLM providers: give it the
+    model this app's agent uses, so they answer too. The key goes in as an engine secret bound to that one host; the
+    engine's confirmation is the admin's own choice of that address (Settings, or ABI_PI_LLM_BASE at deployment).
+    OpenAI-compatible providers only (the engine speaks /chat/completions). Returns what it did, never a key."""
+    import urllib.parse  # noqa: PLC0415
+    import abi  # noqa: PLC0415 (sibling script)
+    import creds  # noqa: PLC0415
+    s = load()
+    if s["model"]:
+        pid, _, mid = s["model"].partition("/")
+        p = next((x for x in s["providers"] if x["id"] == pid), None)
+        if not p or p["api"] not in ("openai-completions", "openai-responses"):
+            return "skipped: the default model's provider is not OpenAI-compatible"
+        base, key = p["base_url"].rstrip("/"), key_of(pid)
+    else:
+        try:
+            base, key = creds.proxy("API base URL").rstrip("/"), creds.proxy("API key")
+        except (OSError, SystemExit):
+            return "skipped: no model connected"
+        mid = json.loads((Path(__file__).resolve().parent.parent / ".pi/settings.json").read_text())["defaultModel"]
+    if not base:
+        return "skipped: no model connected"
+    args = {"id": "abi-pi", "base_url": base, "models": {"small": mid, "large": mid}}
+    if key and key != "none":
+        abi.call("set_secret", name="ABI_PI_LLM", value=key, allowed_hosts=[urllib.parse.urlsplit(base).hostname])
+        args["api_key"] = "${secret:ABI_PI_LLM}"
+    try:
+        abi.call("set_llm_provider", **args)
+    except abi.ActionError as e:
+        if e.status != 409 or not e.body.get("confirm_token"):
+            raise
+        abi.call("set_llm_provider", confirm=e.body["confirm_token"], **args)
+    return f"engine provider abi-pi: {base} model {mid}"
+
+
 def key_of(pid: str) -> str:
     p = next((x for x in load()["providers"] if x["id"] == pid), None)
     if p and p.get("key"):
@@ -203,6 +240,8 @@ def demo(tmp: Path) -> None:
 if __name__ == "__main__":
     if sys.argv[1:2] == ["public"]:
         print(json.dumps(public()))
+    elif sys.argv[1:2] == ["engine"]:
+        print(engine_sync())
     elif sys.argv[1:2] == ["key"] and len(sys.argv) == 3:
         print(key_of(sys.argv[2]))
     else:
