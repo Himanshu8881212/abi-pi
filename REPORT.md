@@ -177,14 +177,15 @@ Correctness sweep (round 8): every one of the 32 pages opened in Developer and i
 
 Before hosting on the local infrastructure:
 
-- [x] ABI-PI is independent: its own engine (`engine/`, a copy of ABI's backend), Postgres and data; one container (3.98 GB) holds all of it, the data in one volume. No other ABI is needed.
+- [x] ABI-PI is independent: its own engine (`engine/`, a copy of ABI's backend), Postgres and data; one container (3.99 GB, tini as PID 1, user `abi`, health check) holds all of it, the data in one volume. No other ABI is needed.
 - [x] Everyone signs in with their own ABI account; the app acts as them (roles, row-level security, reports). `--single` refuses the network.
 - [x] Admins (ABI workspace owners) manage people in Govern › Users & access; sections and reports per person are enforced by the server, not just hidden.
 - [x] Sessions: HttpOnly, SameSite=Strict, `Secure` behind HTTPS; sign-out and the 12 h expiry end the ABI session too.
 - [x] Every request answers (400 for bad input, 500 without details); security headers on every response; no figures in logs.
 - [x] Chats, board packs and the team journal are per person or limited to who may see them.
 - [x] Import refuses zip bombs and never brings waiting steps; pack file names are safe IDs.
-- [x] Tests pass (`.venv/bin/python -m pytest -q tests`).
+- [x] Backup and restore: `scripts/backup.sh backup|keys|restore` in a running container; a restore into a new volume answers the same rows.
+- [x] Tests pass (30 Oct 2026): offline 64 (`.venv/bin/python -m pytest -q tests`), live agent 18 of 18, `tests/container_check.sh` 13 of 13, `tests/container_fuzz.py` 17 of 17; all 30 pages draw in Chrome with no script error.
 - [ ] Put the app behind an HTTPS reverse proxy (it speaks HTTP; the proxy should send `X-Forwarded-Proto: https`) and run it with `--open` only behind that proxy.
 - [ ] Configure the engine's email delivery (`ABI_PUBLIC_URL` and the account mail server) so Users & access invitations and flow emails reach people.
 - [ ] Bring yt_cms onto the own engine: its sources (RustFS S3) and about 100M rows need the data loaded again (the old ABI's copy stays in `workspaces.old-abi/`).
@@ -237,3 +238,5 @@ The release is now the ABI-PI container (self-hosted like n8n). Container checks
 | 51 | Page (deep link) | Opening the app at `…/#chat` (a bookmark, a shared link) threw "Cannot access 'chatBox' before initialization" and drew an empty page: the first page was drawn before the chat's parts further down the script were declared. Every walk-through had started at Home. | The first page is drawn once the whole script has run. Test: `test_a_link_straight_to_a_page_draws_after_the_script`; checked in Chrome at #chat. |
 
 Release loop on the independent ABI-PI (29 Oct 2026, findings 35–40): pass 1 found the PDF cut-off (#39) and the image weight (#40); passes 2 and 3 found nothing new on the own engine and the trimmed container (security fuzz without publish or send, Settings, 200 parallel queries over 10 sessions, a forged cookie, a hard kill with the data kept, zip export/import, PDF/PPTX/video inside the container, no secret in logs, files, layers or `docker inspect` beyond what was passed). Loop stopped.
+
+Second release loop (29–30 Oct 2026, findings 48–51) over security, end to end, stress, edge cases, the container and the code: passes 1, 2 and 4 found #48–#51 (pass 4's live tests were blocked for 2.5 h by the model proxy's quota, which surfaced #50); passes 5 and 6 found nothing new with every test passing (offline, live, container, fuzz, Chrome). Loop stopped.
