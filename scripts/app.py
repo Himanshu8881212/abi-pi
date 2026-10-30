@@ -161,7 +161,7 @@ body[data-mode=viewer] .ed{background:transparent;border-color:transparent;paddi
 .tbl .cols{}.tbl .col{display:grid;grid-template-columns:14px 1fr auto;gap:6px;align-items:center;padding:4px 12px;font-size:12px;border-bottom:1px solid var(--line)}
 .tbl .col .ty{grid-column:3;color:var(--mute);font:10px var(--mono)}.tbl .col>span:not(.dot):not(.ty){grid-column:2;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tbl .dot{width:9px;height:9px;border:1.5px solid var(--mute);border-radius:50%;cursor:crosshair}.tbl .dot:hover{background:var(--signal);border-color:var(--signal)}
 .cards>.wide{grid-column:1/-1}
-.lay{display:grid!important;grid-template-columns:repeat(12,minmax(0,1fr))!important}.lay>*{max-width:none!important}
+.loose{display:grid;grid-template-columns:minmax(0,1fr);gap:16px}.lay>.rowhead{grid-column:1/-1;order:-1}.lay{display:grid!important;grid-template-columns:repeat(12,minmax(0,1fr))!important}.lay>*{max-width:none!important}
 .card.sized{overflow:auto}.card.sized>.body{flex:1;min-height:0}.card.sized>.body svg{height:100%}
 body.laying .lay>*{outline:1px dashed var(--signal);outline-offset:-1px;cursor:grab;position:relative;user-select:none}body.laying .lay>*.drag{opacity:.4}body.laying .lay>*.over{box-shadow:inset 3px 0 0 var(--signal)}
 .rz{position:absolute;right:0;bottom:0;width:18px;height:18px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,var(--signal) 50%);z-index:2}body:not(.laying) .rz{display:none}
@@ -988,14 +988,16 @@ function show(k){if(!PAGES[k])k='home';if(k!=='chat'&&CUR!=='chat')PREV=k;else i
 // ---------- layout: Layout (Developer, desktop) lets you drag a card to move it and drag its corner to resize it (12
 // columns, 20 px steps). A report keeps it in ABI's report (x, y, w, h: commit, then publish); every other page in the
 // app's layouts.json, a draft that Publish copies to what Viewer sees ----------
-let LAYING=false;const LG=':scope .cards:not(.rows):not(.stack),:scope .home,:scope .layers,:scope .grid';
+let LAYING=false;const LG=':scope .cards,:scope .home,:scope .layers,:scope .grid,:scope .loose',grids=pg=>[...pg.querySelectorAll(LG)].filter(g=>!g.parentElement.closest('.card'));
 const layFile=()=>(D.app||={}).layouts||={},laySaved=k=>(layFile()[MODE==='viewer'?'published':'draft']||{})[k]||{};
 const layKids=g=>[...g.children].filter(c=>!c.classList.contains('rowhead')),ttl=c=>(c.querySelector(':scope>h3>span')?.textContent||'').trim();
 const lkey=(g,c,i)=>c.dataset.lk||ttl(c)+'#'+layKids(g).slice(0,i).filter(x=>ttl(x)===ttl(c)).length;
 function lay(pg,k){if(document.body.classList.contains('mobile')||innerWidth<820)return;const S=laySaved(k);
- pg.querySelectorAll(LG).forEach((g,gi)=>{const s=S[gi]||{};if(!LAYING&&!Object.keys(s).length&&!g.classList.contains('lay')&&!g.dataset.page)return;g.classList.add('lay');
+ // cards straight on the page (Docs, Video, History…) go into one grid, so every page has containers to arrange
+ [...pg.children].filter(c=>c.classList.contains('card')).forEach(c=>{const w=c.previousElementSibling?.classList.contains('loose')?c.previousElementSibling:c.before(h('div','loose'))||c.previousElementSibling;w.append(c)});
+ grids(pg).forEach((g,gi)=>{const s=S[gi]||{};if(!LAYING&&!Object.keys(s).length&&!g.classList.contains('lay')&&!g.dataset.page)return;g.classList.add('lay');
   layKids(g).forEach((c,i)=>{const x=s[lkey(g,c,i)];
-   c.dataset.w||=(c.style.gridColumn.match(/span (\d+)/)||[])[1]||(c.classList.contains('full')?12:c.classList.contains('wide')?(g.classList.contains('home')?8:12):4);
+   c.dataset.w||=(c.style.gridColumn.match(/span (\d+)/)||[])[1]||(g.matches('.rows,.stack,.loose')||c.classList.contains('full')?12:c.classList.contains('wide')?(g.classList.contains('home')?8:12):4);
    const ht=x?x.h:c.dataset.h;c.style.gridColumn='span '+(x?.w||c.dataset.w);c.style.order=x?.o??i;c.style.height=ht?ht+'px':'';c.classList.toggle('sized',!!+ht);
    c.draggable=LAYING;if(LAYING&&!c.querySelector(':scope>.rz'))c.append(rz(c))});
   if(LAYING&&!g.dataset.dnd){g.dataset.dnd=1;let src=null;const on=e=>{const t=e.target.closest?.('.lay>*');return t?.parentElement===g?t:null},clr=()=>g.querySelectorAll('.over').forEach(x=>x.classList.remove('over'));
@@ -1005,10 +1007,10 @@ function lay(pg,k){if(document.body.classList.contains('mobile')||innerWidth<820
     ks.splice(ks.indexOf(src),1);ks.splice(ks.indexOf(t),0,src);ks.forEach((c,i)=>c.style.order=i);layStore()});
    g.addEventListener('dragend',()=>{src?.classList.remove('drag');clr();src=null})}})}
 function rz(c){const r=h('div','rz');r.title='Drag to resize';r.onpointerdown=e=>{e.preventDefault();e.stopPropagation();const g=c.parentElement,gap=parseFloat(getComputedStyle(g).columnGap)||16,col=(g.clientWidth-11*gap)/12,b=c.getBoundingClientRect();
- r.setPointerCapture(e.pointerId);r.onpointermove=m=>{c.style.gridColumn='span '+Math.max(1,Math.min(12,Math.round((m.clientX-b.left+gap)/(col+gap))));c.style.height=Math.max(80,Math.round((m.clientY-b.top)/20)*20)+'px';c.classList.add('sized')};
- r.onpointerup=()=>{r.onpointermove=r.onpointerup=null;layStore()}};return r}
+ c.draggable=false;r.setPointerCapture(e.pointerId);r.onpointermove=m=>{c.style.gridColumn='span '+Math.max(1,Math.min(12,Math.round((m.clientX-b.left+gap)/(col+gap))));c.style.height=Math.max(80,Math.round((m.clientY-b.top)/20)*20)+'px';c.classList.add('sized')};
+ r.onpointerup=r.onpointercancel=()=>{r.onpointermove=r.onpointerup=r.onpointercancel=null;c.draggable=LAYING;layStore()}};return r}
 async function layStore(reset){const k=CUR,pg=$('main .pg'),out={};
- pg.querySelectorAll(LG).forEach((g,gi)=>{if(!g.classList.contains('lay'))return;const o={};layKids(g).forEach((c,i)=>o[lkey(g,c,i)]={o:+c.style.order||0,w:+(c.style.gridColumn.match(/\d+/)||[4])[0],h:c.classList.contains('sized')?parseInt(c.style.height):0});out[gi]=o});
+ grids(pg).forEach((g,gi)=>{if(!g.classList.contains('lay'))return;const o={};layKids(g).forEach((c,i)=>o[lkey(g,c,i)]={o:+c.style.order||0,w:+(c.style.gridColumn.match(/\d+/)||[4])[0],h:c.classList.contains('sized')?parseInt(c.style.height):0});out[gi]=o});
  if(k.startsWith('rep:')){const rep=D.reports.find(r=>'rep:'+r.id===k),g=pg.querySelector('.grid'),spec=structuredClone(rep.spec),sp=spec.pages.find(p=>p.id===g.dataset.page),vp=rep.pages.find(p=>p.id===g.dataset.page);
   let x=0,y=0,rh=0;layKids(g).sort((a,b)=>a.style.order-b.style.order).forEach(c=>{const v=sp.visuals.find(v=>v.id===c.dataset.lk);if(!v)return;const w=+(c.style.gridColumn.match(/\d+/)||[6])[0],
    hh=c.classList.contains('sized')?Math.max(1,Math.round((parseInt(c.style.height)+10)/70)):(v.layout?.h||4);if(x+w>12){x=0;y+=rh;rh=0}v.layout={x,y,w,h:hh};vp.visuals.find(z=>z.id===v.id).layout=v.layout;x+=w;rh=Math.max(rh,hh)});
