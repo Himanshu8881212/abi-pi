@@ -661,12 +661,12 @@ function sources(box){const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),qr=
   const ep=h('input','f ed');ep.placeholder='S3 endpoint host:port, e.g. 127.0.0.1:9100 (blank for AWS)';  const file=h('input');file.type='file';file.accept='.parquet';file.className='f ed';
   c.append(h('label','l','Table'),t,h('label','l','Upload a Parquet file'),file,h('label','l','Or an S3 folder of Parquet files'),loc,h('label','l','S3 endpoint'),ep);
   act(c,'Add source',async()=>{if(!t.value)throw new Error('Name the table first.');
-   if(file.files[0]&&!/\.parquet$/i.test(file.files[0].name))throw new Error('Parquet files only.');if(file.files[0]){await upload(t.value,file.files[0]);return `Uploaded and loaded into ${t.value}.`}
+   if(file.files[0]&&!/\.parquet$/i.test(file.files[0].name))throw new Error('Choose a .parquet file.');if(file.files[0]){await upload(t.value,file.files[0]);return `Uploaded and loaded into ${t.value}.`}
    if(!/^s3:\/\/.+\.parquet$/i.test(loc.value))throw new Error('Choose a Parquet file, or give an S3 folder like s3://bucket/folder/*.parquet.');
    const s3=loc.value.startsWith('s3://')?{...(ep.value?{endpoint:ep.value,url_style:'path',use_ssl:false}:{}),region:'us-east-1'}:null;
    await api('add_data',{table:t.value,location:loc.value,format:'parquet',...(s3?{s3}:{})});return `Loaded ${t.value}.`},1);return c};
  bar.append(btn('Add source',()=>g.prepend(add()),1));
- if(!D.sources.length)box.append(h('p','empty','No sources yet: upload a Parquet file or add an S3 folder of Parquet files. Parquet is the only input.'));
+ if(!D.sources.length)box.append(h('p','empty','No sources yet: upload a Parquet file or add an S3 folder of Parquet files.'));
  D.sources.forEach(id=>{const sp=D.source_specs?.[id]||{},r=qr[id],c=card(id,`sources/${id}.json`),k=h('div','kv');
   [['location',sp.location||'—'],['format',sp.format||'from the file'],['refresh',sp.refresh||(r?r[ix('refresh')]:'—')],['rows',r?fmt(r[ix('rows')]):'—'],['last load',r?cell(r[ix('last_load')]):'—']]
    .forEach(([a,b])=>k.append(h('b','',a),h('span','',String(b))));c.append(k);

@@ -38,7 +38,7 @@ SCHEMAS = HERE.parent / "engine/schemas/v1"
 PROJECT_ID = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 SKELETON = ["sources", "tables", "model", "reports", "ml", "flows", "agents", "tools", "security", "environments", "docs"]
 DATA = {".parquet"}  # ABI-PI takes Parquet only: uploaded .parquet files, or S3 folders of Parquet (add_data)
-PARQUET_ONLY = "ABI-PI takes Parquet only: upload a .parquet file, or add an S3 folder of Parquet files (s3://bucket/folder/*.parquet)."
+PARQUET_ONLY = "Upload a .parquet file, or add an S3 folder of Parquet files (s3://bucket/folder/*.parquet)."
 
 
 def parquet_only(action: str, args: dict) -> None:

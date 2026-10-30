@@ -525,9 +525,9 @@ def test_parquet_is_the_only_input(tmp_path):
     """ABI-PI takes .parquet files and S3 folders of Parquet, nothing else: no CSV, Excel, JSON, local paths or databases."""
     for args in ({"location": "s3://b/f/*.csv"}, {"location": "/data/x.parquet"}, {"location": "s3://b/f/*.parquet", "format": "csv"},
                  {"location": "postgres://h/db"}, {}):
-        with pytest.raises(abi.ActionError, match="Parquet only"):
+        with pytest.raises(abi.ActionError, match="S3 folder of Parquet"):
             abi.call("add_data", project="p", table="t", **args)
     abi.parquet_only("add_data", {"location": "s3://b/f/*.parquet", "format": "parquet"})
     (tmp_path / "x.csv").write_text("a\n1\n")
-    with pytest.raises(abi.ActionError, match="Parquet only"):
+    with pytest.raises(abi.ActionError, match="S3 folder of Parquet"):
         abi.upload("p", "t", tmp_path / "x.csv")

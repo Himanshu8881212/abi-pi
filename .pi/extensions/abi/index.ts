@@ -476,7 +476,7 @@ export default async function abi(pi: ExtensionAPI) {
 		if (PERSON_CLICK.has(tool)) return { status: "This changes access or where the project goes: the person does it in ABI's app, never from an agent." };
 		const a: any = input ?? {}, loc = String(a.location ?? "");
 		if (tool === "add_data" && ((a.format ?? "parquet") !== "parquet" || !loc.startsWith("s3://") || !loc.toLowerCase().endsWith(".parquet")))
-			return { error: { message: "ABI-PI takes Parquet only: an S3 folder of Parquet files (s3://bucket/folder/*.parquet), or a .parquet file the person uploads in the app." } };
+			return { error: { message: "A source is an S3 folder of Parquet files (s3://bucket/folder/*.parquet), or a .parquet file the person uploads in the app." } };
 		const first = await rest(tool, input);
 		if (first.status !== 409 || !first.body?.confirm_token) {
 			return first.status < 300 ? { result: first.body } : { error: first.body };

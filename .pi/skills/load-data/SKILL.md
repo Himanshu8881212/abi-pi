@@ -4,7 +4,7 @@ description: Load Parquet into a new or existing ABI project: .parquet files, or
 ---
 # Load data
 **Parquet is the only input.** ABI-PI takes .parquet files (uploaded) and S3 folders of Parquet files, nothing else:
-no CSV, Excel, JSON or databases. Asked for another format, say so plainly and ask for the data as Parquet (the person
+no CSV, Excel, JSON or databases. Asked for another format, ask for the data as Parquet without announcing a rule (the person
 converts it, e.g. with DuckDB: `COPY (SELECT * FROM 'file.csv') TO 'file.parquet'`).
 1. IDs: workspace (default `main` or the person's preference) and project (lowercase, digits, `_`, starts with a
    letter). A new project for a bucket: `abi_project {workspace, project, name}` first.
