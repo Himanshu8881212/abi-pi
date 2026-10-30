@@ -30,6 +30,7 @@ import secrets
 import subprocess
 import sys
 import threading
+import traceback
 import time
 import urllib.error
 import urllib.parse
@@ -149,7 +150,7 @@ body[data-mode=viewer] .ed{background:transparent;border-color:transparent;paddi
 .mobile .areas{grid-template-columns:1fr 1fr}
 .ask0{width:100%}.sugg{display:flex;flex-wrap:wrap;gap:8px}.sg{text-align:left;border:1px solid var(--line);border-radius:999px;background:none;color:var(--ink);padding:6px 14px;cursor:pointer;font:inherit;font-size:13px;transition:border-color .12s}.sg:hover{border-color:var(--ink)}
 @media (max-width:1100px){.home{grid-template-columns:1fr}.home .wide{grid-column:auto}.strip{grid-template-columns:repeat(2,minmax(0,1fr))}.strip .cell{border-bottom:1px solid var(--line)}}
-.canvas{position:relative;height:min(70vh,720px);overflow:auto;border:1px solid var(--line);border-radius:var(--r);background:
+.canvas{position:relative;overflow:auto;border:1px solid var(--line);border-radius:var(--r);background:
  radial-gradient(circle,var(--faint) 1px,transparent 1.2px) 0 0/24px 24px,var(--paper)}
 .canvas .links{position:absolute;inset:0;pointer-events:none;overflow:visible}.canvas .links .hit{pointer-events:stroke;stroke:transparent;stroke-width:14;fill:none;cursor:pointer}
 .canvas .ln{stroke:var(--mute);stroke-width:1.5;fill:none}.canvas .ln.temp{stroke:var(--signal);stroke-dasharray:6 4}.canvas .one{fill:var(--mute)}
@@ -157,7 +158,7 @@ body[data-mode=viewer] .ed{background:transparent;border-color:transparent;paddi
 .tbl{position:absolute;width:250px;background:var(--sheet);border:1px solid var(--line);border-radius:6px;user-select:none;z-index:1;overflow:hidden}
 .tbl .th{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 12px;cursor:grab;font:600 13px var(--display);border-bottom:1px solid var(--line)}
 .tbl.fact .th{background:var(--ink);color:var(--sheet)}.tbl .badge{border:1px solid currentColor;border-radius:999px;background:none;color:inherit;font:500 10px var(--text);padding:1px 8px;cursor:pointer;opacity:.8}
-.tbl .cols{max-height:230px;overflow:auto}.tbl .col{display:grid;grid-template-columns:14px 1fr auto;gap:6px;align-items:center;padding:4px 12px;font-size:12px;border-bottom:1px solid var(--line)}
+.tbl .cols{}.tbl .col{display:grid;grid-template-columns:14px 1fr auto;gap:6px;align-items:center;padding:4px 12px;font-size:12px;border-bottom:1px solid var(--line)}
 .tbl .col .ty{grid-column:3;color:var(--mute);font:10px var(--mono)}.tbl .col>span:not(.dot):not(.ty){grid-column:2;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tbl .dot{width:9px;height:9px;border:1.5px solid var(--mute);border-radius:50%;cursor:crosshair}.tbl .dot:hover{background:var(--signal);border-color:var(--signal)}
 .cards>.wide{grid-column:1/-1}
 .layers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.layer h4{margin:0}.layer table{margin-top:8px}
@@ -193,6 +194,14 @@ textarea.f{font:14px/1.5 var(--text)}textarea.f.code,textarea.code{font:13px/1.5
 .card label.l+select.f,.card label.l+input.f:not([type=checkbox]){display:block;width:100%;max-width:520px;margin-top:6px}.card .card{min-width:0}
 .seg{gap:6px}.seg .chip{cursor:pointer;padding:5px 12px;font-size:13px;margin:0}.seg .chip.on{background:var(--ink);color:var(--sheet);border-color:var(--ink)}.seg .chip.add{border-style:dashed}
 #chat .mdt{white-space:normal;width:auto;min-width:60%;margin:6px 0;font-size:13px}#chat .mdt th,#chat .mdt td{padding:6px 10px}
+.cvtools{gap:6px;margin:0 0 8px}.cvtools .btn{padding:5px 10px}.cvtools .pct{font:12px var(--mono);color:var(--mute);min-width:44px;text-align:center}
+.canvas .sizer{position:relative}.canvas .stage{position:absolute;left:0;top:0;transform-origin:0 0}
+.node{position:absolute;width:230px;background:var(--sheet);border:1px solid var(--line);border-radius:6px;padding:10px 12px;cursor:grab;user-select:none;z-index:1}.node b{display:block;font:600 13px var(--display)}.node span{display:block;font:11.5px var(--mono);color:var(--mute);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.node .when{font-size:12px;color:var(--signal-ink);margin-top:6px}.node.trig{background:var(--ink);border-color:var(--ink)}.node.trig b,.node.trig span{color:var(--sheet)}.node.ok{border-left:3px solid var(--ok)}.node.failed{border-left:3px solid var(--red)}.node.skipped{opacity:.6}
+.stlist{display:flex;flex-direction:column;gap:6px}.strow{flex-wrap:nowrap}.strow b{flex:0 0 190px;font-weight:500;font-size:13px}.strow input{flex:1;min-width:0}.stform select.f{max-width:520px}
+.mlist{max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:var(--r);padding:8px 12px;margin-top:6px;max-width:520px}
+button.pin{font:500 12px var(--text);border:1px solid var(--line);border-radius:999px;background:none;color:var(--mute);padding:2px 10px;cursor:pointer;margin-left:6px}button.pin:hover{border-color:var(--ink);color:var(--ink)}button.pin.on{background:var(--signal);border-color:var(--signal);color:#fff}
+.cards.pins{margin-bottom:8px}.pinned .body{min-height:40px}
+#commit input.f,#commit textarea.f{display:block;width:100%;margin-top:6px}
 #menu{display:none}
 .mobile .modes,.mobile .vc,.mobile #theme{display:none}.mobile #menu{display:inline-flex}
 .mobile body{grid-template-columns:1fr}.mobile header{grid-column:1;gap:8px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
@@ -203,7 +212,7 @@ textarea.f{font:14px/1.5 var(--text)}textarea.f.code,textarea.code{font:13px/1.5
 .mobile main{padding:20px max(16px,env(safe-area-inset-right,0px)) 56px max(16px,env(safe-area-inset-left,0px))}
 .mobile .grid{grid-template-columns:1fr}.mobile .grid>.card{grid-column:1/-1!important}.mobile .cards,.mobile .home{grid-template-columns:1fr}.mobile .home .wide{grid-column:auto}
 .mobile .strip{grid-template-columns:repeat(2,minmax(0,1fr))}.mobile .pghead h2{font-size:24px}.mobile .kpi .v{font-size:30px}.mobile .card{padding:16px}
-.mobile #chat{top:0;width:100vw;z-index:11}.mobile body.chat-open main{padding-right:16px}.mobile .canvas{height:60vh}
+.mobile #chat{top:0;width:100vw;z-index:11}.mobile body.chat-open main{padding-right:16px}.mobile .canvas{max-height:70vh}
 .mobile .card h3 .tools{display:none}.mobile nav.tabs{width:100%;overflow-x:auto;flex-wrap:nowrap}
 select.f{max-width:100%;min-width:0}.card h3{flex-wrap:wrap}.file,.kv span{overflow-wrap:anywhere;min-width:0}.kv{grid-template-columns:auto minmax(0,1fr)}
 #chat.full{box-sizing:border-box;max-width:100%}#chat:not(.open):not(.full){visibility:hidden}
@@ -262,20 +271,37 @@ async function team(at,al){let T;try{T=(await fetch('/team',{method:'POST',heade
   li.append(h('div','',`Waiting for your yes: ${p.action.replace('mcp__abi__','')} ${p.args?.id||p.args?.message||''}`),h('div','file',`${p.why||''} (from ${p.agent}, task ${p.task})`));
   const r=h('div','row');r.append(btn('Approve',async()=>{try{await answer(p.id,'approve');say(m,'Done through ABI.');li.className='ok'}catch(e){say(m,e.message,1)}},1),
    btn('Decline',async()=>{try{await answer(p.id,'decline');say(m,'Declined; the team will see it.');li.className=''}catch(e){say(m,e.message,1)}}));li.append(r,m);al.append(li)})}
-function home(box){const rd=D.readiness||{},q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),rowsQ=q.rows||[];
+// ---------- a person's own Home: pins from any page (pins.json, per person, in the app's Git) ----------
+let PINS=null;const pinKey=p=>JSON.stringify([p.kind,p.ref]);
+const pinPost=b=>fetch('/pins',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json());
+async function pinsLoad(){if(PINS)return PINS;if(!LIVE)return PINS=[];try{PINS=(await pinPost()).result||[]}catch(e){PINS=[]}return PINS}
+function pinBtn(pin){const b=h('button','pin','Pin');b.title='Pin to Home';const set=()=>{const on=(PINS||[]).some(x=>pinKey(x)===pinKey(pin));b.textContent=on?'Pinned':'Pin';b.classList.toggle('on',on)};
+ pinsLoad().then(set);b.onclick=async e=>{e.stopPropagation();await pinsLoad();const k=pinKey(pin),on=PINS.some(x=>pinKey(x)===k);PINS=on?PINS.filter(x=>pinKey(x)!==k):[...PINS,pin];set();
+  try{await pinPost({pins:PINS});toast(on?'Unpinned from Home.':'Pinned to Home.')}catch(x){toast('Could not save the pin.')}};return b}
+async function pinCard(p,c){const body=h('div','body'),go=h('button','btn','Open'),un=h('button','btn','Unpin');c.append(body);const tools=h('div','row acts');tools.append(go,un);c.append(tools);
+ un.onclick=async()=>{PINS=PINS.filter(x=>pinKey(x)!==pinKey(p));await pinPost({pins:PINS});c.remove()};
+ const r=p.ref,line=(t,cls)=>body.append(h('p',cls||'',t));
+ try{if(p.kind==='visual'){go.onclick=()=>show('rep:'+r.report);const d=await api('visual_data',{report:r.report,page:r.page,visual:r.visual});requestAnimationFrame(()=>chart(body,d))}
+  else if(p.kind==='analysis'){go.onclick=()=>{PENDING.explore={...r.q,chart:r.type};show('explore')};const d=await api('semantic_query',{...r.q,limit:500});d.format=d.format||{};d.type=r.type||'bar';d.id='pin';requestAnimationFrame(()=>chart(body,d))}
+  else if(p.kind==='monitor'){go.onclick=()=>show('monitor');const ck=(D.app?.monitor?.checks||[]).find(x=>x.id===r);if(!ck){line('This check was removed.','empty');return}const x=await monEval(ck);line(x.text,x.ok?'ok':'bad')}
+  else if(p.kind==='flow'){go.onclick=()=>show('flw:'+r);const f=(D.flows||[]).find(x=>x.id===r);const x=await api('flow_runs',{flow:r}).catch(()=>({}));const one=x.runs?.[0]||x;
+   line(`${f?.enabled?'On':'Off'} · last run: ${one.status||'never'}`,one.status==='failed'?'bad':one.status==='ok'?'ok':'')}
+  else if(p.kind==='table'){go.onclick=()=>show('tables');const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),row=(q.rows||[]).find(x=>x[0]===r);
+   line(row?`${fmt(row[ix('rows')])} rows · last load ${String(row[ix('last_load')]||'never').slice(0,16).replace('T',' ')}`:'No data-quality row yet.',row&&(row[ix('problems')]||[]).length?'bad':'')}
+  else{const page={agent:'agents',tool:'tools',ml:'ml'}[p.kind]||'home',o=(D[{agent:'agents',tool:'tools',ml:'ml'}[p.kind]]||[]).find(x=>x.id===r);go.onclick=()=>show(page);
+   line(o?(o.description||o.status||o.name||r):'It was removed.',o?'':'empty')}}catch(e){line(e.message,'bad')}}
+async function pinsHome(box){const sec=h('div','cards pins');box.append(sec);const ps=await pinsLoad();
+ if(!ps.length){const c=card('Your Home','pin what you check often');c.classList.add('wide');c.append(h('p','',"Press Pin on a report chart, a saved analysis, a monitor, a table, a flow, an agent or a tool: it shows here, live. Open goes to its page."));sec.append(c);return}
+ ps.forEach(p=>{const c=card(p.title||p.ref);c.classList.add('pinned');sec.append(c);pinCard(p,c)})}
+function home(box){pinsHome(box);const rd=D.readiness||{},q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),rowsQ=q.rows||[];
  const last=rowsQ.map(r=>r[ix('last_load')]).filter(Boolean).sort().pop(),problems=rowsQ.flatMap(r=>(r[ix('problems')]||[]).map(p=>`${r[ix('table')]}: ${p}`));
- // the front door: ask first; the conversation moves to the side chat and the agent takes the person where things are
- const ask0=card(MODE==='viewer'?'Ask anything about the numbers':'Ask, build or find anything'),ta=h('textarea','f ask0');ta.rows=2;
- ta.placeholder=MODE==='viewer'?'e.g. Which channels grew fastest last quarter? Where do I see RPM by country?':'e.g. Add a measure for revenue per subscriber. Where are the flows?';
- const go=()=>{const t=ta.value.trim();if(!t)return;openChat(true);inp.value=t;ta.value='';sendChat()};ta.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();go()}};
- const sl=h('div','sugg');(MODE==='viewer'?['What changed last month, and why?','Where do I see revenue by country?','Is RPM defined the way the vault says?']
-  :['Where are the flows, and what do they do?','Check every measure against the vault definitions','Build a report of revenue by country and month']).forEach(t=>{const b=h('button','sg',t);b.onclick=()=>{ta.value=t;go()};sl.append(b)});
- ask0.append(ta,sl);act(ask0,'Ask',go,1);ask0.classList.add('wide');box.append(ask0);
  const g=h('div','home');box.append(g);
  // what needs attention
  const at=card('Needs attention');const al=h('ul','list');[...(rd.missing||[]).map(x=>typeof x==='string'?x:JSON.stringify(x)),...problems].forEach(t=>al.append(h('li','bad',t)));
  if(MODE==='developer'&&LIVE)team(at,al);
  if(!al.children.length)al.append(h('li','ok','Nothing: the model is ready and the data is fresh.'));at.append(al);
+ if(al.children.length>4){const rest=[...al.children].slice(3);rest.forEach(x=>x.hidden=true);const more=h('button','btn',`Show ${rest.length} more`);
+  more.onclick=()=>{const open=rest[0].hidden;rest.forEach(x=>x.hidden=!open);more.textContent=open?'Show fewer':`Show ${rest.length} more`};at.append(more)}
  act(at,'Check again',async()=>{D.quality=await api('data_quality',{});D.readiness=await api('readiness',{});show('home')});g.append(at);
  // the map: every sidebar group with its pages and one line of status, in pipeline order
  const mlok=D.ml.filter(m=>m.latest_score?.status==='ok').length,on=D.flows.filter(f=>f.enabled).length,lastC=(D.history||[])[0];
@@ -309,7 +335,7 @@ function report(box,rep){let flt=PENDING.filters||[];PENDING.filters=null;
  function page(p){cur=p;[...tabs.children].forEach(b=>b.classList.toggle('on',b.dataset.id===p.id));grid.innerHTML='';
   p.visuals.slice().sort((a,b)=>(a.layout.y-b.layout.y)||(a.layout.x-b.layout.x)).forEach(v=>{const c=h('div','card');c.style.gridColumn=`span ${Math.min(12,v.layout.w||6)}`;
    c.innerHTML=`<h3><span></span><span class="tools"><button data-a="t">table</button><button data-a="c">csv</button><button data-a="h">how</button></span></h3><div class="body"></div><pre class="how" hidden></pre>`;
-   $('h3 span',c).textContent=v.title||v.id;grid.append(c);const body=$('.body',c),d=v.live||v.data;
+   $('h3 span',c).textContent=v.title||v.id;if(v.text===undefined)$('h3',c).append(pinBtn({kind:'visual',ref:{report:rep.id,page:p.id,visual:v.id},title:v.title||v.id}));grid.append(c);const body=$('.body',c),d=v.live||v.data;
    if(v.text!==undefined){$('.tools',c).remove();body.textContent=v.text;body.style.whiteSpace='pre-wrap';return}
    if(!d||d.error||v.error){body.append(h('div','bad',d?.error||v.error||'no data'));return}
    if(flt.length&&(!d.rows.length||d.rows.every(r=>r.every(x=>x===null||typeof x!=='number')))){body.append(h('p','empty','No rows for these filters: they fall outside what this visual covers (the report\'s period or population). Remove a filter to see it again.'));return}
@@ -434,14 +460,20 @@ async function settingsPage(box){if(!LIVE){box.append(h('p','empty','Settings wo
   const def=card('Agent','the model every chat and specialist uses'),ms=h('select','f'),th=h('select','f');ms.append(new Option('the built-in default',''));
   S.providers.forEach(p=>p.models.forEach(m=>ms.append(new Option(`${p.name} · ${m}`,`${p.id}/${m}`))));ms.value=S.model||'';S.levels.forEach(l=>th.append(new Option(l,l)));th.value=S.thinking||'medium';
   def.append(h('label','l','Model'),ms,h('label','l','Reasoning'),th);act(def,'Save',async()=>{const x=await post('settings/default',{model:ms.value||null,thinking:th.value});if(x.error)throw new Error(x.error);S=x.result;return 'Saved: new chats and specialists use it.'},1);g.append(def);
-  S.providers.forEach(p=>{const c=card(p.name,`${p.id} · ${S.apis[p.api]||p.api}`);c.append(h('p','file',p.base_url),h('p','',`Models: ${p.models.join(', ')}`),h('p',p.key_set?'ok':'',p.key_set?`API key set, ends in ${p.key_ends}`:'No API key'));
+  S.providers.forEach(p=>{const c=card(p.name,`${p.id} · ${S.apis[p.api]||p.api}`);c.append(h('p','file',p.base_url),h('p','',`Models: ${p.models.join(', ')}`),h('p',p.key_set?'ok':'',p.key_builtin?'Uses the built-in connection\'s key':p.key_set?`API key set, ends in ${p.key_ends}`:'No API key'));
    act(c,'Test connection',async()=>{const x=await post('settings/test',{id:p.id});if(x.error)throw new Error(x.error);if(!x.result.ok)throw new Error(x.result.message);return x.result.message});
    act(c,'Remove',async()=>{const x=await post('settings/remove',{id:p.id});S=x.result;draw()});g.append(c)});
   const add=card('Connect a provider','OpenAI, Anthropic, OpenRouter, Ollama, Gemini or any OpenAI-compatible endpoint'),pre=h('select','f'),id=h('input','f'),nm=h('input','f'),api=h('select','f'),base=h('input','f'),key=h('input','f'),mods=h('input','f');
   Object.entries(PRESETS).forEach(([k,v])=>pre.append(new Option(v[0],k)));Object.entries(S.apis).forEach(([k,v])=>api.append(new Option(v,k)));key.type='password';key.autocomplete='off';key.placeholder='API key (stored encrypted; leave empty to keep the stored one)';mods.placeholder='model IDs, comma separated';
-  const fill=()=>{const v=PRESETS[pre.value];id.value=pre.value==='custom'?'':pre.value;nm.value=v[0];api.value=v[1];base.value=v[2];mods.value=v[3]};pre.onchange=fill;fill();
-  add.append(h('label','l','Preset'),pre,h('label','l','ID'),id,h('label','l','Name'),nm,h('label','l','API'),api,h('label','l','Base URL'),base,h('label','l','API key'),key,h('label','l','Models'),mods);
-  act(add,'Save provider',async()=>{const x=await post('settings/provider',{provider:{id:id.value.trim(),name:nm.value,api:api.value,base_url:base.value.trim(),models:mods.value.split(',').map(s=>s.trim()).filter(Boolean)},key:key.value});
+  const pick=h('div','checks mlist');mods.type='hidden';
+  const fill=()=>{const v=PRESETS[pre.value];id.value=pre.value==='custom'?'':pre.value;nm.value=v[0];api.value=v[1];base.value=v[2];mods.value='';pick.innerHTML='<p class=file>Fetch models to pick from the provider\'s list.</p>'};pre.onchange=fill;fill();
+  const fetchM=async()=>{const x=await post('settings/models',{provider:{id:id.value.trim(),api:api.value,base_url:base.value.trim()},key:key.value});if(x.error)throw new Error(x.error);
+   if(!x.result.ok)throw new Error(x.result.message);const want=new Set(mods.value.split(',').map(s=>s.trim()).filter(Boolean));pick.innerHTML='';
+   x.result.models.forEach(m=>{const l=h('label','chk'),i=h('input');i.type='checkbox';i.value=m;i.checked=want.has(m);i.onchange=()=>{mods.value=[...pick.querySelectorAll('input:checked')].map(i=>i.value).join(',')};l.append(i,document.createTextNode(m));pick.append(l)});
+   mods.value=[...pick.querySelectorAll('input:checked')].map(i=>i.value).join(',');return x.result.message+' Tick the ones the agent may use.'};
+  add.append(h('label','l','Preset'),pre,h('label','l','ID'),id,h('label','l','Name'),nm,h('label','l','API'),api,h('label','l','Base URL'),base,h('label','l','API key'),key,h('label','l','Models'),pick,mods);
+  act(add,'Fetch models',fetchM);
+  act(add,'Save provider',async()=>{const x=await post('settings/provider',{provider:{id:id.value.trim(),name:nm.value,api:api.value,base_url:base.value.trim(),models:mods.value.split(',').map(s=>s.trim()).filter(Boolean)},key:key.value});if(!mods.value)throw new Error('Fetch models and tick at least one.');
    key.value='';if(x.error)throw new Error(x.error);S=x.result;draw();return 'Saved.'},1);g.append(add)};draw()}
 function transferPage(box){if(!LIVE||MODE==='viewer'){box.append(h('p','empty','Export and import work in Developer mode with the live app.'));return}
  const ex=card('Export','the whole project as one zip'),im=card('Import','replace this project with a zip; ABI checks it first'),g=h('div','cards');
@@ -482,7 +514,29 @@ function reportsPage(box){const bar=h('div','row bar top');bar.append(btn('New r
   c.append(h('p','',r.spec?.description||r.description||''),h('p','file',`${r.pages.length} page${r.pages.length===1?'':'s'}: ${r.pages.map(p=>p.name||p.id).join(', ')} · ${n} visuals`));
   act(c,'Open',async()=>{show('rep:'+r.id)},1);g.append(c)})}
 // Monitor: is anything wrong right now? Only what reports can't show: data freshness, model readiness, ML runs, flows
-function monitorPage(box){const g=h('div','cards');box.append(g);const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),rs=q.rows||[],when=t=>t?String(t).slice(0,16).replace('T',' '):'—';
+// a check: alert when a measure crosses a value, a table goes stale, or a flow's last run failed
+const CMP={'<':(a,b)=>a<b,'<=':(a,b)=>a<=b,'>':(a,b)=>a>b,'>=':(a,b)=>a>=b,'=':(a,b)=>a==b,'!=':(a,b)=>a!=b};
+async function monEval(c){if(c.kind==='measure'){const r=await api('semantic_query',{measures:[c.measure],filters:c.filters||[]});const v=r.rows?.[0]?.[0];
+  return {ok:typeof v==='number'&&!CMP[c.op](v,Number(c.value)),text:`${D.measures.find(m=>m.id===c.measure)?.name||c.measure}: ${fmt(v)} · alerts when ${c.op} ${fmt(Number(c.value))}`}}
+ if(c.kind==='fresh'){const q=D.quality||{},ix=k=>(q.columns||[]).indexOf(k),row=(q.rows||[]).find(x=>x[0]===c.table),t=row&&row[ix('last_load')];
+  const hrs=t?(Date.now()-Date.parse(t))/3600e3:Infinity;return {ok:hrs<=c.hours,text:`${c.table}: last load ${t?Math.round(hrs)+' h ago':'never'} · alerts after ${c.hours} h`}}
+ const x=await api('flow_runs',{flow:c.flow}).catch(()=>({}));const one=x.runs?.[0]||x;return {ok:one.status!=='failed',text:`${c.flow}: last run ${one.status||'never'} · alerts when a run fails`}}
+function newMonitor(box){if(box.querySelector('.monform'))return;const c=card('New monitor','what to watch; it turns red when the condition holds');c.classList.add('monform','wide');
+ const nm=h('input','f'),kind=h('select','f'),f=h('div');nm.placeholder='e.g. Views dropped';[['measure','A measure crosses a value'],['fresh','A table is not loaded in time'],['flow','A flow\'s last run failed']].forEach(([k,l])=>kind.append(new Option(l,k)));
+ const draw=()=>{f.innerHTML='';const s=x=>{const e=h('select','f');x.forEach(([v,l])=>e.append(new Option(l,v)));return e};
+  if(kind.value==='measure'){const m=s(D.measures.map(x=>[x.id,x.name||x.id])),op=s([['<','is below'],['<=','is at most'],['>','is above'],['>=','is at least'],['=','equals'],['!=','is not']]),v=h('input','f');v.type='number';v.placeholder='value';
+   f.append(h('label','l','Measure'),m,h('label','l','Alert when it'),op,h('label','l','Value'),v);f.get=()=>({measure:m.value,op:op.value,value:Number(v.value)})}
+  else if(kind.value==='fresh'){const t=s((D.tables||[]).map(x=>[x,x])),hr=h('input','f');hr.type='number';hr.value=36;f.append(h('label','l','Table'),t,h('label','l','Alert after (hours without a load)'),hr);f.get=()=>({table:t.value,hours:Number(hr.value)})}
+  else{const fl=s((D.flows||[]).map(x=>[x.id,x.name||x.id]));f.append(h('label','l','Flow'),fl);f.get=()=>({flow:fl.value})}};kind.onchange=draw;draw();
+ c.append(h('label','l','Name'),nm,h('label','l','Watch'),kind,f);
+ act(c,'Create',async()=>{if(!nm.value.trim())throw new Error('Give it a name.');const ck={id:nm.value.trim().toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')||'check',name:nm.value.trim(),kind:kind.value,...f.get()};
+  const all=[...(D.app.monitor.checks||[]).filter(x=>x.id!==ck.id),ck];const r=await fetch('/monitor',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({checks:all})}).then(x=>x.json());
+  if(r.error)throw new Error(r.error);D.app.monitor.checks=all;show('monitor')},1);(box.querySelector('.pghead')||box).after(c)}
+function monitorPage(box){const bar=h('div','row bar top');bar.append(btn('New monitor',()=>newMonitor(box),1));box.append(bar);
+ const mine=h('div','cards');box.append(mine);(D.app?.monitor?.checks||[]).forEach(ck=>{const c=card(ck.name);c.querySelector('h3').append(pinBtn({kind:'monitor',ref:ck.id,title:ck.name}));const st=h('p','file','checking…');c.append(st);mine.append(c);
+  monEval(ck).then(x=>{st.className=x.ok?'ok':'bad';st.textContent=(x.ok?'OK · ':'Alert · ')+x.text}).catch(e=>{st.className='bad';st.textContent=e.message});
+  if(MODE==='developer')act(c,'Delete',async()=>{const all=D.app.monitor.checks.filter(x=>x.id!==ck.id);await fetch('/monitor',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({checks:all})});D.app.monitor.checks=all;show('monitor')})});
+ const g=h('div','cards');box.append(g);const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),rs=q.rows||[],when=t=>t?String(t).slice(0,16).replace('T',' '):'—';
  const M=D.app?.monitor||{watch:[],fresh_within_hours:36},watch=t=>M.watch?.length?M.watch.includes(t):/stream/.test(t),old=r=>watch(r[0])&&(!r[ix('last_load')]||Date.now()-Date.parse(r[ix('last_load')])>M.fresh_within_hours*3600e3);
  const fr=card('Data freshness',`ABI data quality; watched tables must load within ${M.fresh_within_hours} h (monitor.json)`),bad=rs.filter(r=>(r[ix('problems')]||[]).length||r[ix('missing_periods')]||old(r));
  fr.append(h('p',bad.length?'bad':'ok',bad.length?`${bad.length} of ${rs.length} tables have problems`:`All ${rs.length} tables without problems`));
@@ -526,7 +580,7 @@ function explore(box){const q0=PENDING.explore||{};PENDING.explore=null;
  c.append(msg,out);const g=h('div','cards'),my=card('Saved analyses','kept with the project for everyone; numbers rerun from the model when opened'),list=h('div');my.append(list);c.style.gridColumn=my.style.gridColumn='1/-1';ms.style.width='100%';g.append(c,my);box.append(g);
  function mine(){list.innerHTML='';if(!MINE.length){list.append(h('p','empty','Nothing kept yet. Run an analysis and press Keep; charts the agent shows you land here too.'));return}
   MINE.forEach((a,i)=>{const r=h('div','row');const o=h('button','btn',a.name);o.onclick=()=>{[...ms.options].forEach(x=>x.selected=a.q.measures.includes(x.value));dm.value=a.q.dimensions[0]||'';ty.value=a.type;flt=a.q.filters||[];fc.value='';fv.hidden=true;run(a.q,a.type)};
-   const x=h('button','btn','forget');x.onclick=()=>{MINE.splice(i,1);saveMine();mine()};r.append(o,h('span','file',a.at||''),x);list.append(r)})}
+   const x=h('button','btn','forget');x.onclick=()=>{MINE.splice(i,1);saveMine();mine()};r.append(o,h('span','file',a.at||''),pinBtn({kind:'analysis',ref:{q:a.q,type:a.type},title:a.name}),x);list.append(r)})}
  mine();if(q0.measures)run(query(),ty.value)}
 function measures(box){modelBar(box);const top=h('div','row bar top'),q=h('input','f');q.placeholder='Search measures';const list=h('div','cards rows');box.append(top,list);
  const edit=(m,isNew)=>{const c=card(isNew?'New measure':(m.name||m.id),isNew?'':m.id),name=h('input','f'),id=h('input','f'),ex=h('textarea','f'),de=h('input','f');
@@ -574,8 +628,31 @@ function sources(box){const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),qr=
    .forEach(([a,b])=>k.append(h('b','',a),h('span','',String(b))));c.append(k);
   const p=r?(r[ix('problems')]||[]):[];if(p.length)c.append(h('div','bad',p.join('; ')));
   act(c,'Reload '+id,async()=>{await api('refresh',{table:id});return 'Reloaded: a new snapshot.'});act(c,'Delete',async()=>{await api('delete_source',{source:id});return 'Deleted.'});g.append(c)})}
+// New staged table: a source, steps picked from a menu (each a small JSON line, filled with the source's columns), a
+// preview of the rows, then set_steps and hidden (staged tables stay out of the model); or the cleaning in words, to the agent
+const STEP_KINDS=[['select','Keep columns',c=>({columns:c.slice(0,3)})],['rename','Rename columns',c=>({columns:{[c[0]]:c[0]+'_new'}})],
+ ['set_type','Change types',c=>({columns:{[c[0]]:'VARCHAR'}})],['filter','Filter rows',c=>({condition:`${c[0]} IS NOT NULL`})],
+ ['deduplicate','Remove duplicates',c=>({columns:[c[0]]})],['add_column','Add a calculated column',c=>({name:'new_column',expression:`upper(${c[0]})`})],
+ ['fill_nulls','Fill empty values',c=>({columns:{[c[0]]:''}})],['append','Append another source',()=>({tables:[D.sources[1]||D.sources[0]]})],
+ ['merge','Join another source',c=>({table:D.sources[1]||D.sources[0],on:{[c[0]]:c[0]},columns:[c[0]],how:'left'})],['sql','SQL over the rows',()=>({query:'SELECT * FROM input'})]];
+function newStaged(box){if(box.querySelector('.stform'))return;const c=card('New staged table','a source, cleaned by steps; hidden from the model');c.classList.add('stform','wide');
+ const src=h('select','f'),nm=h('input','f'),list=h('div','stlist'),add=h('select','f'),out=h('div'),how=h('textarea','f');D.sources.forEach(x=>src.append(new Option(x,x)));
+ nm.placeholder='e.g. silver_orders';const name=()=>nm.value.trim()||'silver_'+src.value;let cols=[];
+ const rowOf=(type,fields)=>{const r=h('div','row strow'),i=h('input','f code');i.value=JSON.stringify(fields);r.dataset.type=type;const x=h('button','btn','✕');x.title='Remove this step';x.onclick=()=>r.remove();
+  r.append(h('b','',(STEP_KINDS.find(k=>k[0]===type)||[0,type])[1]),i,x);list.append(r)};
+ const steps=()=>[{type:'source',source:src.value},...[...list.children].map(r=>{try{return {type:r.dataset.type,...JSON.parse(r.querySelector('input').value)}}catch(e){throw new Error(`Step "${r.dataset.type}": not valid JSON (${e.message})`)}})];
+ const look=async()=>{const r=await api('preview_steps',{steps:steps()});cols=(r.columns||[]).map(x=>x.name||x);rows(out,{columns:cols,rows:(r.rows||[]).slice(0,20)});return r};
+ add.append(new Option('+ Add a step…',''));STEP_KINDS.forEach(([t,l])=>add.append(new Option(l,t)));
+ add.onchange=async()=>{const k=STEP_KINDS.find(x=>x[0]===add.value);add.value='';if(!k)return;if(!cols.length)try{await look()}catch(e){}rowOf(k[0],k[2](cols.length?cols:['column']))};
+ src.onchange=()=>{cols=[];out.innerHTML='';look().catch(()=>{})};how.rows=2;how.placeholder='or in words: e.g. keep the US rows, make trending_date a date, drop duplicates by video and day';
+ c.append(h('label','l','Source'),src,h('label','l','Staged table name'),nm,h('label','l','Steps'),list,add);
+ act(c,'Preview',async()=>{await look();return `${cols.length} columns; the first rows are below.`});
+ act(c,'Create',async()=>{await api('set_steps',{table:name(),steps:steps()});await api('set_table',{table:name(),hidden:true});return `Created ${name()}: staged and hidden from the model. It appears in this list in a few seconds.`},1);
+ c.append(h('label','l','Or ask the agent'),how);act(c,'Ask the agent instead',async()=>{openChat(true);inp.value=`Stage the source ${src.value} as a hidden silver table ${name()}: ${how.value.trim()||'clean it for the model'}`;sendChat();return 'Asked: follow it in the chat.'});
+ c.append(out);(box.querySelector('.pghead')||box).after(c);look().catch(()=>{})}
 function stagedPage(box){const sv=(D.layers||[]).filter(t=>t.layer==='silver').sort((a,b)=>a.table.localeCompare(b.table));
- const g=h('div','cards');box.append(g);if(!sv.length){box.append(h('p','empty','Nothing staged yet: silver tables appear here once a transform builds them.'));return}
+ const bar=h('div','row bar top');bar.append(btn('New staged table',()=>newStaged(box),1));box.append(bar);
+ const g=h('div','cards');box.append(g);if(!sv.length){box.append(h('p','empty','Nothing staged yet: New staged table cleans a source here, or ask the agent.'));return}
  sv.forEach(t=>{const c=card(t.table,`${fmt(t.rows)} rows · hidden from the model`);const st=(D.table_steps||{})[t.table]||[];
   const reads=st.filter(x=>x.type==='source'||x.type==='append'||x.type==='merge').map(x=>x.source||(x.tables||[]).join(', ')||x.table).filter(Boolean);
   if(reads.length)c.append(h('div','file','reads '+reads.join(', ')));
@@ -598,7 +675,7 @@ function tablesPage(box){
   act(c,'Save steps',async()=>{await api('set_steps',{table:id.value,steps:parse()});return 'Saved and loaded through the steps.'},1);c.append(out);return c};
  bar.append(btn('New table',()=>g.prepend(stepsEd('',null,true)),1));
  const T=D.model?.tables||{};if(!Object.keys(T).length)box.append(h('p','empty','No tables yet: add a source first.'));
- Object.entries(T).forEach(([t,v])=>{const c=card(t);const kind=h('select','f ed');['fact','dimension'].forEach(x=>kind.append(new Option(x,x)));kind.value=v.kind||'fact';
+ Object.entries(T).forEach(([t,v])=>{const c=card(t);c.querySelector('h3').append(pinBtn({kind:'table',ref:t,title:t}));const kind=h('select','f ed');['fact','dimension'].forEach(x=>kind.append(new Option(x,x)));kind.value=v.kind||'fact';
   const key=h('input','f ed');key.value=(v.key||[]).join(', ');key.placeholder='key columns';const de=h('input','f ed');de.value=v.description||'';
   const hid=h('input','ed');hid.type='checkbox';hid.checked=!!v.hidden;const hl=h('label','l');hl.append(hid,document.createTextNode('  hidden from the model (staging)'));
   const cols=Object.entries(D.columns?.[t]||{});const cl=h('div');cols.slice(0,40).forEach(([n,ty])=>cl.append(h('span','chip',`${n} · ${ty}`)));
@@ -608,48 +685,71 @@ function tablesPage(box){
   act(c,'Delete',async()=>{await api('delete_table',{table:t});return 'Deleted.'});g.append(c)})}
 
 // ---------- the model canvas: drag tables, drag a column onto another table's column to join, click a join to remove it ----------
-// named models (ABI's model/models.json): one picker on Diagram and Measures; the choice narrows both pages
+// named models (ABI's model/models.json): the Data models page lists them like Reports; each opens its canvas.
+// Measures has a picker; the choice narrows it.
 let NM='';try{NM=localStorage.getItem('abi-nm-'+D.project)||''}catch(e){}
 const nmOf=()=>(D.models||[]).find(m=>m.id===NM),nmTable=t=>{const m=nmOf();return !m||(m.tables||[]).includes(t)||t===D.model?.date_table?.table};
 const nmMeasure=x=>{const m=nmOf();if(!m)return true;if(m.measures?.length)return m.measures.includes(x.id);
  return [...String(x.expression||'').matchAll(/\b([a-z][a-z0-9_]*)\.[a-z_]/gi)].every(r=>nmTable(r[1]))};
-function modelBar(box){if(!(D.models||[]).length&&MODE==='viewer')return;const bar=h('div','row bar lead seg');
- const pick=id=>{NM=id;try{localStorage.setItem('abi-nm-'+D.project,id)}catch(e){}show(CUR)};
- [['','All tables'],...(D.models||[]).map(m=>[m.id,m.name])].forEach(([id,name])=>{const b=h('button','chip'+(NM===id?' on':''),name);b.title=id?(D.models.find(m=>m.id===id).description||'Model '+name):'The whole model';b.onclick=()=>pick(id);bar.append(b)});
- if(MODE==='developer'){const nb=h('button','chip add w','+ New model');nb.onclick=()=>{if(box.querySelector('.nmform'))return;
-  const c=card('New model','a subset of the tables for one audience; joins and measures stay shared'),nm=h('input','f'),ds=h('input','f'),ck=h('div','checks');c.classList.add('nmform','wide');
-  nm.placeholder='e.g. Marketing';ds.placeholder='who it is for (optional)';Object.keys(D.model?.tables||{}).filter(t=>t!==D.model?.date_table?.table).forEach(t=>{const l=h('label','chk'),i=h('input');i.type='checkbox';i.value=t;l.append(i,document.createTextNode(t));ck.append(l)});
-  c.append(h('label','l','Name'),nm,h('label','l','Description'),ds,h('label','l','Tables'),ck);
-  act(c,'Create',async()=>{const tables=[...ck.querySelectorAll('input:checked')].map(i=>i.value),id=nm.value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g,'_').replace(/^[^a-z]+/,'');
-   if(!id||!tables.length)throw new Error('Give it a name and pick at least one table.');
-   await api('save_model',{model:{id,name:nm.value.trim(),description:ds.value.trim()||null,tables}});D.models=[...(D.models||[]).filter(m=>m.id!==id),{id,name:nm.value.trim(),tables}];pick(id)},1);
-  (box.querySelector('.pghead')||bar).after(c)};bar.append(nb)}
- if(MODE==='developer'&&NM){const db=h('button','chip w','Delete this model');db.onclick=async()=>{try{await api('delete_model',{id:NM});D.models=D.models.filter(m=>m.id!==NM);pick('')}catch(e){toast(e.message)}};bar.append(db)}
- box.append(bar)}
-function modelCanvas(box){modelBar(box);const T=D.model?.tables||{},R=(D.model?.relationships||[]).filter(r=>nmTable(r.from.table)&&nmTable(r.to.table)),names=Object.keys(T).filter(nmTable);
+const pickNM=id=>{NM=id;try{localStorage.setItem('abi-nm-'+D.project,id)}catch(e){}};
+function newModelForm(box){if(box.querySelector('.nmform'))return;
+ const c=card('New model','a subset of the tables for one audience; joins and measures stay shared'),nm=h('input','f'),ds=h('input','f'),ck=h('div','checks');c.classList.add('nmform','wide');
+ nm.placeholder='e.g. Marketing';ds.placeholder='who it is for (optional)';Object.keys(D.model?.tables||{}).filter(t=>t!==D.model?.date_table?.table).forEach(t=>{const l=h('label','chk'),i=h('input');i.type='checkbox';i.value=t;l.append(i,document.createTextNode(t));ck.append(l)});
+ c.append(h('label','l','Name'),nm,h('label','l','Description'),ds,h('label','l','Tables'),ck);
+ act(c,'Create',async()=>{const tables=[...ck.querySelectorAll('input:checked')].map(i=>i.value),id=nm.value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g,'_').replace(/^[^a-z]+/,'');
+  if(!id||!tables.length)throw new Error('Give it a name and pick at least one table.');
+  await api('save_model',{model:{id,name:nm.value.trim(),description:ds.value.trim()||null,tables}});D.models=[...(D.models||[]).filter(m=>m.id!==id),{id,name:nm.value.trim(),description:ds.value.trim(),tables}];sidebar();show('mdl:'+id)},1);
+ (box.querySelector('.pghead')||box).after(c)}
+function modelsPage(box){const bar=h('div','row bar top');bar.append(btn('New model',()=>newModelForm(box),1));box.append(bar);
+ const g=h('div','cards stack');box.append(g);const T=D.model?.tables||{},R=D.model?.relationships||[];
+ const row=(key,name,desc,tables)=>{const c=card(name),n=tables.length,j=R.filter(r=>tables.includes(r.from.table)&&tables.includes(r.to.table)).length;
+  c.append(h('p','',desc||''),h('p','file',`${n} table${n===1?'':'s'} · ${j} join${j===1?'':'s'}: ${tables.join(', ')}`));act(c,'Open',async()=>{show(key)},1);g.append(c);return c};
+ row('mdl:all','Whole model','Every model table and join of the project.',Object.keys(T));
+ (D.models||[]).forEach(m=>{const date=D.model?.date_table?.table,c=row('mdl:'+m.id,m.name,m.description,[...m.tables,...(date&&!m.tables.includes(date)?[date]:[])]);
+  if(MODE==='developer')act(c,'Delete',async()=>{await api('delete_model',{id:m.id});D.models=D.models.filter(x=>x.id!==m.id);if(NM===m.id)pickNM('');sidebar();show('model')})})}
+function modelBar(box){if(!(D.models||[]).length)return;const bar=h('div','row bar lead seg');
+ [['','All tables'],...(D.models||[]).map(m=>[m.id,m.name])].forEach(([id,name])=>{const b=h('button','chip'+(NM===id?' on':''),name);b.onclick=()=>{pickNM(id);show(CUR)};bar.append(b)});box.append(bar)}
+function openModel(box,id){pickNM(id);const bar=h('div','row bar lead');bar.append(btn('← Data models',()=>show('model')));box.append(bar);modelCanvas(box)}
+// a canvas with zoom (−, +, Fit, Ctrl/⌘ + wheel) and Auto arrange: a scroll viewport > sizer > stage (scaled)
+function canvasKit(box,onArrange){const tools=h('div','row cvtools'),wrap=h('div','canvas'),sizer=h('div','sizer'),stage=h('div','stage'),svg=document.createElementNS(NS,'svg');
+ svg.classList.add('links');stage.append(svg);sizer.append(stage);wrap.append(sizer);const kit={z:1,w:0,ht:0,wrap,stage,svg,draw:()=>{}};
+ const pct=h('span','pct','100%'),size=()=>{sizer.style.width=kit.w*kit.z+'px';sizer.style.height=kit.ht*kit.z+'px';stage.style.width=kit.w+'px';stage.style.height=kit.ht+'px';
+  stage.style.transform=`scale(${kit.z})`;wrap.style.height=Math.max(320,Math.min(kit.ht*kit.z+24,innerHeight*.78))+'px';pct.textContent=Math.round(kit.z*100)+'%'};
+ kit.setZ=z=>{kit.z=Math.min(2,Math.max(.25,Math.round(z*100)/100));size();kit.draw()};kit.extent=(w,ht)=>{kit.w=w;kit.ht=ht;size()};
+ const b=(t,title,fn)=>{const x=h('button','btn',t);x.title=title;x.onclick=fn;return x};
+ tools.append(b('−','Zoom out',()=>kit.setZ(kit.z-.1)),pct,b('+','Zoom in',()=>kit.setZ(kit.z+.1)),b('Fit','Fit to the window',()=>kit.setZ(Math.min(1,(wrap.clientWidth-24)/Math.max(1,kit.w),(innerHeight*.78)/Math.max(1,kit.ht)))),
+  b('Auto arrange','Lay the boxes out again',onArrange));
+ wrap.addEventListener('wheel',e=>{if(!(e.ctrlKey||e.metaKey))return;e.preventDefault();kit.setZ(kit.z*(e.deltaY<0?1.1:.9))},{passive:false});
+ // a point of the stage, in stage units, from a screen point
+ kit.local=(x,y)=>{const r=stage.getBoundingClientRect();return[(x-r.left)/kit.z,(y-r.top)/kit.z]};
+ box.append(tools,wrap);return kit}
+function modelCanvas(box){const T=D.model?.tables||{},R=(D.model?.relationships||[]).filter(r=>nmTable(r.from.table)&&nmTable(r.to.table)),names=Object.keys(T).filter(nmTable);
  if(!names.length){box.append(h('p','empty','No tables yet: add a source first.'));return}
  const help=h('p','file',MODE==='viewer'?'Facts are filled black, dimensions outlined. Hover a join to see its columns.'
   :'Drag a table by its title. Drag from a column\'s dot onto the matching column of another table to join them (many rows to one). Click a join to remove it. Click a table\'s badge to switch fact or dimension.');
- const wrap=h('div','canvas'),svg=document.createElementNS(NS,'svg');svg.classList.add('links');wrap.append(svg);box.append(help,wrap);
- let pos={};try{pos=JSON.parse(localStorage.getItem('abi-pos-'+D.project)||'{}')}catch(e){}
- const facts=names.filter(t=>T[t].kind==='fact'),dims=names.filter(t=>T[t].kind!=='fact');
- const hgt=t=>48+Math.min(230,Object.keys(D.columns?.[t]||{}).length*25);
- [[facts,24],[dims,380]].forEach(([list,x])=>{let y=24;list.forEach(t=>{if(!pos[t])pos[t]={x,y};y=Math.max(y,pos[t].y)+hgt(t)+32})});
- const save=()=>{try{localStorage.setItem('abi-pos-'+D.project,JSON.stringify(pos))}catch(e){}};
- const boxes={};
+ box.append(help);const key='abi-pos2-'+D.project+'-'+NM;let pos={};try{pos=JSON.parse(localStorage.getItem(key)||'{}')}catch(e){}
+ const save=()=>{try{localStorage.setItem(key,JSON.stringify(pos))}catch(e){}};
+ const facts=names.filter(t=>T[t].kind==='fact');
+ // columns by depth along the joins: facts, the dimensions they join, the ones those join (no loops back)
+ const hgt=t=>46+Object.keys(D.columns?.[t]||{}).length*27,depth={};facts.forEach(t=>depth[t]=0);
+ for(let i=0;i<names.length;i++)R.forEach(r=>{const a=r.from.table,b=r.to.table;if(depth[a]!==undefined&&(depth[b]===undefined||depth[b]<depth[a]+1)&&depth[a]<names.length)depth[b]=depth[a]+1});
+ const layout=()=>{const cols={};names.forEach(t=>(cols[depth[t]??1]??=[]).push(t));Object.entries(cols).forEach(([d,list])=>{let y=24;list.forEach(t=>{if(!pos[t])pos[t]={x:24+d*330,y};y=Math.max(y,pos[t].y)+hgt(t)+32})})};
+ const extent=()=>kit.extent(Math.max(...names.map(t=>pos[t].x+290)),Math.max(...names.map(t=>pos[t].y+hgt(t)+24)));
+ const kit=canvasKit(box,()=>{pos={};layout();names.forEach(t=>{boxes[t].style.left=pos[t].x+'px';boxes[t].style.top=pos[t].y+'px'});save();extent();draw()});
+ const {stage,svg}=kit;layout();const boxes={};
  names.forEach(t=>{const b=h('div','tbl '+(T[t].kind==='fact'?'fact':'dim'));b.style.left=pos[t].x+'px';b.style.top=pos[t].y+'px';
   const hd=h('div','th'),badge=h('button','badge',T[t].kind||'table');hd.append(h('span','',t),badge);b.append(hd);
   const cols=h('div','cols');Object.entries(D.columns?.[t]||{}).forEach(([c,ty])=>{const r=h('div','col');r.dataset.t=t;r.dataset.c=c;
    const dot=h('span','dot w');dot.title='Drag onto another table\'s column to join';r.append(dot,h('span','',c),h('span','ty',String(ty).toLowerCase()));cols.append(r)});
-  b.append(cols);wrap.append(b);boxes[t]=b;
+  b.append(cols);stage.append(b);boxes[t]=b;
   badge.onclick=async()=>{if(MODE==='viewer')return;try{await api('set_table',{table:t,kind:T[t].kind==='fact'?'dimension':'fact'});toast('Saved')}catch(e){toast(e.message)}};
-  hd.onpointerdown=e=>{if(e.target===badge)return;e.preventDefault();const sx=e.clientX-pos[t].x,sy=e.clientY-pos[t].y;hd.setPointerCapture(e.pointerId);
-   hd.onpointermove=m=>{pos[t]={x:Math.max(0,m.clientX-sx),y:Math.max(0,m.clientY-sy)};b.style.left=pos[t].x+'px';b.style.top=pos[t].y+'px';draw()};
+  hd.onpointerdown=e=>{if(e.target===badge)return;e.preventDefault();const [sx,sy]=kit.local(e.clientX,e.clientY),ox=pos[t].x,oy=pos[t].y;hd.setPointerCapture(e.pointerId);
+   hd.onpointermove=m=>{const [x,y]=kit.local(m.clientX,m.clientY);pos[t]={x:Math.max(0,ox+x-sx),y:Math.max(0,oy+y-sy)};b.style.left=pos[t].x+'px';b.style.top=pos[t].y+'px';extent();draw()};
    hd.onpointerup=()=>{hd.onpointermove=null;save()}}});
- const at=(t,c,side)=>{const w=wrap.getBoundingClientRect(),row=boxes[t]?.querySelector(`.col[data-c="${CSS.escape(c)}"]`)||boxes[t];if(!row)return[0,0];
-  const r=row.getBoundingClientRect();return[(side==='r'?r.right:r.left)-w.left+wrap.scrollLeft,r.top+r.height/2-w.top+wrap.scrollTop]};
+ const at=(t,c,side)=>{const row=boxes[t]?.querySelector(`.col[data-c="${CSS.escape(c)}"]`)||boxes[t];if(!row)return[0,0];
+  const r=row.getBoundingClientRect(),[x,y]=kit.local(side==='r'?r.right:r.left,r.top+r.height/2);return[x,y]};
  let temp=null;
- function draw(){svg.innerHTML='';svg.setAttribute('width',wrap.scrollWidth);svg.setAttribute('height',wrap.scrollHeight);
+ function draw(){svg.innerHTML='';svg.setAttribute('width',kit.w);svg.setAttribute('height',kit.ht);
   R.forEach(rel=>{const f=rel.from,to=rel.to;if(!boxes[f.table]||!boxes[to.table])return;
    const L=pos[f.table].x<pos[to.table].x;const [x1,y1]=at(f.table,f.columns[0],L?'r':'l'),[x2,y2]=at(to.table,to.columns[0],L?'l':'r');
    const dx=Math.max(40,Math.abs(x2-x1)/2)*(L?1:-1),d=`M${x1},${y1} C${x1+dx},${y1} ${x2-dx},${y2} ${x2},${y2}`;
@@ -657,17 +757,16 @@ function modelCanvas(box){modelBar(box);const T=D.model?.tables||{},R=(D.model?.
    const tt=document.createElementNS(NS,'title');tt.textContent=`${f.table}.${f.columns.join(',')} → ${to.table}.${to.columns.join(',')} (many to one)`;hit.append(tt);
    hit.onclick=async()=>{if(MODE==='viewer')return;try{await api('remove_relationship',{id:rel.id});toast('Join removed')}catch(e){toast(e.message)}}});
   if(temp)el('path',{d:temp,class:'ln temp'},svg)}
- wrap.addEventListener('pointerdown',e=>{const dot=e.target.closest('.dot');if(!dot||MODE==='viewer')return;e.preventDefault();const from=dot.parentNode,[x1,y1]=at(from.dataset.t,from.dataset.c,'r');
-  const mv=m=>{const w=wrap.getBoundingClientRect();temp=`M${x1},${y1} L${m.clientX-w.left+wrap.scrollLeft},${m.clientY-w.top+wrap.scrollTop}`;draw()};
+ kit.draw=draw;extent();
+ stage.addEventListener('pointerdown',e=>{const dot=e.target.closest('.dot');if(!dot||MODE==='viewer')return;e.preventDefault();const from=dot.parentNode,[x1,y1]=at(from.dataset.t,from.dataset.c,'r');
+  const mv=m=>{const [x,y]=kit.local(m.clientX,m.clientY);temp=`M${x1},${y1} L${x},${y}`;draw()};
   const up=async m=>{window.removeEventListener('pointermove',mv);window.removeEventListener('pointerup',up);temp=null;draw();
    const tgt=document.elementFromPoint(m.clientX,m.clientY)?.closest('.col');if(!tgt||tgt.dataset.t===from.dataset.t)return;
    const a=`${from.dataset.t}.${from.dataset.c}`,b=`${tgt.dataset.t}.${tgt.dataset.c}`;
    if(!await ask({message:`Join ${a} to ${b}?`,preview:`Many rows of ${from.dataset.t} to one row of ${tgt.dataset.t}. ${tgt.dataset.t} becomes a dimension keyed on ${tgt.dataset.c}.`}))return;
    try{await api('add_relationship',{from:a,to:b});toast('Joined')}catch(e){toast(e.message)}};
   window.addEventListener('pointermove',mv);window.addEventListener('pointerup',up)});
- requestAnimationFrame(draw);wrap.onscroll=draw;new ResizeObserver(draw).observe(wrap)}
-
-// ---------- editors: every object can be made, changed and deleted here; ABI checks each save ----------
+ requestAnimationFrame(draw);new ResizeObserver(()=>draw()).observe(kit.wrap)}
 const SERVER_KEYS=['owner','status','version','disabled','error','latest_run','latest_score','active_run','evaluation','sharing','last_runs','tokens'];
 const KIND={
  flow:{label:'flow',save:o=>api('save_flow',{flow:o}),del:o=>api('delete_flow',{flow:o.id}),
@@ -692,15 +791,49 @@ function editor(kind,obj,isNew){const K=KIND[kind],c=card(isNew?`New ${K.label}`
  act(c,isNew?'Create':'Save',async()=>{await K.save(parse());return 'Saved through ABI. It shows as an uncommitted change until you commit.'},1);
  act(c,'Format',()=>{ta.value=JSON.stringify(parse(),null,2)});
  return c}
-function editBtns(c,kind,obj){const K=KIND[kind];let ed=null;
+function editBtns(c,kind,obj){const K=KIND[kind];let ed=null;c.querySelector('h3')?.append(pinBtn({kind,ref:obj.id,title:obj.name||obj.id}));
  act(c,'Edit',()=>{if(ed){ed.remove();ed=null;return}ed=editor(kind,obj,false);c.after(ed);ed.scrollIntoView({behavior:'smooth',block:'nearest'})});
  (K.extra||[]).forEach(([l,f])=>act(c,l,async()=>{await f(obj);return `${l}ed.`}));
  act(c,'Delete',async()=>{await K.del(obj);return 'Deleted.'})}
-function newBtn(box,kind){const bar=box.querySelector(':scope>.bar.top')||h('div','row bar top');
- bar.append(btn(`New ${KIND[kind].label}`,()=>{const c=editor(kind,KIND[kind].tpl,true);box.querySelector('.cards')?.prepend(c)||box.append(c);c.querySelector('textarea').focus()},1));
+// New <kind>: say it in words (the agent builds it in ABI, with its checks and tests) or start from a JSON template
+const SAY={flow:'e.g. every Monday at 8, refresh the data and check its quality; if something is wrong, leave me a note',
+ ml:'e.g. forecast weekly views for the next two months', tool:'e.g. the top 10 videos of a category I choose',agent:'e.g. an assistant for the marketing team that answers which categories trend'};
+function newBtn(box,kind){const bar=box.querySelector(':scope>.bar.top')||h('div','row bar top'),L=KIND[kind].label;
+ bar.append(btn(`New ${L}`,()=>{if(box.querySelector('.newkind'))return;const c=card(`New ${L}`,'describe it and the agent builds it in ABI, or start from a template'),ta=h('textarea','f');c.classList.add('newkind','wide');
+  ta.rows=3;ta.placeholder=SAY[kind]||'what it should do';c.append(h('label','l','What should it do?'),ta);
+  act(c,'Create with the agent',async()=>{if(!ta.value.trim())throw new Error('Say what it should do.');openChat(true);inp.value=`Create a ${L} in this project: ${ta.value.trim()}`;sendChat();return 'Asked: follow it in the chat.'},1);
+  act(c,'Start from a template (JSON)',()=>{const e=editor(kind,KIND[kind].tpl,true);c.after(e);e.querySelector('textarea').focus()});
+  (box.querySelector('.pghead')||bar).after(c);ta.focus()},1));
  if(!bar.parentNode)box.prepend(bar)}
 
 // ---------- Automate ----------
+function flowPage(box,f){const bar=h('div','row bar lead');bar.append(btn('← Flows',()=>show('flows')));box.append(bar);
+ const steps=f.steps||[],t=f.trigger||{type:'manual'},T0='__trigger';
+ const deps={};steps.forEach((x,i)=>deps[x.id]=x.after===undefined?[i?steps[i-1].id:T0]:(x.after.length?x.after:[T0]));
+ const depth={[T0]:0};steps.forEach(x=>depth[x.id]=1+Math.max(...deps[x.id].map(d=>depth[d]??0)));
+ const what=x=>x.table||x.tool||x.agent||x.action||x.model||x.report||(x.measure?`${x.measure} ${x.op} ${x.value}`:'')||(x.changed?'data changed':'')||(x.message||'').slice(0,40);
+ const nodes=[{id:T0,title:'Trigger',sub:t.type+(t.cron?` · ${t.cron}${t.timezone?' '+t.timezone:''}`:'')+(t.tables?' · '+t.tables.join(', '):'')+(t.measure?` · ${t.measure} ${t.op} ${t.value}`:'')},
+  ...steps.map(x=>({id:x.id,title:x.id,sub:`${x.type}${what(x)?' · '+what(x):''}`,when:x.when}))];
+ const H=x=>x.when?96:72,key='abi-flow2-'+D.project+'-'+f.id;let pos={};try{pos=JSON.parse(localStorage.getItem(key)||'{}')}catch(e){}
+ const save=()=>{try{localStorage.setItem(key,JSON.stringify(pos))}catch(e){}};
+ // columns by depth, as many to a row as the canvas fits: a long chain wraps like lines of text
+ const layout=()=>{const per=Math.max(2,Math.floor(((kit.wrap.clientWidth||1100)-24)/280)),cols={};nodes.forEach(n=>(cols[depth[n.id]]??=[]).push(n));const tall={};Object.entries(cols).forEach(([d,list])=>{const r=Math.floor(d/per);tall[r]=Math.max(tall[r]||0,list.reduce((a,n)=>a+H(n)+28,0))});
+  const top=r=>24+[...Array(r).keys()].reduce((a,i)=>a+(tall[i]||0)+40,0);Object.entries(cols).forEach(([d,list])=>{let y=top(Math.floor(d/per));list.forEach(n=>{if(!pos[n.id])pos[n.id]={x:24+(d%per)*280,y};y=Math.max(y,pos[n.id].y)+H(n)+28})})};
+ const extent=()=>kit.extent(Math.max(...nodes.map(n=>pos[n.id].x+260)),Math.max(...nodes.map(n=>pos[n.id].y+H(n)+24)));
+ const kit=canvasKit(box,()=>{pos={};layout();nodes.forEach(n=>{els[n.id].style.left=pos[n.id].x+'px';els[n.id].style.top=pos[n.id].y+'px'});save();extent();draw()});
+ const {stage,svg}=kit,els={};layout();
+ nodes.forEach(n=>{const e=h('div','node'+(n.id===T0?' trig':''));e.style.left=pos[n.id].x+'px';e.style.top=pos[n.id].y+'px';e.append(h('b','',n.title),h('span','',n.sub));
+  if(n.when)e.append(h('div','when',`only if ${n.when.value.replace(/[{}\s]/g,'')} ${n.when.op} ${JSON.stringify(n.when.to)}`));
+  e.onpointerdown=ev=>{ev.preventDefault();const [sx,sy]=kit.local(ev.clientX,ev.clientY),ox=pos[n.id].x,oy=pos[n.id].y;e.setPointerCapture(ev.pointerId);
+   e.onpointermove=m=>{const [x,y]=kit.local(m.clientX,m.clientY);pos[n.id]={x:Math.max(0,ox+x-sx),y:Math.max(0,oy+y-sy)};e.style.left=pos[n.id].x+'px';e.style.top=pos[n.id].y+'px';extent();draw()};
+   e.onpointerup=()=>{e.onpointermove=null;save()}};stage.append(e);els[n.id]=e});
+ const side=(id,r)=>{const b=els[id].getBoundingClientRect(),[x,y]=kit.local(r?b.right:b.left,b.top+b.height/2);return[x,y]};
+ function draw(){svg.innerHTML='';svg.setAttribute('width',kit.w);svg.setAttribute('height',kit.ht);
+  steps.forEach(x=>deps[x.id].forEach(d=>{if(!els[d])return;const [x1,y1]=side(d,1),[x2,y2]=side(x.id,0),dx=Math.max(30,(x2-x1)/2);
+   el('path',{d:`M${x1},${y1} C${x1+dx},${y1} ${x2-dx},${y2} ${x2},${y2}`,class:'ln'},svg);el('circle',{cx:x2,cy:y2,r:3.5,class:'one'},svg)}))}
+ kit.draw=draw;extent();requestAnimationFrame(draw);new ResizeObserver(()=>draw()).observe(kit.wrap);
+ if(LIVE)api('flow_runs',{flow:f.id}).then(x=>{const one=x.runs?.[0]||x;(one.steps||[]).forEach(r=>els[r.step||r.id]?.classList.add(r.status));
+  if(one.status)box.querySelector('.cvtools').append(h('span','file',`last run: ${one.status}${one.started?' · '+cell(one.started):''}`))}).catch(()=>{})}
 function flows(box){newBtn(box,'flow');const g=h('div','cards');box.append(g);if(!D.flows.length)box.append(h('p','empty','No flows yet: New flow, or ask the agent.'));
  D.flows.forEach(f=>{const t=f.trigger||{},c=card(f.name||f.id,f.enabled?'enabled':'disabled');
   c.append(h('div','file',`${t.type||'manual'} trigger${t.cron?' · '+t.cron:''}${t.measure?` · ${t.measure} ${t.op} ${t.value}`:''} · flows/${f.id}.json`));
@@ -709,6 +842,7 @@ function flows(box){newBtn(box,'flow');const g=h('div','cards');box.append(g);if
    for(let i=0;i<150;i++){await wait(2000);const x=await api('flow_runs',{flow:f.id,run:r.run}),one=x.runs?.[0]||x;tr.innerHTML='';
     (one.steps||[]).forEach(s=>tr.append(h('li',s.status==='ok'?'ok':s.status==='failed'?'bad':'',`${s.step||s.id}: ${s.status}${s.error?' · '+s.error:''}`)));
     if(['ok','failed','stopped','rejected','waiting'].includes(one.status))return `run ${one.status}`}return 'still running; see ABI\'s flow runs'},1);
+  act(c,'Open canvas',async()=>{show('flw:'+f.id)});
   act(c,f.enabled?'Disable':'Enable',async()=>{await api('enable_flow',{flow:f.id,enabled:!f.enabled});f.enabled=!f.enabled;show('flows')});editBtns(c,'flow',f);g.append(c)})}
 function ml(box){newBtn(box,'ml');const g=h('div','cards');box.append(g);if(!D.ml.length)box.append(h('p','empty','No ML models yet: New ML model needs a query.'));
  D.ml.forEach(m=>{const c=card(m.name||m.id,`ml/${m.id}.json`);c.append(h('div','file',`${m.task}${m.target?' of '+m.target:''} on query ${m.dataset}${m.horizon?`, ${m.horizon} ahead`:''}`));
@@ -734,7 +868,9 @@ function agents(box){newBtn(box,'agent');const g=h('div','cards');box.append(g);
 function docs(box){const d=D.docs?.projects?.[0];if(!d){box.append(h('p','empty','No documentation yet.'));return}
  (d.sections||[]).forEach(s=>{const c=card(`${s.number}. ${s.title}`);(s.items||[]).forEach(it=>{c.append(h('h4','',it.title));const t=h('table');
   (it.facts||[]).forEach(([k,v])=>{const r=t.insertRow();r.insertCell().textContent=k;r.insertCell().textContent=typeof v==='string'?v:JSON.stringify(v)});c.append(t)});box.append(c)});
- act(box.firstChild||box,'Regenerate from ABI',async()=>{D.docs=await api('docs',{});show('docs')})}
+ act(box.firstChild||box,'Regenerate from ABI',async()=>{D.docs=await api('docs',{});show('docs')});
+ act(box.firstChild||box,'Download PDF',async()=>{const r=await fetch('/docs/pdf',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'});
+  if(!r.ok)throw new Error('The PDF could not be made: '+((await r.json().catch(()=>({}))).error||r.status));const a=h('a');a.href=URL.createObjectURL(await r.blob());a.download=D.project+'-documentation.pdf';a.click();return 'Downloaded.'},1)}
 function commits(box){const c=card('Commits','every change is a commit in ABI\'s Git history');const t=h('table');c.append(t);box.append(c);
  const fill=()=>{t.innerHTML='';(D.history||[]).forEach(x=>{const r=t.insertRow();[new Date(x.time*1000).toLocaleString(),x.author+(x.by==='agent'?' (agent)':''),x.message,x.id.slice(0,7)].forEach(v=>r.insertCell().textContent=v)})};fill();
  act(c,'Reload',async()=>{D.history=(await api('history',{})).commits;fill()})}
@@ -772,7 +908,7 @@ function vaultPage(box){if(!LIVE){box.append(h('p','empty','The vault opens with
 // ---------- sidebar ----------
 const PENDING={filters:null,explore:null};
 const LEDE={vault:'Your business documents: definitions, finance rules, KPI specs. The agents search them before they define or check a measure.',home:'Start here: ask anything, see what needs attention, and every part of the project at a glance.',datasets:'Saved questions to the model (measures by dimensions, with filters). Each run returns a fresh table; nothing is stored. Reports, flows and ML reuse them. Preview their rows.',
- measures:'The business numbers. Edit a formula and ABI checks it before it saves; Test shows the total.',model:'Tables and how they join. Facts are black, dimensions are outlined.',
+ measures:'The business numbers. Edit a formula and ABI checks it before it saves; Test shows the total.',model:'Your data models: the whole model and each named model. Open one to see its tables and how they join.',
  chat:'Talk to the agent: ask a question, ask where something is, or ask for a change. When it shows you a page, the chat moves to the side and goes on.',boardpack:'Board packs: the documents, data and explainer video a review needs, made from ABI by the board-pack agent and checked before they leave. Nothing is sent from here.',documents:'A report, some of its pages or one view, as ABI renders it: PDF, PNG or PowerPoint.',onepager:'One page for the board: a report page with the headline numbers, two charts and the caveats. The agent builds it in ABI; export it here.',dataexport:'The rows behind any view, as CSV or Excel, or a query\'s rows as CSV.',video:'A silent explainer of report views: the numbers from ABI, animated, with a caption per slide, in the app\'s theme.',settings:'The agent\'s model and how hard it thinks, and the providers it may use. API keys are stored encrypted and never shown again.',people:'Who may sign in to this project, as what (Viewer, Editor, Owner), and which sections and reports each person sees.',transfer:'The whole project as one zip, so it can be kept, reviewed, moved or rebuilt. Import goes through ABI, which checks it and makes it one undoable commit.',edits:'Write-back: people correct or add rows of the gold tables. Edits apply on top of the table by row key (the loaded data is never changed), survive refreshes, can be undone, and every query sees the edited table.',reports:'The saved reports of this project. Open one to filter it and click through.',monitor:'Is anything wrong right now: data freshness, model readiness, ML runs and flows. Reports show the business; this shows the system.',explore:'Your own analysis: pick measures, a dimension and a filter; the numbers come from the model, so they match the reports. Keep the ones you want: they are saved with the app, the project itself doesn\'t change.',glossary:'What the business words mean and which measures implement them.',sources:'Bronze: the data as it landed, one source per file or bucket folder. Reload, add or delete a source.',
  staged:'Silver: the cleaned and combined tables between the sources and the final tables. Hidden from the model; edit their steps here.',tables:'Gold: the final business tables the model and measures are built on. Edit kind, key, description and steps.',flows:'Automations. Run one now and follow its steps, or switch it on or off.',
  ml:'Forecasts, segments and anomaly models. Train, score and read the latest run.',tools:'Calculations your agents can call. Run one with inputs or run its tests.',
@@ -781,13 +917,13 @@ const LEDE={vault:'Your business documents: definitions, finance rules, KPI spec
 function nav(){const all=navAll(),me=window.ME||{admin:true};return all.filter(([g])=>g==='Start'||!me.sections||me.sections.includes(g))}
 function navAll(){return [['Start',[['home','Home',home],['chat','Chat',chatPage]]],
  ['Data',[['sources','Sources',sources,D.sources.length],['staged','Staged',stagedPage,(D.layers||[]).filter(t=>t.layer==='silver').length],['tables','Tables',tablesPage,(D.model?Object.keys(D.model.tables||{}).length:D.tables.length)],['edits','Edits',editsPage]]],
- ['Data Model',[['model','Diagram',modelCanvas],['measures','Measures',measures,D.measures.length],
+ ['Data Model',[['model','Data models',modelsPage,(D.models||[]).length+1],['measures','Measures',measures,D.measures.length],
  ['glossary','Glossary',glossary,D.glossary.length],['datasets','Queries',datasets,D.datasets.length]]],
  ['Visualizations',[['reports','Reports',reportsPage,D.reports.length],['monitor','Monitor',monitorPage],['explore','Explore',explore,MINE.length||'']]],
  ['Export',[['boardpack','Board pack',boardPage,(D.app?.packs||[]).length],['documents','Documents',documentsPage],['onepager','One-pager',onePagerPage],['dataexport','Data',dataExportPage],['video','Video',videoPage],['transfer','Project',transferPage]]],
  ['Automate',[['flows','Flows',flows,D.flows.length],['ml','ML models',ml,D.ml.length],['tools','Tools',tools,D.tools.length],['agents','Agents',agents,D.agents.length]]],
  ['Knowledge',[['vault','Vault',vaultPage,(VAULT||[]).length],['docs','Docs',docs]]],
- ['Govern',[['security','Security',security],['environments','Environments',b=>b.insertAdjacentHTML('beforeend',D.sections.Environments)],['history','History',commits,(D.history||[]).length],...((window.ME||{admin:true}).admin?[['people','Users & access',usersPage],['settings','Settings',settingsPage]]:[])]]]}
+ ['Govern',[['security','Security',security],['environments','Environments',b=>{const x=(D.sections.Environments||'').trim();if(x&&!/^<p[^>]*>\s*<\/p>$/.test(x))b.insertAdjacentHTML('beforeend',x);if(b.innerText.trim().length<10)b.append(h('p','empty','No environments yet: a dev/prod pair lets you test changes before they reach production. Ask the agent to set one up.'))}],['history','History',commits,(D.history||[]).length],...((window.ME||{admin:true}).admin?[['people','Users & access',usersPage],['settings','Settings',settingsPage]]:[])]]]}
 let MODE='developer',VAULT=[];
 let FOLD={};try{FOLD=JSON.parse(localStorage.getItem('abi-fold')||'{}')}catch(e){}
 function sidebar(){side.innerHTML='';PAGES={};nav().forEach(([g,items])=>{const sec=h('div','sec'),hd=h('button','grp'),list=h('div','items');
@@ -795,9 +931,10 @@ function sidebar(){side.innerHTML='';PAGES={};nav().forEach(([g,items])=>{const 
  hd.onclick=()=>{FOLD[g]=!FOLD[g];sec.classList.toggle('folded',FOLD[g]);hd.setAttribute('aria-expanded',String(!FOLD[g]));try{localStorage.setItem('abi-fold',JSON.stringify(FOLD))}catch(e){}};
  items.forEach(([k,label,fn,n])=>{PAGES[k]=[label,fn];const b=h('button','it');b.dataset.k=k;
   b.append(h('span','',label));if(n!==undefined&&n!=='')b.append(h('span','n',String(n)));b.onclick=()=>show(k);list.append(b)});
- sec.append(hd,list);side.append(sec)});D.reports.forEach(r=>PAGES['rep:'+r.id]=[r.name||r.id,b=>report(b,r)])}
+ sec.append(hd,list);side.append(sec)});D.reports.forEach(r=>PAGES['rep:'+r.id]=[r.name||r.id,b=>report(b,r)]);PAGES['mdl:all']=['Whole model',b=>openModel(b,'')];(D.flows||[]).forEach(f=>PAGES['flw:'+f.id]=[f.name||f.id,b=>flowPage(b,f)]);
+ (D.models||[]).forEach(m=>PAGES['mdl:'+m.id]=[m.name,b=>openModel(b,m.id)])}
 let PREV='home';
-function show(k){if(!PAGES[k])k='home';if(k!=='chat'&&CUR!=='chat')PREV=k;else if(k==='chat'&&CUR!=='chat')PREV=CUR;{const cb=$('#chat');if(cb.classList.contains('full')){cb.classList.remove('full');$('#chat .wide-t').textContent='Full page';document.body.append(cb);cb.classList.remove('open');document.body.classList.remove('chat-open')}}CUR=k;setTimeout(ctx);const sk=k.startsWith('rep:')?'reports':k;side.querySelectorAll('button.it').forEach(b=>b.classList.toggle('on',b.dataset.k===sk));
+function show(k){if(!PAGES[k])k='home';if(k!=='chat'&&CUR!=='chat')PREV=k;else if(k==='chat'&&CUR!=='chat')PREV=CUR;{const cb=$('#chat');if(cb.classList.contains('full')){cb.classList.remove('full');$('#chat .wide-t').textContent='Full page';document.body.append(cb);cb.classList.remove('open');document.body.classList.remove('chat-open')}}CUR=k;setTimeout(ctx);const sk=k.startsWith('rep:')?'reports':k.startsWith('mdl:')?'model':k.startsWith('flw:')?'flows':k;side.querySelectorAll('button.it').forEach(b=>b.classList.toggle('on',b.dataset.k===sk));
  const act=side.querySelector('button.it.on');if(act)act.closest('.sec').classList.remove('folded');
  const box=$('main');box.innerHTML='';const pg=h('div','pg'),head=h('div','pghead'),pn=$('#pgname');pn.textContent=PAGES[k][0];document.title=PAGES[k][0]+' · '+D.project;
  pn.title=(k.startsWith('rep:')?'Filter the report or click a bar to filter by it. Every number comes from ABI.':LEDE[k])||'';pg.append(head);box.append(pg);PAGES[k][1](pg);
@@ -828,7 +965,7 @@ $('#publish').onclick=async()=>{if(!LIVE)return;if(!await ask({message:'Publish 
 $('#menu').onclick=()=>document.body.classList.toggle('menu-open');side.addEventListener('click',e=>{if(e.target.closest('button.it'))document.body.classList.remove('menu-open')});
 $('#switch').onclick=switcher;
 if(window.ME?.signin){const w=h('span','who',ME.name),f=h('form');f.method='post';f.action='/signout';f.append(h('button','btn','Sign out'));const r0=$('header .right');r0.prepend(w,f)}
-if(window.ME&&!['editor','owner'].includes(ME.role)){$('#m-dev').hidden=true;$('#m-view').classList.add('on')}$('#m-dev').onclick=()=>pickMode('developer');$('#m-view').onclick=()=>pickMode('viewer');
+if(window.ME&&!['editor','owner'].includes(ME.role))$('.modes').hidden=true;/* Viewer access only: no switch at all */$('#m-dev').onclick=()=>pickMode('developer');$('#m-view').onclick=()=>pickMode('viewer');
 let first=decodeURIComponent(location.hash.slice(1));if(!first)try{first=localStorage.getItem('abi-app-'+D.project)}catch(e){}setTimeout(()=>show(first||'home'));  // after the whole script: the chat page's parts are declared further down
 boot.then(()=>{sidebar();show(CUR)});setMode('developer');vc();
 window.addEventListener('hashchange',()=>{const k=decodeURIComponent(location.hash.slice(1));if(k&&k!==CUR)show(k)});
@@ -915,7 +1052,7 @@ def published(project: str) -> dict:
     return json.loads(f.read_text()) if f.exists() else {}
 
 
-MONITOR = {"watch": [], "fresh_within_hours": 36}  # watch: tables that must stay fresh ([] = every table named *stream*)
+MONITOR = {"watch": [], "fresh_within_hours": 36, "checks": []}  # watch: tables that must stay fresh ([] = every table named *stream*)
 
 
 def app_dir(project: str) -> Path:
@@ -1004,6 +1141,23 @@ def publish_bundle(project: str) -> tuple[str, dict, str]:
         abi.new_project(dest.parent.name, pub, f"{(bundle.get('project.json') or {}).get('name', project)} (published)")
     last = (abi.call("history", project=project).get("commits") or [{}])[0]  # ABI's last commit, not the local skeleton one
     return pub, bundle, f"{last.get('id', '')[:7]} {last.get('message', '')}".strip()
+
+
+def docs_pdf(project: str) -> bytes:
+    """ABI's documentation of the project as an A4 PDF: render.docs_html printed by the engine's headless Chromium
+    (the one report exports use), in its own process."""
+    import tempfile  # noqa: PLC0415
+    name = (render.j(abi.folder(project) / "project.json", {}) or {}).get("name", project)
+    py = Path(__file__).resolve().parent.parent / "engine/backend/.venv/bin/python"
+    home = os.environ.get("ENGINE_HOME") or str(Path(__file__).resolve().parent.parent / "data/home")
+    code = ("import sys\nfrom playwright.sync_api import sync_playwright\nwith sync_playwright() as p:\n b = p.chromium.launch(args=['--disable-dev-shm-usage'])\n"
+            " pg = b.new_page(); pg.goto('file://' + sys.argv[1]); pg.wait_for_load_state('networkidle')\n"
+            " pg.pdf(path=sys.argv[2], format='A4', print_background=True, margin={k: '14mm' for k in ('top', 'right', 'bottom', 'left')}); b.close()")
+    with tempfile.TemporaryDirectory() as d:
+        (Path(d) / "docs.html").write_text(render.docs_html(name, read("docs", project) or {}))
+        subprocess.run([str(py), "-c", code, f"{d}/docs.html", f"{d}/docs.pdf"], check=True, timeout=180,
+                       env={**os.environ, "HOME": home if Path(home).exists() else os.environ.get("HOME", "")}, capture_output=True)
+        return (Path(d) / "docs.pdf").read_bytes()
 
 
 def published_now(project: str, pub: str, head: str) -> dict:
@@ -1264,7 +1418,7 @@ NO_PROJECT = """<!doctype html><meta charset=utf-8><meta name=viewport content='
 
 SECTIONS = ["Data", "Data Model", "Visualizations", "Export", "Automate", "Knowledge", "Govern"]  # Start is everyone's
 ROUTE_SECTION = {"/edits/rows": "Data", "/upload": "Data", "/report/export": "Export", "/data/export": "Export", "/video/export": "Export",
-                 "/packs/file": "Export", "/transfer/": "Export", "/vault/": "Knowledge", "/analyses": "Visualizations"}
+                 "/packs/file": "Export", "/transfer/": "Export", "/vault/": "Knowledge", "/analyses": "Visualizations", "/monitor": "Visualizations", "/docs/pdf": "Knowledge"}
 REPORT_ACTIONS = {"visual_data", "report_snapshot", "export_visual", "save_report", "delete_report"}
 _SEC = {"Data": "add_data delete_source delete_table set_steps preview_steps refresh edit_cells approve_edit reject_edit undo_edits create_input_table",
         "Data Model": "add_relationship remove_relationship set_measure delete_measure set_glossary_term delete_glossary_term save_dataset delete_dataset save_model delete_model",
@@ -1454,7 +1608,9 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                     self.reply(503, b'{"error":"ABI isn\'t answering right now. Try again in a minute."}')
             except OSError:
                 pass  # the browser went away
-            except Exception:  # noqa: BLE001 (never a dropped connection; no details, they may carry values)
+            except Exception as e:  # noqa: BLE001 (never a dropped connection; no details to the page, they may carry values)
+                at = traceback.extract_tb(e.__traceback__)[-1]  # the operator gets the kind and the line, never the message
+                print(f"error {type(e).__name__} at {Path(at.filename).name}:{at.lineno} on {self.path}", file=sys.stderr, flush=True)
                 with contextlib.suppress(OSError):
                     self.reply(500, b'{"error":"Something went wrong. Try again."}')
 
@@ -1511,6 +1667,18 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                     with hub.lock:
                         hub.clients.remove(q)
                 return None
+            if route.startswith("/api/artifacts/"):  # a file ABI rendered (a chat's PDF link), fetched as this person
+                rel = route.removeprefix("/api/artifacts/")
+                proj = rel.split("/", 1)[0]
+                if not re.fullmatch(r"[a-z][a-z0-9_]{0,62}/[\w.-]{1,100}", rel) or not known(proj.removesuffix("_pub")) or not role_of(self.sess, proj.removesuffix("_pub")):
+                    return self.reply(404, b"{}")
+                try:
+                    data = abi.artifact(rel)
+                except (urllib.error.HTTPError, abi.ActionError):
+                    return self.reply(404, b"{}")
+                kind = {".pdf": "application/pdf", ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        ".png": "image/png", ".csv": "text/csv"}.get(Path(rel).suffix, "application/octet-stream")
+                return self.reply(200, data, kind)
             if route not in ("/", "/app.html"):
                 return self.reply(404, b"{}")
             want = urllib.parse.unquote(qs.get("p", ""))
@@ -1638,6 +1806,15 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                 pub, bundle, head = publish_bundle(project)
                 out = run("import_project", {"project": pub, "bundle": bundle}, None, lambda: published_now(project, pub, head))
                 return self.reply(200, json.dumps(out, default=str).encode())
+            if self.path == "/docs/pdf":  # the documentation as a PDF, printed by the engine's Chromium
+                pdf = docs_pdf(project)
+                self.send_response(200)
+                for k, v in (("Content-Type", "application/pdf"), ("Content-Length", str(len(pdf))),
+                             ("Content-Disposition", f'attachment; filename="{project}-documentation.pdf"')):
+                    self.send_header(k, v)
+                self.end_headers()
+                self.wfile.write(pdf)
+                return None
             if self.path == "/upload":  # a person's file into a table (IN-7 resumable upload, as abi.py load)
                 if hub.mode == "viewer":
                     return self.reply(403, b'{"error":"Viewer mode is read-only."}')
@@ -1701,6 +1878,24 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                 if not isinstance(items, list) or len(items) > 100 or len(raw) > 200_000:
                     return self.reply(400, b'{"error":"at most 100 analyses"}')
                 app_save(project, "analyses.json", items, hub.user)
+                return self.reply(200, b'{"result":"saved"}')
+            if self.path == "/pins":  # a person's own Home: what they pinned (the app's file, per person, with history)
+                who = hub.user or "me"
+                allp = render.j(app_dir(project) / "pins.json", {}) or {}
+                if "pins" in body:
+                    pins = body["pins"]
+                    if not isinstance(pins, list) or len(pins) > 60 or len(raw) > 100_000 or not all(isinstance(x, dict) and x.get("kind") for x in pins):
+                        return self.reply(400, b'{"error":"at most 60 pins, each with a kind"}')
+                    app_save(project, "pins.json", allp | {who: pins}, hub.user)
+                return self.reply(200, json.dumps({"result": (render.j(app_dir(project) / "pins.json", {}) or {}).get(who, [])}).encode())
+            if self.path == "/monitor":  # Monitor's own checks (monitor.json): what a person wants watched
+                if hub.mode == "viewer":
+                    return self.reply(403, b'{"error":"Make monitors in Developer mode."}')
+                checks = body.get("checks")
+                if not isinstance(checks, list) or len(checks) > 50 or len(raw) > 100_000 or not all(isinstance(c, dict) and c.get("kind") in ("measure", "fresh", "flow") for c in checks):
+                    return self.reply(400, b'{"error":"at most 50 checks, each a measure, fresh or flow check"}')
+                app_save(project, "monitor.json", (render.j(app_dir(project) / "monitor.json", {}) or {}) | {"checks": checks}, hub.user)
+                changed(project)
                 return self.reply(200, b'{"result":"saved"}')
             if self.path.startswith("/transfer/"):  # the whole project as one zip, and back (Developer only)
                 import base64  # noqa: PLC0415
@@ -1774,7 +1969,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                     return self.reply(410, b'{"error":"That confirmation expired; try again."}')
                 return self.reply(200, json.dumps(run(*job[:4]), default=str).encode())  # job: action, args, token, after, hub
             action = self.path.removeprefix("/api/")
-            if action not in ALLOWED or body.get("project") != project:
+            if action not in ALLOWED or body.get("project") not in (project, pub_id(project)):  # Viewer's page names the published copy
                 return self.reply(403, json.dumps({"error": f"'{action}' is not available here; use ABI's app."}).encode())
             if hub.mode == "viewer" and (action in WRITES or action in READS_ONLY):
                 return self.reply(403, json.dumps({"error": "Viewer mode is read-only. Switch to Developer in the top bar to change things."}).encode())
@@ -1811,6 +2006,8 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                     out = settings.set_default(body.get("model") or None, str(body.get("thinking") or "medium"))
                 elif op == "settings/test":
                     out = settings.test(str(body.get("id", "")))
+                elif op == "settings/models":  # the form's model list, fetched from the provider (the key stays here)
+                    return 200, json.dumps({"result": settings.models(body.get("provider") or {}, str(body.get("key") or "") or None)}).encode()
                 else:
                     out = settings.public()
             except ValueError as e:
@@ -1963,8 +2160,11 @@ def main(argv: list[str]) -> int:
     argv = [a for a in argv if a not in ("--tailnet", "--open", "--single")]
     try:
         s = serve(argv[0], int(argv[1]) if len(argv) > 1 else 8790, open_browser=not tailnet, tailnet=tailnet, signin=signin)
-    except (urllib.error.URLError, subprocess.CalledProcessError):  # no ABI to talk to, or to sign in with
+    except urllib.error.URLError:  # no ABI to talk to
         raise SystemExit(f"Can't reach ABI at {abi.URL}: start ABI (or set ABI_URL) and try again.") from None
+    except subprocess.CalledProcessError:  # ABI answers but the service account's sign-in was refused
+        raise SystemExit(f"ABI at {abi.URL} refused the app's sign-in: check the account in data/accounts.txt, or wait 15 minutes"
+                         " if there were many failed sign-ins (ABI's throttle).") from None
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     atexit.register(lambda: [h.pi.terminate() for h in HUBS.values() if h.pi and h.pi.poll() is None])  # the chats' agents stop with the app
     print(f"{abi.folder(argv[0]) / 'app.html'} · live at http://127.0.0.1:{s.server_address[1]}/ (Ctrl+C to stop)", flush=True)

@@ -56,7 +56,8 @@ def _save(s: dict) -> None:
 def public() -> dict:
     s = load()
     return {**s, "apis": APIS, "levels": LEVELS,
-            "providers": [{k: v for k, v in p.items() if k != "key"} | {"key_set": bool(p.get("key")), "key_ends": p.get("ends", "")}
+            "providers": [{k: v for k, v in p.items() if k != "key"} | {"key_set": bool(p.get("key")) or bool(_builtin(p["base_url"])),
+                                                                     "key_builtin": not p.get("key") and bool(_builtin(p["base_url"])), "key_ends": p.get("ends", "")}
                           for p in s["providers"]]}
 
 
@@ -120,9 +121,32 @@ def set_default(model: str | None, thinking: str) -> dict:
     return public()
 
 
+def _builtin(base: str) -> str:
+    """The built-in connection's key, only for its own address (creds.py: the container's environment, else the proxy
+    credentials file): a provider saved for that address without a key of its own uses it; any other address never
+    sees it."""
+    import creds  # noqa: PLC0415 (sibling script)
+    try:
+        own = creds.proxy("API base URL").rstrip("/")
+        return creds.proxy("API key") if own and base.rstrip("/") == own else ""
+    except (OSError, SystemExit):  # no built-in connection here
+        return ""
+
+
 def key_of(pid: str) -> str:
     p = next((x for x in load()["providers"] if x["id"] == pid), None)
-    return _fernet().decrypt(p["key"].encode()).decode() if p and p.get("key") else ""
+    if p and p.get("key"):
+        return _fernet().decrypt(p["key"].encode()).decode()
+    return _builtin(p["base_url"]) if p else ""
+
+
+def models(p: dict, key: str | None) -> dict:
+    """The model IDs a provider offers, for the form to pick from: with the typed key, else the stored one (same ID),
+    else the built-in connection's for its own address. The key is used here and never returned."""
+    base, pid = str(p.get("base_url", "")).rstrip("/"), str(p.get("id", ""))
+    key = key or (key_of(pid) if any(x["id"] == pid and x["base_url"] == base for x in load()["providers"]) else "") or _builtin(base)
+    out = _list(str(p.get("api") or "openai-completions"), base, key)
+    return {"ok": out["ok"], "models": out.get("models", []), "message": out["message"] if not out["ok"] else f"{len(out['models'])} models available."}
 
 
 def test(pid: str) -> dict:
@@ -130,12 +154,15 @@ def test(pid: str) -> dict:
     p = next((x for x in load()["providers"] if x["id"] == pid), None)
     if not p:
         return {"ok": False, "message": "No such provider."}
-    key, base = key_of(pid), p["base_url"]
-    if not safe_url(base):  # checked again: a name can resolve elsewhere later
+    return _list(p["api"], p["base_url"], key_of(pid))
+
+
+def _list(api: str, base: str, key: str) -> dict:
+    if not re.match(r"^https?://[^\s]+$", base) or not safe_url(base):  # checked at every request: a name can resolve elsewhere later
         return {"ok": False, "message": "That address is not allowed for a model API."}
-    if p["api"] == "anthropic-messages":
+    if api == "anthropic-messages":
         req = urllib.request.Request(f"{base}/v1/models", headers={"x-api-key": key, "anthropic-version": "2023-06-01"})
-    elif p["api"] == "google-generative-ai":
+    elif api == "google-generative-ai":
         req = urllib.request.Request(f"{base}/models", headers={"x-goog-api-key": key})
     else:
         req = urllib.request.Request(f"{base}/models", headers={"Authorization": f"Bearer {key}"} if key else {})

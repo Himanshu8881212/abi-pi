@@ -147,3 +147,37 @@ def test_a_link_straight_to_a_page_draws_after_the_script():
     """Opening the app at #chat drew the page before the chat's parts were declared: an empty page (REPORT #51)."""
     html = app.page_html("pi_app_test", app.cached("pi_app_test"))
     assert "setTimeout(()=>show(first||'home'))" in html
+
+
+def _yes(port, key, r):
+    """A step ABI asks a yes for: the person's click (POST /confirm/<id>), as the page does."""
+    while isinstance(r, dict) and "confirm" in r:
+        r = post(port, f"/confirm/{r['confirm']['id']}", {}, key)[1]
+    return r
+
+
+def test_commit_publish_and_viewer_reads_only_the_published_copy(srv):  # noqa: F811
+    """Commit lands in History with its message; Publish copies the last commit to the published project; Viewer
+    reads that copy: the committed measure with the same numbers, never uncommitted work."""
+    port, key, _ = srv
+    post(port, "/mode", {"mode": "developer"}, key)
+    api(port, key, "set_measure", id="e2e_pub", name="Published", expression="SUM(orders.amount)")
+    r = _yes(port, key, api(port, key, "commit", message="e2e: the publish test")[1])
+    assert "result" in r, r
+    hist = api(port, key, "history")[1]["result"]["commits"]
+    assert hist[0]["message"].startswith("e2e: the publish test"), hist[0]
+    r = _yes(port, key, post(port, "/publish", {}, key)[1])
+    assert "error" not in r, r
+    assert abi.folder(f"{P}_pub"), "the published copy exists"
+    api(port, key, "set_measure", id="e2e_unpub", name="Not yet", expression="SUM(orders.amount)")  # uncommitted
+    dev = api(port, key, "semantic_query", measures=["e2e_pub"], dimensions=["orders.region"])[1]["result"]["rows"]
+    post(port, "/mode", {"mode": "viewer"}, key)
+    try:
+        # the page in Viewer holds the published copy's data, so its requests name `<project>_pub`: still answered
+        code, r = post(port, "/api/semantic_query", {"project": f"{P}_pub", "measures": ["e2e_pub"], "dimensions": ["orders.region"]}, key)
+        assert code == 200 and r["result"]["rows"] == dev, r
+        seen = {m["id"] for m in model(port, key)["measures"]}
+        assert "e2e_pub" in seen and "e2e_unpub" not in seen, sorted(seen)
+        assert api(port, key, "semantic_query", measures=["e2e_pub"], dimensions=["orders.region"])[1]["result"]["rows"] == dev
+    finally:
+        post(port, "/mode", {"mode": "developer"}, key)

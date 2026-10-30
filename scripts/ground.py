@@ -190,7 +190,7 @@ def _caps(text: str, quoted: bool = False) -> list[tuple[int, str]]:
     words stays whole."""
     out = []
     for m in CAP.finditer(text):
-        pre = text[:m.start()].rstrip(" \t*_#>•-")
+        pre = text[:m.start()].rstrip(" \t*_#>•-[")  # a link label ("[Download it](…)") opens like a sentence
         phrase = m[0]
         if (not pre and not quoted) or (pre and pre[-1] in ".!?\n"):  # sentence start (also "1." list items)
             phrase = phrase.partition(" ")[2]

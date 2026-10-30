@@ -267,7 +267,9 @@ def test_people_sign_in_with_their_abi_account_and_get_only_their_access():
             c.request("POST", "/signin", urllib.parse.urlencode({"name": name, "password": pw}), {"Content-Type": "application/x-www-form-urlencoded"})
             r = c.getresponse()
             return r.status, r.getheader("Set-Cookie") or "", r.read().decode()
-        st, cookie, body = sign("himanshu", "wrong-" + "x" * 12)
+        # a wrong password on a name nobody has: the same refusal, and the owner (the app's own account) never
+        # collects failures toward ABI's 10-per-15-minutes lock from repeated runs
+        st, cookie, body = sign("nobody-here", "wrong-" + "x" * 12)
         assert st == 200 and "Wrong name or password" in body and not cookie
         st, cookie, _ = sign("himanshu", _account("himanshu"))
         assert st == 303 and "abi_u=" in cookie and "HttpOnly" in cookie
@@ -466,3 +468,37 @@ def test_one_person_mode_serves_the_live_page_not_a_stale_file(srv):
     app.changed(P)
     page = urllib.request.urlopen(f"http://127.0.0.1:{port}/?p={P}").read().decode()
     assert '"stale_marker"' not in page
+
+
+def test_every_page_draws_in_a_real_browser(srv):
+    """Each sidebar page in headless Chromium (the engine's, as report exports use): no script error, nothing blank.
+    A page script that loses a definition (KIND) left Agents, Tools, Flows and ML blank while every other test passed."""
+    py = ROOT / "engine/backend/.venv/bin/python"
+    if not py.exists():
+        pytest.skip("no engine venv with Playwright")
+    port, _, _ = srv
+    code = """
+import json, sys
+from playwright.sync_api import sync_playwright
+url, out = sys.argv[1], {"errors": [], "blank": [], "pages": 0}
+with sync_playwright() as p:
+    b = p.chromium.launch(); pg = b.new_page(viewport={"width": 1440, "height": 900})
+    pg.on("pageerror", lambda e: out["errors"].append(str(e)[:200]))
+    pg.goto(url); pg.wait_for_selector("aside button.it")
+    for k in pg.eval_on_selector_all("aside button.it", "bs => bs.map(b => b.dataset.k)"):
+        pg.click(f"aside button.it[data-k='{k}']"); pg.wait_for_timeout(300); out["pages"] += 1
+        if len(pg.inner_text("main").strip()) < 10: out["blank"].append(k)
+    for want in ("viewer", "developer"):  # the switch's own buttons (a stray comment once swallowed their wiring)
+        pg.click("#m-view" if want == "viewer" else "#m-dev"); pg.wait_for_timeout(800)
+        out[want] = pg.evaluate("document.body.dataset.mode")
+    b.close()
+print(json.dumps(out))
+"""
+    import os
+    env = {**os.environ, "HOME": os.environ.get("ENGINE_HOME", str(ROOT / "data/home"))} if (ROOT / "data/home").exists() else None
+    r = subprocess.run([str(py), "-c", code, f"http://127.0.0.1:{port}/"], capture_output=True, text=True, timeout=300, env=env)
+    if r.returncode and "Executable doesn't exist" in r.stderr:
+        pytest.skip("Playwright's Chromium isn't installed here")
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert out["pages"] >= 25 and out["errors"] == [] and out["blank"] == [], out
+    assert out["viewer"] == "viewer" and out["developer"] == "developer", out

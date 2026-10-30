@@ -39,21 +39,23 @@ def places(project: str) -> dict[str, Path]:
     return {"abi": dest, "app": ws / "_app" / project, "vault": ws / "_vault" / project / "files", "team": ws / "_team" / project}
 
 
-def committed(dest: Path) -> dict:
-    """ABI's committed project as a bundle {path: content}: what ABI has, not what this folder has."""
-    abi.git(dest, "fetch", "-q")
+def committed(dest: Path) -> tuple[dict, str]:
+    """ABI's committed project as a bundle {path: content} and its commit: what ABI has, not what this folder has."""
     out = {}
-    for rel in abi.git(dest, "ls-tree", "-r", "--name-only", "FETCH_HEAD").split():
-        if rel.endswith(".gitkeep"):
-            continue
-        text = subprocess.run(["git", "-C", str(dest), "show", f"FETCH_HEAD:{rel}"], capture_output=True, text=True, check=True).stdout
-        out[rel] = json.loads(text) if rel.endswith(".json") else text
-    return out
+    with abi.copy_lock(dest):  # a sync's fetch would move FETCH_HEAD under these reads
+        abi.git(dest, "fetch", "-q")
+        head = abi.git(dest, "rev-parse", "FETCH_HEAD").strip()
+        for rel in abi.git(dest, "ls-tree", "-r", "--name-only", head).split():
+            if rel.endswith(".gitkeep"):
+                continue
+            text = subprocess.run(["git", "-C", str(dest), "show", f"{head}:{rel}"], capture_output=True, text=True, check=True).stdout
+            out[rel] = json.loads(text) if rel.endswith(".json") else text
+    return out, head
 
 
 def export(project: str) -> bytes:
     p, buf = places(project), io.BytesIO()
-    bundle = committed(p["abi"])
+    bundle, head = committed(p["abi"])
     raw = json.dumps(bundle)
     meta = bundle.get("project.json") or {}
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
@@ -67,7 +69,7 @@ def export(project: str) -> bytes:
             counts[part] = len(files)
         z.writestr("manifest.json", json.dumps({
             "format": FORMAT, "project": project, "name": meta.get("name"), "workspace": p["abi"].parent.name,
-            "abi_commit": abi.git(p["abi"], "rev-parse", "FETCH_HEAD").strip(),
+            "abi_commit": head,
             "exported": datetime.now(timezone.utc).isoformat(timespec="seconds"), "files": counts,
             "needs": {"secrets": sorted(set(SECRET.findall(raw))),
                       "data": "not included: after the import, refresh the sources to load the data again",

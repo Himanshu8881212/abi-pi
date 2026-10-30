@@ -36,3 +36,10 @@ def test_clock_minutes_are_no_figure():
     """'every Monday at 8' became 'at 08:[not verified]': the minutes of a time were checked as a figure (REPORT #43)."""
     assert ground.check("The flow runs every Monday at 08:00 UTC.", ROWS, asked="every Monday at 8") == {"numbers": [], "names": []}
     assert ground.check("The flow runs every Monday at 09:00 UTC.", ROWS, asked="every Monday at 8")["numbers"] == ["09"]
+
+
+
+def test_a_link_label_opens_like_a_sentence():
+    """'[Download your dashboard PDF](…)' came back as '[[not verified] your dashboard PDF]'."""
+    assert ground.check("[Download your dashboard PDF](/api/artifacts/p/x.pdf)", ROWS)["names"] == []
+    assert ground.check("See [Atlantis Monthly](/x) with 98,765 views.", ROWS)["names"] == ["Atlantis Monthly"]  # mid-sentence: still a name

@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path[:0] = [str(ROOT / "scripts"), str(ROOT / "tests")]
 
 
-TEST_PROJECT = re.compile(r"pi_app_test|pi_test_layout|pi_date_test|pi_model_test|yt|(sec|s1)_\d{8}")
+TEST_PROJECT = re.compile(r"(pi_app_test|pi_test_layout|pi_date_test|pi_model_test|yt|(sec|s1)_\d{8})(_pub)?")
 
 
 @pytest.fixture(scope="session", autouse=True)

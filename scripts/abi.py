@@ -15,6 +15,7 @@ project repository (read-only).
 Token: $ABI_TOKEN (the Pi extension passes its in-memory one), else scripts/creds.py signs in. Output: JSON on stdout.
 """
 import contextlib
+import fcntl
 import json
 import os
 import re
@@ -203,6 +204,21 @@ def sync(project: str) -> dict:
     dest = folder(project)
     if not dest:
         raise SystemExit(f"No folder for project '{project}' under {WORKSPACES}; create it with `abi.py project`.")
+    with copy_lock(dest):
+        return _sync(project, dest)
+
+
+@contextlib.contextmanager
+def copy_lock(dest: Path):
+    """One reader or writer of a project's copy at a time, across processes (the app's sync after a commit, Publish,
+    Export, the agent's abi_sync): two fetches at once fail with "cannot lock ref", and one rewrites FETCH_HEAD
+    under the other's reads."""
+    with open(dest / ".git" / "abi-sync.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+def _sync(project: str, dest: Path) -> dict:
     git(dest, "fetch", "-q")
     edited = git(dest, "ls-files", "--others", "--modified", "--exclude-standard").split()
     for rel in dict.fromkeys(edited):  # hand edits ABI has now committed (cli apply): drop ours, take ABI's
