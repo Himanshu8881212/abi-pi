@@ -158,7 +158,7 @@ body[data-mode=viewer] .ed{background:transparent;border-color:transparent;paddi
 .tbl .th{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 12px;cursor:grab;font:600 13px var(--display);border-bottom:1px solid var(--line)}
 .tbl.fact .th{background:var(--ink);color:var(--sheet)}.tbl .badge{border:1px solid currentColor;border-radius:999px;background:none;color:inherit;font:500 10px var(--text);padding:1px 8px;cursor:pointer;opacity:.8}
 .tbl .cols{max-height:230px;overflow:auto}.tbl .col{display:grid;grid-template-columns:14px 1fr auto;gap:6px;align-items:center;padding:4px 12px;font-size:12px;border-bottom:1px solid var(--line)}
-.tbl .col .ty{color:var(--mute);font:10px var(--mono)}.tbl .dot{width:9px;height:9px;border:1.5px solid var(--mute);border-radius:50%;cursor:crosshair}.tbl .dot:hover{background:var(--signal);border-color:var(--signal)}
+.tbl .col .ty{grid-column:3;color:var(--mute);font:10px var(--mono)}.tbl .col>span:not(.dot):not(.ty){grid-column:2;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tbl .dot{width:9px;height:9px;border:1.5px solid var(--mute);border-radius:50%;cursor:crosshair}.tbl .dot:hover{background:var(--signal);border-color:var(--signal)}
 .cards>.wide{grid-column:1/-1}
 .layers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.layer h4{margin:0}.layer table{margin-top:8px}
 .mobile .layers{grid-template-columns:1fr}
