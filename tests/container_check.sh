@@ -17,8 +17,9 @@ t=$(date +%s); run abi-pi-test 8796 abi-pi-e2e; up 8796 && ok "fresh volume up i
 [ "$(docker exec abi-pi-test ps -o comm= -p 1)" = tini ] && ok "tini is PID 1" || bad "PID 1"
 [ "$(docker exec abi-pi-test id -un)" = abi ] && ok "runs as abi" || bad "user"
 in_c abi-pi-test 'mkdir -p /tmp/d && printf "order_date,region,amount\n2026-05-01,North,10\n2026-05-01,South,20\n2026-05-02,North,5\n" > /tmp/d/orders.csv && python3 -c "
-import json, sys; sys.path.insert(0, \"scripts\"); import abi
-abi.load(\"demo\", \"pi_app_test\", [\"/tmp/d/orders.csv\"])
+import duckdb, json, sys; sys.path.insert(0, \"scripts\"); import abi
+duckdb.sql(\"COPY (SELECT * FROM read_csv('/tmp/d/orders.csv')) TO '/tmp/d/orders.parquet' (FORMAT parquet)\")
+abi.load(\"demo\", \"pi_app_test\", [\"/tmp/d/orders.parquet\"])
 pages = [p[\"id\"] for p in json.load(open(abi.folder(\"pi_app_test\") / \"reports/overview.json\"))[\"pages\"]]
 for f in (\"pdf\", \"pptx\"):
     b = abi.artifact(abi.call(\"report_snapshot\", project=\"pi_app_test\", report=\"overview\", format=f, pages=pages)[\"snapshot\"]); assert b[:2] in (b\"%P\", b\"PK\"), f

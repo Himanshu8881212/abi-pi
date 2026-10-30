@@ -9,6 +9,7 @@ from pathlib import Path
 
 import duckdb
 import pytest
+from conftest import parquet
 
 import abi
 from pi_driver import ROOT, ask
@@ -69,7 +70,7 @@ def yt():
         drop = ROOT / "scratch" / "yt"
         drop.mkdir(parents=True, exist_ok=True)
         shutil.copy2(CSV, drop / CSV.name)
-        abi.load("demo", "yt", [str(drop / CSV.name)])
+        abi.load("demo", "yt", parquet(drop / CSV.name))
         abi.call("create_input_table", project="yt", table="targets", key=["category_id", "month"],
                  columns=[{"name": "category_id", "type": "BIGINT"}, {"name": "month", "type": "VARCHAR"}, {"name": "target", "type": "BIGINT"}])
         abi.call("edit_cells", project="yt", table="targets",

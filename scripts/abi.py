@@ -37,8 +37,15 @@ ABI_CLI = HERE.parent / "engine/backend"
 SCHEMAS = HERE.parent / "engine/schemas/v1"
 PROJECT_ID = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 SKELETON = ["sources", "tables", "model", "reports", "ml", "flows", "agents", "tools", "security", "environments", "docs"]
-DATA = {".csv", ".tsv", ".parquet", ".json", ".jsonl", ".ndjson", ".xlsx", ".avro", ".arrow", ".sqlite"}
-CSV_SAFE = {"quote": '"', "escape": '"', "strict_mode": False}  # demo lesson: quoted fields with "" and line breaks
+DATA = {".parquet"}  # ABI-PI takes Parquet only: uploaded .parquet files, or S3 folders of Parquet (add_data)
+PARQUET_ONLY = "ABI-PI takes Parquet only: upload a .parquet file, or add an S3 folder of Parquet files (s3://bucket/folder/*.parquet)."
+
+
+def parquet_only(action: str, args: dict) -> None:
+    """The one rule for data coming in: a source is an S3 folder of Parquet files; uploads are .parquet files (upload)."""
+    loc = str(args.get("location") or "")
+    if action == "add_data" and (args.get("format", "parquet") != "parquet" or not loc.startswith("s3://") or not loc.lower().endswith(".parquet")):
+        raise ActionError(400, {"message": PARQUET_ONLY})
 CHUNK = 64 * 1024**2
 
 
@@ -123,20 +130,22 @@ def artifact(snapshot: str) -> bytes:
 
 def call(action: str, confirm: str | None = None, **args) -> dict:
     """One action as the person (SDK semantics). A 409 with a confirm token raises ActionError: callers show it."""
+    parquet_only(action, args)
     return _open("POST", f"/api/actions/{action}", args, {"X-Abi-Confirm": confirm} if confirm else None)[1]
 
 
-def upload(project: str, table: str, path: Path, csv: dict | None = None) -> dict:
+def upload(project: str, table: str, path: Path) -> dict:
     """IN-7 resumable upload; the last PATCH runs add_data and returns its result. Bytes go to ABI, never to the LLM."""
+    if path.suffix.lower() != ".parquet":
+        raise ActionError(400, {"message": PARQUET_ONLY})
     size = path.stat().st_size
     name = re.sub(r"[^\w .-]", "_", path.name)
     _, started, _ = _open("POST", f"/api/uploads/{project}/{table}/{urllib.parse.quote(name)}", headers={"Upload-Length": str(size)})
-    q = f"?csv={urllib.parse.quote(json.dumps(csv))}" if csv else ""
     off, out = 0, {}
     with path.open("rb") as f:
         while off < size:
             chunk = f.read(CHUNK)
-            _, out, hdr = _open("PATCH", f"/api/uploads/{started['id']}{q}", raw=chunk,
+            _, out, hdr = _open("PATCH", f"/api/uploads/{started['id']}", raw=chunk,
                                 headers={"Upload-Offset": str(off), "Content-Type": "application/offset+octet-stream"})
             off += len(chunk)
     return out
@@ -305,7 +314,7 @@ def load(ws: str, project: str, paths: list[str]) -> dict:
     for p in map(lambda s: Path(s).expanduser().resolve(), paths):
         files += sorted(f for f in (p.rglob("*") if p.is_dir() else [p]) if f.is_file() and f.suffix.lower() in DATA)
     if not files:
-        raise SystemExit("No data files (csv, parquet, json, xlsx, …) found there.")
+        raise SystemExit("No Parquet files found there: " + PARQUET_ONLY)
     for f in files:
         guard(f)
     log = {"project": new_project(ws, project), "loaded": [], "failed": []}
@@ -313,13 +322,7 @@ def load(ws: str, project: str, paths: list[str]) -> dict:
         t = table_id(f)
         t0 = time.time()
         try:
-            csv = f.suffix.lower() in (".csv", ".tsv")
-            try:  # demo lesson: DuckDB's guess splits quoted multi-line fields, so CSVs load with explicit quoting first
-                r = upload(project, t, f, CSV_SAFE if csv else None)
-            except ActionError:
-                if not csv:
-                    raise
-                r = upload(project, t, f)
+            r = upload(project, t, f)
             log["loaded"].append({"table": t, "file": f.name, "snapshot": r.get("snapshot"), "seconds": round(time.time() - t0, 1)})
         except ActionError as e:
             log["failed"].append({"table": t, "file": f.name, "error": e.body.get("message")})

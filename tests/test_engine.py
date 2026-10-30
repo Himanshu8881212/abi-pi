@@ -46,7 +46,8 @@ def test_a_two_digit_year_date_is_never_read_as_year_2(tmp_path):
     f = tmp_path / "videos.csv"  # one "n/a" keeps the column text, as the real file's multi-line rows do
     f.write_text("trending_date,views\n" + "".join(f"18.{d:02d}.{m:02d},{d * m}\n" for m in (1, 2, 3) for d in range(1, 13) for _ in range(4))
                  + "n/a,0\n")
-    r = abi.load("demo", "pi_date_test", [str(f)])
+    from conftest import parquet
+    r = abi.load("demo", "pi_date_test", parquet(f))
     assert r["loaded"][0].get("date", {}).get("format") == "%y.%d.%m", r["loaded"]
 
 
@@ -59,7 +60,8 @@ def test_named_models_narrow_the_model_queries_and_reports(tmp_path):
     import abi
     (tmp_path / "orders.csv").write_text("order_id,region,amount\n1,North,10\n2,South,20\n3,North,5\n")
     (tmp_path / "visits.csv").write_text("visit_id,page,seconds\n1,home,30\n2,cart,12\n")
-    abi.load("demo", "pi_model_test", [str(tmp_path)])
+    from conftest import parquet
+    abi.load("demo", "pi_model_test", parquet(tmp_path / "orders.csv", tmp_path / "visits.csv"))
     P = "pi_model_test"
     ms = {m["id"]: m["expression"] for m in abi.call("semantic_model", project=P, all=True)["measures"]}
     sales = next(i for i, e in ms.items() if "orders.amount" in e)

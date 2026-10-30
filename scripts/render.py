@@ -82,7 +82,9 @@ function table(box,d){const t=document.createElement('table');const cols=d.colum
 function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;const ms=d.columns.slice(nd);const type=d.type;
  if(type==='kpi'||(nd===0&&d.rows.length===1)){box.innerHTML='';ms.forEach(m=>{const k=document.createElement('div');k.className='kpi';k.innerHTML=`<div class="v">${E(fmt(d.rows[0]?.[d.columns.indexOf(m)],d.format[m]))}</div><div class="l">${E(d.measures[m]||m)}</div>`;box.appendChild(k)});return}
  if(nd!==1||!['bar','line','pie','combo','funnel','treemap','waterfall','scatter','map'].includes(type)){table(box,d);return}
- const W=box.clientWidth||600,H=260,L=60,B=40,svg=el('svg',{viewBox:`0 0 ${W} ${H}`,width:'100%'},box);
+ const sz=box.closest('.sized'),W=box.clientWidth||600,H=sz?Math.max(140,box.clientHeight||260):260,L=60,B=40,svg=el('svg',{viewBox:`0 0 ${W} ${H}`,width:'100%'},box);
+ // drawn for its box: a card made wider, narrower or (sized) taller draws again rather than stretching its text
+ if(window.ResizeObserver){const ro=new ResizeObserver(()=>{if(svg.parentNode!==box)return ro.disconnect();if(Math.abs(box.clientWidth-W)>8||(sz&&Math.abs(box.clientHeight-H)>8)){ro.disconnect();svg.remove();chart(box,d)}});ro.observe(box)}
  const rows=d.rows.filter(r=>ms.some((m,i)=>typeof r[nd+i]==='number'));const vals=rows.flatMap(r=>ms.map((m,i)=>r[nd+i]||0));
  const max=Math.max(0,...vals),min=Math.min(0,...vals),y=v=>H-B-(v-min)/((max-min)||1)*(H-B-10);
  for(let g=0;g<=4;g++){const v=min+(max-min)*g/4;el('line',{x1:L,x2:W-8,y1:y(v),y2:y(v),stroke:'var(--line)'},svg);el('text',{x:L-6,y:y(v)+4,'text-anchor':'end'},svg).textContent=fmt(v,{compact:true,decimals:1})}

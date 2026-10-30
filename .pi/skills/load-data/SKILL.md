@@ -1,11 +1,14 @@
 ---
 name: load-data
-description: Load files, S3 folders of Parquet, or a database into a new or existing ABI project. Use for "load this", "here are some files/parquet/csv", "data is in a bucket", "connect to postgres", a folder of data.
+description: Load Parquet into a new or existing ABI project: .parquet files, or S3 folders of Parquet files. Use for "load this", "here are some parquet files", "data is in a bucket", a folder of data.
 ---
 # Load data
+**Parquet is the only input.** ABI-PI takes .parquet files (uploaded) and S3 folders of Parquet files, nothing else:
+no CSV, Excel, JSON or databases. Asked for another format, say so plainly and ask for the data as Parquet (the person
+converts it, e.g. with DuckDB: `COPY (SELECT * FROM 'file.csv') TO 'file.parquet'`).
 1. IDs: workspace (default `main` or the person's preference) and project (lowercase, digits, `_`, starts with a
-   letter). A new project for a bucket or database: `abi_project {workspace, project, name}` first.
-2. Files on this machine: `abi_load {workspace, project, paths}` uploads each file as a table, types a date, builds the
+   letter). A new project for a bucket: `abi_project {workspace, project, name}` first.
+2. Parquet files on this machine: `abi_load {workspace, project, paths}` uploads each .parquet file as a table, types a date, builds the
    model, starter measures and an Overview report: a **quick look** only (a throwaway project, "just show me"). For a
    project people will use, the uploaded tables are the bronze sources (one per file, as landed): hide them and build
    the layers on top (step 6).
@@ -25,10 +28,8 @@ description: Load files, S3 folders of Parquet, or a database into a new or exis
      (medallion skill).
    - Large folders (tens of millions of rows) take one to two minutes each. Wait for the result; never retry a load
      that is still running, and never load the same folder twice.
-4. A database: `add_data` with `postgres://host/db` (or mysql, clickhouse) and `database: {table, user, password}`
-   as secret references.
-5. After loading: `data_quality` (rows, freshness, gaps). Row counts come from its rows only.
-6. **Always continue with the medallion skill**: bronze sources (hidden), silver staged tables (cleaned, typed,
+4. After loading: `data_quality` (rows, freshness, gaps). Row counts come from its rows only.
+5. **Always continue with the medallion skill**: bronze sources (hidden), silver staged tables (cleaned, typed,
    combined; hidden: they are the Staged page), gold facts and dimensions (the model). profile-clean decides the
    silver steps; then build-model. Cleaning never happens outside ABI: it is silver's steps, so its lineage stays.
 - The first load from a new host (e.g. the S3 endpoint) asks the person once (ABI's address policy): do that

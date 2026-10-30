@@ -10,6 +10,7 @@ import urllib.request
 from pathlib import Path
 
 import pytest
+from conftest import parquet
 
 import abi
 import app
@@ -27,7 +28,7 @@ def srv():
         drop.mkdir(parents=True, exist_ok=True)
         (drop / "orders.csv").write_text("order_id,order_date,region,amount\n" + "".join(  # an id: `amount` is no key
             f"{d * 2 + i},2026-05-{d:02d},{r},{d * 3 + i}\n" for d in range(1, 29) for i, r in enumerate(["North", "South"])))
-        abi.load("demo", P, [str(drop / "orders.csv")])
+        abi.load("demo", P, parquet(drop / "orders.csv"))
     s = app.serve(P, 0, open_browser=False)
     port = s.server_address[1]
     page = urllib.request.urlopen(f"http://127.0.0.1:{port}/").read().decode()
@@ -518,3 +519,15 @@ def test_page_layouts_are_a_draft_until_publish(srv):
     assert json.loads(f.read_text())["published"]["home"] == lay
     code, r = post(port, "/layouts", {"page": "home", "layout": None}, key)
     assert code == 200 and "home" not in r["result"], "Reset drops the page's layout"
+
+
+def test_parquet_is_the_only_input(tmp_path):
+    """ABI-PI takes .parquet files and S3 folders of Parquet, nothing else: no CSV, Excel, JSON, local paths or databases."""
+    for args in ({"location": "s3://b/f/*.csv"}, {"location": "/data/x.parquet"}, {"location": "s3://b/f/*.parquet", "format": "csv"},
+                 {"location": "postgres://h/db"}, {}):
+        with pytest.raises(abi.ActionError, match="Parquet only"):
+            abi.call("add_data", project="p", table="t", **args)
+    abi.parquet_only("add_data", {"location": "s3://b/f/*.parquet", "format": "parquet"})
+    (tmp_path / "x.csv").write_text("a\n1\n")
+    with pytest.raises(abi.ActionError, match="Parquet only"):
+        abi.upload("p", "t", tmp_path / "x.csv")

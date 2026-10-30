@@ -10,6 +10,16 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path[:0] = [str(ROOT / "scripts"), str(ROOT / "tests")]
 
 
+def parquet(*csvs) -> list[str]:
+    """ABI-PI takes Parquet only: tests write their small tables as CSV and load the Parquet copy (DuckDB converts)."""
+    import duckdb
+    out = []
+    for f in map(Path, csvs):
+        duckdb.sql(f"COPY (SELECT * FROM read_csv('{f}')) TO '{f.with_suffix('.parquet')}' (FORMAT parquet)")
+        out.append(str(f.with_suffix(".parquet")))
+    return out
+
+
 TEST_PROJECT = re.compile(r"(pi_app_test|pi_test_layout|pi_date_test|pi_model_test|yt|(sec|s1)_\d{8})(_pub)?")
 
 

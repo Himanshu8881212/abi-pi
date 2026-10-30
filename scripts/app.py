@@ -656,18 +656,17 @@ async function upload(table,file){const data=await new Promise(r=>{const fr=new 
  if(r.error)throw new Error(r.error);return r.result}
 function sources(box){const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),qr=Object.fromEntries((q.rows||[]).map(r=>[r[ix('table')],r]));
  const g=h('div','cards'),bar=h('div','row bar top');box.append(bar,g);
- const add=()=>{const c=card('Add a source','a file you upload, or a folder of Parquet files on S3');c.classList.add('editor');
-  const t=h('input','f ed');t.placeholder='table id, e.g. bronze_orders';const loc=h('input','f ed');loc.placeholder='s3://bucket/folder/*.parquet  or  https://…';
-  const ep=h('input','f ed');ep.placeholder='S3 endpoint host:port, e.g. 127.0.0.1:9100 (blank for AWS)';const fm=h('select','f ed');['','parquet','csv','json','xlsx','delta','iceberg'].forEach(x=>fm.append(new Option(x||'format from the file name',x)));
-  const file=h('input');file.type='file';file.accept='.csv,.tsv,.parquet,.json,.jsonl,.xlsx';file.className='f ed';
-  c.append(h('label','l','Table'),t,h('label','l','Upload a file'),file,h('label','l','Or a location'),loc,h('label','l','S3 endpoint'),ep,h('label','l','Format'),fm);
+ const add=()=>{const c=card('Add a source','a Parquet file you upload, or an S3 folder of Parquet files');c.classList.add('editor');
+  const t=h('input','f ed');t.placeholder='table id, e.g. bronze_orders';const loc=h('input','f ed');loc.placeholder='s3://bucket/folder/*.parquet';
+  const ep=h('input','f ed');ep.placeholder='S3 endpoint host:port, e.g. 127.0.0.1:9100 (blank for AWS)';  const file=h('input');file.type='file';file.accept='.parquet';file.className='f ed';
+  c.append(h('label','l','Table'),t,h('label','l','Upload a Parquet file'),file,h('label','l','Or an S3 folder of Parquet files'),loc,h('label','l','S3 endpoint'),ep);
   act(c,'Add source',async()=>{if(!t.value)throw new Error('Name the table first.');
-   if(file.files[0]){await upload(t.value,file.files[0]);return `Uploaded and loaded into ${t.value}.`}
-   if(!loc.value)throw new Error('Choose a file or give a location.');
+   if(file.files[0]&&!/\.parquet$/i.test(file.files[0].name))throw new Error('Parquet files only.');if(file.files[0]){await upload(t.value,file.files[0]);return `Uploaded and loaded into ${t.value}.`}
+   if(!/^s3:\/\/.+\.parquet$/i.test(loc.value))throw new Error('Choose a Parquet file, or give an S3 folder like s3://bucket/folder/*.parquet.');
    const s3=loc.value.startsWith('s3://')?{...(ep.value?{endpoint:ep.value,url_style:'path',use_ssl:false}:{}),region:'us-east-1'}:null;
-   await api('add_data',{table:t.value,location:loc.value,...(fm.value?{format:fm.value}:{}),...(s3?{s3}:{})});return `Loaded ${t.value}.`},1);return c};
+   await api('add_data',{table:t.value,location:loc.value,format:'parquet',...(s3?{s3}:{})});return `Loaded ${t.value}.`},1);return c};
  bar.append(btn('Add source',()=>g.prepend(add()),1));
- if(!D.sources.length)box.append(h('p','empty','No sources yet: add a file or an S3 folder of Parquet files.'));
+ if(!D.sources.length)box.append(h('p','empty','No sources yet: upload a Parquet file or add an S3 folder of Parquet files. Parquet is the only input.'));
  D.sources.forEach(id=>{const sp=D.source_specs?.[id]||{},r=qr[id],c=card(id,`sources/${id}.json`),k=h('div','kv');
   [['location',sp.location||'—'],['format',sp.format||'from the file'],['refresh',sp.refresh||(r?r[ix('refresh')]:'—')],['rows',r?fmt(r[ix('rows')]):'—'],['last load',r?cell(r[ix('last_load')]):'—']]
    .forEach(([a,b])=>k.append(h('b','',a),h('span','',String(b))));c.append(k);
@@ -998,7 +997,7 @@ function lay(pg,k){if(document.body.classList.contains('mobile')||innerWidth<820
  grids(pg).forEach((g,gi)=>{const s=S[gi]||{};if(!LAYING&&!Object.keys(s).length&&!g.classList.contains('lay')&&!g.dataset.page)return;g.classList.add('lay');
   layKids(g).forEach((c,i)=>{const x=s[lkey(g,c,i)];
    c.dataset.w||=(c.style.gridColumn.match(/span (\d+)/)||[])[1]||(g.matches('.rows,.stack,.loose')||c.classList.contains('full')?12:c.classList.contains('wide')?(g.classList.contains('home')?8:12):4);
-   const ht=x?x.h:c.dataset.h;c.style.gridColumn='span '+(x?.w||c.dataset.w);c.style.order=x?.o??i;c.style.height=ht?ht+'px':'';c.classList.toggle('sized',!!+ht);
+   if(!c.dataset.laid){c.dataset.laid=1;const ht=x?x.h:c.dataset.h;c.style.gridColumn='span '+(x?.w||c.dataset.w);c.style.order=x?.o??i;c.style.height=ht?ht+'px':'';c.classList.toggle('sized',!!+ht)}  // once: a redraw never undoes a drag
    c.draggable=LAYING;if(LAYING&&!c.querySelector(':scope>.rz'))c.append(rz(c))});
   if(LAYING&&!g.dataset.dnd){g.dataset.dnd=1;let src=null;const on=e=>{const t=e.target.closest?.('.lay>*');return t?.parentElement===g?t:null},clr=()=>g.querySelectorAll('.over').forEach(x=>x.classList.remove('over'));
    g.addEventListener('dragstart',e=>{src=on(e);if(!src)return;src.classList.add('drag');e.dataTransfer.effectAllowed='move'});
@@ -1917,7 +1916,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                     f = Path(d) / name
                     f.write_bytes(base64.b64decode(body.get("data") or ""))
                     try:
-                        res = abi.upload(project, str(body.get("table")), f, abi.CSV_SAFE if f.suffix.lower() in (".csv", ".tsv") else None)
+                        res = abi.upload(project, str(body.get("table")), f)
                         out = {"result": res}
                     except abi.ActionError as e:
                         out = {"error": str(e.body.get("message") if isinstance(e.body, dict) else e.body)}

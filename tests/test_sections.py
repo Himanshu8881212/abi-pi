@@ -8,6 +8,7 @@ import re
 import time
 
 import pytest
+from conftest import parquet
 
 import abi
 from pi_driver import ROOT, ask
@@ -33,7 +34,7 @@ def project():
                 units = rnd.randint(1, 40)
                 w.writerow([f"2026-{(d - 1) // 30 + 5:02d}-{(d - 1) % 30 + 1:02d}", region, rnd.choice(["Ale", "Bock", "Cider"]),
                             units, units * rnd.choice([4, 5, 6])])
-    abi.load("demo", P, [str(drop / "sales.csv")])
+    abi.load("demo", P, parquet(drop / "sales.csv"))
     return P
 
 
