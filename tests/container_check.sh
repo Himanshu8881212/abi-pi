@@ -1,7 +1,7 @@
 #!/bin/sh
 # The release container as a stranger runs it (the loop's area E): fresh volume, data, exports, the agent, a hard kill,
 # backup + restore into a new volume, secrets nowhere, non-root, health. Secrets only in this shell's environment.
-#   tests/container_check.sh     (needs Docker, the image abi-pi:latest, the model endpoint via scripts/creds.py)
+#   tests/container_check.sh     (needs Docker, the image abi-pi:latest, the model endpoint: ABI_PI_LLM_BASE/KEY or scripts/creds.py)
 set -eu
 cd "$(dirname "$0")/.."
 S=$(mktemp -d); trap 'rm -rf "$S"; docker rm -f abi-pi-restored >/dev/null 2>&1; docker volume rm abi-pi-restore >/dev/null 2>&1 || true' EXIT
@@ -10,7 +10,8 @@ up() { for _ in $(seq 1 90); do curl -fs -o /dev/null "127.0.0.1:$1/" && return 
 in_c() { docker exec "$1" sh -c "cd /app && eval \"\$(scripts/engine.sh env)\" && $2"; }
 docker rm -f abi-pi-test >/dev/null 2>&1 || true; docker volume rm abi-pi-e2e >/dev/null 2>&1 || true
 export ABI_PASSWORD; ABI_PASSWORD=$(openssl rand -hex 12)
-export ABI_PI_LLM_BASE ABI_PI_LLM_KEY; ABI_PI_LLM_BASE=$(python3 scripts/creds.py llm-base); ABI_PI_LLM_KEY=$(python3 scripts/creds.py llm-key)
+export ABI_PI_LLM_BASE ABI_PI_LLM_KEY  # given in the environment (another machine), else from scripts/creds.py
+ABI_PI_LLM_BASE=${ABI_PI_LLM_BASE:-$(python3 scripts/creds.py llm-base)}; ABI_PI_LLM_KEY=${ABI_PI_LLM_KEY:-$(python3 scripts/creds.py llm-key)}
 run() { docker run -d --name "$1" -p "127.0.0.1:$2:8790" -v "$3:/data" -e ABI_USER=admin -e ABI_PASSWORD -e ABI_PI_LLM_BASE \
   -e ABI_PI_LLM_KEY -e ABI_PI_PROJECT=pi_app_test -e ABI_PI_WORKSPACE=demo abi-pi:latest >/dev/null; }
 t=$(date +%s); run abi-pi-test 8796 abi-pi-e2e; up 8796 && ok "fresh volume up in $(( $(date +%s) - t )) s" || bad "fresh start"
