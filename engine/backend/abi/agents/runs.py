@@ -170,6 +170,9 @@ def _answer(project: str, a: dict, question: str, user: User, via: str, files: d
             # OB-1/AG-6: usage per agent and provider; the agent file's model (alias or auto) and effort (D-71)
             resp = llm.complete(user, a["id"], a.get("model", "auto"), question, project=project, effort=a.get("effort"),
                                 messages=sent, tools=_defs(allowed, files, a.get("agents", [])))
+        except llm.Declined:  # ABI-PI: the provider's safety filter refused the request: the agent declines it
+            text, grounded = llm.DECLINED, True if ground else None
+            break
         except llm.Shown:  # no model to try (LLM-2-fix-13) or a provider error said plainly (LLM-2.7-fix-1)
             raise
         except Exception as e:  # noqa: BLE001 (the message may carry the endpoint URL)

@@ -195,6 +195,14 @@ class Shown(ActionFailed):
     """An LLM failure whose text is safe to show as is (no URL, key or provider body, SC-4); a 4xx is never retried (FL-4)."""
 
 
+class Declined(Shown):
+    """ABI-PI: the provider's safety filter refused this request (its content policy), not a broken model or setup."""
+
+
+POLICY = {"cyber_policy", "content_policy_violation", "content_filter", "safety", "moderation_blocked"}
+DECLINED = "I can't help with that: the request was declined under the model provider's content policy."
+
+
 class NoModel(Shown):
     """Nothing to try (LLM-2-fix-13): a 4xx with what to do, shown as is and never retried."""
 
@@ -209,6 +217,8 @@ def explain(e: Exception, provider: str, model: str) -> Exception:
     code = e.status_code
     if code == 404:
         return Shown(400, f"LLM provider '{provider}' has no model '{model}' (HTTP 404).")
+    if code in (400, 422) and str((e.body or {}).get("code") if isinstance(e.body, dict) else "") in POLICY:
+        return Declined(400, DECLINED)  # the request, not the model: an agent run answers it as a refusal
     if code in (400, 422):
         return Shown(400, f"LLM provider '{provider}' refused model '{model}' (HTTP {code}): it may not support chat or tool calls.")
     return Shown(400 if code < 500 and code != 429 else 502, f"LLM provider '{provider}' answered HTTP {code} for model '{model}'.")
