@@ -1109,6 +1109,7 @@ if(LIVE){const es=new EventSource('/events?k='+encodeURIComponent(KEY)+'&c='+CID
   else if(e.type==='step'){if(!steps){steps=h('div','m steps');log.append(steps)}const last=[...steps.children].reverse().find(x=>x.dataset.t===e.tool&&x.dataset.s==='run');
    if(e.state==='run'||!last){const l=h('div','',`${e.state==='run'?'…':e.state==='ok'?'✓':'✗'} ${stepName(e.tool)}`);l.dataset.t=e.tool;l.dataset.s=e.state;steps.append(l)}
    else{last.textContent=`${e.state==='ok'?'✓':'✗'} ${stepName(e.tool)}`;last.dataset.s=e.state;last.className=e.state==='ok'?'':'bad'}log.scrollTop=log.scrollHeight}
+  else if(e.type==='said')bubble('me',e.text)
   else if(e.type==='answer'){steps=null;bubble('ai',e.text);chats();if(!chatBox.classList.contains('open'))toast('The agent answered')}
   else if(e.type==='ask'){const yes=await ask({message:e.title||'ABI asks for your confirmation',preview:e.message});bubble('sys',yes?'You confirmed.':'You declined.');
    fetch('/chat/answer',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({id:e.id,yes})})}
@@ -1388,14 +1389,23 @@ class Hub:
             self.pi.terminate()
         self.pi, self.busy = None, False
         self.chat_id = cid or datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(2)
-        self.emit({"type": "busy", "on": False})
+        running = any(h.busy for h in self.watchers())
+        self.emit({"type": "busy", "on": running})
+        if running:
+            self.emit({"type": "note", "text": "This chat is running in another window: you follow its steps here."})
         return self.chat_load(self.chat_id)
 
-    def emit(self, event: dict) -> None:
+    def emit(self, event: dict, here: bool = True) -> None:
         line = f"data: {json.dumps(event, default=str)}\n\n".encode()
-        with self.lock:
-            for q in list(self.clients):
-                q.append(line)
+        for h in ([self] if here else []) + (self.watchers() if event.get("type") in ("step", "answer", "busy", "said") else []):
+            with h.lock:
+                for q in list(h.clients):
+                    q.append(line)
+
+    def watchers(self) -> list:
+        """This person's other windows with the same chat open: they follow it live (a chat runs in one window)."""
+        return [h for h in list(HUBS.values()) if h is not self and self.chat_id and h.chat_id == self.chat_id and h.user == self.user
+                and h.project == self.project]
 
     def current(self) -> str:
         """Viewer reads the published copy; Developer the project itself."""
@@ -1409,6 +1419,9 @@ class Hub:
     def chat(self, message: str, page: str) -> None:
         if not self.chat_id:
             self.chat_switch(None)
+        if any(h.busy for h in self.watchers()):  # one agent per chat: the other window's turn first
+            self.emit({"type": "note", "text": "This chat is still running in another window. Wait until it answers, or start a new chat."})
+            return
         if not self.pi or self.pi.poll() is not None:
             env = {**os.environ, "ABI_TOKEN": self.token or abi.token(), "ABI_APP_URL": self.url, "ABI_APP_PROJECT": self.project,
                    "ABI_APP_AGENT_KEY": self.agent_key, "ABI_APP_CLIENT": self.hid}
@@ -1428,6 +1441,7 @@ class Hub:
                      " until the person commits them, and Viewer sees them only after Publish")
         text = f"[In the app for {where}; the person is on its '{page}' page.] {message}"
         self.chat_note("me", message)
+        self.emit({"type": "said", "text": message}, here=False)
         self.last = self.heard = time.time()
         self.told = False
         self.send({"type": "follow_up" if self.busy else "prompt", "message": text})

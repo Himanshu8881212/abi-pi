@@ -313,3 +313,9 @@ Open findings:
   store-manager agent stayed a draft.
 - Fixed during the run: developer commands in the agent's answers; measure Test clarity; chat height; resize on hover;
   collapsible sidebar.
+- **Fixed after the deployed run:** (1) the agent makes Monitor checks and Explore analyses (`abi_monitor`,
+  `abi_explore`, through the app's agent channel; Developer only for monitors; analyst and automation specialists have
+  them); (2) another window of the same person follows a running chat live and can't start a second agent on it;
+  (3) grounding accepts the other side of a yes/no column ("Nonmembers" for `loyalty_member`); (4) the app gives ABI's
+  engine the agent's model at start and on every Settings change (an engine secret bound to that host; the engine now
+  takes `http://` with a key only on a private or loopback IP), so custom agents answer and can be evaluated.

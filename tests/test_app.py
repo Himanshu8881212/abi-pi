@@ -557,3 +557,22 @@ def test_the_agent_makes_monitor_checks_and_explore_analyses(srv):
     req = urllib.request.Request(f"http://127.0.0.1:{port}/agent/monitor", b"{}", {"X-Abi-Agent": "wrong"})
     with pytest.raises(urllib.error.HTTPError):
         urllib.request.urlopen(req)
+
+
+def test_a_chat_running_in_one_window_is_followed_in_another(srv):
+    """Release run 30 Oct: a chat running in one window showed nothing live in another; typing there would start a second
+    agent on the same conversation. Now the other window follows its steps, and waits for its turn."""
+    a, b = (app.Hub(P, "http://x", "k", f"w{i}", False, "pat", None) for i in (1, 2))
+    app.HUBS.update({"pat/w1": a, "pat/w2": b})
+    try:
+        a.chat_id = b.chat_id = "20261030-000000-abcd"
+        qb: list = []
+        b.clients.append(qb)
+        a.emit({"type": "step", "tool": "semantic_query", "state": "ok"})
+        a.emit({"type": "show", "page": "home"})
+        assert [json.loads(x[5:])["type"] for x in qb] == ["step"], "steps follow; page moves stay in their window"
+        a.busy = True
+        b.chat("hello", "home")
+        assert b.pi is None and "another window" in json.loads(qb[-1][5:])["text"], "no second agent on a running chat"
+    finally:
+        app.HUBS.pop("pat/w1", None), app.HUBS.pop("pat/w2", None)
