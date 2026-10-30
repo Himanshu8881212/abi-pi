@@ -13,3 +13,4 @@ engine/backend/.venv/
 engine/backend/static/
 engine/frontend/node_modules/
 workspaces.old-abi/
+.claude/scheduled_tasks.lock

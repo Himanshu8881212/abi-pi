@@ -25,8 +25,8 @@ def srv():
     if not abi.folder(P):
         drop = ROOT / "scratch" / P
         drop.mkdir(parents=True, exist_ok=True)
-        (drop / "orders.csv").write_text("order_date,region,amount\n" + "".join(
-            f"2026-05-{d:02d},{r},{d * 3 + i}\n" for d in range(1, 29) for i, r in enumerate(["North", "South"])))
+        (drop / "orders.csv").write_text("order_id,order_date,region,amount\n" + "".join(  # an id: `amount` is no key
+            f"{d * 2 + i},2026-05-{d:02d},{r},{d * 3 + i}\n" for d in range(1, 29) for i, r in enumerate(["North", "South"])))
         abi.load("demo", P, [str(drop / "orders.csv")])
     s = app.serve(P, 0, open_browser=False)
     port = s.server_address[1]

@@ -268,6 +268,11 @@ def purge_deleted(conn, now: float | None = None) -> None:
     for s in [r["nspname"] for r in conn.execute("SELECT nspname FROM pg_namespace WHERE starts_with(nspname, %s)", [DELETED])]:
         if int(s.split("_")[2]) < cutoff:
             path = conn.execute(f"""SELECT value FROM "{s}".ducklake_metadata WHERE key = 'data_path'""").fetchone()["value"]
+            # ABI-PI: the app and the worker keep a deleted project's lake cached, its catalog connection idle in
+            # transaction; its lock held the DROP for ever. Only a stale cache can hold a lake deleted 30 days ago.
+            conn.execute("""SELECT pg_terminate_backend(l.pid) FROM pg_locks l JOIN pg_class c ON c.oid = l.relation
+                            JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = %s AND l.pid <> pg_backend_pid()""", [s])
+            conn.execute("SET LOCAL lock_timeout = '30s'")
             conn.execute(f'DROP SCHEMA "{s}" CASCADE')
             shutil.rmtree(path, ignore_errors=True)
             conn.commit()

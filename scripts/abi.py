@@ -253,7 +253,8 @@ def add_date(project: str, table: str) -> dict | None:
     for i, (c, f) in enumerate(tries):
         vals = [row[names.index(c)] for row in rows if row[names.index(c)] not in (None, "")]
         got = [row[names.index(f"p{i}")] for row in rows if row[names.index(c)] not in (None, "")]
-        if vals and sum(g is not None for g in got) >= 0.99 * len(vals):
+        # %Y also takes "02" (year 2): yy.dd.mm data parsed as dd.mm.yyyy when every sampled day was <= 12
+        if vals and sum(g is not None and 1900 <= int(str(g)[:4]) <= 2100 for g in got) >= 0.99 * len(vals):
             steps = src + [{"type": "add_column", "name": "day", "expression": exprs[i]}]
             call("set_steps", project=project, table=table, steps=steps)
             return {"column": c, "format": f or "ISO", "expression": exprs[i]}

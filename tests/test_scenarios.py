@@ -74,6 +74,7 @@ def yt():
                  columns=[{"name": "category_id", "type": "BIGINT"}, {"name": "month", "type": "VARCHAR"}, {"name": "target", "type": "BIGINT"}])
         abi.call("edit_cells", project="yt", table="targets",
                  add=[{"category_id": c, "month": "2018-07", "target": v} for c, v in ((20, 5_000_000), (24, 9_000_000), (10, 7_000_000))])
+        abi.call("set_measure", project="yt", id="target", name="Target", expression="SUM(targets.target)")  # reads the current value
         abi.sync("yt")
     return "yt"
 
