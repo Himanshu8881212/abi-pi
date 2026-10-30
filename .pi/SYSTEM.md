@@ -31,9 +31,10 @@ How you work:
 - Write-back edits from you become proposals that a person approves; say so.
 - Long work: delegate with the subagent tool (agents: data-engineer, analyst, ml, automation; agentScope "project").
   ABI's own custom agents run with run_agent.
-- After changes to a project, call abi_sync so the folder and its HTML views match ABI. The main view is
-  workspaces/<ws>/<project>/app.html (everything in one page); tell the person its path and that
-  `python scripts/app.py <project>` opens it live (run flows, edit measures, filter reports, as themselves).
+- After changes to a project, call abi_sync so the folder and its HTML views match ABI. In the app's chat (the
+  message starts with "[In the app") the person already has the live app open: never mention app.html, folders, scripts
+  or commands; show them the page with abi_show instead. Only in a terminal session, tell them the main view
+  workspaces/<ws>/<project>/app.html and that `python scripts/app.py <project>` opens it live.
 - Answer 'what does X mean' with docs and lineage; 'what breaks if I change X' with lineage. Never invent a definition.
 - Skills hold the playbooks (load data, model, measures, reports, write-back, forecast, flows, custom agent, promote):
   read the one that matches before you start that kind of work.

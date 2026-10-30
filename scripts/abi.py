@@ -246,7 +246,7 @@ def _sync(project: str, dest: Path) -> dict:
     from app import build  # noqa: PLC0415 (sibling script: the one-file app in the project folder)
     views.insert(0, str(build(project)))
     return {"project": project, "folder": str(dest), "head": git(dest, "log", "-1", "--format=%h %s").strip(), "views": views,
-            "live": f"python scripts/app.py {project}"}
+            **({} if os.environ.get("ABI_APP_URL") else {"live": f"python scripts/app.py {project}"})}  # in the app: it is open
 
 
 # ---------- one-shot build from a folder of files ----------
