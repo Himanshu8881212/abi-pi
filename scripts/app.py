@@ -164,7 +164,7 @@ body[data-mode=viewer] .ed{background:transparent;border-color:transparent;paddi
 .loose{display:grid;grid-template-columns:minmax(0,1fr);gap:16px}.lay>.rowhead{grid-column:1/-1;order:-1}.lay{display:grid!important;grid-template-columns:repeat(12,minmax(0,1fr))!important}.lay>*{max-width:none!important}
 .card.sized{overflow:auto}.card.sized>.body{flex:1;min-height:0}.card.sized>.body svg{height:100%}
 body.laying .lay>*{outline:1px dashed var(--signal);outline-offset:-1px;cursor:grab;position:relative;user-select:none}body.laying .lay>*.drag{opacity:.4}body.laying .lay>*.over{box-shadow:inset 3px 0 0 var(--signal)}
-.rz{position:absolute;right:0;bottom:0;width:18px;height:18px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,var(--signal) 50%);z-index:2}body:not(.laying) .rz{display:none}
+.rz{position:absolute;right:0;bottom:0;width:18px;height:18px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,var(--signal) 50%);z-index:2;opacity:0;transition:opacity .12s}*:hover>.rz,body.laying .rz{opacity:1}:has(>.rz){position:relative}body[data-mode=viewer] .rz{display:none}
 #layout.on{background:var(--signal);color:#fff;border-color:var(--signal)}.mobile #layout{display:none}
 .layers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.layer h4{margin:0}.layer table{margin-top:8px}
 .mobile .layers{grid-template-columns:1fr}
@@ -208,7 +208,7 @@ button.pin{font:500 12px var(--text);border:1px solid var(--line);border-radius:
 .cards.pins{margin-bottom:8px;align-items:start}.pinned .acts .btn{padding:5px 9px}.pinned .body{min-height:40px}
 #commit input.f,#commit textarea.f{display:block;width:100%;margin-top:6px}
 .card>.btn{align-self:flex-start}
-#menu{display:none}
+#menu{display:inline-flex}body.side-off{grid-template-columns:minmax(0,1fr)}body.side-off header{grid-column:1}body.side-off aside{display:none}
 .mobile .modes,.mobile .vc,.mobile #theme{display:none}.mobile #menu{display:inline-flex}
 .mobile body{grid-template-columns:1fr}.mobile header{grid-column:1;gap:8px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 .mobile .crumb i,.mobile .crumb>:not(b){display:none}.mobile .crumb{font-size:14px}
@@ -994,18 +994,20 @@ const lkey=(g,c,i)=>c.dataset.lk||ttl(c)+'#'+layKids(g).slice(0,i).filter(x=>ttl
 function lay(pg,k){if(document.body.classList.contains('mobile')||innerWidth<820)return;const S=laySaved(k);
  // cards straight on the page (Docs, Video, History…) go into one grid, so every page has containers to arrange
  [...pg.children].filter(c=>c.classList.contains('card')).forEach(c=>{const w=c.previousElementSibling?.classList.contains('loose')?c.previousElementSibling:c.before(h('div','loose'))||c.previousElementSibling;w.append(c)});
- grids(pg).forEach((g,gi)=>{const s=S[gi]||{};if(!LAYING&&!Object.keys(s).length&&!g.classList.contains('lay')&&!g.dataset.page)return;g.classList.add('lay');
+ grids(pg).forEach((g,gi)=>{if(MODE==='developer'&&LIVE)layKids(g).forEach(c=>{if(!c.querySelector(':scope>.rz'))c.append(rz(c))});const s=S[gi]||{};if(!LAYING&&!Object.keys(s).length&&!g.classList.contains('lay')&&!g.dataset.page)return;g.classList.add('lay');
   layKids(g).forEach((c,i)=>{const x=s[lkey(g,c,i)];
    c.dataset.w||=(c.style.gridColumn.match(/span (\d+)/)||[])[1]||(g.matches('.rows,.stack,.loose')||c.classList.contains('full')?12:c.classList.contains('wide')?(g.classList.contains('home')?8:12):4);
    if(!c.dataset.laid){c.dataset.laid=1;const ht=x?x.h:c.dataset.h;c.style.gridColumn='span '+(x?.w||c.dataset.w);c.style.order=x?.o??i;c.style.height=ht?ht+'px':'';c.classList.toggle('sized',!!+ht)}  // once: a redraw never undoes a drag
-   c.draggable=LAYING;if(LAYING&&!c.querySelector(':scope>.rz'))c.append(rz(c))});
+   c.draggable=LAYING});
   if(LAYING&&!g.dataset.dnd){g.dataset.dnd=1;let src=null;const on=e=>{const t=e.target.closest?.('.lay>*');return t?.parentElement===g?t:null},clr=()=>g.querySelectorAll('.over').forEach(x=>x.classList.remove('over'));
    g.addEventListener('dragstart',e=>{src=on(e);if(!src)return;src.classList.add('drag');e.dataTransfer.effectAllowed='move'});
    g.addEventListener('dragover',e=>{const t=on(e);if(!src||!t)return;e.preventDefault();clr();if(t!==src)t.classList.add('over')});
    g.addEventListener('drop',e=>{const t=on(e);if(!src||!t||t===src)return;e.preventDefault();const ks=layKids(g).sort((a,b)=>a.style.order-b.style.order);
     ks.splice(ks.indexOf(src),1);ks.splice(ks.indexOf(t),0,src);ks.forEach((c,i)=>c.style.order=i);layStore()});
    g.addEventListener('dragend',()=>{src?.classList.remove('drag');clr();src=null})}})}
-function rz(c){const r=h('div','rz');r.title='Drag to resize';r.onpointerdown=e=>{e.preventDefault();e.stopPropagation();const g=c.parentElement,gap=parseFloat(getComputedStyle(g).columnGap)||16,col=(g.clientWidth-11*gap)/12,b=c.getBoundingClientRect();
+function layOn(g){if(g.classList.contains('lay'))return;const gap=parseFloat(getComputedStyle(g).columnGap)||16,col=(g.clientWidth-11*gap)/12;  // keep the look: each card's width in columns
+ layKids(g).forEach((c,i)=>{c.dataset.w=Math.max(1,Math.min(12,Math.round((c.offsetWidth+gap)/(col+gap))));c.dataset.laid=1;c.style.gridColumn='span '+c.dataset.w;c.style.order=i});g.classList.add('lay')}
+function rz(c){const r=h('div','rz');r.title='Drag to resize';r.onpointerdown=e=>{e.preventDefault();e.stopPropagation();layOn(c.parentElement);const g=c.parentElement,gap=parseFloat(getComputedStyle(g).columnGap)||16,col=(g.clientWidth-11*gap)/12,b=c.getBoundingClientRect();
  c.draggable=false;r.setPointerCapture(e.pointerId);r.onpointermove=m=>{c.style.gridColumn='span '+Math.max(1,Math.min(12,Math.round((m.clientX-b.left+gap)/(col+gap))));c.style.height=Math.max(80,Math.round((m.clientY-b.top)/20)*20)+'px';c.classList.add('sized')};
  r.onpointerup=r.onpointercancel=()=>{r.onpointermove=r.onpointerup=r.onpointercancel=null;c.draggable=LAYING;layStore()}};return r}
 async function layStore(reset){const k=CUR,pg=$('main .pg'),out={};
@@ -1041,7 +1043,8 @@ $('#publish').onclick=async()=>{if(!LIVE)return;if(!await ask({message:'Publish 
  toast('Publishing: ABI checks the last commit…');const post=(u,b)=>fetch(u,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json());
  let r=await post('/publish');if(r.confirm){if(!await ask(r.confirm)){toast('Not published.');return}r=await post('/confirm/'+r.confirm.id)}
  toast(r.error?`Publish failed: ${r.error}`:`Published ${r.result.commit}`)};
-$('#menu').onclick=()=>document.body.classList.toggle('menu-open');side.addEventListener('click',e=>{if(e.target.closest('button.it'))document.body.classList.remove('menu-open')});
+const sideOff=on=>{document.body.classList.toggle('side-off',on);try{localStorage.setItem('abi-side-off',on?'1':'')}catch(e){}};try{sideOff(localStorage.getItem('abi-side-off')==='1')}catch(e){}
+$('#menu').title='Show or hide the sidebar';$('#menu').onclick=()=>R.classList.contains('mobile')?document.body.classList.toggle('menu-open'):sideOff(!document.body.classList.contains('side-off'));side.addEventListener('click',e=>{if(e.target.closest('button.it'))document.body.classList.remove('menu-open')});
 $('#switch').onclick=switcher;
 if(window.ME?.signin){const w=h('span','who',ME.name),f=h('form');f.method='post';f.action='/signout';f.append(h('button','btn','Sign out'));const r0=$('header .right');r0.prepend(w,f)}
 if(window.ME&&!['editor','owner'].includes(ME.role))$('.modes').hidden=true;/* Viewer access only: no switch at all */$('#m-dev').onclick=()=>pickMode('developer');$('#m-view').onclick=()=>pickMode('viewer');
