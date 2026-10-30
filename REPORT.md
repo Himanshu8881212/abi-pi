@@ -319,3 +319,10 @@ Open findings:
   (3) grounding accepts the other side of a yes/no column ("Nonmembers" for `loyalty_member`); (4) the app gives ABI's
   engine the agent's model at start and on every Settings change (an engine secret bound to that host; the engine now
   takes `http://` with a key only on a private or loopback IP), so custom agents answer and can be evaluated.
+- **New in Automate is a form:** Flows (when it starts: schedule by day/week/month and time, after a table refresh, a
+  data-quality problem, a measure crossing a value, or by hand; steps in order: refresh, score/train, tool, ask an agent,
+  report PDF, inbox message, approval), ML models (task, the measure and grain or features; the training query is made
+  for you), tools (measures, grouping, inputs the user gives, bounded as ABI requires) and agents (purpose, instructions,
+  tools, scope, evaluation questions). Each saves through ABI's checks; "Describe it to the agent" and JSON stay as
+  alternatives. Also: saved analyses take two groupings and a top N; monitors can use completed periods only or the
+  latest period; a new chat is no longer answered by the old agent ending.

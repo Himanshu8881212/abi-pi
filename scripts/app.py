@@ -844,15 +844,75 @@ function editBtns(c,kind,obj){const K=KIND[kind];let ed=null;c.querySelector('h3
  act(c,'Edit',()=>{if(ed){ed.remove();ed=null;return}ed=editor(kind,obj,false);c.after(ed);ed.scrollIntoView({behavior:'smooth',block:'nearest'})});
  (K.extra||[]).forEach(([l,f])=>act(c,l,async()=>{await f(obj);return `${l}ed.`}));
  act(c,'Delete',async()=>{await K.del(obj);return 'Deleted.'})}
-// New <kind>: say it in words (the agent builds it in ABI, with its checks and tests) or start from a JSON template
-const SAY={flow:'e.g. every Monday at 8, refresh the data and check its quality; if something is wrong, leave me a note',
- ml:'e.g. forecast weekly views for the next two months', tool:'e.g. the top 10 videos of a category I choose',agent:'e.g. an assistant for the marketing team that answers which categories trend'};
+// ---------- New flow / ML model / tool / agent as a form: pick what you want, it saves through ABI (checked like an import) ----------
+const slug=(n,k)=>{const x=String(n||'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');return /^[a-z]/.test(x)?x.slice(0,60):k+'_'+(x||'1')};
+const sel=(opts,v)=>{const e=h('select','f');opts.forEach(o=>{const [val,lab]=Array.isArray(o)?o:[o,o];e.append(new Option(lab,val))});if(v!==undefined)e.value=v;return e};
+const inpt=(ph,v,type)=>{const e=h('input','f');e.placeholder=ph||'';if(v!==undefined)e.value=v;if(type)e.type=type;return e};
+const lab=t=>h('label','l',t),MS=()=>D.measures.map(m=>[m.id,m.name||m.id]),CMPS=[['>','is above'],['>=','is at least'],['<','is below'],['<=','is at most'],['=','equals'],['!=','is not']];
+function flowForm(c){const nm=inpt('e.g. Morning refresh'),de=inpt('what it is for'),tr=sel([['schedule','On a schedule'],['after_refresh','After a table refreshes'],['data_quality','When data quality finds a problem'],['data_condition','When a measure crosses a value'],['manual','Only when run by hand']]),tb=h('div');
+ const draw=()=>{tb.innerHTML='';const v=tr.value;
+  if(v==='schedule'){const fq=sel([['d','Every day'],['w','Every week on'],['m','Every month on day']]),dw=sel([['1','Monday'],['2','Tuesday'],['3','Wednesday'],['4','Thursday'],['5','Friday'],['6','Saturday'],['0','Sunday']]),dm=inpt('1','1','number'),tm=inpt('','07:00','time'),tz=inpt('time zone',Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC');
+   const vis=()=>{dw.hidden=fq.value!=='w';dm.hidden=fq.value!=='m'};fq.onchange=vis;vis();const r=h('div','row');r.append(fq,dw,dm,lab('at'),tm,tz);tb.append(r);
+   tb.get=()=>{const [H,M]=(tm.value||'07:00').split(':').map(Number);return {type:'schedule',cron:`${M} ${H} ${fq.value==='m'?Math.min(28,Math.max(1,+dm.value||1)):'*'} * ${fq.value==='w'?dw.value:'*'}`,timezone:tz.value||'UTC'}}}
+  else if(v==='after_refresh'){const t=multi([...new Set([...D.sources,...D.tables])],[]);tb.append(lab('Tables (any of them)'),t);tb.get=()=>{const x=[...t.selectedOptions].map(o=>o.value);if(!x.length)throw new Error('Pick at least one table.');return {type:'after_refresh',tables:x}}}
+  else if(v==='data_quality')tb.get=()=>({type:'data_quality'});
+  else if(v==='data_condition'){const m=sel(MS()),op=sel(CMPS),val=inpt('value','','number');const r=h('div','row');r.append(m,op,val);tb.append(r);
+   tb.get=()=>{if(val.value==='')throw new Error('Give the value.');return {type:'data_condition',query:{measures:[m.value]},measure:m.value,op:op.value,value:+val.value}}}
+  else tb.get=()=>({type:'manual'})};tr.onchange=draw;draw();
+ // steps, run one after the other
+ const KINDS=[['refresh','Refresh a table'],['score','Score an ML model'],['train','Train an ML model'],['tool','Run a tool'],['agent','Ask an agent'],['snapshot','Export a report (PDF)'],['post','Leave a message in the app inbox'],['approval','Wait for someone\'s approval']];
+ const list=h('div','stack'),add=sel([['','+ Add a step…'],...KINDS]);
+ add.onchange=()=>{const k=add.value;add.value='';if(!k)return;const row=h('div','row'),x=h('button','btn','Remove');row.append(h('b','',KINDS.find(z=>z[0]===k)[1]));let get;
+  if(k==='refresh'){const t=sel([...new Set([...D.sources,...D.tables])]);row.append(t);get=()=>({type:'refresh',table:t.value})}
+  else if(k==='score'||k==='train'){const m=sel((D.ml||[]).map(x=>[x.id,x.name||x.id]));row.append(m);get=()=>{if(!m.value)throw new Error('There is no ML model yet.');return {type:k,model:m.value}}}
+  else if(k==='tool'){const t=sel((D.tools||[]).map(x=>[x.id,x.name||x.id])),i=inpt('inputs as JSON, e.g. {"store_id":"S001"}');row.append(t,i);get=()=>{if(!t.value)throw new Error('There is no tool yet.');return {type:'tool',tool:t.value,...(i.value?{inputs:JSON.parse(i.value)}:{})}}}
+  else if(k==='agent'){const a=sel((D.agents||[]).map(x=>[x.id,x.name||x.id])),q=inpt('what to ask it');row.append(a,q);get=()=>{if(!a.value||!q.value)throw new Error('Pick an agent and say what to ask.');return {type:'agent',agent:a.value,prompt:q.value}}}
+  else if(k==='snapshot'){const r=sel(D.reports.map(x=>[x.id,x.name||x.id]));row.append(r);get=()=>{if(!r.value)throw new Error('There is no report yet.');return {type:'snapshot',report:r.value,pages:'all',format:'pdf'}}}
+  else if(k==='post'){const t=inpt('the message');row.append(t);get=()=>{if(!t.value)throw new Error('Write the message.');return {type:'action',action:'post_message',input:{channel:'inbox',text:t.value}}}}
+  else{const t=inpt('what they approve');row.append(t);get=()=>{if(!t.value)throw new Error('Say what they approve.');return {type:'approval',message:t.value}}}
+  row.get=get;x.onclick=()=>row.remove();row.append(x);list.append(row)};
+ c.append(lab('Name'),nm,lab('Description'),de,lab('Starts'),tr,tb,lab('Steps, in order'),list,add);
+ return ()=>{if(!nm.value.trim())throw new Error('Give it a name.');const st=[...list.children].map((r,i)=>({id:`step_${i+1}`,...r.get()}));if(!st.length)throw new Error('Add at least one step.');
+  return {$schema:'https://schema.abi.invalid/v1/flow.json',id:slug(nm.value,'flow'),name:nm.value.trim(),description:de.value,enabled:false,trigger:tb.get(),steps:st}}}
+function mlForm(c){const nm=inpt('e.g. Daily revenue forecast'),task=sel([['forecast','Forecast a measure'],['regression','Predict a number'],['classification','Predict a category'],['clustering','Group similar rows'],['anomaly','Find unusual days']]),ds=sel([['','A new query from these fields'],...(D.datasets||[]).map(d=>[d.id,d.name||d.id])]),f=h('div');
+ const meas=sel(MS()),time=sel(D.dims.filter(d=>d.startsWith('calendar.')),'calendar.day'),hz=inpt('days ahead','28','number'),feats=multi(D.measures.map(m=>m.id),[]),k=inpt('groups (blank: automatic)','','number'),meth=sel(['auto','lightgbm','ets','seasonal','random_forest','kmeans','gmm','isolation_forest']);
+ const draw=()=>{f.innerHTML='';const t=task.value;
+  if(t==='forecast')f.append(lab('Measure to forecast'),meas,lab('By'),time,lab('Horizon (periods ahead)'),hz);
+  else if(t==='anomaly')f.append(lab('Measures to watch'),feats,lab('By'),time);
+  else if(t==='clustering')f.append(lab('Measures to group by'),feats,lab('Number of groups'),k);
+  else f.append(lab('Target measure'),meas,lab('Learn from'),feats);
+  f.append(lab('Method'),meth)};task.onchange=draw;draw();
+ c.append(lab('Name'),nm,lab('Task'),task,lab('Training rows'),ds,f);
+ return async()=>{if(!nm.value.trim())throw new Error('Give it a name.');const id=slug(nm.value,'ml'),t=task.value,fs=[...feats.selectedOptions].map(o=>o.value);let dataset=ds.value;
+  if(!dataset){const q={measures:[...new Set([...(t==='forecast'||t==='regression'||t==='classification'?[meas.value]:[]),...fs])],dimensions:t==='forecast'||t==='anomaly'?[time.value]:[]};
+   if(!q.measures.length)throw new Error('Pick the measures.');dataset=id+'_rows';await api('save_dataset',{id:dataset,name:nm.value.trim()+' (training rows)',query:q})}
+  return {$schema:'https://schema.abi.invalid/v1/ml.json',id,name:nm.value.trim(),task:t,dataset,method:meth.value,...(t==='forecast'?{target:meas.value,time:time.value,horizon:+hz.value||28}:{}),
+   ...(t==='anomaly'?{time:time.value,features:fs}:{}),...(t==='clustering'?{features:fs,...(k.value?{k:+k.value}:{})}:{}),...(t==='regression'||t==='classification'?{target:meas.value,...(fs.length?{features:fs}:{})}:{})}}}
+function toolForm(c){const nm=inpt('e.g. Store KPIs for a month'),de=inpt('what it returns, for the person and the agents'),ms=multi(D.measures.map(m=>m.id),[]),by=multi(ALLCOLS(),[]),ins=h('div','stack'),lim=inpt('all rows','','number');
+ const add=sel([['','+ Ask the user for…'],...D.dims.map(d=>[d,d])]);add.onchange=()=>{const col=add.value;add.value='';if(!col)return;const r=h('div','row'),ty=sel([['string','text'],['integer','whole number'],['number','number']]),lo=inpt('from','0','number'),hi=inpt('to','1000000','number'),x=h('button','btn','Remove');
+  const vis=()=>{lo.hidden=hi.hidden=ty.value==='string'};ty.onchange=vis;vis();r.append(h('b','',col),ty,lo,hi,x);x.onclick=()=>r.remove();  // ABI bounds every input
+  r.get=()=>({col,name:col.split('.').pop(),spec:{type:ty.value,description:col,...(ty.value==='string'?{minLength:1,maxLength:200}:{minimum:+lo.value,maximum:+hi.value})}});ins.append(r)};
+ c.append(lab('Name'),nm,lab('Description'),de,lab('Measures it returns'),ms,lab('Grouped by'),by,lab('Inputs: the rows are filtered to what the user gives'),ins,add,lab('At most this many rows'),lim);
+ return ()=>{if(!nm.value.trim()||!de.value.trim())throw new Error('Give it a name and a description.');const m=[...ms.selectedOptions].map(o=>o.value);if(!m.length)throw new Error('Pick at least one measure.');const I=[...ins.children].map(r=>r.get());
+  return {$schema:'https://schema.abi.invalid/v1/tool.json',id:slug(nm.value,'tool'),name:nm.value.trim(),description:de.value.trim(),kind:'query',
+   inputs:{type:'object',additionalProperties:false,properties:Object.fromEntries(I.map(i=>[i.name,i.spec])),required:I.map(i=>i.name)},
+   query:{measures:m,dimensions:[...by.selectedOptions].map(o=>o.value),filters:I.map(i=>({column:i.col,op:'=',value:{$input:i.name}})),...(lim.value?{limit:+lim.value}:{})},
+   outputs:{type:'array',items:{type:'object'}},permissions:{role:'viewer'},tests:[]}}}
+function agentForm(c){const nm=inpt('e.g. Store manager assistant'),pu=inpt('who it is for and what it answers'),ins=h('textarea','f'),tl=multi(['semantic_query',...(D.tools||[]).map(t=>t.id)],['semantic_query']),sc=multi(D.measures.map(m=>m.id),[]),mo=sel([['tools_only','Answers only through its tools'],['exploratory','May also explore the measures in scope']]),cs=h('div','stack');
+ ins.rows=3;ins.placeholder='how it answers: tone, what to refuse, what to ask for';const addc=btn('+ Test question',()=>{const r=h('div','row'),q=inpt('a question a user would ask'),e=inpt('the answer must contain (comma separated)'),x=h('button','btn','Remove');r.append(q,e,x);x.onclick=()=>r.remove();r.get=()=>q.value?{question:q.value,expect:{contains:e.value.split(',').map(s=>s.trim()).filter(Boolean)}}:null;cs.append(r)});addc.click();
+ c.append(lab('Name'),nm,lab('Purpose'),pu,lab('Instructions'),ins,lab('Tools it may use'),tl,lab('Measures in its scope'),sc,lab('Mode'),mo,lab('Evaluation: questions it must answer correctly before it can be published'),cs,addc);
+ return ()=>{if(!nm.value.trim()||!pu.value.trim()||!ins.value.trim())throw new Error('Give it a name, a purpose and instructions.');
+  return {$schema:'https://schema.abi.invalid/v1/agent.json',id:slug(nm.value,'agent'),name:nm.value.trim(),purpose:pu.value.trim(),instructions:ins.value.trim(),mode:mo.value,grounding:true,channels:[{type:'in_app'}],
+   scope:{measures:[...sc.selectedOptions].map(o=>o.value),tables:[]},tools:[...tl.selectedOptions].map(o=>o.value),cases:[...cs.children].map(r=>r.get()).filter(Boolean)}}}
+const FORMS={flow:[flowForm,'flows'],ml:[mlForm,'ml'],tool:[toolForm,'tools'],agent:[agentForm,'agents']};
 function newBtn(box,kind){const bar=box.querySelector(':scope>.bar.top')||h('div','row bar top'),L=KIND[kind].label;
- bar.append(btn(`New ${L}`,()=>{if(box.querySelector('.newkind'))return;const c=card(`New ${L}`,'describe it and the agent builds it in ABI, or start from a template'),ta=h('textarea','f');c.classList.add('newkind','wide');
-  ta.rows=3;ta.placeholder=SAY[kind]||'what it should do';c.append(h('label','l','What should it do?'),ta);
-  act(c,'Create with the agent',async()=>{if(!ta.value.trim())throw new Error('Say what it should do.');openChat(true);inp.value=`Create a ${L} in this project: ${ta.value.trim()}`;sendChat();return 'Asked: follow it in the chat.'},1);
-  act(c,'Start from a template (JSON)',()=>{const e=editor(kind,KIND[kind].tpl,true);c.after(e);e.querySelector('textarea').focus()});
-  (box.querySelector('.pghead')||bar).after(c);ta.focus()},1));
+ bar.append(btn(`New ${L}`,()=>{if(box.querySelector('.newkind'))return;const c=card(`New ${L}`,'fill it in and create it; it is checked by ABI like everything else');c.classList.add('newkind','wide');
+  const get=FORMS[kind][0](c);
+  act(c,`Create ${L}`,async()=>{const o=await get();await KIND[kind].save(o);toast(`Created ${o.name}. `+(kind==='flow'?'It is off until you switch it on.':kind==='ml'?'Train it on its card.':kind==='tool'?'Test it, then publish it.':'Run its evaluation set on its card.'));show(FORMS[kind][1])},1);
+  act(c,'Describe it to the agent instead',()=>{openChat(true);inp.value=`Create a ${L} in this project: `;inp.focus()});
+  act(c,'Start from JSON',()=>{const e=editor(kind,KIND[kind].tpl,true);c.after(e);e.querySelector('textarea').focus()});
+  act(c,'Cancel',()=>c.remove());
+  (box.querySelector('.pghead')||bar).after(c);c.querySelector('input')?.focus()},1));
  if(!bar.parentNode)box.prepend(bar)}
 
 // ---------- Automate ----------
