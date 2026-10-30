@@ -392,9 +392,11 @@ def check(answer: str, results: list, vocab: set[str] = frozenset(), members: se
         at := sorted({s for x in {m, m[:1].upper() + m[1:], m.upper()} for s in _find(x, answer, case=True)}))]
     # GATE-9-fix-10 (e): a name the person typed in this chat grounds exactly as typed (custom runs pass no `asked`,
     # D-114); (b, c): a phrase of COMMON or PRODUCT words only; (b) "Order" for an `orders` table
+    part = lambda w: w in parts or w.endswith("s") and w[:-1] in parts or w + "s" in parts  # noqa: E731
+    # a yes/no column's other side: "Nonmembers", "Non-members", "Not members" for `loyalty_member` (release run 30 Oct)
+    neg = lambda n: bool(m := re.fullmatch(r"(?:non[- ]?|not |no )([a-z]+)", n.lower())) and part(m[1])  # noqa: E731
     bad_names = [(at, n) for n, vocab_ok, at in cands if not _has(n, found) and not _has(n, asked, case=True) and not (
-        vocab_ok and (_has(n, words) or " ".join(n.lower().split()) in spelled or n.lower() in parts
-                      or n.endswith("s") and n.lower()[:-1] in parts or n.lower() + "s" in parts
+        vocab_ok and (_has(n, words) or " ".join(n.lower().split()) in spelled or part(n.lower()) or neg(n)
                       or all(w.lower() in COMMON or _has(w, "\n".join(PRODUCT)) for w in n.split())))]
     out = {"numbers": list(dict.fromkeys(t for _, t in bad_nums)), "names": list(dict.fromkeys(n for _, n in bad_names))}
     if not spans:

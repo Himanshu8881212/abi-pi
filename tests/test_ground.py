@@ -43,3 +43,11 @@ def test_a_link_label_opens_like_a_sentence():
     """'[Download your dashboard PDF](…)' came back as '[[not verified] your dashboard PDF]'."""
     assert ground.check("[Download your dashboard PDF](/api/artifacts/p/x.pdf)", ROWS)["names"] == []
     assert ground.check("See [Atlantis Monthly](/x) with 98,765 views.", ROWS)["names"] == ["Atlantis Monthly"]  # mid-sentence: still a name
+
+
+def test_the_other_side_of_a_yes_no_column_is_no_invented_name():
+    """Release run 30 Oct: "Nonmembers" for `loyalty_member` = false was masked, and with it the plain word in prose."""
+    res = [{"columns": ["loyalty_member", "average_ticket"], "rows": [[True, 5.6544], [False, 5.6574]]}]
+    ans = "Members and nonmembers.\n\n| Loyalty status | Average ticket |\n|---|---:|\n| Members | 5.6544 |\n| Nonmembers | 5.6574 |\n| Non-members | 5.6574 |"
+    assert ground.check(ans, res, fields={"dim_customers.loyalty_member"})["names"] == []
+    assert "Nonbuyers" in ground.check("| Loyalty status | Average ticket |\n|---|---:|\n| Nonbuyers | 5.6574 |", res, fields={"dim_customers.loyalty_member"})["names"]
