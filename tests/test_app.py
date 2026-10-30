@@ -576,3 +576,22 @@ def test_a_chat_running_in_one_window_is_followed_in_another(srv):
         assert b.pi is None and "another window" in json.loads(qb[-1][5:])["text"], "no second agent on a running chat"
     finally:
         app.HUBS.pop("pat/w1", None), app.HUBS.pop("pat/w2", None)
+
+
+def test_a_new_chat_is_not_answered_by_the_old_agent_ending(srv):
+    """Release run 31 Oct: New chat stops the idle agent; its reader, ending, saw the window busy with the next message
+    and answered it "The agent stopped before it could answer"."""
+    import subprocess as sp
+    import threading
+    h = app.Hub(P, "http://x", "k", "w9", False, "pat", None)
+    q: list = []
+    h.clients.append(q)
+    h.pi = sp.Popen(["sleep", "0.3"], stdout=sp.PIPE, text=True)
+    t = threading.Thread(target=h.read)
+    t.start()
+    h.pi, h.busy = sp.Popen(["sleep", "5"], stdout=sp.PIPE, text=True), True  # the next message's agent
+    try:
+        t.join(5)
+        assert h.busy and not [x for x in q if b'"answer"' in x], "the old agent's end says nothing about the new turn"
+    finally:
+        h.pi.kill()

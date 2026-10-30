@@ -290,14 +290,14 @@ export default async function abi(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "abi_monitor",
 		label: "Monitor checks",
-		description: "The app's Monitor page: list, save or delete a check; the page evaluates it live and turns it red when the condition holds (people pin it to Home). Use it for 'tell me when / alert me / watch'. Kinds: measure — {measure, op (< <= > >= = !=), against: 'value' + value | 'measure' + other (a measure ID, e.g. a target) | 'prev' + value (% change) + period (a calendar column, e.g. calendar.week: the latest period against the one before)}, optional by (a column: alert per member, e.g. each region) and filters [{column, op:'=', value}]; fresh — {table, hours} (no load within that many hours); flow — {flow} (its last run failed). Test the measure with semantic_query first. Developer mode only.",
+		description: "The app's Monitor page: list, save or delete a check; the page evaluates it live and turns it red when the condition holds (people pin it to Home). Use it for 'tell me when / alert me / watch'. Kinds: measure — {measure, op (< <= > >= = !=), against: 'value' + value | 'measure' + other (a measure ID, e.g. a target) | 'prev' + value (% change) + period (a calendar column, e.g. calendar.week: the latest period against the one before)}; with value or measure, a period checks only the latest period (e.g. this month against the target); skip_latest: true uses completed periods only (the latest one may still be filling: 'last week' = the last full week); optional by (a column: alert per member, e.g. each region) and filters [{column, op:'=', value}]; fresh — {table, hours} (no load within that many hours); flow — {flow} (its last run failed). Test the measure with semantic_query first. Developer mode only.",
 		parameters: Type.Object({
 			project: Type.String({ pattern: "^[a-z][a-z0-9_]{0,62}$" }),
 			action: Type.String({ enum: ["list", "save", "delete"] }),
 			check: Type.Optional(Type.Object({ name: Type.String(), kind: Type.String({ enum: ["measure", "fresh", "flow"] }), measure: Type.Optional(Type.String()),
 				op: Type.Optional(Type.String()), against: Type.Optional(Type.String({ enum: ["value", "measure", "prev"] })), value: Type.Optional(Type.Number()),
 				other: Type.Optional(Type.String()), period: Type.Optional(Type.String()), by: Type.Optional(Type.String()),
-				filters: Type.Optional(Type.Array(Type.Object({ column: Type.String(), op: Type.String(), value: Type.Any() }))),
+				filters: Type.Optional(Type.Array(Type.Object({ column: Type.String(), op: Type.String(), value: Type.Any() }))), skip_latest: Type.Optional(Type.Boolean()),
 				table: Type.Optional(Type.String()), hours: Type.Optional(Type.Number()), flow: Type.Optional(Type.String()) })),
 			id: Type.Optional(Type.String({ description: "the check's ID, with action delete" })),
 		}),
@@ -306,12 +306,13 @@ export default async function abi(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "abi_explore",
 		label: "Explore analyses",
-		description: "Explore's saved analyses (shared in the project, people open and pin them): list them, or save one — a name, a query {measures, dimensions (at most one), filters} and a chart (bar, line or table). Run the query with semantic_query first. Use it when asked to explore, save or keep an analysis.",
+		description: "Explore's saved analyses (shared in the project, people open and pin them): list them, or save one — a name, a query {measures, dimensions (one for a chart, two for a table such as month × region), filters, order_by [{field, desc}], limit (a top N)} and a chart (bar, line or table). Run the query with semantic_query first. Use it when asked to explore, save or keep an analysis.",
 		parameters: Type.Object({
 			project: Type.String({ pattern: "^[a-z][a-z0-9_]{0,62}$" }),
 			action: Type.String({ enum: ["list", "save"] }),
 			name: Type.Optional(Type.String()),
-			query: Type.Optional(Type.Object({ measures: Type.Array(Type.String()), dimensions: Type.Optional(Type.Array(Type.String())), filters: Type.Optional(Type.Array(Type.Any())) })),
+			query: Type.Optional(Type.Object({ measures: Type.Array(Type.String()), dimensions: Type.Optional(Type.Array(Type.String())), filters: Type.Optional(Type.Array(Type.Any())),
+				order_by: Type.Optional(Type.Array(Type.Object({ field: Type.String(), desc: Type.Optional(Type.Boolean()) }))), limit: Type.Optional(Type.Number()) })),
 			chart: Type.Optional(Type.String({ enum: ["bar", "line", "table"] })),
 		}),
 		async execute(_id, p) { return text(await appCall(p.project, "/agent/analysis", p)); },

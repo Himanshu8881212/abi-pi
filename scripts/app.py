@@ -292,7 +292,7 @@ async function pinCard(p,c){const body=h('div','body'),go=h('button','btn','Open
  un.onclick=async()=>{PINS=PINS.filter(x=>pinKey(x)!==pinKey(p));await pinPost({pins:PINS});c.remove()};
  const r=p.ref,line=(t,cls)=>body.append(h('p',cls||'',t));
  try{if(p.kind==='visual'){go.onclick=()=>show('rep:'+r.report);const d=await api('visual_data',{report:r.report,page:r.page,visual:r.visual});requestAnimationFrame(()=>chart(body,d))}
-  else if(p.kind==='analysis'){go.onclick=()=>{PENDING.explore={...r.q,chart:r.type};show('explore')};const d=await api('semantic_query',{...r.q,limit:500});d.format=d.format||{};d.type=r.type||'bar';d.id='pin';requestAnimationFrame(()=>chart(body,d))}
+  else if(p.kind==='analysis'){go.onclick=()=>{PENDING.explore={...r.q,chart:r.type};show('explore')};const d=await api('semantic_query',{limit:500,...r.q});d.format=d.format||{};d.type=r.type||'bar';d.id='pin';requestAnimationFrame(()=>chart(body,d))}
   else if(p.kind==='monitor'){go.onclick=()=>show('monitor');const ck=(D.app?.monitor?.checks||[]).find(x=>x.id===r);if(!ck){line('This check was removed.','empty');return}const x=await monEval(ck);line(x.text,x.ok?'ok':'bad')}
   else if(p.kind==='flow'){go.onclick=()=>show('flw:'+r);const f=(D.flows||[]).find(x=>x.id===r);const x=await api('flow_runs',{flow:r}).catch(()=>({}));const one=x.runs?.[0]||x;
    line(`${f?.enabled?'On':'Off'} · last run: ${one.status||'never'}`,one.status==='failed'?'bad':one.status==='ok'?'ok':'')}
@@ -549,12 +549,15 @@ const OPS=[['<','is below'],['<=','is at most'],['>','is above'],['>=','is at le
 // a measure check compares the measure with a value, with another measure (a target), or with its previous period (% change);
 // optionally filtered, and optionally for each member of a dimension (alerts when any member matches)
 async function monEval(c){if(c.kind==='measure'){const f=c.filters||[],vs=c.against||'value';
-  if(vs==='prev'){const r=await api('semantic_query',{measures:[c.measure],dimensions:[c.period],filters:f,order_by:[{field:c.period,desc:true}],limit:2}),[a,b]=r.rows||[];
+  const sk=c.skip_latest?1:0;  // completed periods only: the latest (still filling) is left out
+  if(vs==='prev'){const r=await api('semantic_query',{measures:[c.measure],dimensions:[c.period],filters:f,order_by:[{field:c.period,desc:true}],limit:2+sk}),[a,b]=(r.rows||[]).slice(sk);
    if(!a||!b||typeof a[1]!=='number'||typeof b[1]!=='number'||!b[1])return {ok:true,text:`${mname(c.measure)}: not enough periods to compare yet`};
    const pct=(a[1]-b[1])/Math.abs(b[1])*100;return {ok:!CMP[c.op](pct,Number(c.value)),text:`${mname(c.measure)}: ${fmt(a[1])} in ${cell(a[0])}, ${pct>=0?'+':''}${pct.toFixed(1)}% on ${cell(b[0])} · alerts when the change ${opw(c.op)} ${fmt(Number(c.value))}%`}}
-  const r=await api('semantic_query',{measures:vs==='measure'?[c.measure,c.other]:[c.measure],dimensions:c.by?[c.by]:[],filters:f,limit:500}),n=c.by?1:0;
+  let fl=f,at='';if(c.period){const l=await api('semantic_query',{measures:[c.measure],dimensions:[c.period],filters:f,order_by:[{field:c.period,desc:true}],limit:1+sk}),pv=(l.rows||[])[sk]?.[0];
+   if(pv==null)return {ok:true,text:`${mname(c.measure)}: no ${c.period.split('.').pop()} with data yet`};fl=[...f,{column:c.period,op:'=',value:pv}];at=` in ${cell(pv)}`}  // the latest (completed) period
+  const r=await api('semantic_query',{measures:vs==='measure'?[c.measure,c.other]:[c.measure],dimensions:c.by?[c.by]:[],filters:fl,limit:500}),n=c.by?1:0;
   const bad=(r.rows||[]).filter(x=>typeof x[n]==='number'&&CMP[c.op](x[n],vs==='measure'?x[n+1]:Number(c.value)));
-  const what=vs==='measure'?mname(c.other):fmt(Number(c.value)),where=f.length?` (${f.map(x=>`${x.column} = ${x.value}`).join(', ')})`:'';
+  const what=vs==='measure'?mname(c.other):fmt(Number(c.value)),where=(f.length?` (${f.map(x=>`${x.column} = ${x.value}`).join(', ')})`:'')+at;
   if(c.by)return {ok:!bad.length,text:bad.length?`${bad.length} of ${(r.rows||[]).length} ${c.by.split('.').pop()} ${opw(c.op)} ${what}: ${bad.slice(0,5).map(x=>x[0]).join(', ')}${bad.length>5?'…':''}${where}`:`No ${c.by.split('.').pop()} ${opw(c.op)} ${what}${where}`};
   const x=(r.rows||[])[0]||[];return {ok:typeof x[0]==='number'&&!bad.length,text:`${mname(c.measure)}: ${fmt(x[0])}${vs==='measure'?` vs ${what} ${fmt(x[1])}`:''}${where} · alerts when it ${opw(c.op)} ${what}`}}
  if(c.kind==='fresh'){const q=D.quality||{},ix=k=>(q.columns||[]).indexOf(k),row=(q.rows||[]).find(x=>x[0]===c.table),t=row&&row[ix('last_load')];
@@ -1454,7 +1457,8 @@ class Hub:
 
     def read(self) -> None:
         started, final, failed = {}, "", ""
-        for line in self.pi.stdout:
+        proc = self.pi  # this reader's agent: a new chat replaces self.pi while an old one is still ending
+        for line in proc.stdout:
             self.heard, self.told = time.time(), False
             try:
                 e = json.loads(line)
@@ -1487,7 +1491,7 @@ class Hub:
                 final, failed = "", ""
                 self.busy = False
                 self.emit({"type": "busy", "on": False})
-        if self.busy:  # the agent ended without an answer (it couldn't start, or it crashed): say so instead of waiting
+        if self.busy and self.pi is proc:  # the agent ended without an answer (it couldn't start, or it crashed): say so
             self.busy = False
             self.emit({"type": "busy", "on": False})
             self.emit({"type": "answer", "text": "The agent stopped before it could answer (details in logs/pi-stderr.log). Try again; if it keeps happening, check the model settings (Govern › Settings)."})
@@ -1617,7 +1621,7 @@ def agent_monitor(project: str, body: dict, by: str) -> list:
         if need is None or any(c.get(k) in (None, "") for k in need) or (kind == "measure" and c["op"] not in OPS):
             raise ValueError(f"A {kind or '?'} check needs {', '.join(need or ['kind: measure, fresh or flow'])}"
                              + (f"; op is one of {' '.join(OPS)}" if kind == "measure" else "") + ".")
-        keep = ("measure", "op", "against", "value", "other", "period", "by", "filters", "table", "hours", "flow")
+        keep = ("measure", "op", "against", "value", "other", "period", "skip_latest", "by", "filters", "table", "hours", "flow")
         c = {"id": cid, "name": str(c.get("name") or cid)[:120], "kind": kind} | {k: c[k] for k in keep if c.get(k) not in (None, "")}
         checks = [x for x in checks if x.get("id") != cid] + [c]
         if len(checks) > 50:
@@ -1634,7 +1638,9 @@ def agent_analysis(project: str, body: dict, by: str) -> list:
         q, name = body.get("query") or {}, str(body.get("name") or "").strip()[:120]
         if not name or not q.get("measures"):
             raise ValueError("Give the analysis a name and at least one measure.")
-        a = {"name": name, "q": {"measures": q["measures"], "dimensions": (q.get("dimensions") or [])[:1], "filters": q.get("filters") or []},
+        order = [o for o in q.get("order_by") or [] if isinstance(o, dict) and o.get("field")][:2]
+        a = {"name": name, "q": {"measures": q["measures"], "dimensions": (q.get("dimensions") or [])[:2], "filters": q.get("filters") or []}
+             | ({"order_by": order} if order else {}) | ({"limit": int(q["limit"])} if str(q.get("limit") or "").isdigit() else {}),
              "type": body.get("chart") if body.get("chart") in ("bar", "line", "table") else "bar", "at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")}
         items = ([a] + [x for x in items if x.get("name") != name])[:100]
         app_save(project, "analyses.json", items, by)
