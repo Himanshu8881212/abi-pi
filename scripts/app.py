@@ -1153,8 +1153,21 @@ def app_save(project: str, name: str, data, by: str = "") -> None:
 
 
 def snapshot(dest: Path, project: str) -> dict:
-    """What the page shows: ABI's live state (uncommitted changes included); a few definitions only the folder has
-    (a dataset's query, a source's location) come from the last commit."""
+    """What the page shows: ABI's live state, uncommitted changes included. The folder holds commits only, so the
+    definitions read from it (sources, staged tables' steps, queries) come from a copy with ABI's pending changes applied."""
+    import shutil  # noqa: PLC0415
+    import tempfile  # noqa: PLC0415
+    pending = read("changes", project)
+    patch = "".join((f.get("patch") or "").rstrip("\n") + "\n" for f in (pending or {}).get("files") or [])
+    with tempfile.TemporaryDirectory() as tmp:
+        if patch.strip():
+            shutil.copytree(dest, tmp, ignore=shutil.ignore_patterns(".git", "app.html"), dirs_exist_ok=True)
+            if subprocess.run(["git", "apply", "--whitespace=nowarn", "-"], cwd=tmp, input=patch, text=True, capture_output=True).returncode == 0:
+                dest = Path(tmp)  # ponytail: a patch that doesn't apply falls back to the last commit
+        return _snapshot(dest, project, pending)
+
+
+def _snapshot(dest: Path, project: str, pending: dict | None) -> dict:
     j = render.j
     sm = read("semantic_model", project) or {}
     measures = sm.get("measures") or (j(dest / "model/measures.json", {}) or {}).get("measures", [])
@@ -1183,7 +1196,7 @@ def snapshot(dest: Path, project: str) -> dict:
            "agents": live("list_agents", "agents", "agents"), "glossary": sm.get("glossary") or [], "models": sm.get("models") or [],
            "datasets": [queries.get(d["id"], {}) | d for d in sm.get("datasets") or []], "model": model,
            "columns": sm.get("columns") or {}, "sources": sorted(sources), "source_specs": sources, "table_steps": table_steps,
-           "tables": sorted(model["tables"]), "readiness": read("readiness", project), "pending": read("changes", project),
+           "tables": sorted(model["tables"]), "readiness": read("readiness", project), "pending": pending,
            "quality": read("data_quality", project), "rls": read("rls_rules", project), "history": (read("history", project) or {}).get("commits", []),
            "docs": read("docs", project), "sections": sections, "published": published(project.removesuffix("_pub")),
            "stamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
