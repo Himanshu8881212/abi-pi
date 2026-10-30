@@ -326,3 +326,6 @@ Open findings:
   tools, scope, evaluation questions). Each saves through ABI's checks; "Describe it to the agent" and JSON stay as
   alternatives. Also: saved analyses take two groupings and a top N; monitors can use completed periods only or the
   latest period; a new chat is no longer answered by the old agent ending.
+- **No ChatGPT:** models come only from Settings (the proxy or an API provider). The engine's ChatGPT account link
+  (its sign-in route and the actions chatgpt_account, set_chatgpt_model, unlink_chatgpt) is taken out, the agent no
+  longer has those tools, and "no model" messages point to Govern › Settings.

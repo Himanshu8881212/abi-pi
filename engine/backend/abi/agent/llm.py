@@ -182,9 +182,8 @@ def route(model: str, question: str) -> str:
 
 
 EMPTY = "The model returned an empty answer (no text and no tool calls). Try again or pick another model."
-NO_MODEL = "No model is available: link your ChatGPT account, or ask a workspace Owner to add an LLM provider in Settings."
-NO_FLOW_MODEL = ("No model is available to flows and scheduled tasks: a ChatGPT sign-in only answers its own user's questions"
-                 " in the app. A workspace Owner adds an LLM provider in Settings.")
+NO_MODEL = "No model is available: an admin connects one in Govern › Settings (a proxy or an API provider)."
+NO_FLOW_MODEL = "No model is available to flows and scheduled tasks: an admin connects one in Govern › Settings."
 LIMITED = ("Your ChatGPT plan's usage limit is reached (see ChatGPT Settings → Usage). Try again after it resets,"
            " or ask a workspace Owner to add an LLM provider in Settings.")
 LIMITED_ALL = ("Your ChatGPT plan's usage limit is reached (see ChatGPT Settings → Usage), and the backup LLM providers failed"

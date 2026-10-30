@@ -122,7 +122,8 @@ async def invalid(request, e: RequestValidationError) -> JSONResponse:
 app.include_router(accounts.router)
 app.include_router(actions.router)
 app.include_router(agent.router)
-app.include_router(chatgpt.router)  # AG-6: also /callback, OpenAI's loopback redirect (D-53)
+# ABI-PI: no ChatGPT link flow (models come from Settings): chatgpt.router is not mounted
+# app.include_router(chatgpt.router)  # AG-6: also /callback, OpenAI's loopback redirect (D-53)
 app.include_router(inbound.router)
 app.include_router(mail.router)
 app.include_router(totp.router)

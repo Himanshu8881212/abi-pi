@@ -110,7 +110,6 @@
       "tools": [
         "agent_runs",
         "chat_history",
-        "chatgpt_account",
         "delete_agent",
         "delete_chat",
         "forget",
@@ -122,9 +121,7 @@
         "run_agent",
         "save_agent",
         "save_chat",
-        "set_chatgpt_model",
-        "test_agent",
-        "unlink_chatgpt"
+        "test_agent"
       ]
     },
     "flows": {

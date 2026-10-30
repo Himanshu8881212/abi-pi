@@ -271,7 +271,7 @@ def _rest() -> None:
         raise ActionFailed(403, "Your ChatGPT link is managed by you at the REST API only.")
 
 
-@action(Role.viewer)
+# ABI-PI: no ChatGPT sign-in; models come from Settings (a proxy or an API provider)
 def chatgpt_account(conn, user: User, args: NoInput) -> dict:
     """Your ChatGPT link (AG-6): whether this app can link one, the linked email, the model your own runs use and the
     plan's models. `relink`: sign in again (the tokens were refused)."""
@@ -293,7 +293,7 @@ def chatgpt_account(conn, user: User, args: NoInput) -> dict:
     return out
 
 
-@action(Role.viewer)
+# ABI-PI: no ChatGPT sign-in; models come from Settings (a proxy or an API provider)
 def set_chatgpt_model(conn, user: User, args: Model) -> dict:
     """Picks the ChatGPT plan model your own runs try first (Main Agent, your custom agent runs; never flows), or null
     to stop using ChatGPT; `backup`: the plan model tried next when it fails or answers empty; `effort`: its reasoning
@@ -317,7 +317,7 @@ def set_chatgpt_model(conn, user: User, args: Model) -> dict:
     return {}
 
 
-@action(Role.viewer)
+# ABI-PI: no ChatGPT sign-in; models come from Settings (a proxy or an API provider)
 def unlink_chatgpt(conn, user: User, args: NoInput) -> dict:
     """Disconnects your ChatGPT account: revokes its tokens at OpenAI and deletes them here (after a confirmation;
     nothing linked: nothing to do)."""
