@@ -113,7 +113,7 @@ pre{margin:12px 0 0}.pg .grid{gap:16px}.pg>section>h2{display:none}
 #chat{position:fixed;top:56px;right:0;bottom:0;margin:0;width:440px;max-width:100vw;background:var(--sheet);border-left:1px solid var(--line);display:flex;flex-direction:column;
  transform:translateX(100%);transition:transform .2s cubic-bezier(.2,.8,.2,1);z-index:7;padding-bottom:env(safe-area-inset-bottom,0px)}
 #chat.open{transform:none}body.chat-open main{padding-right:480px}
-#chat.full{position:static;width:auto;max-width:none;height:calc(100vh - 220px);min-height:420px;transform:none;border:1px solid var(--line);border-radius:var(--r)}
+main:has(#chat.full){padding-bottom:32px}#chat.full{position:static;width:auto;max-width:none;height:calc(100dvh - 120px);min-height:420px;transform:none;border:1px solid var(--line);border-radius:var(--r)}
 #chat.full .log,#chat.full .compose,#chat.full .ctx,#chat.full .busy{width:100%;max-width:820px;margin:0 auto}#chat.full .m{font-size:15px}#chat.full .x{display:none}
 #chat .ctx{padding:8px 20px 0;font-size:12px;color:var(--mute)}#chat .busy{display:flex;align-items:center;gap:10px}#chat .busy[hidden]{display:none!important}
 #chat .hello{display:flex;flex-direction:column;gap:8px}#chat .hello p{margin:0 0 4px;color:var(--mute);font-size:14px}#chat .m.nav{align-self:flex-start;border:0;padding:0;font-size:12px;color:var(--mute);cursor:pointer;text-decoration:underline;text-decoration-color:var(--signal)}
