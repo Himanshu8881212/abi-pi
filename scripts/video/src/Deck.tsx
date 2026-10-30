@@ -2,7 +2,7 @@ import React from "react";
 import { AbsoluteFill, Easing, interpolate, Sequence, useCurrentFrame, useVideoConfig } from "remotion";
 
 // A silent explainer: a title card, one slide per report view (its numbers as ABI returned them, animated in) with
-// a caption that says what to see, and an end card. The look is the app's ledger: paper, ink, hard rules, no radius.
+// a caption that says what to see, and an end card. The look is the app's Swiss signal: hairlines, one signal colour.
 export type Theme = { paper: string; sheet: string; ink: string; mute: string; faint: string; accent: string };
 export type Series = { name: string; values: (number | null)[] };
 export type Slide = {
@@ -13,7 +13,7 @@ export type Slide = {
 };
 export type DeckProps = { title: string; subtitle: string; footer: string; theme: Theme; seconds: number; width: number; height: number; slides: Slide[] };
 
-const FONT = '"Courier Prime", "IBM Plex Mono", "Courier New", monospace';
+const FONT = '"Inter Tight", "Inter", "Helvetica Neue", Arial, sans-serif';
 const compact = (v: number | null) => v === null ? "—" : Math.abs(v) >= 1e9 ? (v / 1e9).toFixed(1) + "bn" : Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(1) + "m"
   : Math.abs(v) >= 1e3 ? (v / 1e3).toFixed(1) + "k" : Number.isInteger(v) ? String(v) : v.toFixed(2);
 const ease = (f: number, a: number, b: number) => interpolate(f, [a, b], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: Easing.out(Easing.cubic) });
@@ -22,11 +22,11 @@ const Card: React.FC<{ t: Theme; children: React.ReactNode; title: string; capti
   const f = useCurrentFrame();
   return (
     <AbsoluteFill style={{ background: t.paper, color: t.ink, fontFamily: FONT, padding: "64px 96px", display: "flex", flexDirection: "column", gap: 28 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 24, borderBottom: `3px solid ${t.ink}`, paddingBottom: 18, opacity: ease(f, 0, 12) }}>
-        {n && <span style={{ background: t.ink, color: t.paper, padding: "4px 14px", fontSize: 30, fontWeight: 700 }}>{n}</span>}
-        <span style={{ fontSize: 54, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>{title}</span>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 24, borderBottom: `2px solid ${t.faint}`, paddingBottom: 18, opacity: ease(f, 0, 12) }}>
+        {n && <span style={{ background: t.accent, color: "#fff", padding: "4px 14px", fontSize: 30, fontWeight: 600, borderRadius: 6 }}>{n}</span>}
+        <span style={{ fontSize: 56, fontWeight: 600, letterSpacing: -1 }}>{title}</span>
       </div>
-      <div style={{ flex: 1, minHeight: 0, overflow: "hidden", background: t.sheet, border: `3px solid ${t.ink}`, padding: 36, display: "flex" }}>{children}</div>
+      <div style={{ flex: 1, minHeight: 0, overflow: "hidden", background: t.sheet, border: `2px solid ${t.faint}`, borderRadius: 12, padding: 36, display: "flex" }}>{children}</div>
       {caption && <div style={{ fontSize: 36, lineHeight: 1.35, maxWidth: 1500, opacity: ease(f, 30, 50), transform: `translateY(${(1 - ease(f, 30, 50)) * 20}px)` }}>{caption}</div>}
     </AbsoluteFill>
   );
@@ -67,7 +67,7 @@ const Line: React.FC<{ s: Slide; t: Theme }> = ({ s, t }) => {
         <span key={j} style={{ display: "flex", alignItems: "center", gap: 10, color: cols[j % 3] }}>
           <span style={{ width: 36, height: 6, background: cols[j % 3] }} />{sr.name}</span>))}</div>
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", flex: 1, minHeight: 0 }} preserveAspectRatio="xMidYMid meet">
-        <line x1={60} x2={W - 160} y1={H - 60} y2={H - 60} stroke={t.ink} strokeWidth={3} />
+        <line x1={60} x2={W - 160} y1={H - 60} y2={H - 60} stroke={t.faint} strokeWidth={2} />
         {series.map((sr, j) => {
           const pts = sr.values.map((v, i) => (v === null ? null : [x(i), y(v), v])).filter(Boolean) as number[][];
           const d = pts.map((p, i) => `${i ? "L" : "M"}${p[0]},${p[1]}`).join(" "), len = pts.length * 260, last = pts[pts.length - 1];
@@ -84,14 +84,17 @@ const Line: React.FC<{ s: Slide; t: Theme }> = ({ s, t }) => {
 };
 
 const Kpis: React.FC<{ s: Slide; t: Theme }> = ({ s, t }) => {
-  const f = useCurrentFrame();
+  const f = useCurrentFrame(), { width } = useVideoConfig(), n = (s.kpis || []).length, cols = Math.min(4, n);
+  // the longest figure fits its column: the slide's padding (96 + 36 each side) and the gaps come off the width
+  const col = (width - 2 * (96 + 36) - 28 * (cols - 1)) / cols - 24, chars = Math.max(4, ...(s.kpis || []).map((k) => String(k.text).length));
+  const size = Math.min(n > 3 ? 64 : 88, Math.floor(col / (chars * 0.6)));
   return (
-    <div style={{ flex: 1, display: "grid", gridTemplateColumns: `repeat(${Math.min(4, (s.kpis || []).length)}, minmax(0, 1fr))`, gap: 28, alignContent: "center" }}>
+    <div style={{ flex: 1, display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: 28, alignContent: "center" }}>
       {(s.kpis || []).map((k, i) => {
         const g = ease(f, 6 + i * 6, 40 + i * 6);
-        return <div key={i} style={{ border: `3px solid ${t.ink}`, padding: 28, opacity: g, minWidth: 0 }}>
-          <div style={{ fontSize: (s.kpis || []).length > 3 ? 64 : 88, fontWeight: 700, whiteSpace: "nowrap" }}>{g < 1 && k.value !== null ? compact(k.value * g) : k.text}</div>
-          <div style={{ fontSize: 28, color: t.mute, textTransform: "uppercase", letterSpacing: 2, marginTop: 12 }}>{k.label}</div>
+        return <div key={i} style={{ borderLeft: `4px solid ${t.accent}`, padding: "8px 0 8px 20px", opacity: g, minWidth: 0 }}>
+          <div style={{ fontSize: size, fontWeight: 600, letterSpacing: -2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g < 1 && k.value !== null ? compact(k.value * g) : k.text}</div>
+          <div style={{ fontSize: Math.max(18, size * 0.36), color: t.mute, marginTop: 12 }}>{k.label}</div>
         </div>;
       })}
     </div>
@@ -102,7 +105,7 @@ const Table: React.FC<{ s: Slide; t: Theme }> = ({ s, t }) => {
   const f = useCurrentFrame(), rows = (s.rows || []).slice(0, 10);
   return (
     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 28, alignSelf: "flex-start" }}>
-      <thead><tr>{(s.columns || []).map((c, i) => <th key={i} style={{ textAlign: i ? "right" : "left", borderBottom: `3px solid ${t.ink}`, padding: "10px 14px", textTransform: "uppercase", fontSize: 22 }}>{c}</th>)}</tr></thead>
+      <thead><tr>{(s.columns || []).map((c, i) => <th key={i} style={{ textAlign: i ? "right" : "left", borderBottom: `2px solid ${t.faint}`, padding: "10px 14px", fontSize: 22, color: t.mute, fontWeight: 500 }}>{c}</th>)}</tr></thead>
       <tbody>{rows.map((r, i) => (
         <tr key={i} style={{ opacity: ease(f, 8 + i * 4, 24 + i * 4) }}>{r.map((v, j) => (
           <td key={j} style={{ textAlign: j >= (s.dims ?? 1) ? "right" : "left", borderBottom: `1px solid ${t.faint}`, padding: "10px 14px" }}>{typeof v === "number" && j >= (s.dims ?? 1) ? compact(v) : v ?? "—"}</td>))}</tr>))}
@@ -116,9 +119,9 @@ export const Deck: React.FC<DeckProps> = (p) => {
   const Title: React.FC = () => {
     const f = useCurrentFrame();
     return <AbsoluteFill style={{ background: t.ink, color: t.paper, fontFamily: FONT, justifyContent: "center", padding: 120 }}>
-      <div style={{ fontSize: 110, fontWeight: 700, textTransform: "uppercase", opacity: ease(f, 0, 20) }}>{p.title}</div>
+      <div style={{ fontSize: 110, fontWeight: 600, letterSpacing: -3, opacity: ease(f, 0, 20) }}>{p.title}</div>
       <div style={{ fontSize: 44, marginTop: 24, opacity: ease(f, 15, 35) }}>{p.subtitle}</div>
-      <div style={{ width: `${ease(f, 20, 60) * 60}%`, height: 6, background: t.paper, marginTop: 48 }} />
+      <div style={{ width: `${ease(f, 20, 60) * 60}%`, height: 6, background: t.accent, marginTop: 48 }} />
     </AbsoluteFill>;
   };
   return (

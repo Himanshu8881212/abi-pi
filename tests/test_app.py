@@ -222,6 +222,9 @@ def test_modes_are_per_browser_and_a_phone_stays_viewer(srv):
     assert p("/api/set_measure", {"project": P, "id": "m_probe", "name": "M", "expression": "SUM(orders.amount)"}, "phone1", "1")[0] == 403
     p("/mode", {"mode": "developer"}, "laptop1")
     assert app.HUBS["laptop1"].mode == "developer" and app.HUBS["phone1"].mode == "viewer"
+    p("/mode", {"mode": "viewer"}, "laptop1", "1")  # a window made narrow, then wide again: the phone layout ends with it
+    p("/mode", {"mode": "viewer"}, "laptop1", "0")
+    assert app.HUBS["laptop1"].mobile is False
 
 
 def _account(name):

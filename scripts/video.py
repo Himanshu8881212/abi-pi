@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """A silent explainer video of a report: one slide per view, its numbers from ABI (visual_data, as the person), a
-caption per slide, the app's theme (paper or ink), rendered by Remotion (scripts/video/) to an MP4.
+caption per slide, the app's theme (light or dark), rendered by Remotion (scripts/video/) to an MP4.
 
     video.py <project> <report> [--pages p1,p2] [--views v1,v2] [--theme paper|ink] [--seconds 6] [--size 1920x1080]
              [--captions captions.json] [--out file.mp4]
@@ -21,8 +21,8 @@ from pathlib import Path
 import abi
 
 HERE = Path(__file__).resolve().parent
-THEMES = {"paper": {"paper": "#ebe4d4", "sheet": "#f4efe4", "ink": "#141311", "mute": "#5f584c", "faint": "#cdc4b1", "accent": "#a3321f"},
-          "ink": {"paper": "#131210", "sheet": "#1b1a17", "ink": "#e8e0cf", "mute": "#a1988a", "faint": "#3a3631", "accent": "#e07a63"}}
+THEMES = {"paper": {"paper": "#f7f7f5", "sheet": "#ffffff", "ink": "#0b0b0b", "mute": "#62625e", "faint": "#e4e4e1", "accent": "#ff4f1f"},
+          "ink": {"paper": "#0b0b0b", "sheet": "#141414", "ink": "#f2f2ef", "mute": "#9b9b96", "faint": "#2a2a28", "accent": "#ff6a3d"}}
 NUM = re.compile(r"-?\d[\d,]*(?:\.\d+)?\s*(?:bn|m|k|%)?", re.I)
 YEAR = re.compile(r"^(19|20)\d\d$")  # a year is a label, not a figure
 

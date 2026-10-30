@@ -19,44 +19,46 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 CSS = """
-/* typewritten ledger: beige paper, black ink, hard 2px rules, no radius, no shadow; black blocks mark what is active */
-:root{--paper:#ebe4d4;--sheet:#f4efe4;--ink:#141311;--mute:#5f584c;--faint:#cdc4b1;--red:#a3321f;--ok:#2f5a3a;
- --c2:#8a7650;--c3:#4f6355;--c4:#b8a27a;--display:"Courier Prime","American Typewriter","Courier New",monospace;
- --text:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
- --bg:var(--paper);--card:var(--sheet);--line:var(--faint);--acc:var(--ink);--acc2:var(--c2);--bad:var(--red);color-scheme:light}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--paper:#131210;--sheet:#1b1a17;--ink:#e8e0cf;--mute:#a1988a;
- --faint:#3a3631;--red:#e07a63;--ok:#93bf96;--c2:#c2aa7d;--c3:#8fa596;--c4:#6f6450;color-scheme:dark}}
-:root[data-theme="dark"]{--paper:#131210;--sheet:#1b1a17;--ink:#e8e0cf;--mute:#a1988a;--faint:#3a3631;--red:#e07a63;--ok:#93bf96;
- --c2:#c2aa7d;--c3:#8fa596;--c4:#6f6450;color-scheme:dark}
+/* Swiss signal: white (or near-black) ground, hairline rules, an 8-pt grid, Inter Tight for words and IBM Plex Mono for
+   code and figures, one red-orange signal colour for what is live or active; radius 4, no shadows */
+:root{--paper:#f7f7f5;--sheet:#ffffff;--ink:#0b0b0b;--mute:#62625e;--faint:#e4e4e1;--line:#e4e4e1;--hover:#f1f1ee;
+ --signal:#ff4f1f;--signal-ink:#c2380f;--red:#c8311a;--ok:#1d7a45;--c2:#ff4f1f;--c3:#7a7a75;--c4:#c4c4bf;
+ --display:"Inter Tight","Inter",system-ui,-apple-system,"Segoe UI",sans-serif;--text:var(--display);
+ --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;--r:4px;
+ --bg:var(--paper);--card:var(--sheet);--acc:var(--ink);--acc2:var(--c2);--bad:var(--red);color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--paper:#0b0b0b;--sheet:#141414;--ink:#f2f2ef;--mute:#9b9b96;
+ --faint:#2a2a28;--line:#2a2a28;--hover:#1c1c1b;--signal:#ff6a3d;--signal-ink:#ff8a63;--red:#ff6b55;--ok:#4cc27f;--c2:#ff6a3d;--c3:#8f8f8a;--c4:#4d4d4a;color-scheme:dark}}
+:root[data-theme="dark"]{--paper:#0b0b0b;--sheet:#141414;--ink:#f2f2ef;--mute:#9b9b96;--faint:#2a2a28;--line:#2a2a28;--hover:#1c1c1b;
+ --signal:#ff6a3d;--signal-ink:#ff8a63;--red:#ff6b55;--ok:#4cc27f;--c2:#ff6a3d;--c3:#8f8f8a;--c4:#4d4d4a;color-scheme:dark}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
-body{margin:0;font:13px/1.6 var(--text);background:var(--paper);color:var(--ink)}
-header{display:flex;gap:18px;align-items:center;flex-wrap:wrap;padding-block:14px;padding-left:max(24px,env(safe-area-inset-left,0px));
- padding-right:max(24px,env(safe-area-inset-right,0px));border-bottom:2px solid var(--ink);background:var(--paper)}
-header h1{font:700 22px/1.1 var(--display);margin:0;text-transform:uppercase;letter-spacing:.02em}
-header .sub{color:var(--mute);font-size:12px}
-main{padding:28px max(24px,env(safe-area-inset-right,0px)) 64px max(24px,env(safe-area-inset-left,0px));max-width:1440px;margin:0 auto}
-h2,h3,h4{font-family:var(--display);text-wrap:balance}
-nav.tabs{display:flex;gap:0;flex-wrap:wrap;margin:0 0 20px;border:2px solid var(--ink);width:max-content;max-width:100%}
-nav.tabs button{border:0;border-right:2px solid var(--ink);background:none;color:var(--ink);padding:7px 14px;cursor:pointer;font:600 12px var(--text);text-transform:uppercase;letter-spacing:.06em}
-nav.tabs button:last-child{border-right:0}nav.tabs button.on{background:var(--ink);color:var(--paper)}
+body{margin:0;font:14px/1.5 var(--text);background:var(--paper);color:var(--ink);-webkit-font-smoothing:antialiased;font-feature-settings:"ss01","cv11"}
+header{display:flex;gap:16px;align-items:center;flex-wrap:wrap;padding-block:12px;padding-left:max(24px,env(safe-area-inset-left,0px));
+ padding-right:max(24px,env(safe-area-inset-right,0px));border-bottom:1px solid var(--line);background:var(--sheet)}
+header h1{font:600 18px/1.2 var(--display);margin:0;letter-spacing:-.01em}
+header .sub{color:var(--mute);font-size:13px}
+main{padding:32px max(24px,env(safe-area-inset-right,0px)) 64px max(24px,env(safe-area-inset-left,0px));max-width:1440px;margin:0 auto}
+h2,h3,h4{font-family:var(--display);text-wrap:balance;letter-spacing:-.01em}
+nav.tabs{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 24px;border-bottom:1px solid var(--line);width:100%;max-width:100%}
+nav.tabs button{border:0;border-bottom:2px solid transparent;background:none;color:var(--mute);padding:8px 12px;margin-bottom:-1px;cursor:pointer;font:500 13px var(--text)}
+nav.tabs button:hover{color:var(--ink)}nav.tabs button.on{color:var(--ink);border-bottom-color:var(--signal)}
 .grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:16px}
-.card{background:var(--sheet);border:2px solid var(--ink);padding:16px 18px 18px;min-width:0}
-.card h3{margin:0 0 12px;padding-bottom:10px;border-bottom:1px solid var(--faint);font:700 15px/1.25 var(--display);display:flex;justify-content:space-between;align-items:baseline;gap:10px}
-.card h3 .tools{display:flex;gap:0;flex-shrink:0}.card h3 .tools button{font:500 10px var(--text);text-transform:uppercase;letter-spacing:.08em;border:1px solid var(--ink);margin-left:-1px;background:none;color:var(--ink);padding:3px 7px;cursor:pointer}
-.card h3 .tools button:hover{background:var(--ink);color:var(--paper)}
-.kpi .v{font:700 40px/1 var(--display);letter-spacing:-.01em;font-variant-numeric:tabular-nums;margin:6px 0 4px}.kpi .l{color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.08em}
-table{border-collapse:collapse;width:100%;font-size:12px}th,td{padding:7px 10px;border-bottom:1px solid var(--faint);text-align:left;vertical-align:top}
-th{cursor:pointer;user-select:none;color:var(--mute);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.08em;border-bottom:2px solid var(--ink)}
-td.n{text-align:right;font-variant-numeric:tabular-nums}tr:hover td{background:color-mix(in srgb,var(--ink) 5%,transparent)}
-.scroll{max-height:380px;overflow:auto}svg text{fill:var(--mute);font:11px var(--text)}
-.tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--paper);padding:5px 9px;font-size:12px;display:none;z-index:9}
-code,pre{font:12px/1.5 var(--text)}pre{background:var(--paper);border:1px solid var(--faint);padding:10px 12px;overflow:auto;max-height:320px}
-.file{color:var(--mute);font-size:11px;margin-top:10px;letter-spacing:.02em}
-.chip{display:inline-block;padding:2px 8px;border:1px solid var(--ink);margin:2px 4px 2px 0;font-size:11px;background:none}
-section{margin-bottom:36px}section>h2{font:700 18px var(--display);text-transform:uppercase;margin:0 0 12px;letter-spacing:.03em}
-input.search{padding:8px 10px;border:2px solid var(--ink);background:var(--sheet);color:var(--ink);font:inherit;width:280px;max-width:100%}
-a{color:var(--ink);text-underline-offset:3px}.empty{color:var(--mute);font-style:italic}.steps li{margin:2px 0}.ok{color:var(--ok)}.bad{color:var(--red)}
-:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.card{background:var(--sheet);border:1px solid var(--line);border-radius:var(--r);padding:20px 24px 24px;min-width:0}
+.card h3{margin:0 0 16px;font:600 15px/1.3 var(--display);display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.card h3 .tools{display:flex;gap:4px;flex-shrink:0}.card h3 .tools button{font:500 12px var(--text);border:1px solid transparent;border-radius:var(--r);background:none;color:var(--mute);padding:2px 8px;cursor:pointer}
+.card h3 .tools button:hover{border-color:var(--line);color:var(--ink)}
+.kpi .v{font:600 40px/1 var(--display);letter-spacing:-.03em;font-variant-numeric:tabular-nums;margin:4px 0 8px}.kpi .l{color:var(--mute);font-size:13px}
+table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:8px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{cursor:pointer;user-select:none;color:var(--mute);font-weight:500;font-size:12px;white-space:nowrap}
+td.n{text-align:right;font:13px var(--mono);font-variant-numeric:tabular-nums}tr:hover td{background:var(--hover)}
+.scroll{max-height:400px;overflow:auto}svg text{fill:var(--mute);font:11px var(--text)}
+.tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--sheet);padding:6px 10px;border-radius:var(--r);font-size:12px;display:none;z-index:9}
+code,pre{font:12.5px/1.6 var(--mono)}pre{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);padding:12px 16px;overflow:auto;max-height:320px}
+.file{color:var(--mute);font:12px var(--mono);margin-top:8px}
+.chip{display:inline-block;padding:2px 8px;border:1px solid var(--line);border-radius:999px;margin:2px 4px 2px 0;font-size:12px;background:none}
+section{margin-bottom:40px}section>h2{font:600 18px var(--display);margin:0 0 16px}
+input.search{padding:8px 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--sheet);color:var(--ink);font:inherit;width:280px;max-width:100%}
+a{color:var(--ink);text-underline-offset:3px;text-decoration-color:var(--signal)}.empty{color:var(--mute)}.steps li{margin:2px 0}.ok{color:var(--ok)}.bad{color:var(--red)}
+:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 """
 
@@ -117,7 +119,7 @@ def j(path: Path, default=None):
 
 def shell(title: str, sub: str, body: str, script: str = "") -> str:
     return (f"<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-            f"<title>{esc(title)}</title><link rel=stylesheet href='https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap'><style>{CSS}</style></head><body><div class=tip></div><header><h1>{esc(title)}</h1>"
+            f"<title>{esc(title)}</title><link rel=stylesheet href='https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap'><style>{CSS}</style></head><body><div class=tip></div><header><h1>{esc(title)}</h1>"
             f"<span class=sub>{sub}</span></header><main>{body}</main>{script}</body></html>")
 
 
