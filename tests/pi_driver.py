@@ -1,5 +1,5 @@
 """Drive the harness like a person at the terminal: `pi --mode rpc` in this folder, one prompt, confirmations answered
-by `confirm` (and recorded), until the agent settles. Used by the live tests and scripts/bench.py."""
+by `confirm` (and recorded), until the agent settles. Used by the live tests."""
 import json
 import os
 import subprocess

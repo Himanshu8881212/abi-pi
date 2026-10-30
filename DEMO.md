@@ -11,10 +11,10 @@ bin/abi                                     # Pi starts on cliproxy/gpt-6.1-sol;
 If ABI at :8770 is down, `health` says so; ABI is started outside the harness. The footer status line shows the current
 project, how many ABI tools are active and the grounding state. `/abi` prints the health check.
 
-**The app: one file per project.** `workspaces/<workspace>/<project>/app.html` has everything behind a sidebar:
+**The app.** One page per project with everything behind a sidebar:
 Overview (readiness, data quality, latest changes) · Analyze (every report, Datasets) · Model (Measures, Model,
 Glossary) · Data (Sources, Tables) · Automate (Flows, ML models, Tools, Agents) · Govern (Docs, Security, Environments,
-History). Every `abi_sync` rewrites it.
+History).
 
 ```sh
 .venv/bin/python scripts/app.py <project>       # http://127.0.0.1:8790/ live, as you
@@ -24,8 +24,6 @@ Live, you filter reports (or click a bar to cross-filter), edit/test/add measure
 watch its trace, train or score an ML model, run a tool, ask a custom agent, reload a source. Each click is an ABI
 action as you, so ABI checks it and asks for a confirmation where it would in its own app (the dialog shows ABI's
 message and preview; the confirm token never leaves the local server). Roles, users and secrets stay in ABI's app.
-Opened straight from Finder, the same file is a read-only snapshot. The older pages are still in
-`workspaces/<workspace>/_views/<project>/` (`index.html`, `reports/<id>.html`).
 
 ## 0. The one-liner: a folder of files to a report
 
@@ -49,7 +47,7 @@ mkdir -p scratch/live && cp ~/Work/Working/ABI-demo/youtube_trending_real/JPvide
 
 Expect: `abi_load` (upload, `day` from `trending_date`, calendar, starter measures, Overview), `readiness` Ready, one
 `semantic_query`, the five categories with figures. Show `workspaces/demo/jp_live/` (ABI's layout, every file a commit)
-and `workspaces/demo/_views/jp_live/index.html`. The automated check computes the same top 5 with DuckDB over the CSV
+and the project in the app. The automated check computes the same top 5 with DuckDB over the CSV
 (`tests/test_scenarios.py::test_scenario1_load_model_top5`).
 
 ## 2. Questions and a report on `yt`
@@ -105,7 +103,7 @@ ABI's message for enabling it / the first send to a new address. Say **No**: the
 
 ## Edit by hand
 
-Edit any JSON in a project folder (each card in `index.html` names its file), then:
+Edit any JSON in a project folder (each card in the app names its file), then:
 
 ```sh
 .venv/bin/python scripts/abi.py cli diff jp_live     # ABI's import checks, dry run

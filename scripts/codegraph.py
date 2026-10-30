@@ -16,7 +16,7 @@ SKIP = re.compile(r"^(engine/|bench/|workspaces/|codegraph/)|lock\.json$|^uv\.lo
 GROUPS = [("scripts/", "App and scripts", 0xFF4F1F), (".pi/extensions/", "Agent harness (Pi extensions)", 0x2F6FEB),
           (".pi/agents/", "Specialists", 0x8250DF), (".pi/skills/", "Skills (playbooks)", 0x1A7F37),
           (".pi/", "Agent instructions", 0x0969DA), ("harness/", "Team and tool areas", 0x9A6700),
-          ("tests/", "Tests", 0x6E7781), ("docker", "Container", 0x0550AE), ("converters/", "Converters", 0xBC4C00),
+          ("tests/", "Tests", 0x6E7781), ("docker", "Container", 0x0550AE),
           ("", "Docs and config", 0x57606A)]
 
 
@@ -29,8 +29,6 @@ def domain(rel: str) -> str:
     """The Code Graph skill's area vocabulary (3-7 areas, from the folders)."""
     if rel.startswith("tests/"):
         return "tests"
-    if rel.startswith("converters/"):
-        return "converters"
     if rel.startswith((".pi/", "harness/")) or rel in ("scripts/team.py", "scripts/gen_agents.py", "scripts/gen_areas.py"):
         return "agent"
     if rel.startswith("docker") or rel in ("Dockerfile", "bin/abi", "scripts/engine.sh", "scripts/backup.sh"):

@@ -118,7 +118,7 @@ def test_hand_edit_of_a_tracked_file_syncs(project):
 
 def test_every_tab_renders(project):
     abi.sync(P)
-    h = (abi.folder(P).parent / "_views" / P / "index.html").read_text()
-    empty = [k for k in TABS if not (m := re.search(rf"<section id='{k}'><h2>[^<]+</h2>(.*?)</section>", h, re.S))
-             or "None yet" in m.group(1) or " None " in m.group(1)]
+    import render
+    secs = render.sections(abi.folder(P))  # what the app's pages show from the folder
+    empty = [k for k in TABS if k not in secs or "None yet" in secs[k] or " None " in secs[k]]
     assert empty == [], f"empty tabs: {empty}"

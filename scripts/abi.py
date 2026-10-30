@@ -7,7 +7,7 @@ project repository (read-only).
   abi.py workspace <ws>                          new workspace: an empty folder
   abi.py project <ws> <project> [name]           create_project + auto-commit + clone + full empty skeleton
   abi.py load <ws> <project> <folder|file>...    upload every data file, build the model, starter measures + report
-  abi.py sync <project>                          git pull ABI's commits, re-render the HTML views and <project>/app.html
+  abi.py sync <project>                          git pull ABI's commits into the project folder
   abi.py pack make|list <project> ...            a board pack (scripts/pack.py)
   abi.py call <action> '<json>'                  one action (a 409 is printed as needs-confirmation, never confirmed)
   abi.py cli validate|diff|apply|watch <project> ABI's own CLI on the folder (bundle without .gitkeep)
@@ -241,11 +241,7 @@ def _sync(project: str, dest: Path) -> dict:
                 (dest / rel).unlink()
     git(dest, "pull", "-q", "--rebase")
     skeleton(dest)
-    from render import render  # noqa: PLC0415 (sibling script)
-    views = render(dest, project)
-    from app import build  # noqa: PLC0415 (sibling script: the one-file app in the project folder)
-    views.insert(0, str(build(project)))
-    return {"project": project, "folder": str(dest), "head": git(dest, "log", "-1", "--format=%h %s").strip(), "views": views,
+    return {"project": project, "folder": str(dest), "head": git(dest, "log", "-1", "--format=%h %s").strip(),
             **({} if os.environ.get("ABI_APP_URL") else {"live": f"python scripts/app.py {project}"})}  # in the app: it is open
 
 

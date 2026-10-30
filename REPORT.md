@@ -329,3 +329,7 @@ Open findings:
 - **No ChatGPT:** models come only from Settings (the proxy or an API provider). The engine's ChatGPT account link
   (its sign-in route and the actions chatgpt_account, set_chatgpt_model, unlink_chatgpt) is taken out, the agent no
   longer has those tools, and "no model" messages point to Govern › Settings.
+- **Cut (ponytail audit):** the static HTML views (`_views/…/index.html`, `reports/*.html`) and the offline `app.html`
+  snapshot every sync rewrote (and recomputed), with the snapshot-only branches of the page script and the `/views`
+  prompt; the yt_cms converters and `build_cms.py` of the old ABI preview; the raw benchmark runs (their results stay in
+  bench/RESULTS.md). Local only: `scratch/` and `converters/.venv` (about 3 GB) moved to the Trash.

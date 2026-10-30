@@ -1,20 +1,9 @@
 #!/usr/bin/env python3
-"""HTML views of a project folder, written next to it in <workspace>/_views/<project>/ (never inside the project
-folder: ABI's import refuses unknown files there).
-
-  index.html          project explorer: sources, tables and steps, model diagram, measures (MEL), glossary, reports,
-                      ML, flows, agents, tools, security, history; each card names the JSON file to edit
-  reports/<id>.html   interactive report: pages, KPIs and charts (hover, sort, table/chart toggle, CSV download)
-
-Definitions come from the folder; every number comes from ABI's `visual_data` rows (principle 7). Self-contained
-files, no CDN, open them straight from disk.
-
-    python scripts/render.py <project folder>
-"""
+"""The app's shared drawing pieces: the page shell and CSS, charts and tables (JS), report pages with their numbers
+from ABI's `visual_data` rows (principle 7), the project sections (sources, steps, model, history) and the docs page."""
 import html
 import json
 import subprocess
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -96,15 +85,6 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
   b.onmousemove=e=>{b.setAttribute('opacity',.7);showTip(e,`${r[0]} · ${d.measures[m]||m}: ${fmt(v,{...d.format[m],compact:false})}`)};b.onmouseleave=()=>{b.setAttribute('opacity',1);hideTip()}}))}
 function csv(d){const q=v=>v===null?'':/[",\n]/.test(String(v))?'"'+String(v).replace(/"/g,'""')+'"':String(v);
  const blob=new Blob([[d.columns.join(','),...d.rows.map(r=>r.map(q).join(','))].join('\n')],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=d.id+'.csv';a.click()}
-function render(R){const tabs=document.querySelector('nav.tabs'),grid=document.querySelector('.grid');
- function page(p){grid.innerHTML='';[...tabs.children].forEach(b=>b.classList.toggle('on',b.dataset.id===p.id));
-  p.visuals.slice().sort((a,b)=>(a.layout.y-b.layout.y)||(a.layout.x-b.layout.x)).forEach(v=>{const c=document.createElement('div');c.className='card';c.style.gridColumn=`span ${Math.min(12,v.layout.w||6)}`;
-   c.innerHTML=`<h3><span>${E(v.title||v.id)}</span><span class="tools"><button data-a="t">table</button><button data-a="c">csv</button><button data-a="h">how</button></span></h3><div class="body"></div><pre class="how" hidden></pre>`;grid.appendChild(c);
-   const body=c.querySelector('.body');if(v.text!==undefined){c.querySelector('.tools').remove();body.textContent=v.text;body.style.whiteSpace='pre-wrap';return}if(v.error){body.innerHTML=`<div class="bad">${E(v.error)}</div>`;return}
-   let asTable=false;const draw=()=>{body.innerHTML='';asTable?table(body,v.data):chart(body,v.data)};requestAnimationFrame(draw);
-   c.querySelector('[data-a=t]').onclick=()=>{asTable=!asTable;draw()};c.querySelector('[data-a=c]').onclick=()=>csv(v.data);
-   c.querySelector('[data-a=h]').onclick=()=>{const h=c.querySelector('.how');h.hidden=!h.hidden;h.textContent=v.how}})}
- R.pages.forEach(p=>{const b=document.createElement('button');b.textContent=p.name||p.id;b.dataset.id=p.id;b.onclick=()=>page(p);tabs.appendChild(b)});page(R.pages[0])}
 """
 
 
@@ -149,13 +129,6 @@ def report_pages(project: str, rid: str, rep: dict, measures: dict) -> list[dict
             vs.append(item)
         pages.append({"id": p["id"], "name": p.get("name"), "visuals": vs})
     return pages
-
-
-def report_html(dest: Path, project: str, rid: str, rep: dict, measures: dict) -> str:
-    data = json.dumps({"pages": report_pages(project, rid, rep, measures)}, default=str).replace("</", "<\\/")
-    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    return shell(rep.get("name", rid), f"{esc(project)} · numbers from ABI's visual_data, {stamp} · <a href='../index.html'>project</a>",
-                 "<nav class=tabs></nav><div class=grid></div>", f"<script>{JS}\nrender({data})</script>")
 
 
 def diagram(model: dict, kinds: dict) -> str:
@@ -238,37 +211,6 @@ def sections(dest: Path) -> dict[str, str]:
             "<div class=file>loaded as is (no transform steps); steps go to tables/&lt;id&gt;.json through set_steps</div></div>"
     sec["Tables"] = sec["Tables"] or "<p class=empty>None yet.</p>"
     return sec
-
-
-def index_html(dest: Path, project: str, reports: list[str]) -> str:
-    pj = j(dest / "project.json", {})
-    meas = (j(dest / "model/measures.json", {}) or {}).get("measures", [])
-    sec = sections(dest)
-    nav = "<nav class=tabs>" + "".join(f"<button onclick=\"document.getElementById('{k}').scrollIntoView({{behavior:'smooth'}})\">{k}</button>" for k in sec) + "</nav>"
-    body = nav + "".join(f"<section id='{k}'><h2>{k}</h2>{v}</section>" for k, v in sec.items())
-    body += ("<section><h2>Edit</h2><div class=card>Every card names its JSON file in <code>" + esc(dest) + "</code>. Edit it, then send it through ABI's import"
-             f" checks: <code>scripts/abi.py cli diff {esc(project)}</code>, <code>… cli apply {esc(project)}</code>, or keep <code>… cli watch {esc(project)}</code>"
-             " running. Then <code>scripts/abi.py sync " + esc(project) + "</code> refreshes these pages.</div></section>")
-    tz = (pj.get("settings") or {}).get("time_zone", "UTC")
-    return shell(pj.get("name", project), f"{esc(project)} · time zone {esc(tz)} · {len(meas)} measures · {len(reports)} report(s)", body)
-
-
-def render(dest: Path, project: str) -> list[str]:
-    out = dest.parent / "_views" / project
-    (out / "reports").mkdir(parents=True, exist_ok=True)
-    measures = {m["id"]: m for m in (j(dest / "model/measures.json", {}) or {}).get("measures", [])}
-    written = []
-    for f in sorted((dest / "reports").glob("*.json")):
-        (out / "reports" / f"{f.stem}.html").write_text(report_html(dest, project, f.stem, j(f, {}), measures))
-        written.append(str(out / "reports" / f"{f.stem}.html"))
-    (out / "index.html").write_text(index_html(dest, project, written))
-    return [str(out / "index.html"), *written]
-
-
-if __name__ == "__main__":
-    sys.path.insert(0, str(Path(__file__).parent))
-    d = Path(sys.argv[1]).resolve()
-    print(json.dumps(render(d, d.name), indent=1))
 
 
 def docs_html(name: str, docs: dict) -> str:

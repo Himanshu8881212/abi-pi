@@ -131,7 +131,6 @@ main:has(#chat.full){padding-bottom:32px}#chat.full{position:static;width:auto;m
 #commit .files{display:flex;flex-direction:column;gap:8px;max-height:50vh;overflow:auto}#commit summary{cursor:pointer;font-weight:600}#commit .row{margin-top:16px}
 .brand{display:inline-flex;align-items:center;gap:8px;font:700 17px/1 var(--display);letter-spacing:-.02em;color:var(--ink)}.brand::before{content:"";width:10px;height:10px;background:var(--signal);border-radius:2px}
 .crumb{font:500 14px var(--text);display:flex;gap:8px;align-items:baseline}.crumb i{font-style:normal;color:var(--mute)}.crumb b{font-weight:600}
-.snap{font-size:11px;border:1px dashed var(--mute);border-radius:999px;color:var(--mute);padding:2px 8px}
 header .right{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 header .right .btn{padding:6px 12px}header #chat-toggle{background:var(--signal);border-color:var(--signal);color:#fff}header #chat-toggle:hover{background:var(--signal-ink);border-color:var(--signal-ink)}
 .modes{display:flex;padding:2px;background:var(--hover);border-radius:6px}.modes button{border:0;background:none;color:var(--mute);padding:5px 12px;font:500 13px var(--text);cursor:pointer;border-radius:4px}
@@ -233,7 +232,7 @@ select.f{max-width:100%;min-width:0}.card h3{flex-wrap:wrap}.file,.kv span{overf
 """
 
 JS = r"""
-const D=window.APP, KEY='__ABI_APP_KEY__', LIVE=location.protocol.startsWith('http')&&!KEY.startsWith('__');
+const D=window.APP, KEY='__ABI_APP_KEY__';
 const MOBILE=matchMedia('(max-width: 820px), (pointer: coarse) and (max-width: 1100px)').matches;
 let CID='';try{CID=localStorage.getItem('abi-client')||'';if(!CID){CID=Math.random().toString(36).slice(2,12);localStorage.setItem('abi-client',CID)}}catch(e){CID=Math.random().toString(36).slice(2,12)}
 {const f0=window.fetch.bind(window);window.fetch=(u,o={})=>{if(typeof u==='string'&&u.startsWith('/')){o.headers={...(o.headers||{}),'X-Abi-Client':CID,'X-Abi-Mobile':MOBILE?'1':'0','X-Abi-Project':D.project}}
@@ -244,7 +243,7 @@ if(MOBILE)document.documentElement.classList.add('mobile');
 const $=(s,r=document)=>r.querySelector(s), h=(t,c,x)=>{const e=document.createElement(t);if(c)e.className=c;if(x!==undefined)e.textContent=x;return e};
 const wait=ms=>new Promise(z=>setTimeout(z,ms));
 async function api(action,args){
- if(!LIVE)throw new Error('Snapshot: start `python scripts/app.py '+D.project+'` to work live.');
+ 
  const post=(u,b)=>fetch(u,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json());
  let r=await post('/api/'+action,{project:D.project,...args});
  if(r.confirm){if(!await ask(r.confirm))throw new Error('You declined. Nothing changed.');r=await post('/confirm/'+r.confirm.id)}
@@ -280,7 +279,7 @@ async function team(at,al){let T;try{T=(await fetch('/team',{method:'POST',heade
 // ---------- a person's own Home: pins from any page (pins.json, per person, in the app's Git) ----------
 let PINS=null;const pinKey=p=>JSON.stringify([p.kind,p.ref]);
 const pinPost=b=>fetch('/pins',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json());
-async function pinsLoad(){if(PINS)return PINS;if(!LIVE)return PINS=[];try{PINS=(await pinPost()).result||[]}catch(e){PINS=[]}return PINS}
+async function pinsLoad(){if(PINS)return PINS;try{PINS=(await pinPost()).result||[]}catch(e){PINS=[]}return PINS}
 function pinBtn(pin){const b=h('button','pin','Pin');b.title='Pin to Home';const set=()=>{const on=(PINS||[]).some(x=>pinKey(x)===pinKey(pin));b.textContent=on?'Pinned':'Pin';b.classList.toggle('on',on)};
  pinsLoad().then(set);b.onclick=async e=>{e.stopPropagation();await pinsLoad();const k=pinKey(pin),on=PINS.some(x=>pinKey(x)===k);PINS=on?PINS.filter(x=>pinKey(x)!==k):[...PINS,pin];set();
   try{await pinPost({pins:PINS});toast(on?'Unpinned from Home.':'Pinned to Home.')}catch(x){toast('Could not save the pin.')}};return b}
@@ -316,7 +315,7 @@ async function addPin(box){if(box.querySelector('.addpin')){box.querySelector('.
  const fill=()=>{it.innerHTML='';ch[grp.value][1].forEach((x,i)=>{const o=new Option((x.from?x.from+' · ':'')+x.title+(PINS.some(y=>pinKey(y)===pinKey(x))?'  (on Home)':''),i);it.append(o)})};grp.onchange=fill;fill();
  const row=h('div','row');row.append(grp,it);c.append(row);act(c,'Pin to Home',async()=>{const x=ch[grp.value][1][it.value];if(!x)return;if(PINS.some(y=>pinKey(y)===pinKey(x))){toast('Already on Home.');return}
   PINS=[...PINS,{kind:x.kind,ref:x.ref,title:x.title}];await pinPost({pins:PINS});show('home')},1);act(c,'Cancel',()=>c.remove());(box.querySelector('.pghead')||box).after(c)}
-async function pinsHome(box){const sec=h('div','cards pins');box.append(sec);if(LIVE){const bar=h('div','row bar top');bar.append(btn('+ Add widget',()=>addPin(box),1));box.prepend(bar)}const ps=await pinsLoad();
+async function pinsHome(box){const sec=h('div','cards pins');box.append(sec);{const bar=h('div','row bar top');bar.append(btn('+ Add widget',()=>addPin(box),1));box.prepend(bar)}const ps=await pinsLoad();
  if(!ps.length){const c=card('Your Home','pin what you check often');c.classList.add('wide');c.append(h('p','',"Press + Add widget, or Pin on a report chart, a saved analysis, a monitor, a table, a flow, an agent or a tool: it shows here, live. Open goes to its page."));sec.append(c);return}
  ps.forEach(p=>{const c=card(p.title||p.ref);c.classList.add('pinned');if(p.wide)c.classList.add('wide');sec.append(c);pinCard(p,c)})}
 function home(box){pinsHome(box);const rd=D.readiness||{},q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),rowsQ=q.rows||[];
@@ -324,7 +323,7 @@ function home(box){pinsHome(box);const rd=D.readiness||{},q=D.quality||{},ix=c=>
  const g=h('div','home');box.append(g);
  // what needs attention
  const at=card('Needs attention');const al=h('ul','list');[...(rd.missing||[]).map(x=>typeof x==='string'?x:JSON.stringify(x)),...problems].forEach(t=>al.append(h('li','bad',t)));
- if(MODE==='developer'&&LIVE)team(at,al);
+ if(MODE==='developer')team(at,al);
  if(!al.children.length)al.append(h('li','ok','Nothing: the model is ready and the data is fresh.'));at.append(al);
  // one summary line; the details open on demand (the team's steps arrive later, the line follows them)
  const sum=h('p'),tog=h('button','btn','Show details');al.hidden=true;al.before(sum);al.after(tog);
@@ -354,7 +353,7 @@ function report(box,rep){let flt=PENDING.filters||[];PENDING.filters=null;
   try{const r=await api('semantic_query',{measures:[D.measures[0]?.id],dimensions:[col.value],order_by:[{field:col.value}],limit:500});
    r.rows.forEach(x=>val.append(new Option(String(x[0]),JSON.stringify(x[0]))));val.size=Math.min(8,r.rows.length);val.hidden=add.hidden=false}catch(e){say(msg,e.message,1)}};
  add.onclick=()=>{const v=[...val.selectedOptions].map(o=>JSON.parse(o.value));if(v.length){flt=flt.filter(f=>f.column!==col.value);flt.push({column:col.value,op:'in',value:v});draw()}};
- const cross=(dim,value)=>{if(!LIVE){say(msg,'Snapshot: start the app to filter.',1);return}flt=flt.filter(f=>f.column!==dim);flt.push({column:dim,op:'=',value});draw()};
+ const cross=(dim,value)=>{flt=flt.filter(f=>f.column!==dim);flt.push({column:dim,op:'=',value});draw()};
  let cur=rep.pages[0];
  async function draw(){chips.innerHTML='';msg.textContent='';
   flt.forEach(f=>{const c=h('span','chip x',`${f.column} ${f.op} ${Array.isArray(f.value)?f.value.join(', '):f.value}`);c.onclick=()=>{flt=flt.filter(x=>x!==f);draw()};chips.append(c)});
@@ -460,7 +459,7 @@ function boardPage(box){const g=h('div','cards');box.append(g);const P=D.app?.pa
   const fl=h('div','areas');[...m.items,{file:'notes.md',kind:'notes',status:'ok'}].forEach(it=>{const b=h('button','lk');b.append(h('b','',it.kind),h('span','',it.status==='ok'?it.file:'not made: '+(it.error||'')));
    if(it.status==='ok')b.onclick=async()=>{try{dl(await fileOf('/packs/file',{pack:m.id,file:it.file}),it.file)}catch(e){toast(e.message)}};fl.append(b)});c.append(fl);g.append(c)})}
 // Users & access (workspace owners): ABI's accounts and roles; the app's sections and reports per person
-async function usersPage(box){if(!LIVE){box.append(h('p','empty','Users & access works with the live app.'));return}
+async function usersPage(box){
  const post=(op,b)=>fetch('/admin/'+op,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json());
  const r=await post('users');if(r.error){box.append(h('p','bad',r.error));return}const U=r.result,g=h('div','cards');box.append(g);
  const inv=card('Invite','ABI creates the account and emails a link to choose a password'),em=h('input','f');em.type='email';em.placeholder='name@company.com';inv.append(em);
@@ -482,7 +481,7 @@ async function usersPage(box){if(!LIVE){box.append(h('p','empty','Users & access
 const PRESETS={openai:['OpenAI','openai-responses','https://api.openai.com/v1','gpt-5'],anthropic:['Anthropic','anthropic-messages','https://api.anthropic.com','claude-sonnet-4-5'],
  openrouter:['OpenRouter','openai-completions','https://openrouter.ai/api/v1','anthropic/claude-sonnet-4.5'],ollama:['Ollama (local)','openai-completions','http://host.docker.internal:11434/v1','llama3.1'],
  gemini:['Google Gemini','google-generative-ai','https://generativelanguage.googleapis.com/v1beta','gemini-2.5-pro'],custom:['OpenAI-compatible','openai-completions','https://','model-id']};
-async function settingsPage(box){if(!LIVE){box.append(h('p','empty','Settings work with the live app.'));return}
+async function settingsPage(box){
  const post=(op,b)=>fetch('/admin/'+op,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json());
  let r=await post('settings');if(r.error){box.append(h('p','bad',r.error));return}let S=r.result;const g=h('div','cards');box.append(g);
  const draw=()=>{g.innerHTML='';
@@ -504,7 +503,7 @@ async function settingsPage(box){if(!LIVE){box.append(h('p','empty','Settings wo
   act(add,'Fetch models',fetchM);
   act(add,'Save provider',async()=>{const x=await post('settings/provider',{provider:{id:id.value.trim(),name:nm.value,api:api.value,base_url:base.value.trim(),models:mods.value.split(',').map(s=>s.trim()).filter(Boolean)},key:key.value});if(!mods.value)throw new Error('Fetch models and tick at least one.');
    key.value='';if(x.error)throw new Error(x.error);S=x.result;draw();return 'Saved.'},1);g.append(add)};draw()}
-function transferPage(box){if(!LIVE||MODE==='viewer'){box.append(h('p','empty','Export and import work in Developer mode with the live app.'));return}
+function transferPage(box){if(MODE==='viewer'){box.append(h('p','empty','Export and import work in Developer mode with the live app.'));return}
  const ex=card('Export','the whole project as one zip'),im=card('Import','replace this project with a zip; ABI checks it first'),g=h('div','cards');
  ex.append(h('p','','ABI\'s committed files (sources, tables, model, measures, glossary, queries, reports, flows, ML, tools, agents, security, environments, docs), the app\'s JSON (Monitor settings, saved analyses), the vault\'s documents and the team\'s plan. Not inside: the data (refresh the sources after an import), secret values, people\'s roles, chats, uncommitted changes.'));
  act(ex,'Download zip',async()=>{const r=await fetch('/transfer/export',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'});if(!r.ok)throw new Error((await r.json()).error);
@@ -597,11 +596,11 @@ function monitorPage(box){const bar=h('div','row bar top');bar.append(btn('New m
   h('p',tr.status==='ok'?'ok':'bad',`trained: ${tr.status||'never'} · ${when(tr.finished||tr.created)}`),h('p',sc2.status==='ok'?'ok':'bad',`scored: ${sc2.status||'never'} · ${when(sc2.finished||sc2.created)}`))});
  const fl=card('Flows','switched on or off, last run');fl.querySelector('h3').append(pinBtn({kind:'status',ref:'flows',title:'Flows'}));if(!D.flows.length)fl.append(h('p','empty','No flows yet.'));
  D.flows.forEach(f=>{const l=h('p','file','last run: …');fl.append(h('h4','',f.name||f.id),h('p',f.enabled?'ok':'',f.enabled?'on':'off'),l);
-  if(LIVE)api('flow_runs',{flow:f.id}).then(x=>{const r=(x.runs||[])[0];l.textContent=r?`last run: ${r.status} · ${when(r.finished||r.started||r.created)}`:'last run: never'}).catch(e=>l.textContent='last run: '+e.message)});
+  api('flow_runs',{flow:f.id}).then(x=>{const r=(x.runs||[])[0];l.textContent=r?`last run: ${r.status} · ${when(r.finished||r.started||r.created)}`:'last run: never'}).catch(e=>l.textContent='last run: '+e.message)});
  g.append(fr,mo,ml,fl);fr.style.gridColumn='1/-1'}
 // Explore: anyone's own analysis on the governed model (reads only, so Viewer can use it); kept analyses stay in this browser
 let MINE=D.app?.analyses||[];if(!MINE.length)try{MINE=JSON.parse(localStorage.getItem('abi-explore')||'[]');if(MINE.length)setTimeout(saveMine,0)}catch(e){}
-function saveMine(){MINE=MINE.slice(0,100);if(LIVE)fetch('/analyses',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({analyses:MINE})}).catch(()=>{})}
+function saveMine(){MINE=MINE.slice(0,100);fetch('/analyses',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({analyses:MINE})}).catch(()=>{})}
 function explore(box){const q0=PENDING.explore||{};PENDING.explore=null;
  const c=card('New analysis','measures by a dimension, from the model'),ms=multi(D.measures.map(m=>m.id),q0.measures),dm=h('select','f'),ty=h('select','f'),
   fc=h('select','f'),fv=h('select','f'),out=h('div','body'),msg=h('div','msg');ms.classList.remove('ed');fv.multiple=true;fv.hidden=true;
@@ -941,7 +940,7 @@ function flowPage(box,f){const bar=h('div','row bar lead');bar.append(btn('← F
   steps.forEach(x=>deps[x.id].forEach(d=>{if(!els[d])return;const [x1,y1]=side(d,1),[x2,y2]=side(x.id,0),dx=Math.max(30,(x2-x1)/2);
    el('path',{d:`M${x1},${y1} C${x1+dx},${y1} ${x2-dx},${y2} ${x2},${y2}`,class:'ln'},svg);el('circle',{cx:x2,cy:y2,r:3.5,class:'one'},svg)}))}
  kit.draw=draw;extent();requestAnimationFrame(draw);new ResizeObserver(()=>draw()).observe(kit.wrap);
- if(LIVE)api('flow_runs',{flow:f.id}).then(x=>{const one=x.runs?.[0]||x;(one.steps||[]).forEach(r=>els[r.step||r.id]?.classList.add(r.status));
+ api('flow_runs',{flow:f.id}).then(x=>{const one=x.runs?.[0]||x;(one.steps||[]).forEach(r=>els[r.step||r.id]?.classList.add(r.status));
   if(one.status)box.querySelector('.cvtools').append(h('span','file',`last run: ${one.status}${one.started?' · '+cell(one.started):''}`))}).catch(()=>{})}
 function flows(box){newBtn(box,'flow');const g=h('div','cards');box.append(g);if(!D.flows.length)box.append(h('p','empty','No flows yet: New flow, or ask the agent.'));
  D.flows.forEach(f=>{const t=f.trigger||{},c=card(f.name||f.id,f.enabled?'enabled':'disabled');
@@ -995,8 +994,8 @@ function security(box){const g=h('div','cards');box.append(g);const r=D.rls||{},
 // ---------- Knowledge: the vault ----------
 async function vpost(op,body){const r=await fetch('/vault/'+op,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(body||{})}).then(r=>r.json());
  if(r.error)throw new Error(r.error);return r.result}
-async function loadVault(){if(LIVE)try{VAULT=await vpost('list')}catch(e){VAULT=[]}}
-function vaultPage(box){if(!LIVE){box.append(h('p','empty','The vault opens with the live app: run scripts/app.py '+D.project+'.'));return}
+async function loadVault(){try{VAULT=await vpost('list')}catch(e){VAULT=[]}}
+function vaultPage(box){
  const bar=h('div','row bar top'),file=h('input');file.type='file';file.multiple=true;file.accept='.md,.txt,.html,.htm,.docx,.pdf';file.hidden=true;file.id='vault-file';
  bar.append(file,btn('Add document',()=>file.click(),1));box.append(bar);
  file.onchange=async()=>{for(const f of file.files){const data=await new Promise(r=>{const fr=new FileReader();fr.onload=()=>r(fr.result.split(',')[1]);fr.readAsDataURL(f)});
@@ -1059,7 +1058,7 @@ const lkey=(g,c,i)=>c.dataset.lk||ttl(c)+'#'+layKids(g).slice(0,i).filter(x=>ttl
 function lay(pg,k){if(document.body.classList.contains('mobile')||innerWidth<820)return;const S=laySaved(k);
  // cards straight on the page (Docs, Video, History…) go into one grid, so every page has containers to arrange
  [...pg.children].filter(c=>c.classList.contains('card')).forEach(c=>{const w=c.previousElementSibling?.classList.contains('loose')?c.previousElementSibling:c.before(h('div','loose'))||c.previousElementSibling;w.append(c)});
- grids(pg).forEach((g,gi)=>{if(MODE==='developer'&&LIVE)layKids(g).forEach(c=>{if(!c.querySelector(':scope>.rz'))c.append(rz(c))});const s=S[gi]||{};if(!LAYING&&!Object.keys(s).length&&!g.classList.contains('lay')&&!g.dataset.page)return;g.classList.add('lay');
+ grids(pg).forEach((g,gi)=>{if(MODE==='developer')layKids(g).forEach(c=>{if(!c.querySelector(':scope>.rz'))c.append(rz(c))});const s=S[gi]||{};if(!LAYING&&!Object.keys(s).length&&!g.classList.contains('lay')&&!g.dataset.page)return;g.classList.add('lay');
   layKids(g).forEach((c,i)=>{const x=s[lkey(g,c,i)];
    c.dataset.w||=(c.style.gridColumn.match(/span (\d+)/)||[])[1]||(g.matches('.rows,.stack,.loose')||c.classList.contains('full')?12:c.classList.contains('wide')?(g.classList.contains('home')?8:12):4);
    if(!c.dataset.laid){c.dataset.laid=1;const ht=x?x.h:c.dataset.h;c.style.gridColumn='span '+(x?.w||c.dataset.w);c.style.order=x?.o??i;c.style.height=ht?ht+'px':'';c.classList.toggle('sized',!!+ht)}  // once: a redraw never undoes a drag
@@ -1084,16 +1083,16 @@ async function layStore(reset){const k=CUR,pg=$('main .pg'),out={};
  const r=await fetch('/layouts',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({page:k,layout:reset?null:out})}).then(x=>x.json()).catch(e=>({error:e.message}));
  if(r.error)toast(r.error);else{layFile().draft=r.result;vc();if(reset)show(k)}}
 function layMode(on){LAYING=on;document.body.classList.toggle('laying',on);const b=$('#layout');b.classList.toggle('on',on);b.textContent=on?'Done':'Layout';$('#layreset').hidden=!on}
-$('#layout').onclick=()=>{if(!LIVE){toast('Snapshot: start the app to change the layout.');return}layMode(!LAYING);show(CUR);if(LAYING)toast('Drag a card to move it, its corner to resize it. Publish shows it to Viewer.')};
+$('#layout').onclick=()=>{layMode(!LAYING);show(CUR);if(LAYING)toast('Drag a card to move it, its corner to resize it. Publish shows it to Viewer.')};
 $('#layreset').onclick=()=>{if(CUR.startsWith('rep:')){toast('A report\'s layout is in the report: undo it under Changes.');return}layStore(true)};
 const boot=loadVault();sidebar();
 const R=document.documentElement,TB=$('#theme');const dark=()=>R.dataset.theme?R.dataset.theme==='dark':matchMedia('(prefers-color-scheme: dark)').matches;
 const setTheme=t=>{if(t)R.dataset.theme=t;TB.textContent=dark()?'Light':'Dark'};try{setTheme(localStorage.getItem('abi-theme'))}catch(e){setTheme()}
 TB.onclick=()=>{const t=dark()?'light':'dark';setTheme(t);try{localStorage.setItem('abi-theme',t)}catch(e){}};
-$('.snap').hidden=LIVE;$('.snap').title=`Snapshot of ${D.stamp}. Run scripts/app.py ${D.project} to work live.`;
+
 function setMode(md){if(window.ME&&!['editor','owner'].includes(ME.role))md='viewer';MODE=md;if(md==='viewer'&&LAYING)layMode(false);setTimeout(()=>{ctx();const g=log.querySelector('.hello');if(g)g.replaceWith(hello())});document.body.dataset.mode=md;$('#m-dev').classList.toggle('on',md==='developer');$('#m-view').classList.toggle('on',md==='viewer');
  $('#chat textarea').placeholder=md==='viewer'?'Ask a question. In Viewer the agent only reads.':'Ask a question or for a change.'}
-async function pickMode(md){if(!LIVE){toast('Snapshot: start the app to switch modes.');return}
+async function pickMode(md){
  await fetch('/mode',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({mode:md})})}
 function vc(){const n=D.pending?.files?.length||0,cb=$('#changes'),pb=$('#publish');cb.textContent=n?`${n} change${n>1?'s':''}`:'No changes';cb.classList.toggle('pri',!!n);
  const head=(D.history||[])[0]?.id?.slice(0,7),pubc=(D.published?.commit||'').split(' ')[0];const L=D.app?.layouts||{},ld=JSON.stringify(L.draft||{})!==JSON.stringify(L.published||{});pb.disabled=!!n||!head||(head===pubc&&!ld);
@@ -1104,7 +1103,7 @@ $('#changes').onclick=()=>{const d=$('#commit'),f=$('.files',d);f.innerHTML='';c
 $('#c-close').onclick=()=>$('#commit').close();
 $('#c-commit').onclick=async()=>{try{await api('commit',{message:$('#c-message').value||'Changes from the app'});$('#commit').close();toast('Committed')}catch(e){say($('#commit .msg'),e.message,1)}};
 $('#c-undo').onclick=async()=>{try{const r=await api('undo',{});say($('#commit .msg'),`Undone: ${r.undone}`);D.pending=await api('changes',{});$('#changes').onclick()}catch(e){say($('#commit .msg'),e.message,1)}};
-$('#publish').onclick=async()=>{if(!LIVE)return;if(!await ask({message:'Publish the last commit? Viewer will show it from now on.',preview:(D.history||[])[0]?.message||''}))return;
+$('#publish').onclick=async()=>{if(!await ask({message:'Publish the last commit? Viewer will show it from now on.',preview:(D.history||[])[0]?.message||''}))return;
  toast('Publishing: ABI checks the last commit…');const post=(u,b)=>fetch(u,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json());
  let r=await post('/publish');if(r.confirm){if(!await ask(r.confirm)){toast('Not published.');return}r=await post('/confirm/'+r.confirm.id)}
  toast(r.error?`Publish failed: ${r.error}`:`Published ${r.result.commit}`)};
@@ -1118,7 +1117,7 @@ boot.then(()=>{sidebar();show(CUR)});setMode('developer');vc();
 window.addEventListener('hashchange',()=>{const k=decodeURIComponent(location.hash.slice(1));if(k&&k!==CUR)show(k)});
 
 // ---------- the agent: it steers this page, the page follows its changes, and the person talks to it here ----------
-async function switcher(){if(!LIVE){toast('Snapshot: start the app to switch projects.');return}let d=$('#switcher');if(d){d.remove();return}
+async function switcher(){let d=$('#switcher');if(d){d.remove();return}
  const r=(await fetch('/projects',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(x=>x.json())).result;
  d=h('div','card');d.id='switcher';const ws=h('select','f'),list=h('div','areas');Object.keys(r.workspaces).forEach(w=>ws.append(new Option(w,w)));ws.value=r.workspace;
  const fill=()=>{list.innerHTML='';(r.workspaces[ws.value]||[]).forEach(p=>{const b=h('button','lk');b.append(h('b','',p.id),h('span','',p.name===p.id?'':p.name));
@@ -1150,7 +1149,7 @@ function hello(){const d=h('div','hello'),pg=PAGES[CUR]?.[0]||'this page';d.appe
 function ctx(){const c=$('#chat .ctx'),g=log.querySelector('.hello');if(c)c.textContent=`${MODE==='viewer'?'Viewer · read-only':'Developer'} · on ${PAGES[CUR]?.[0]||CUR}`;if(g&&CUR!=='chat')g.replaceWith(hello())}
 const INTRO='';log.append(hello());
 async function cpost(u,b){return fetch(u,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json())}
-async function chats(sel){if(!LIVE)return;const r=await cpost('/chat/list'),pk=$('#chat-pick');pk.innerHTML='';
+async function chats(sel){const r=await cpost('/chat/list'),pk=$('#chat-pick');pk.innerHTML='';
  const cur=sel||r.current;if(!r.chats.some(c=>c.id===cur))pk.append(new Option('New chat',cur||''));
  r.chats.forEach(c=>pk.append(new Option(`${c.title||'Chat'} · ${c.messages}`,c.id)));pk.value=cur||'';
  const del=$('#chat-del');if(del)del.hidden=!r.chats.length}
@@ -1158,12 +1157,12 @@ function paint(c){log.innerHTML='';steps=null;(c.messages||[]).forEach(m=>bubble
 $('#chat-new').onclick=async()=>{const c=await cpost('/chat/new');paint(c);chats(c.id);inp.focus()};
 $('#chat-pick').onchange=async e=>{if(!e.target.value)return;const c=await cpost('/chat/open',{id:e.target.value});paint(c);chats(c.id)};
 $('#chat-toggle').onclick=()=>openChat();$('#chat .wide-t').onclick=()=>{if(chatBox.classList.contains('full')){show(PREV||'home');openChat(true)}else show('chat')};$('#chat .x').onclick=()=>openChat(false);
-async function sendChat(){const t=inp.value.trim();if(!t)return;if(!LIVE){bubble('sys','Snapshot: start `python scripts/app.py '+D.project+'` to talk to the agent.');return}
+async function sendChat(){const t=inp.value.trim();if(!t)return;
  log.querySelector('.hello')?.remove();bubble('me',t);inp.value='';steps=null;
  await fetch('/chat',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({message:t,page:CUR})})}
 $('#chat .send').onclick=sendChat;inp.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChat()}};
 $('#chat .stop').onclick=()=>fetch('/chat/stop',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'});
-if(LIVE){const es=new EventSource('/events?k='+encodeURIComponent(KEY)+'&c='+CID+'&m='+(MOBILE?1:0)+'&p='+encodeURIComponent(D.project));
+{const es=new EventSource('/events?k='+encodeURIComponent(KEY)+'&c='+CID+'&m='+(MOBILE?1:0)+'&p='+encodeURIComponent(D.project));
  es.onerror=()=>{if(es.readyState===2)stale()};  // the stream was refused: a restart or an ended session
  es.onmessage=async ev=>{const e=JSON.parse(ev.data);
   if(e.type==='show'){PENDING.filters=e.filters||null;if(e.page==='explore'&&e.query){const q={measures:e.query.measures||[],dimensions:(e.query.dimensions||[]).slice(0,1),filters:e.query.filters||[]};PENDING.explore={...q,chart:e.chart};MINE.unshift({name:'Agent: '+q.measures.join(', ')+(q.dimensions[0]?' by '+q.dimensions[0]:''),q,type:e.chart||'bar',at:new Date().toISOString().slice(0,16).replace('T',' ')});saveMine();sidebar()}const nv=h('div','m nav','→ '+(e.page==='report'?'report '+e.report:e.page)+(e.note?' · '+e.note:''));nv.onclick=()=>show(e.page==='report'?'rep:'+e.report:e.page);log.append(nv);log.scrollTop=log.scrollHeight;const wasFull=chatBox.classList.contains('full');const k=e.page==='report'?'rep:'+e.report:e.page;show(k);if(wasFull)openChat(true);setTimeout(()=>highlight(e.item),400);if(e.note)toast('Agent: '+e.note)}
@@ -1343,24 +1342,13 @@ def published_now(project: str, pub: str, head: str) -> dict:
     return info
 
 
-def build(project: str) -> Path:
-    dest = abi.folder(project)
-    if not dest:
-        raise SystemExit(f"No folder for project '{project}'; create it with `abi.py project`.")
-    (dest / "app.html").write_text(page_html(project, snapshot(dest, project)))
-    exclude = dest / ".git/info/exclude"  # never committed locally, never in a bundle to ABI
-    if "app.html" not in exclude.read_text():
-        exclude.write_text(exclude.read_text().rstrip("\n") + "\napp.html\n")
-    return dest / "app.html"
-
-
 def page_html(project: str, snap: dict) -> str:
     dest = abi.folder(project)
     data = json.dumps(snap, default=str).replace("</", "<\\/")
     name = (render.j(dest / "project.json", {}) or {}).get("name", project)
     page = render.shell(name, "", "", "")
     head = (f"<header><button class=btn id=menu aria-label=Menu>Menu</button><span class=brand>ABI</span><button class=crumb id=switch title='Switch workspace or project'>{render.esc(dest.parent.name)}<i>/</i><b>{render.esc(project)}</b><i class=car>▾</i></button><span class=pgname id=pgname></span>"
-            "<span class=snap hidden>snapshot</span><span class=right><span class='vc w'><button class=btn id=layout title='Drag cards to move them, drag a corner to resize'>Layout</button><button class=btn id=layreset hidden title='Put this page back as it was built'>Reset</button><button class=btn id=changes>No changes</button>"
+            "<span class=right><span class='vc w'><button class=btn id=layout title='Drag cards to move them, drag a corner to resize'>Layout</button><button class=btn id=layreset hidden title='Put this page back as it was built'>Reset</button><button class=btn id=changes>No changes</button>"
             "<button class=btn id=publish title='Make the last commit what Viewer sees'>Publish</button></span><span class=modes role=group aria-label=Mode>"
             "<button id=m-dev class=on title='Build and change: you and the agent'>Developer</button>"
             "<button id=m-view title='Read only: the agent answers as an analyst'>Viewer</button></span>"
@@ -1775,7 +1763,6 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
             pass
 
     opening(default)
-    build(default)
     key, pending = secrets.token_urlsafe(24), {}
     agent_key = os.environ.get("ABI_APP_AGENT_KEY") or secrets.token_urlsafe(24)
     host = f"127.0.0.1:{port}"

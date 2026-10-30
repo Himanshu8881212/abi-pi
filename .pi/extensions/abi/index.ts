@@ -203,7 +203,7 @@ export default async function abi(pi: ExtensionAPI) {
 	py("abi_load", "Load files into ABI", "The fast path for 'here are some files': uploads every Parquet file of the folders/files (Parquet only) to ABI, types a date column, builds the model, adds starter measures (row count, sums) and an Overview report, and renders the HTML views. Returns what it did and what readiness still misses. The files' contents never reach you.",
 		Type.Object({ workspace: Type.String(), project: Type.String({ pattern: "^[a-z][a-z0-9_]{0,62}$" }), paths: Type.Array(Type.String(), { minItems: 1 }) }),
 		(p) => ["load", p.workspace, p.project, ...p.paths]);
-	py("abi_sync", "Sync project folder", "Pulls ABI's commits into the project folder and re-renders the HTML views (app.html in the project folder: everything in one page with a sidebar; plus index.html and one page per report). Run after changes. The person opens app.html live with `python scripts/app.py <project>`.",
+	py("abi_sync", "Sync project folder", "Pulls ABI's commits into the project folder. Run after changes. In a terminal, the person opens the app with `python scripts/app.py <project>`.",
 		Type.Object({ project: Type.String() }), (p) => ["sync", p.project]);
 	py("abi_pack", "Make a board pack", "Renders a board pack through ABI and keeps it with the project (workspaces/<ws>/_app/<project>/packs/<id>/): documents (report_snapshot: pdf, png, pptx), data extracts (export_visual: csv, xlsx) and a silent explainer video of report views (the app's theme). The notes (your commentary, Markdown) may only use numbers that appear in the rows of the pack's report views, else the pack is refused; so may video captions. What ABI can't render is listed with its reason. Never sends anything: sending is a step for the person's yes.",
 		Type.Object({ project: Type.String({ pattern: "^[a-z][a-z0-9_]{0,62}$" }), spec: Type.Object({
@@ -260,7 +260,7 @@ export default async function abi(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "abi_show",
 		label: "Show in the app",
-		description: "Shows the person something in their open ABI app (workspaces/<ws>/<project>/app.html, live): a page of its sidebar, a report with filters, a chart of measures by a dimension in Explore (page 'explore' with query), or one item (a measure, flow, ML model, tool, agent, term) highlighted. Starts the app if it isn't open. Use it when the person asks to see something, after you built or changed something they should look at, and to point at the rows behind an answer (a report with the filters you used). Filters: [{column: 'table.column', op: '=', '<>', '<', '<=', '>', '>=' or 'in', value}].",
+		description: "Shows the person something in their open ABI app: a page of its sidebar, a report with filters, a chart of measures by a dimension in Explore (page 'explore' with query), or one item (a measure, flow, ML model, tool, agent, term) highlighted. Starts the app if it isn't open. Use it when the person asks to see something, after you built or changed something they should look at, and to point at the rows behind an answer (a report with the filters you used). Filters: [{column: 'table.column', op: '=', '<>', '<', '<=', '>', '>=' or 'in', value}].",
 		parameters: Type.Object({
 			project: Type.String({ pattern: "^[a-z][a-z0-9_]{0,62}$" }),
 			page: Type.String({ enum: PAGES }),
@@ -275,7 +275,7 @@ export default async function abi(pi: ExtensionAPI) {
 			if (p.page === "report" && !p.report) return text("Name the report (report ID) to show.");
 			const ok = await appPost(p.project, "/agent/show", p, true);
 			const a = await appFor(p.project);
-			return text(ok && a ? `Shown in the person's app: ${a.url}/#${p.page === "report" ? `rep:${p.report}` : p.page}` : "The app couldn't be opened; give the person the path workspaces/<ws>/" + p.project + "/app.html instead.");
+			return text(ok && a ? `Shown in the person's app: ${a.url}/#${p.page === "report" ? `rep:${p.report}` : p.page}` : "The app isn't running; the person starts it with `python scripts/app.py " + p.project + "`.");
 		},
 	});
 	// ---------- the app's own Monitor checks and Explore analyses (files of the app, not ABI actions) ----------
@@ -696,10 +696,10 @@ export default async function abi(pi: ExtensionAPI) {
 
 	if (!sub) {
 		pi.registerCommand("abi", {
-			description: "ABI status: health, current project, views folder",
+			description: "ABI status: health, current project",
 			handler: async (_a, ctx) => {
 				const h = await runPy(["health"]);
-				ctx.ui.notify(`${h}\nproject: ${state.project ?? "-"}\napp: ${ROOT}/workspaces/<workspace>/<project>/app.html (live: python scripts/app.py <project>)`, "info");
+				ctx.ui.notify(`${h}\nproject: ${state.project ?? "-"}\napp: python scripts/app.py <project>`, "info");
 			},
 		});
 	}

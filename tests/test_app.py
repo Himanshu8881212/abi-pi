@@ -46,16 +46,6 @@ def post(port, path, body, key, host=None):
         return e.code, json.loads(e.read())
 
 
-def test_one_file_in_the_project_folder_never_committed_or_sent(srv):
-    dest = abi.folder(P)
-    html = (dest / "app.html").read_text()
-    assert app.KEY_SLOT in html, "the file on disk holds no key: opened from disk it is a snapshot"
-    for k in ("reports", "measures", "flows", "ml", "tools", "agents", "glossary", "datasets", "docs", "history", "rls"):
-        assert f'"{k}":' in html, k
-    assert abi.git(dest, "status", "--porcelain").strip() == "", "app.html is git-excluded"
-    assert "app.html" in (dest / ".git/info/exclude").read_text()
-
-
 def test_served_page_is_live_and_queries_go_through_abi(srv):
     port, key, page = srv
     assert not key.startswith("__")
@@ -459,17 +449,6 @@ def test_chat_answers_draw_markdown_tables_safely():
                          capture_output=True, text=True, check=True).stdout
     assert "<table class=mdt><tr><th>Category</th><th>Views</th></tr>" in out and "<td class=n>1,200</td>" in out
     assert "&lt;b&gt;Music&lt;/b&gt;" in out and "<td><b>Gaming</b></td>" in out and "|---" not in out
-
-
-def test_one_person_mode_serves_the_live_page_not_a_stale_file(srv):
-    """--single served <project>/app.html from disk, written at the last sync: a change made since (here: a file
-    left over from before) stayed invisible until the next sync."""
-    port, key, _ = srv
-    f = abi.folder(P) / "app.html"
-    f.write_text(f.read_text().replace('"project": "', '"stale_marker": 1, "project": "', 1))
-    app.changed(P)
-    page = urllib.request.urlopen(f"http://127.0.0.1:{port}/?p={P}").read().decode()
-    assert '"stale_marker"' not in page
 
 
 def test_every_page_draws_in_a_real_browser(srv):

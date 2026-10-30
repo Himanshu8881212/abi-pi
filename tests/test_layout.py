@@ -23,7 +23,6 @@ def test_new_project_has_the_full_skeleton(tmp_path, monkeypatch):
     pj = json.loads((dest / "project.json").read_text())
     assert pj["schema_version"] == 1 and pj["settings"]["auto_commit"] is True
     assert abi.validate_files(dest) == []
-    assert (tmp_path / "ws" / "_views" / "pi_test_layout" / "index.html").exists()
 
 
 def test_project_ids_follow_abis_pattern():

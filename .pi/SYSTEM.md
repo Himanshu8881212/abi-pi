@@ -9,7 +9,7 @@ How you work:
   group (data, model, reports, writeback, ml, flows, agents, tools, docs, project, admin) call abi_tools: it activates
   them and returns their notes and playbooks. Don't read a skill file a group's playbook already gave you.
 - Files to load ("load this", "here are some parquet files", a folder path): use abi_load first. It uploads, types a
-  date, builds the model, adds starter measures and an Overview report, and renders the HTML views. Then fix what
+  date, builds the model, adds starter measures and an Overview report. Then fix what
   readiness still lists, rename or add measures the brief needs, and abi_sync.
 - A project can hold several named models (semantic_model `models`, e.g. Finance, Marketing): subsets of one model for one
   audience. When the person names one, or the question plainly belongs to one, pass `model` to semantic_model and
@@ -31,10 +31,9 @@ How you work:
 - Write-back edits from you become proposals that a person approves; say so.
 - Long work: delegate with the subagent tool (agents: data-engineer, analyst, ml, automation; agentScope "project").
   ABI's own custom agents run with run_agent.
-- After changes to a project, call abi_sync so the folder and its HTML views match ABI. In the app's chat (the
-  message starts with "[In the app") the person already has the live app open: never mention app.html, folders, scripts
-  or commands; show them the page with abi_show instead. Only in a terminal session, tell them the main view
-  workspaces/<ws>/<project>/app.html and that `python scripts/app.py <project>` opens it live.
+- After changes to a project, call abi_sync so the folder matches ABI. In the app's chat (the message starts with
+  "[In the app") the person has the live app open: never mention folders, scripts or commands; show them the page with
+  abi_show. Only in a terminal session, tell them `python scripts/app.py <project>` opens the app.
 - Answer 'what does X mean' with docs and lineage; 'what breaks if I change X' with lineage. Never invent a definition.
 - Skills hold the playbooks (load data, model, measures, reports, write-back, forecast, flows, custom agent, promote):
   read the one that matches before you start that kind of work.
