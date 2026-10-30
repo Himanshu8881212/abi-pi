@@ -226,7 +226,7 @@ export default async function abi(pi: ExtensionAPI) {
 	if (process.env.ABI_APP_URL && process.env.ABI_APP_PROJECT && process.env.ABI_APP_AGENT_KEY)
 		apps.set(process.env.ABI_APP_PROJECT, { url: process.env.ABI_APP_URL, key: process.env.ABI_APP_AGENT_KEY });
 	async function appFor(project: string, _start?: boolean): Promise<{ url: string; key: string } | undefined> {
-		return apps.get(project);
+		return apps.get(project) ?? apps.values().next().value;  // one app serves every project: a new one opens in it too
 	}
 	async function appPost(project: string, route: string, body: unknown, start = false): Promise<boolean> {
 		const a = await appFor(project, start);
@@ -274,7 +274,7 @@ export default async function abi(pi: ExtensionAPI) {
 		async execute(_id, p) {
 			if (p.page === "report" && !p.report) return text("Name the report (report ID) to show.");
 			const ok = await appPost(p.project, "/agent/show", p, true);
-			const a = apps.get(p.project);
+			const a = await appFor(p.project);
 			return text(ok && a ? `Shown in the person's app: ${a.url}/#${p.page === "report" ? `rep:${p.report}` : p.page}` : "The app couldn't be opened; give the person the path workspaces/<ws>/" + p.project + "/app.html instead.");
 		},
 	});

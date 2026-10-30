@@ -179,6 +179,8 @@ def visual_data(conn, user: User, args: VisualRef) -> dict:
     if "query" not in v:
         return {"id": v["id"], "type": "text", "title": v.get("title"), "text": v["text"]}
     q, _, off = _query(args.project, r, p, v, [f.model_dump(mode="json") for f in args.interaction])
+    if r.get("model"):  # ABI-PI: a report built in a named model reads only that model
+        model.in_scope(args.project, r["model"], q["measures"], q["dimensions"] + [f["column"] for f in q["filters"]])
     out = semantic.query(args.project, q, user.id)
     ms = {m["id"]: m for m in model._read(args.project, "measures.json").get("measures", [])}
     trees = mel.compile({i: m["expression"] for i, m in ms.items()})  # all: a measure may reference any other

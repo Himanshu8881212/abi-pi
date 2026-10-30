@@ -14,7 +14,7 @@ import logging
 import re
 
 import duckdb
-from pydantic import Field
+from pydantic import BaseModel, Field
 from sqlglot import exp
 
 from abi import actions, db, semantic, storage, transform
@@ -391,18 +391,26 @@ def readiness(conn, user: User, args: storage.ProjectRef) -> dict:
 
 class ModelInput(storage.ProjectRef):
     all: bool = Field(False, description="every item, not only those relevant to your question")
+    model: str | None = Field(None, description="a named model (see `models`): only its tables, relationships and measures")
 
 
 @action(Role.viewer)
 def semantic_model(conn, user: User, args: ModelInput) -> dict:
-    """What semantic_query can ask for: measures (ID, display name, MEL expression, description), model tables (kind, key, description) with their columns, relationships, the date table, datasets (ID, name) and glossary terms (ID, term, definition, linked measures and columns). Hidden staging tables are left out. In a large project only the tables, measures and terms relevant to your question are listed (`relevant` says so); `all` lists every one."""
+    """What semantic_query can ask for (in one named model with `model`; `models` lists them): measures (ID, display name, MEL expression, description), model tables (kind, key, description) with their columns, relationships, the date table, datasets (ID, name) and glossary terms (ID, term, definition, linked measures and columns). Hidden staging tables are left out. In a large project only the tables, measures and terms relevant to your question are listed (`relevant` says so); `all` lists every one."""
     ms = [{k: x[k] for k in ("id", "name", "expression", "description") if k in x} for x in _read(args.project, "measures.json").get("measures", [])]
     m = load(args.project)
     cols = {t: c for t, c in lake_columns(args.project).items() if not m["tables"].get(t, {}).get("hidden")}
     out = {**visible(m), "columns": cols, "measures": ms,
            "datasets": [{"id": d["id"], "name": d["name"]} for d in _read(args.project, "datasets.json").get("datasets", [])],
            "glossary": [{k: t[k] for k in ("id", "term", "definition", "measures", "columns") if k in t} for t in masked(
-               args.project, _read(args.project, "glossary.json").get("terms", []), semantic.rls.restricted(args.project, user.id))]}
+               args.project, _read(args.project, "glossary.json").get("terms", []), semantic.rls.restricted(args.project, user.id))],
+           "models": named_models(args.project)}
+    if args.model:
+        tables, keep = scope(args.project, args.model)
+        out |= {"model": args.model, "tables": {t: i for t, i in out["tables"].items() if t in tables},
+                "columns": {t: c for t, c in out["columns"].items() if t in tables},
+                "relationships": [r for r in out["relationships"] if {r["from"]["table"], r["to"]["table"]} <= tables],
+                "measures": [x for x in out["measures"] if x["id"] in keep]}
     return out if args.all else _relevant(user, args.project, out)
 
 
@@ -481,6 +489,81 @@ def delete_glossary_term(conn, user: User, args: ObjectRef) -> dict:
 def terms(project: str) -> set[str]:
     """Glossary term IDs, which memory entries link to (§5 #6)."""
     return {x["id"] for x in _read(project, "glossary.json").get("terms", [])}
+
+
+# ---------- named models: subsets of the one model for one audience (model/models.json) ----------
+# ABI-PI: several models in one project, as perspectives. Joins and measures stay the project's own, so a number is
+# the same in every model; a model only narrows what a report or a question may use.
+
+class NamedModel(BaseModel):
+    id: str = Field(pattern=ID, description="lowercase ID, e.g. finance")
+    name: str = Field(min_length=1, max_length=200)
+    description: str | None = Field(None, max_length=2000)
+    tables: list[str] = Field(min_length=1, description="model tables in it (the date table is always in)")
+    measures: list[str] = Field([], description="measure IDs in it; empty: every measure over its tables")
+
+
+class ModelSave(storage.ProjectRef):
+    model: NamedModel
+
+
+def named_models(project: str) -> list[dict]:
+    return _read(project, "models.json").get("models", [])
+
+
+def scope(project: str, mid: str) -> tuple[set[str], set[str]]:
+    """The tables and measures named model `mid` allows. Raises 404 with the models there are."""
+    m = next((x for x in named_models(project) if x["id"] == mid), None)
+    if m is None:
+        have = ", ".join(x["id"] for x in named_models(project)) or "none yet"
+        raise ActionFailed(404, f"No model '{mid}' in project '{project}' (models: {have}).")
+    date = (_read(project, "model.json").get("date_table") or {}).get("table")
+    tables = set(m["tables"]) | ({date} if date else set())
+    ms = {x["id"]: x["expression"] for x in _read(project, "measures.json").get("measures", [])}
+    if m.get("measures"):
+        return tables, set(m["measures"]) & ms.keys()
+    trees = mel.compile(ms)
+    used = {i: {n.table if type(n) is mel.Col else n.col.table for n in mel._walk(t) if type(n) in (mel.Col, mel.Agg)}
+            for i, t in trees.items()}
+    return tables, {i for i, ts in used.items() if ts <= tables}
+
+
+def in_scope(project: str, mid: str, measures: list[str], columns: list[str]) -> None:
+    """Refuses (400) measures or table.column items outside named model `mid`, saying which and what it has."""
+    tables, ms = scope(project, mid)
+    bad = [m for m in measures if m not in ms] + [c for c in columns if c.split(".", 1)[0] not in tables]
+    if bad:
+        raise ActionFailed(400, f"{', '.join(bad)} {'is' if len(bad) == 1 else 'are'} not in model '{mid}': it has tables "
+                                f"{', '.join(sorted(tables))} and measures {', '.join(sorted(ms)) or 'none'}.")
+
+
+@action(Role.editor, definition=True)
+def save_model(conn, user: User, args: ModelSave) -> dict:
+    """Adds or replaces a named model of the project: a subset of its model tables and measures for one audience or subject (e.g. Finance, Marketing), kept in model/models.json. Reports and questions can name it to stay inside it; joins and measures are shared, so numbers match across models."""
+    m = args.model
+    known = visible(load(args.project))["tables"]
+    if missing := sorted(set(m.tables) - known.keys()):
+        raise ActionFailed(400, f"No model table {missing} in project '{args.project}' (hidden staging tables can't be in a model).")
+    ms = {x["id"] for x in _read(args.project, "measures.json").get("measures", [])}
+    if missing := sorted(set(m.measures) - ms):
+        raise ActionFailed(400, f"No measure {missing} in project '{args.project}'.")
+    entry = {"id": m.id, "name": m.name, **({"description": m.description} if m.description else {}),
+             "tables": sorted(set(m.tables)), **({"measures": sorted(set(m.measures))} if m.measures else {})}
+    _write(args.project, "models.json", {"models": [x for x in named_models(args.project) if x["id"] != m.id] + [entry]})
+    return {"id": m.id}
+
+
+@action(Role.editor, destructive=True, definition=True)
+def delete_model(conn, user: User, args: ObjectRef) -> dict:
+    """Deletes a named model (not its tables or measures). Refused while a report is built in it."""
+    ms = named_models(args.project)
+    if not any(x["id"] == args.id for x in ms):
+        raise ActionFailed(400, f"No model '{args.id}'.")
+    users = sorted(f.stem for f in (git.path(args.project) / "reports").glob("*.json") if json.loads(f.read_text()).get("model") == args.id)
+    if users:
+        raise ActionFailed(409, f"Report(s) {', '.join(users)} are built in model '{args.id}': move them to another model first.")
+    _write(args.project, "models.json", {"models": [x for x in ms if x["id"] != args.id]})
+    return {}
 
 
 class Dataset(storage.ProjectRef):

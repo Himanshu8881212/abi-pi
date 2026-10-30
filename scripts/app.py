@@ -45,7 +45,7 @@ import render  # noqa: E402
 KEY_SLOT = "__ABI_APP_KEY__"
 ME_SLOT = "null/*__ABI_ME__*/"
 READS_ONLY = {"run_flow", "run_agent"}  # not changes to the project, but they act (send, call tools): Developer only
-WRITES = {"set_measure", "delete_measure", "set_glossary_term", "delete_glossary_term", "enable_flow", "train_model", "score_model", "refresh",
+WRITES = {"set_measure", "delete_measure", "set_glossary_term", "delete_glossary_term", "save_model", "delete_model", "enable_flow", "train_model", "score_model", "refresh",
           "commit", "undo", "add_data", "delete_source", "delete_table", "set_table", "add_relationship", "remove_relationship",
           "save_dataset", "delete_dataset", "save_report", "delete_report", "save_flow", "delete_flow", "save_ml_model",
           "delete_ml_model", "save_tool", "publish_tool", "delete_tool", "save_agent", "publish_agent", "delete_agent", "set_steps", "edit_cells", "approve_edit", "reject_edit", "undo_edits", "create_input_table"}
@@ -191,6 +191,8 @@ textarea.f{font:14px/1.5 var(--text)}textarea.f.code,textarea.code{font:13px/1.5
 .mobile .brand{font-size:0;gap:0}.mobile .pgname::before{display:none}.mobile .crumb,.mobile .long{display:none}.mobile .pgname{min-width:0;flex:1}.mobile header{flex-wrap:nowrap}.mobile aside{z-index:20}
 .grid>.card{container-type:inline-size}.grid .kpi .v{font-size:clamp(22px,16cqi,40px)}
 .card label.l+select.f,.card label.l+input.f:not([type=checkbox]){display:block;width:100%;max-width:520px;margin-top:6px}.card .card{min-width:0}
+.seg{gap:6px}.seg .chip{cursor:pointer;padding:5px 12px;font-size:13px;margin:0}.seg .chip.on{background:var(--ink);color:var(--sheet);border-color:var(--ink)}.seg .chip.add{border-style:dashed}
+#chat .mdt{white-space:normal;width:auto;min-width:60%;margin:6px 0;font-size:13px}#chat .mdt th,#chat .mdt td{padding:6px 10px}
 #menu{display:none}
 .mobile .modes,.mobile .vc,.mobile #theme{display:none}.mobile #menu{display:inline-flex}
 .mobile body{grid-template-columns:1fr}.mobile header{grid-column:1;gap:8px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
@@ -526,7 +528,7 @@ function explore(box){const q0=PENDING.explore||{};PENDING.explore=null;
   MINE.forEach((a,i)=>{const r=h('div','row');const o=h('button','btn',a.name);o.onclick=()=>{[...ms.options].forEach(x=>x.selected=a.q.measures.includes(x.value));dm.value=a.q.dimensions[0]||'';ty.value=a.type;flt=a.q.filters||[];fc.value='';fv.hidden=true;run(a.q,a.type)};
    const x=h('button','btn','forget');x.onclick=()=>{MINE.splice(i,1);saveMine();mine()};r.append(o,h('span','file',a.at||''),x);list.append(r)})}
  mine();if(q0.measures)run(query(),ty.value)}
-function measures(box){const top=h('div','row bar top'),q=h('input','f');q.placeholder='Search measures';const list=h('div','cards rows');box.append(top,list);
+function measures(box){modelBar(box);const top=h('div','row bar top'),q=h('input','f');q.placeholder='Search measures';const list=h('div','cards rows');box.append(top,list);
  const edit=(m,isNew)=>{const c=card(isNew?'New measure':(m.name||m.id),isNew?'':m.id),name=h('input','f'),id=h('input','f'),ex=h('textarea','f'),de=h('input','f');
   [name,id,ex,de].forEach(e=>e.classList.add('ed'));name.value=m.name||'';id.value=m.id||'';ex.value=m.expression||'';de.value=m.description||'';
   id.placeholder='a-z, 0-9, _';name.placeholder='display name';ex.placeholder='e.g. SUM(sales.revenue)';de.placeholder='what it means';
@@ -536,7 +538,7 @@ function measures(box){const top=h('div','row bar top'),q=h('input','f');q.place
    Object.assign(m,{id:id.value,name:name.value,expression:ex.value,description:de.value});if(isNew){D.measures.push(m);show('measures')}return 'Saved through ABI (checked like an import).'},1);
   act(c,'Test',async()=>{const r=await api('semantic_query',{measures:[id.value]});return `${r.measures?.[id.value]||id.value} = ${fmt(r.rows?.[0]?.[0])}`});
   if(!isNew)act(c,'Delete',async()=>{await api('delete_measure',{id:id.value});D.measures=D.measures.filter(x=>x!==m);show('measures')});return c};
- const fill=()=>{list.innerHTML='';list.append(rowhead('Measure','MEL','Description',''));D.measures.filter(m=>!q.value||JSON.stringify(m).toLowerCase().includes(q.value.toLowerCase())).forEach(m=>list.append(edit(m)))};
+ const fill=()=>{list.innerHTML='';list.append(rowhead('Measure','MEL','Description',''));D.measures.filter(nmMeasure).filter(m=>!q.value||JSON.stringify(m).toLowerCase().includes(q.value.toLowerCase())).forEach(m=>list.append(edit(m)))};
  top.append(q,btn('New measure',()=>list.firstChild.after(edit({},true)),1));q.oninput=fill;fill()}
 function glossary(box){const list=h('div','cards rows');box.append(list);
  const edit=(t,isNew)=>{const c=card(isNew?'New term':(t.term||t.id)),term=h('input','f'),def=h('textarea','f'),ms=h('input','f');[term,def,ms].forEach(e=>e.classList.add('ed'));term.value=t.term||'';def.value=t.definition||'';ms.value=(t.measures||[]).join(', ');
@@ -606,7 +608,25 @@ function tablesPage(box){
   act(c,'Delete',async()=>{await api('delete_table',{table:t});return 'Deleted.'});g.append(c)})}
 
 // ---------- the model canvas: drag tables, drag a column onto another table's column to join, click a join to remove it ----------
-function modelCanvas(box){const T=D.model?.tables||{},R=D.model?.relationships||[],names=Object.keys(T);
+// named models (ABI's model/models.json): one picker on Diagram and Measures; the choice narrows both pages
+let NM='';try{NM=localStorage.getItem('abi-nm-'+D.project)||''}catch(e){}
+const nmOf=()=>(D.models||[]).find(m=>m.id===NM),nmTable=t=>{const m=nmOf();return !m||(m.tables||[]).includes(t)||t===D.model?.date_table?.table};
+const nmMeasure=x=>{const m=nmOf();if(!m)return true;if(m.measures?.length)return m.measures.includes(x.id);
+ return [...String(x.expression||'').matchAll(/\b([a-z][a-z0-9_]*)\.[a-z_]/gi)].every(r=>nmTable(r[1]))};
+function modelBar(box){if(!(D.models||[]).length&&MODE==='viewer')return;const bar=h('div','row bar lead seg');
+ const pick=id=>{NM=id;try{localStorage.setItem('abi-nm-'+D.project,id)}catch(e){}show(CUR)};
+ [['','All tables'],...(D.models||[]).map(m=>[m.id,m.name])].forEach(([id,name])=>{const b=h('button','chip'+(NM===id?' on':''),name);b.title=id?(D.models.find(m=>m.id===id).description||'Model '+name):'The whole model';b.onclick=()=>pick(id);bar.append(b)});
+ if(MODE==='developer'){const nb=h('button','chip add w','+ New model');nb.onclick=()=>{if(box.querySelector('.nmform'))return;
+  const c=card('New model','a subset of the tables for one audience; joins and measures stay shared'),nm=h('input','f'),ds=h('input','f'),ck=h('div','checks');c.classList.add('nmform','wide');
+  nm.placeholder='e.g. Marketing';ds.placeholder='who it is for (optional)';Object.keys(D.model?.tables||{}).filter(t=>t!==D.model?.date_table?.table).forEach(t=>{const l=h('label','chk'),i=h('input');i.type='checkbox';i.value=t;l.append(i,document.createTextNode(t));ck.append(l)});
+  c.append(h('label','l','Name'),nm,h('label','l','Description'),ds,h('label','l','Tables'),ck);
+  act(c,'Create',async()=>{const tables=[...ck.querySelectorAll('input:checked')].map(i=>i.value),id=nm.value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g,'_').replace(/^[^a-z]+/,'');
+   if(!id||!tables.length)throw new Error('Give it a name and pick at least one table.');
+   await api('save_model',{model:{id,name:nm.value.trim(),description:ds.value.trim()||null,tables}});D.models=[...(D.models||[]).filter(m=>m.id!==id),{id,name:nm.value.trim(),tables}];pick(id)},1);
+  (box.querySelector('.pghead')||bar).after(c)};bar.append(nb)}
+ if(MODE==='developer'&&NM){const db=h('button','chip w','Delete this model');db.onclick=async()=>{try{await api('delete_model',{id:NM});D.models=D.models.filter(m=>m.id!==NM);pick('')}catch(e){toast(e.message)}};bar.append(db)}
+ box.append(bar)}
+function modelCanvas(box){modelBar(box);const T=D.model?.tables||{},R=(D.model?.relationships||[]).filter(r=>nmTable(r.from.table)&&nmTable(r.to.table)),names=Object.keys(T).filter(nmTable);
  if(!names.length){box.append(h('p','empty','No tables yet: add a source first.'));return}
  const help=h('p','file',MODE==='viewer'?'Facts are filled black, dimensions outlined. Hover a join to see its columns.'
   :'Drag a table by its title. Drag from a column\'s dot onto the matching column of another table to join them (many rows to one). Click a join to remove it. Click a table\'s badge to switch fact or dimension.');
@@ -824,7 +844,11 @@ function toast(t){const x=h('div','toast',t);document.body.append(x);setTimeout(
 function highlight(item){if(!item)return;const want=String(item).toLowerCase();
  const c=[...document.querySelectorAll('main .card')].find(c=>c.textContent.toLowerCase().includes(want));if(c){c.classList.add('hl');c.scrollIntoView({behavior:'smooth',block:'center'});setTimeout(()=>c.classList.remove('hl'),4000)}}
 const chatBox=$('#chat'),log=$('#chat .log'),inp=$('#chat textarea'),busy=$('#chat .busy');
-const md=t=>t.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])).replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>');
+// an answer's text as HTML: escaped first, then bold, code and markdown tables (a block of |-lines; the --- row is dropped)
+const md=t=>t.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])).replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>')
+ .replace(/(^|\n)((?:[ \t]*\|[^\n]*\|[ \t]*(?:\n|$))+)/g,(all,pre,block)=>{const rows=block.trim().split('\n').map(r=>r.trim().slice(1,-1).split('|').map(c=>c.trim()))
+  .filter(r=>!r.every(c=>/^:?-{2,}:?$/.test(c)));if(rows.length<2)return all;const n=c=>/^[-+]?[\d.,]+\s*%?$/.test(c);
+  return pre+'<table class=mdt><tr>'+rows[0].map(c=>'<th>'+c+'</th>').join('')+'</tr>'+rows.slice(1).map(r=>'<tr>'+r.map(c=>'<td'+(n(c)?' class=n':'')+'>'+c+'</td>').join('')+'</tr>').join('')+'</table>'});
 function bubble(cls,text){const b=h('div','m '+cls);if(cls==='ai')b.innerHTML=md(text);else b.textContent=text;log.append(b);log.scrollTop=log.scrollHeight;return b}
 let steps=null;
 // Chat page: the same conversation as the side panel, full width; leaving the page (or the agent showing one) puts it back at the side
@@ -867,6 +891,7 @@ if(LIVE){const es=new EventSource('/events?k='+encodeURIComponent(KEY)+'&c='+CID
   else if(e.type==='answer'){steps=null;bubble('ai',e.text);chats();if(!chatBox.classList.contains('open'))toast('The agent answered')}
   else if(e.type==='ask'){const yes=await ask({message:e.title||'ABI asks for your confirmation',preview:e.message});bubble('sys',yes?'You confirmed.':'You declined.');
    fetch('/chat/answer',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({id:e.id,yes})})}
+  else if(e.type==='open'){location.href='/?p='+encodeURIComponent(e.project)+'#'+encodeURIComponent(e.page)}
   else if(e.type==='mode'){setMode(e.mode);show(CUR);if(e.mode==='viewer'&&!e.published){let seen=0;try{seen=sessionStorage.getItem('abi-unpub');sessionStorage.setItem('abi-unpub','1')}catch(x){}if(!seen)toast('Nothing published yet: Viewer shows the working version until you publish.')}}
   else if(e.type==='vault'){await loadVault();sidebar();show(CUR)}
   else if(e.type==='note')toast(e.text)}}
@@ -939,7 +964,7 @@ def snapshot(dest: Path, project: str) -> dict:
     sections["Model"] = f"<div class=card>{render.diagram(model, kinds)}</div>"
     out = {"project": project, "measures": measures, "reports": reports, "dims": dims, "flows": live("list_flows", "flows", "flows"),
            "ml": live("ml_models", "models", "ml"), "tools": live("list_tools", "tools", "tools"),
-           "agents": live("list_agents", "agents", "agents"), "glossary": sm.get("glossary") or [],
+           "agents": live("list_agents", "agents", "agents"), "glossary": sm.get("glossary") or [], "models": sm.get("models") or [],
            "datasets": [queries.get(d["id"], {}) | d for d in sm.get("datasets") or []], "model": model,
            "columns": sm.get("columns") or {}, "sources": sorted(sources), "source_specs": sources, "table_steps": table_steps,
            "tables": sorted(model["tables"]), "readiness": read("readiness", project), "pending": read("changes", project),
@@ -1242,7 +1267,7 @@ ROUTE_SECTION = {"/edits/rows": "Data", "/upload": "Data", "/report/export": "Ex
                  "/packs/file": "Export", "/transfer/": "Export", "/vault/": "Knowledge", "/analyses": "Visualizations"}
 REPORT_ACTIONS = {"visual_data", "report_snapshot", "export_visual", "save_report", "delete_report"}
 _SEC = {"Data": "add_data delete_source delete_table set_steps preview_steps refresh edit_cells approve_edit reject_edit undo_edits create_input_table",
-        "Data Model": "add_relationship remove_relationship set_measure delete_measure set_glossary_term delete_glossary_term save_dataset delete_dataset",
+        "Data Model": "add_relationship remove_relationship set_measure delete_measure set_glossary_term delete_glossary_term save_dataset delete_dataset save_model delete_model",
         "Visualizations": "save_report delete_report", "Export": "export_visual report_snapshot", "Govern": "commit undo",
         "Automate": "save_flow delete_flow enable_flow run_flow save_ml_model delete_ml_model train_model score_model save_tool publish_tool"
                     " delete_tool run_tool test_tool save_agent publish_agent delete_agent run_agent test_agent"}
@@ -1354,10 +1379,6 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
             abi.call("set_auto_commit", project=p, on=False)
         except abi.ActionError:
             pass
-
-    def page_of(p: str) -> Path:
-        f = abi.folder(p) / "app.html"
-        return f if f.exists() else build(p)
 
     opening(default)
     build(default)
@@ -1499,10 +1520,8 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
             opening(p)
             me = {"name": self.sess["name"] if self.sess else None, "admin": bool(not self.sess or self.sess["admin"]), "signin": signin,
                   "role": role_of(self.sess, p), **access(self.sess, p)}
-            if self.sess:  # the page's data as this person: their row-level security, their sections and reports
-                page = page_html(p, own_packs(viewed(cached(p, self.sess["name"]), access(self.sess, p)), self.sess, p))
-            else:
-                page = page_of(p).read_text()
+            # the page's data as this person (their row-level security, sections and reports); live, never the synced file
+            page = page_html(p, own_packs(viewed(cached(p, self.sess["name"] if self.sess else ""), access(self.sess, p)), self.sess, p))
             self.reply(200, page.replace(KEY_SLOT, key, 1).replace(ME_SLOT, json.dumps(me).replace("</", "<\\/"), 1).encode(), "text/html; charset=utf-8")
 
         def post(self):
@@ -1569,6 +1588,11 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                 if self.path == "/agent/show":
                     for h0 in [h for h in targets if body.get("project") in (h.project, pub_id(h.project))]:
                         h0.emit({"type": "show", **{k: body.get(k) for k in ("page", "report", "filters", "item", "note", "query", "chart")}})
+                    p = str(body.get("project", ""))
+                    if cid and known(p):  # another project (one the chat just made): that browser opens it; its load checks access
+                        page = f"rep:{body['report']}" if body.get("page") == "report" and body.get("report") else str(body.get("page") or "home")
+                        for h0 in [h for h in targets if p not in (h.project, pub_id(h.project))]:
+                            h0.emit({"type": "open", "project": p, "page": page})
                 elif self.path == "/agent/changed":
                     changed(body["project"].removesuffix("_pub") if known(str(body.get("project", "")).removesuffix("_pub")) else default)
                 return self.reply(200, b"{}")

@@ -48,3 +48,38 @@ def test_a_two_digit_year_date_is_never_read_as_year_2(tmp_path):
                  + "n/a,0\n")
     r = abi.load("demo", "pi_date_test", [str(f)])
     assert r["loaded"][0].get("date", {}).get("format") == "%y.%d.%m", r["loaded"]
+
+
+@pytest.mark.skipif(not PY.exists() or engine("from abi import db; db.connect().close()").returncode, reason="engine's Postgres not running")
+def test_named_models_narrow_the_model_queries_and_reports(tmp_path):
+    """Several models in one project (model/models.json): a model shows only its tables and measures, a query or a
+    report in it can't reach outside it, a report can't name a model that isn't there, and the numbers are the same."""
+    import sys
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import abi
+    (tmp_path / "orders.csv").write_text("order_id,region,amount\n1,North,10\n2,South,20\n3,North,5\n")
+    (tmp_path / "visits.csv").write_text("visit_id,page,seconds\n1,home,30\n2,cart,12\n")
+    abi.load("demo", "pi_model_test", [str(tmp_path)])
+    P = "pi_model_test"
+    ms = {m["id"]: m["expression"] for m in abi.call("semantic_model", project=P, all=True)["measures"]}
+    sales = next(i for i, e in ms.items() if "orders.amount" in e)
+    web = next(i for i, e in ms.items() if "visits." in e)
+    assert abi.call("save_model", project=P, model={"id": "sales", "name": "Sales", "tables": ["orders"]}) == {"id": "sales"}
+    m = abi.call("semantic_model", project=P, model="sales", all=True)
+    assert set(m["tables"]) == {"orders"} and {x["id"] for x in m["measures"]} >= {sales} and web not in {x["id"] for x in m["measures"]}
+    assert m["models"] == [{"id": "sales", "name": "Sales", "tables": ["orders"]}]  # the page filters by its tables
+    inside = abi.call("semantic_query", project=P, model="sales", measures=[sales], dimensions=["orders.region"])["rows"]
+    assert inside == abi.call("semantic_query", project=P, measures=[sales], dimensions=["orders.region"])["rows"]
+    with pytest.raises(abi.ActionError) as e:
+        abi.call("semantic_query", project=P, model="sales", measures=[web])
+    assert "not in model 'sales'" in str(e.value)
+    rep = {"id": "web_in_sales", "name": "W", "model": "sales", "pages": [{"id": "p", "name": "P", "visuals": [
+        {"id": "v", "type": "kpi", "title": "t", "query": {"measures": [sales], "dimensions": ["visits.page"]}, "layout": {"x": 0, "y": 0, "w": 3, "h": 3}}]}]}
+    with pytest.raises(abi.ActionError):
+        abi.call("save_report", project=P, report=rep)
+    with pytest.raises(abi.ActionError):
+        abi.call("save_report", project=P, report=rep | {"model": "nope"})
+    with pytest.raises(abi.ActionError) as e:  # destructive: it waits for a person's yes, as every delete does
+        abi.call("delete_model", project=P, id="sales")
+    abi.call("delete_model", confirm=e.value.body["confirm_token"], project=P, id="sales")
+    assert abi.call("semantic_model", project=P, all=True)["models"] == []

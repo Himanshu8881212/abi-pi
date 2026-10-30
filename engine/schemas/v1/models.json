@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.abi.invalid/v1/models.json",
+  "title": "Models",
+  "description": "model/models.json: named models of one project (perspectives): each a subset of the project's model tables and measures for one audience or subject (e.g. Finance, Marketing). Joins and measures stay those of model/model.json and model/measures.json, so numbers never differ between models. A report or a query that names a model may use only its tables (and the date table) and measures.",
+  "type": "object",
+  "required": ["$schema", "models"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {"const": "https://schema.abi.invalid/v1/models.json"},
+    "models": {"type": "array", "items": {"type": "object", "required": ["id", "name", "tables"], "additionalProperties": false, "properties": {
+      "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$"},
+      "name": {"type": "string", "minLength": 1, "description": "Display name, shown to users"},
+      "description": {"type": "string"},
+      "tables": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}, "description": "Model tables in this model; the date table is always included"},
+      "measures": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "Measure IDs in this model; empty or missing: every measure over its tables"}
+    }}}
+  }
+}

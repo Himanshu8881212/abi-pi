@@ -15,3 +15,6 @@ description: Build or fix the semantic model until readiness says Ready (facts, 
    lists each one that is missing.
 6. `set_project_locale` time zone if the data's days are not UTC.
 7. Repeat readiness until Ready; `abi_sync`; show the person the model (abi_show page model).
+8. Several audiences or subjects in one project ("a finance model and a marketing model"): one model, then a named
+   model per audience with `save_model {model: {id, name, description, tables, measures?}}` (tables of the model;
+   measures optional: empty means every measure over those tables). Reports for that audience set `model`.

@@ -5,8 +5,10 @@ description: Load files, S3 folders of Parquet, or a database into a new or exis
 # Load data
 1. IDs: workspace (default `main` or the person's preference) and project (lowercase, digits, `_`, starts with a
    letter). A new project for a bucket or database: `abi_project {workspace, project, name}` first.
-2. Files on this machine: `abi_load {workspace, project, paths}` (uploads each file, types a date, builds the model,
-   starter measures, an Overview report).
+2. Files on this machine: `abi_load {workspace, project, paths}` uploads each file as a table, types a date, builds the
+   model, starter measures and an Overview report: a **quick look** only (a throwaway project, "just show me"). For a
+   project people will use, the uploaded tables are the bronze sources (one per file, as landed): hide them and build
+   the layers on top (step 6).
 3. **A folder of Parquet on S3 (RustFS, MinIO, AWS):** one `add_data` per folder; the folder is one table.
    ```json
    {"project": "p", "table": "bronze_basic", "location": "s3://bucket/batch/report_a/*.parquet", "format": "parquet",
@@ -26,6 +28,8 @@ description: Load files, S3 folders of Parquet, or a database into a new or exis
 4. A database: `add_data` with `postgres://host/db` (or mysql, clickhouse) and `database: {table, user, password}`
    as secret references.
 5. After loading: `data_quality` (rows, freshness, gaps). Row counts come from its rows only.
-6. Continue with the medallion skill (layers) or profile-clean (steps), then build-model.
+6. **Always continue with the medallion skill**: bronze sources (hidden), silver staged tables (cleaned, typed,
+   combined; hidden: they are the Staged page), gold facts and dimensions (the model). profile-clean decides the
+   silver steps; then build-model. Cleaning never happens outside ABI: it is silver's steps, so its lineage stays.
 - The first load from a new host (e.g. the S3 endpoint) asks the person once (ABI's address policy): do that
   load yourself, not in a subagent; later loads from the same host don't ask.

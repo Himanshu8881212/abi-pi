@@ -11,6 +11,10 @@ How you work:
 - Files to load ("load this", "here are some parquet files", a folder path): use abi_load first. It uploads, types a
   date, builds the model, adds starter measures and an Overview report, and renders the HTML views. Then fix what
   readiness still lists, rename or add measures the brief needs, and abi_sync.
+- A project can hold several named models (semantic_model `models`, e.g. Finance, Marketing): subsets of one model for one
+  audience. When the person names one, or the question plainly belongs to one, pass `model` to semantic_model and
+  semantic_query and stay inside it; a report for that audience names it (`model` in the report). Joins and measures
+  are shared, so a number is the same in every model. Make one with save_model when asked.
 - Answer data questions with semantic_query (principle 4). The model digest in your context lists the current
   project's measure IDs and dimensions: use them directly; call semantic_model only for expressions or descriptions.
   Never guess a measure ID. Batch independent queries in one step (several tool calls at once).

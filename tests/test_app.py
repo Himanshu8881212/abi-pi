@@ -115,6 +115,24 @@ def test_agent_steers_the_page_only_with_its_key(srv):
     assert ev == {"type": "show", "page": "measures", "report": None, "filters": None, "item": "amount", "note": "look here", "query": None, "chart": None}
 
 
+def test_the_chat_agent_opens_a_project_it_just_made(srv):
+    """A project the agent built in the chat opens in that person's app (the page reloads on it, and the server checks
+    their access there); before, abi_show found no app for the new project and told the person to run a command."""
+    port, key, _ = srv
+    other = next((p["project"] for p in abi.call("list_projects")["projects"] if p["project"] != P), None)
+    if not other:
+        pytest.skip("needs a second project")
+    stream = urllib.request.urlopen(f"http://127.0.0.1:{port}/events?k={key}&c=open1&m=0", timeout=10)
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/agent/show", json.dumps({"project": other, "page": "report", "report": "overview"}).encode(),
+                                 {"X-Abi-Agent": HUB.agent_key, "X-Abi-Client": "open1", "Content-Type": "application/json"})
+    urllib.request.urlopen(req)
+    for _ in range(20):
+        line = stream.readline()
+        if line.startswith(b"data:") and (ev := json.loads(line[5:]))["type"] == "open":
+            break
+    assert ev == {"type": "open", "project": other, "page": "rep:overview"}
+
+
 @pytest.mark.live
 def test_chat_in_the_page_answers_and_steers_it(srv):
     port, key, _ = srv
@@ -424,3 +442,27 @@ def test_a_model_that_refuses_is_told_not_silent():
     answers = [e["text"] for e in out if e["type"] == "answer"]
     assert answers and "429" in answers[0] and "Settings" in answers[0], out
     assert "credentials" not in answers[0], "the provider's own text stays in the log"
+
+
+def test_chat_answers_draw_markdown_tables_safely():
+    """The agent answers with markdown tables; the chat showed them as raw pipes. Cells stay escaped."""
+    import shutil
+    if not shutil.which("node"):
+        pytest.skip("no node")
+    src = re.search(r"const md=t=>.*?\}\);", app.JS, re.S).group(0)
+    out = subprocess.run(["node", "-e", src + "\nprocess.stdout.write(md(process.argv[1]))",
+                          "Top:\n| Category | Views |\n|---|---:|\n| <b>Music</b> | 1,200 |\n| **Gaming** | 900 |\nDone."],
+                         capture_output=True, text=True, check=True).stdout
+    assert "<table class=mdt><tr><th>Category</th><th>Views</th></tr>" in out and "<td class=n>1,200</td>" in out
+    assert "&lt;b&gt;Music&lt;/b&gt;" in out and "<td><b>Gaming</b></td>" in out and "|---" not in out
+
+
+def test_one_person_mode_serves_the_live_page_not_a_stale_file(srv):
+    """--single served <project>/app.html from disk, written at the last sync: a change made since (here: a file
+    left over from before) stayed invisible until the next sync."""
+    port, key, _ = srv
+    f = abi.folder(P) / "app.html"
+    f.write_text(f.read_text().replace('"project": "', '"stale_marker": 1, "project": "', 1))
+    app.changed(P)
+    page = urllib.request.urlopen(f"http://127.0.0.1:{port}/?p={P}").read().decode()
+    assert '"stale_marker"' not in page

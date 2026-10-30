@@ -407,12 +407,18 @@ def query(project: str, q: dict, user_id: int | None = None) -> dict:
 
 class QueryInput(SemanticQuery):
     project: str = Field(pattern=storage.PROJECT)
+    model: str | None = Field(None, description="a named model of the project (semantic_model lists them): the query may use only its tables and measures")
 
 
 @action(Role.viewer)
 def semantic_query(conn, user: User, args: QueryInput) -> dict:
     """Answers a data question through the semantic model: measure IDs, grouped by table.column dimensions, with filters, optional totals, order and limit. Returns the columns (dimensions, then measure IDs), each measure's display name and the rows. Every number you state must come from these rows."""
-    return query(args.project, args.model_dump(mode="json", exclude={"project"}), user.id)
+    q = args.model_dump(mode="json", exclude={"project", "model"})
+    if args.model:
+        from abi.semantic import model  # not at top: model imports this package
+
+        model.in_scope(args.project, args.model, q["measures"], q["dimensions"] + [f["column"] for f in q["filters"]])
+    return query(args.project, q, user.id)
 
 
 EXPORT_BATCH = 65_536  # rows per Arrow batch (D-17); DuckDB reserves a whole batch per column (duckdb#26270)

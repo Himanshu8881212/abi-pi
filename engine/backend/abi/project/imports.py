@@ -28,7 +28,7 @@ RLS = git.RLS
 MEASURES = "model/measures.json"
 LAYOUT = {  # §6.6 paths that have a published schema (M-04); other object types ship with their tasks
     r"project\.json": "project", r"sources/[^/]+\.json": "source", r"tables/[^/]+\.json": "table",
-    r"model/model\.json": "model", r"model/glossary\.json": "glossary", r"model/measures\.json": "measures", r"model/datasets\.json": "datasets",
+    r"model/model\.json": "model", r"model/glossary\.json": "glossary", r"model/measures\.json": "measures", r"model/datasets\.json": "datasets", r"model/models\.json": "models",
     r"security/roles\.json": "roles", r"security/rls\.json": "rls", r"reports/[^/]+\.json": "report", r"tools/[^/]+\.json": "tool",
     r"docs/descriptions\.json": "descriptions", r"flows/[^/]+\.json": "flow",
     r"agents/[^/]+\.eval\.json": "eval", r"agents/[^/]+\.json": "agent",  # eval first: agents/x.eval.json matches both
@@ -244,6 +244,29 @@ def _references(conn, project: str, files: dict) -> list[dict]:
     model = files.get("model/model.json")
     tables = model and {t["table"] for t in model.get("tables", [])}  # None: no model to check against
     errs += [e for rel, c in files.items() if _kind(rel) == "report" for e in _report(rel, c, measures, tables)]
+    # ABI-PI: named models (model/models.json) hold model tables and measures; a report names one that exists, and its
+    # visuals stay inside it when the model lists its measures
+    named = {x["id"]: x for x in (files.get("model/models.json") or {}).get("models", [])}
+    date = ((model or {}).get("date_table") or {}).get("table")
+    errs += [_err("model/models.json", f"$.models[{i}].tables[{j}]", f"Unknown model table '{t}'.", "Use a table of model/model.json.")
+             for i, x in enumerate(named.values()) for j, t in enumerate(x["tables"]) if tables is not None and t not in tables]
+    errs += [_err("model/models.json", f"$.models[{i}].measures[{j}]", f"Unknown measure '{m}'.", f"Add it to {MEASURES} or remove it from the model.")
+             for i, x in enumerate(named.values()) for j, m in enumerate(x.get("measures", [])) if m not in measures]
+    for rel, c in files.items():
+        if _kind(rel) != "report" or not c.get("model"):
+            continue
+        if c["model"] not in named:
+            errs.append(_err(rel, "$.model", f"No model '{c['model']}'.", "Add it to model/models.json or remove $.model."))
+            continue
+        nm = named[c["model"]]
+        for pi, pg in enumerate(c.get("pages", [])):
+            for vi, v in enumerate(pg.get("visuals", [])):
+                q = v.get("query") or {}
+                out = [m for m in q.get("measures", []) if nm.get("measures") and m not in nm["measures"]] + [
+                    col for col in q.get("dimensions", []) + [f["column"] for f in q.get("filters", [])]
+                    if col.split(".", 1)[0] not in {*nm["tables"], date}]
+                errs += [_err(rel, f"$.pages[{pi}].visuals[{vi}].query", f"'{x}' is not in model '{c['model']}'.",
+                              f"Use the model's tables ({', '.join(nm['tables'])}) and measures, or add it to the model.") for x in out]
     errs += [e for rel, c in files.items() if _kind(rel) == "tool" and "query" in c for e in _query(rel, "$.query", c["query"], measures, tables)]
     # SC-9: an account of another tenant can't own or hold anything here, and reads as an unknown ID (no probing)
     users = {str(r["id"]): r["workspace_owner"] for r in conn.execute(f"SELECT id, workspace_owner FROM users WHERE {ALLOWED}", [project])}
