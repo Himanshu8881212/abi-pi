@@ -200,8 +200,9 @@ textarea.f{font:14px/1.5 var(--text)}textarea.f.code,textarea.code{font:13px/1.5
 .stlist{display:flex;flex-direction:column;gap:6px}.strow{flex-wrap:nowrap}.strow b{flex:0 0 190px;font-weight:500;font-size:13px}.strow input{flex:1;min-width:0}.stform select.f{max-width:520px}
 .mlist{max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:var(--r);padding:8px 12px;margin-top:6px;max-width:520px}
 button.pin{font:500 12px var(--text);border:1px solid var(--line);border-radius:999px;background:none;color:var(--mute);padding:2px 10px;cursor:pointer;margin-left:6px}button.pin:hover{border-color:var(--ink);color:var(--ink)}button.pin.on{background:var(--signal);border-color:var(--signal);color:#fff}
-.cards.pins{margin-bottom:8px}.pinned .body{min-height:40px}
+.cards.pins{margin-bottom:8px;align-items:start}.pinned .acts .btn{padding:5px 9px}.pinned .body{min-height:40px}
 #commit input.f,#commit textarea.f{display:block;width:100%;margin-top:6px}
+.card>.btn{align-self:flex-start}
 #menu{display:none}
 .mobile .modes,.mobile .vc,.mobile #theme{display:none}.mobile #menu{display:inline-flex}
 .mobile body{grid-template-columns:1fr}.mobile header{grid-column:1;gap:8px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
@@ -279,6 +280,10 @@ function pinBtn(pin){const b=h('button','pin','Pin');b.title='Pin to Home';const
  pinsLoad().then(set);b.onclick=async e=>{e.stopPropagation();await pinsLoad();const k=pinKey(pin),on=PINS.some(x=>pinKey(x)===k);PINS=on?PINS.filter(x=>pinKey(x)!==k):[...PINS,pin];set();
   try{await pinPost({pins:PINS});toast(on?'Unpinned from Home.':'Pinned to Home.')}catch(x){toast('Could not save the pin.')}};return b}
 async function pinCard(p,c){const body=h('div','body'),go=h('button','btn','Open'),un=h('button','btn','Unpin');c.append(body);const tools=h('div','row acts');tools.append(go,un);c.append(tools);
+ // arrange: move left or right, wide or narrow (saved with the pins)
+ const mv=async d=>{const i=PINS.findIndex(x=>pinKey(x)===pinKey(p)),j=i+d;if(i<0||j<0||j>=PINS.length)return;[PINS[i],PINS[j]]=[PINS[j],PINS[i]];await pinPost({pins:PINS});show('home')};
+ const l=h('button','btn','←'),r2=h('button','btn','→'),wd=h('button','btn',p.wide?'Narrow':'Wide');l.title='Move left';r2.title='Move right';l.onclick=()=>mv(-1);r2.onclick=()=>mv(1);
+ wd.onclick=async()=>{const x=PINS.find(x=>pinKey(x)===pinKey(p));x.wide=!x.wide;await pinPost({pins:PINS});show('home')};tools.append(l,r2,wd);
  un.onclick=async()=>{PINS=PINS.filter(x=>pinKey(x)!==pinKey(p));await pinPost({pins:PINS});c.remove()};
  const r=p.ref,line=(t,cls)=>body.append(h('p',cls||'',t));
  try{if(p.kind==='visual'){go.onclick=()=>show('rep:'+r.report);const d=await api('visual_data',{report:r.report,page:r.page,visual:r.visual});requestAnimationFrame(()=>chart(body,d))}
@@ -292,7 +297,7 @@ async function pinCard(p,c){const body=h('div','body'),go=h('button','btn','Open
    line(o?(o.description||o.status||o.name||r):'It was removed.',o?'':'empty')}}catch(e){line(e.message,'bad')}}
 async function pinsHome(box){const sec=h('div','cards pins');box.append(sec);const ps=await pinsLoad();
  if(!ps.length){const c=card('Your Home','pin what you check often');c.classList.add('wide');c.append(h('p','',"Press Pin on a report chart, a saved analysis, a monitor, a table, a flow, an agent or a tool: it shows here, live. Open goes to its page."));sec.append(c);return}
- ps.forEach(p=>{const c=card(p.title||p.ref);c.classList.add('pinned');sec.append(c);pinCard(p,c)})}
+ ps.forEach(p=>{const c=card(p.title||p.ref);c.classList.add('pinned');if(p.wide)c.classList.add('wide');sec.append(c);pinCard(p,c)})}
 function home(box){pinsHome(box);const rd=D.readiness||{},q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),rowsQ=q.rows||[];
  const last=rowsQ.map(r=>r[ix('last_load')]).filter(Boolean).sort().pop(),problems=rowsQ.flatMap(r=>(r[ix('problems')]||[]).map(p=>`${r[ix('table')]}: ${p}`));
  const g=h('div','home');box.append(g);
@@ -300,8 +305,11 @@ function home(box){pinsHome(box);const rd=D.readiness||{},q=D.quality||{},ix=c=>
  const at=card('Needs attention');const al=h('ul','list');[...(rd.missing||[]).map(x=>typeof x==='string'?x:JSON.stringify(x)),...problems].forEach(t=>al.append(h('li','bad',t)));
  if(MODE==='developer'&&LIVE)team(at,al);
  if(!al.children.length)al.append(h('li','ok','Nothing: the model is ready and the data is fresh.'));at.append(al);
- if(al.children.length>4){const rest=[...al.children].slice(3);rest.forEach(x=>x.hidden=true);const more=h('button','btn',`Show ${rest.length} more`);
-  more.onclick=()=>{const open=rest[0].hidden;rest.forEach(x=>x.hidden=!open);more.textContent=open?'Show fewer':`Show ${rest.length} more`};at.append(more)}
+ // one summary line; the details open on demand (the team's steps arrive later, the line follows them)
+ const sum=h('p'),tog=h('button','btn','Show details');al.hidden=true;al.before(sum);al.after(tog);
+ const upd=()=>{const it=[...al.children],wait=it.filter(x=>/^Waiting for your yes/.test(x.textContent)).length,bad=it.filter(x=>x.classList.contains('bad')).length-wait;
+  sum.className=bad||wait?'bad':'ok';sum.textContent=bad||wait?[bad&&`${bad} problem${bad>1?'s':''} in the data or model`,wait&&`${wait} step${wait>1?'s':''} wait for your yes`].filter(Boolean).join(' · '):'Nothing: the model is ready and the data is fresh.';tog.hidden=!(bad||wait)};
+ tog.onclick=()=>{al.hidden=!al.hidden;tog.textContent=al.hidden?'Show details':'Hide details'};upd();new MutationObserver(upd).observe(al,{childList:true});
  act(at,'Check again',async()=>{D.quality=await api('data_quality',{});D.readiness=await api('readiness',{});show('home')});g.append(at);
  // the map: every sidebar group with its pages and one line of status, in pipeline order
  const mlok=D.ml.filter(m=>m.latest_score?.status==='ok').length,on=D.flows.filter(f=>f.enabled).length,lastC=(D.history||[])[0];

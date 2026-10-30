@@ -30,7 +30,7 @@ CSS = """
  --faint:#2a2a28;--line:#2a2a28;--hover:#1c1c1b;--signal:#ff6a3d;--signal-ink:#ff8a63;--red:#ff6b55;--ok:#4cc27f;--c2:#ff6a3d;--c3:#8f8f8a;--c4:#4d4d4a;color-scheme:dark}}
 :root[data-theme="dark"]{--paper:#0b0b0b;--sheet:#141414;--ink:#f2f2ef;--mute:#9b9b96;--faint:#2a2a28;--line:#2a2a28;--hover:#1c1c1b;
  --signal:#ff6a3d;--signal-ink:#ff8a63;--red:#ff6b55;--ok:#4cc27f;--c2:#ff6a3d;--c3:#8f8f8a;--c4:#4d4d4a;color-scheme:dark}
-*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}[hidden]{display:none!important}
 body{margin:0;font:14px/1.5 var(--text);background:var(--paper);color:var(--ink);-webkit-font-smoothing:antialiased;font-feature-settings:"ss01","cv11"}
 header{display:flex;gap:16px;align-items:center;flex-wrap:wrap;padding-block:12px;padding-left:max(24px,env(safe-area-inset-left,0px));
  padding-right:max(24px,env(safe-area-inset-right,0px));border-bottom:1px solid var(--line);background:var(--sheet)}
