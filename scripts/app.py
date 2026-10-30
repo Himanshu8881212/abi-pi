@@ -635,7 +635,9 @@ function measures(box){modelBar(box);const top=h('div','row bar top'),q=h('input
   ex.classList.add('code');if(!isNew){ex.rows=1;rowcard(c,fld('Name',name,m.id),fld('MEL',ex),fld('Description',de))}
   act(c,isNew?'Create':'Save',async()=>{await api('set_measure',{id:id.value,name:name.value,expression:ex.value,description:de.value||null});
    Object.assign(m,{id:id.value,name:name.value,expression:ex.value,description:de.value});if(isNew){D.measures.push(m);show('measures')}return 'Saved through ABI (checked like an import).'},1);
-  act(c,'Test',async()=>{const r=await api('semantic_query',{measures:[id.value]});return `${r.measures?.[id.value]||id.value} = ${fmt(r.rows?.[0]?.[0])}`});
+  // Test: the measure's total through ABI. ABI runs saved measures only, so an edit not yet saved is not what it tests
+  act(c,'Test',async msg=>{say(msg,'Testing…');const t0=Date.now(),r=await api('semantic_query',{measures:[id.value]}),v=r.rows?.[0]?.[0];
+   return `${r.measures?.[id.value]||id.value} = ${fmt(v,r.format?.[id.value])} · total over all data, ${((Date.now()-t0)/1000).toFixed(1)} s`+(c.classList.contains('dirty')?' · this is the saved version: Save to test your change':'')});
   if(!isNew)act(c,'Delete',async()=>{await api('delete_measure',{id:id.value});D.measures=D.measures.filter(x=>x!==m);show('measures')});return c};
  const fill=()=>{list.innerHTML='';list.append(rowhead('Measure','MEL','Description',''));D.measures.filter(nmMeasure).filter(m=>!q.value||JSON.stringify(m).toLowerCase().includes(q.value.toLowerCase())).forEach(m=>list.append(edit(m)))};
  top.append(q,btn('New measure',()=>list.firstChild.after(edit({},true)),1));q.oninput=fill;fill()}
