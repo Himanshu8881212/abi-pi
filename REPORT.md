@@ -295,3 +295,21 @@ From a plain-user pass over every feature (the agent built, explained, refused w
 - **Sources are Parquet:** a source is an uploaded .parquet file or an S3 folder of Parquet files (`s3://…/*.parquet`); CSV, Excel, JSON, local paths and databases are refused at every door, with a message that says what to upload instead (it never announces a rule): `abi.call`/`abi.upload` (the app, `abi.py load`), the agent's actions (the extension) and the Sources form (Parquet file picker, no format menu). The load-data skill says so. Sources already loaded stay as they are.
 - **No developer instructions in the app's chat:** after a sync the agent told app users "Open live: `python scripts/app.py main`" and the app.html path (found in the release run on the deployed container). In the app's chat it now shows the page instead; `abi_sync` leaves out the command when the agent runs in the app.
 - **Resize without a mode, and a collapsible sidebar:** in Developer on a desktop, a card's corner handle shows on hover and resizes it at once (the first resize keeps the grid as it looks, in 12 columns); moving cards stays in Layout. The Menu button collapses the sidebar on a desktop (remembered per browser) and opens the drawer on a phone.
+
+## Deployed release run (30 Oct 2026, Proxmox pve1, container 100)
+
+Deployed as the README says (repo copy, `.env`, `docker compose build` 3 min 12 s, `up -d` 16 s); RustFS beside it with
+Brewline Coffee: 120 cafés, 60,000 customers, 7.4M orders in 36 monthly Parquet files. Container check 13/13 there.
+Sources added through the app (orders in 35 s); eight plain requests to the agent (about 2 h 10 min in all); committed.
+The agent's 2024/2025 revenue by region matches an independent DuckDB sum over the Parquet to the cent.
+
+Open findings:
+- **The agent can't make the app's monitors or Explore analyses.** Asked for monitors it built none (ABI's actions have no
+  rolling "last week"); the app's Monitor checks (previous period, against a target) would do it, but they are app files
+  with no agent tool. Explore: it saved queries instead.
+- **A chat running in another window can't be followed** (live steps go only to the window that sent the message).
+- **Grounding masked an ordinary word** ("[not verified] nonmembers") in an analysis answer.
+- **ABI's own custom agents can't be evaluated in the container**: "no LLM model is available" to the engine, so the
+  store-manager agent stayed a draft.
+- Fixed during the run: developer commands in the agent's answers; measure Test clarity; chat height; resize on hover;
+  collapsible sidebar.
