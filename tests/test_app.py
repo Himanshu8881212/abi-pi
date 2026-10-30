@@ -406,3 +406,18 @@ def test_the_apps_own_settings_have_a_git_history(srv):
     log = subprocess.run(["git", "-C", str(d), "log", "--format=%s", "--", "analyses.json"], capture_output=True, text=True).stdout
     assert log.count("analyses.json by") >= 2, log
     assert subprocess.run(["git", "-C", str(d), "status", "--porcelain"], capture_output=True, text=True).stdout == ""
+
+
+def test_a_model_that_refuses_is_told_not_silent():
+    """A provider out of quota (429) ended the run with no answer: the chat just stopped (REPORT #50)."""
+    import types
+    err = {"role": "assistant", "content": [], "stopReason": "error",
+           "errorMessage": 'cliproxy API error (429): {"code":"model_cooldown","message":"All credentials are cooling down"}'}
+    lines = [json.dumps({"type": "message_end", "message": err}), json.dumps({"type": "agent_settled", "aborted": False})]
+    h = app.Hub.__new__(app.Hub)
+    out = []
+    h.pi, h.busy, h.emit, h.chat_note = types.SimpleNamespace(stdout=iter(l + "\n" for l in lines)), True, out.append, lambda *a: None
+    h.read()
+    answers = [e["text"] for e in out if e["type"] == "answer"]
+    assert answers and "429" in answers[0] and "Settings" in answers[0], out
+    assert "credentials" not in answers[0], "the provider's own text stays in the log"

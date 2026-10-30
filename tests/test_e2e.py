@@ -141,3 +141,9 @@ def test_the_agent_tools_know_every_page():
     nav = {"home", "chat", "sources", "staged", "tables", "edits", "model", "measures", "glossary", "datasets", "reports", "monitor", "explore",
            "flows", "ml", "tools", "agents", "vault", "docs", "security", "environments", "history"}
     assert nav <= pages | {"chat", "edits"}, sorted(nav - pages)
+
+
+def test_a_link_straight_to_a_page_draws_after_the_script():
+    """Opening the app at #chat drew the page before the chat's parts were declared: an empty page (REPORT #51)."""
+    html = app.page_html("pi_app_test", app.cached("pi_app_test"))
+    assert "setTimeout(()=>show(first||'home'))" in html

@@ -25,7 +25,7 @@ for f in (\"pdf\", \"pptx\"):
 print(abi.call(\"semantic_query\", project=\"pi_app_test\", measures=[\"orders_rows\"], dimensions=[\"orders.region\"])[\"rows\"])"' > "$S/rows" 2>&1 \
   && ok "load, query, PDF, PPTX: $(tail -1 "$S/rows")" || bad "load/exports: $(tail -2 "$S/rows")"
 in_c abi-pi-test 'python3 scripts/video.py pi_app_test overview --seconds 1 --size 320x180 --out /tmp/v.mp4' >/dev/null 2>&1 && ok "video" || bad "video"
-in_c abi-pi-test 'export ABI_TOKEN=$(python3 scripts/creds.py abi-token) && pi -p "In project pi_app_test: how many orders rows per region? Give the figures."' > "$S/agent" 2>&1
+in_c abi-pi-test 'export ABI_TOKEN=$(python3 scripts/creds.py abi-token) && pi -p "In project pi_app_test: how many orders rows per region? Give the figures."' > "$S/agent" 2>&1 || true
 grep -q "North" "$S/agent" && grep -q "2" "$S/agent" && ok "agent answers inside" || bad "agent: $(tail -3 "$S/agent")"
 docker kill -s KILL abi-pi-test >/dev/null; docker start abi-pi-test >/dev/null; up 8796 && in_c abi-pi-test 'python3 -c "import sys; sys.path.insert(0, \"scripts\"); import abi; print(abi.call(\"semantic_query\", project=\"pi_app_test\", measures=[\"orders_rows\"], dimensions=[\"orders.region\"])[\"rows\"])"' > "$S/after" 2>&1
 cmp -s "$S/after" "$(printf '%s' "$S/rows")" 2>/dev/null; [ "$(tail -1 "$S/after")" = "$(tail -1 "$S/rows")" ] && ok "hard kill keeps data" || bad "after kill: $(tail -1 "$S/after")"

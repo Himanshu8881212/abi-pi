@@ -766,7 +766,7 @@ $('#menu').onclick=()=>document.body.classList.toggle('menu-open');side.addEvent
 $('#switch').onclick=switcher;
 if(window.ME?.signin){const w=h('span','who',ME.name),f=h('form');f.method='post';f.action='/signout';f.append(h('button','btn','Sign out'));const r0=$('header .right');r0.prepend(w,f)}
 if(window.ME&&!['editor','owner'].includes(ME.role)){$('#m-dev').hidden=true;$('#m-view').classList.add('on')}$('#m-dev').onclick=()=>pickMode('developer');$('#m-view').onclick=()=>pickMode('viewer');
-let first=decodeURIComponent(location.hash.slice(1));if(!first)try{first=localStorage.getItem('abi-app-'+D.project)}catch(e){}show(first||'home');
+let first=decodeURIComponent(location.hash.slice(1));if(!first)try{first=localStorage.getItem('abi-app-'+D.project)}catch(e){}setTimeout(()=>show(first||'home'));  // after the whole script: the chat page's parts are declared further down
 boot.then(()=>{sidebar();show(CUR)});setMode('developer');vc();
 window.addEventListener('hashchange',()=>{const k=decodeURIComponent(location.hash.slice(1));if(k&&k!==CUR)show(k)});
 
@@ -1112,7 +1112,7 @@ class Hub:
         self.pi.stdin.flush()
 
     def read(self) -> None:
-        started, final = {}, ""
+        started, final, failed = {}, "", ""
         for line in self.pi.stdout:
             self.heard, self.told = time.time(), False
             try:
@@ -1131,14 +1131,19 @@ class Hub:
                 self.emit({"type": "step", "tool": started.get(e["toolCallId"], e.get("toolName", "")).removeprefix("mcp__abi__"),
                            "state": "error" if e.get("isError") else "ok"})
             elif t == "message_end" and (m := e.get("message", {})).get("role") == "assistant":
+                if m.get("stopReason") == "error":  # the model refused (quota, key, outage); Pi retries, then settles
+                    failed = (re.search(r"\((\d{3})\)", m.get("errorMessage") or "") or re.search("()", "")).group(1) or "an error"
                 txt = "".join(c.get("text", "") for c in m.get("content", []) if c.get("type") == "text")
                 if txt.strip() and not any(c.get("type") == "toolCall" for c in m.get("content", [])):
                     final = txt  # after grounding; a first draft that failed it is followed by the retry: keep the last
             elif t == "agent_settled":
+                if not final and failed:  # say so, never just stop: the provider's own text stays in Pi's log
+                    final = (f"The model didn't answer ({failed}{': usage limit or too many requests' if failed == '429' else ''})."
+                             " Try again later, or pick another model or provider in Govern › Settings.")
                 if final:
                     self.emit({"type": "answer", "text": final})
                     self.chat_note("ai", final)
-                final = ""
+                final, failed = "", ""
                 self.busy = False
                 self.emit({"type": "busy", "on": False})
         if self.busy:  # the agent ended without an answer (it couldn't start, or it crashed): say so instead of waiting
