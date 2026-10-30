@@ -161,6 +161,11 @@ body[data-mode=viewer] .ed{background:transparent;border-color:transparent;paddi
 .tbl .cols{}.tbl .col{display:grid;grid-template-columns:14px 1fr auto;gap:6px;align-items:center;padding:4px 12px;font-size:12px;border-bottom:1px solid var(--line)}
 .tbl .col .ty{grid-column:3;color:var(--mute);font:10px var(--mono)}.tbl .col>span:not(.dot):not(.ty){grid-column:2;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tbl .dot{width:9px;height:9px;border:1.5px solid var(--mute);border-radius:50%;cursor:crosshair}.tbl .dot:hover{background:var(--signal);border-color:var(--signal)}
 .cards>.wide{grid-column:1/-1}
+.lay{display:grid!important;grid-template-columns:repeat(12,minmax(0,1fr))!important}.lay>*{max-width:none!important}
+.card.sized{overflow:auto}.card.sized>.body{flex:1;min-height:0}.card.sized>.body svg{height:100%}
+body.laying .lay>*{outline:1px dashed var(--signal);outline-offset:-1px;cursor:grab;position:relative;user-select:none}body.laying .lay>*.drag{opacity:.4}body.laying .lay>*.over{box-shadow:inset 3px 0 0 var(--signal)}
+.rz{position:absolute;right:0;bottom:0;width:18px;height:18px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,var(--signal) 50%);z-index:2}body:not(.laying) .rz{display:none}
+#layout.on{background:var(--signal);color:#fff;border-color:var(--signal)}.mobile #layout{display:none}
 .layers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.layer h4{margin:0}.layer table{margin-top:8px}
 .mobile .layers{grid-template-columns:1fr}
 .hits{display:flex;flex-direction:column;gap:12px;margin-top:12px}.hit{border-left:2px solid var(--signal);padding:2px 0 2px 12px;white-space:pre-wrap}.hit .file{margin:0 0 4px}
@@ -291,12 +296,28 @@ async function pinCard(p,c){const body=h('div','body'),go=h('button','btn','Open
   else if(p.kind==='monitor'){go.onclick=()=>show('monitor');const ck=(D.app?.monitor?.checks||[]).find(x=>x.id===r);if(!ck){line('This check was removed.','empty');return}const x=await monEval(ck);line(x.text,x.ok?'ok':'bad')}
   else if(p.kind==='flow'){go.onclick=()=>show('flw:'+r);const f=(D.flows||[]).find(x=>x.id===r);const x=await api('flow_runs',{flow:r}).catch(()=>({}));const one=x.runs?.[0]||x;
    line(`${f?.enabled?'On':'Off'} · last run: ${one.status||'never'}`,one.status==='failed'?'bad':one.status==='ok'?'ok':'')}
+  else if(p.kind==='status'){go.onclick=()=>show('monitor');const q=D.quality||{},ix=k=>(q.columns||[]).indexOf(k),rs=q.rows||[];
+   if(r==='freshness'){const bad=rs.filter(x=>(x[ix('problems')]||[]).length||x[ix('missing_periods')]);line(bad.length?`${bad.length} of ${rs.length} tables have problems`:`All ${rs.length} tables without problems`,bad.length?'bad':'ok')}
+   else if(r==='model'){const rd=D.readiness||{};line(rd.ready?'Ready':'Not ready',rd.ready?'ok':'bad');(rd.missing||[]).slice(0,3).forEach(m=>line(typeof m==='string'?m:JSON.stringify(m),'file'))}
+   else if(r==='ml'){const ok=D.ml.filter(m=>m.latest_score?.status==='ok').length;line(`${ok} of ${D.ml.length} ML models scored`,ok<D.ml.length?'bad':'ok')}
+   else{const on=D.flows.filter(f=>f.enabled).length;line(`${on} of ${D.flows.length} flows on`)}}
   else if(p.kind==='table'){go.onclick=()=>show('tables');const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),row=(q.rows||[]).find(x=>x[0]===r);
    line(row?`${fmt(row[ix('rows')])} rows · last load ${String(row[ix('last_load')]||'never').slice(0,16).replace('T',' ')}`:'No data-quality row yet.',row&&(row[ix('problems')]||[]).length?'bad':'')}
   else{const page={agent:'agents',tool:'tools',ml:'ml'}[p.kind]||'home',o=(D[{agent:'agents',tool:'tools',ml:'ml'}[p.kind]]||[]).find(x=>x.id===r);go.onclick=()=>show(page);
    line(o?(o.description||o.status||o.name||r):'It was removed.',o?'':'empty')}}catch(e){line(e.message,'bad')}}
-async function pinsHome(box){const sec=h('div','cards pins');box.append(sec);const ps=await pinsLoad();
- if(!ps.length){const c=card('Your Home','pin what you check often');c.classList.add('wide');c.append(h('p','',"Press Pin on a report chart, a saved analysis, a monitor, a table, a flow, an agent or a tool: it shows here, live. Open goes to its page."));sec.append(c);return}
+// + Add widget: everything that can be pinned, in one picker (the same pins as the Pin buttons on each page)
+function pinChoices(){const vis=D.reports.flatMap(r=>r.pages.flatMap(p=>p.visuals.filter(v=>v.text===undefined).map(v=>({kind:'visual',ref:{report:r.id,page:p.id,visual:v.id},title:v.title||v.id,from:r.name||r.id}))));
+ const one=(kind,list,from)=>(list||[]).map(x=>({kind,ref:x.id,title:x.name||x.id,from}));
+ return [['Report charts',vis],['Your analyses',MINE.map(a=>({kind:'analysis',ref:{q:a.q,type:a.type},title:a.name}))],['Monitors',[...one('monitor',D.app?.monitor?.checks,'your check'),
+  ...[['freshness','Data freshness'],['model','Model readiness'],['ml','ML models'],['flows','Flows']].map(([ref,title])=>({kind:'status',ref,title,from:'Monitor'}))]],
+  ['Tables',(D.tables||[]).map(t=>({kind:'table',ref:t,title:t}))],['Flows',one('flow',D.flows)],['ML models',one('ml',D.ml)],['Tools',one('tool',D.tools)],['Agents',one('agent',D.agents)]].filter(([,l])=>l.length)}
+async function addPin(box){if(box.querySelector('.addpin')){box.querySelector('.addpin').remove();return}await pinsLoad();const c=card('Add to your Home','pick what to watch here; it stays live');c.classList.add('addpin','wide');
+ const grp=h('select','f'),it=h('select','f'),ch=pinChoices();ch.forEach(([g],i)=>grp.append(new Option(g,i)));
+ const fill=()=>{it.innerHTML='';ch[grp.value][1].forEach((x,i)=>{const o=new Option((x.from?x.from+' · ':'')+x.title+(PINS.some(y=>pinKey(y)===pinKey(x))?'  (on Home)':''),i);it.append(o)})};grp.onchange=fill;fill();
+ const row=h('div','row');row.append(grp,it);c.append(row);act(c,'Pin to Home',async()=>{const x=ch[grp.value][1][it.value];if(!x)return;if(PINS.some(y=>pinKey(y)===pinKey(x))){toast('Already on Home.');return}
+  PINS=[...PINS,{kind:x.kind,ref:x.ref,title:x.title}];await pinPost({pins:PINS});show('home')},1);act(c,'Cancel',()=>c.remove());(box.querySelector('.pghead')||box).after(c)}
+async function pinsHome(box){const sec=h('div','cards pins');box.append(sec);if(LIVE){const bar=h('div','row bar top');bar.append(btn('+ Add widget',()=>addPin(box),1));box.prepend(bar)}const ps=await pinsLoad();
+ if(!ps.length){const c=card('Your Home','pin what you check often');c.classList.add('wide');c.append(h('p','',"Press + Add widget, or Pin on a report chart, a saved analysis, a monitor, a table, a flow, an agent or a tool: it shows here, live. Open goes to its page."));sec.append(c);return}
  ps.forEach(p=>{const c=card(p.title||p.ref);c.classList.add('pinned');if(p.wide)c.classList.add('wide');sec.append(c);pinCard(p,c)})}
 function home(box){pinsHome(box);const rd=D.readiness||{},q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),rowsQ=q.rows||[];
  const last=rowsQ.map(r=>r[ix('last_load')]).filter(Boolean).sort().pop(),problems=rowsQ.flatMap(r=>(r[ix('problems')]||[]).map(p=>`${r[ix('table')]}: ${p}`));
@@ -340,8 +361,8 @@ function report(box,rep){let flt=PENDING.filters||[];PENDING.filters=null;
   for(const p of rep.pages)for(const v of p.visuals){delete v.live;if(flt.length&&v.text===undefined)
    try{v.live=await api('visual_data',{report:rep.id,page:p.id,visual:v.id,interaction:flt});v.live.id=v.id}catch(e){v.live={error:e.message}}}
   page(cur)}
- function page(p){cur=p;[...tabs.children].forEach(b=>b.classList.toggle('on',b.dataset.id===p.id));grid.innerHTML='';
-  p.visuals.slice().sort((a,b)=>(a.layout.y-b.layout.y)||(a.layout.x-b.layout.x)).forEach(v=>{const c=h('div','card');c.style.gridColumn=`span ${Math.min(12,v.layout.w||6)}`;
+ function page(p){cur=p;grid.dataset.page=p.id;[...tabs.children].forEach(b=>b.classList.toggle('on',b.dataset.id===p.id));grid.innerHTML='';
+  p.visuals.slice().sort((a,b)=>(a.layout.y-b.layout.y)||(a.layout.x-b.layout.x)).forEach(v=>{const c=h('div','card');c.style.gridColumn=`span ${Math.min(12,v.layout.w||6)}`;c.dataset.lk=v.id;c.dataset.w=Math.min(12,v.layout.w||6);if(v.layout.h)c.dataset.h=v.layout.h*70-10;
    c.innerHTML=`<h3><span></span><span class="tools"><button data-a="t">table</button><button data-a="c">csv</button><button data-a="h">how</button></span></h3><div class="body"></div><pre class="how" hidden></pre>`;
    $('h3 span',c).textContent=v.title||v.id;if(v.text===undefined)$('h3',c).append(pinBtn({kind:'visual',ref:{report:rep.id,page:p.id,visual:v.id},title:v.title||v.id}));grid.append(c);const body=$('.body',c),d=v.live||v.data;
    if(v.text!==undefined){$('.tools',c).remove();body.textContent=v.text;body.style.whiteSpace='pre-wrap';return}
@@ -524,26 +545,42 @@ function reportsPage(box){const bar=h('div','row bar top');bar.append(btn('New r
 // Monitor: is anything wrong right now? Only what reports can't show: data freshness, model readiness, ML runs, flows
 // a check: alert when a measure crosses a value, a table goes stale, or a flow's last run failed
 const CMP={'<':(a,b)=>a<b,'<=':(a,b)=>a<=b,'>':(a,b)=>a>b,'>=':(a,b)=>a>=b,'=':(a,b)=>a==b,'!=':(a,b)=>a!=b};
-async function monEval(c){if(c.kind==='measure'){const r=await api('semantic_query',{measures:[c.measure],filters:c.filters||[]});const v=r.rows?.[0]?.[0];
-  return {ok:typeof v==='number'&&!CMP[c.op](v,Number(c.value)),text:`${D.measures.find(m=>m.id===c.measure)?.name||c.measure}: ${fmt(v)} · alerts when ${c.op} ${fmt(Number(c.value))}`}}
+const OPS=[['<','is below'],['<=','is at most'],['>','is above'],['>=','is at least'],['=','equals'],['!=','is not']],opw=o=>(OPS.find(x=>x[0]===o)||[o,o])[1],mname=id=>D.measures.find(m=>m.id===id)?.name||id;
+// a measure check compares the measure with a value, with another measure (a target), or with its previous period (% change);
+// optionally filtered, and optionally for each member of a dimension (alerts when any member matches)
+async function monEval(c){if(c.kind==='measure'){const f=c.filters||[],vs=c.against||'value';
+  if(vs==='prev'){const r=await api('semantic_query',{measures:[c.measure],dimensions:[c.period],filters:f,order_by:[{field:c.period,desc:true}],limit:2}),[a,b]=r.rows||[];
+   if(!a||!b||typeof a[1]!=='number'||typeof b[1]!=='number'||!b[1])return {ok:true,text:`${mname(c.measure)}: not enough periods to compare yet`};
+   const pct=(a[1]-b[1])/Math.abs(b[1])*100;return {ok:!CMP[c.op](pct,Number(c.value)),text:`${mname(c.measure)}: ${fmt(a[1])} in ${cell(a[0])}, ${pct>=0?'+':''}${pct.toFixed(1)}% on ${cell(b[0])} · alerts when the change ${opw(c.op)} ${fmt(Number(c.value))}%`}}
+  const r=await api('semantic_query',{measures:vs==='measure'?[c.measure,c.other]:[c.measure],dimensions:c.by?[c.by]:[],filters:f,limit:500}),n=c.by?1:0;
+  const bad=(r.rows||[]).filter(x=>typeof x[n]==='number'&&CMP[c.op](x[n],vs==='measure'?x[n+1]:Number(c.value)));
+  const what=vs==='measure'?mname(c.other):fmt(Number(c.value)),where=f.length?` (${f.map(x=>`${x.column} = ${x.value}`).join(', ')})`:'';
+  if(c.by)return {ok:!bad.length,text:bad.length?`${bad.length} of ${(r.rows||[]).length} ${c.by.split('.').pop()} ${opw(c.op)} ${what}: ${bad.slice(0,5).map(x=>x[0]).join(', ')}${bad.length>5?'…':''}${where}`:`No ${c.by.split('.').pop()} ${opw(c.op)} ${what}${where}`};
+  const x=(r.rows||[])[0]||[];return {ok:typeof x[0]==='number'&&!bad.length,text:`${mname(c.measure)}: ${fmt(x[0])}${vs==='measure'?` vs ${what} ${fmt(x[1])}`:''}${where} · alerts when it ${opw(c.op)} ${what}`}}
  if(c.kind==='fresh'){const q=D.quality||{},ix=k=>(q.columns||[]).indexOf(k),row=(q.rows||[]).find(x=>x[0]===c.table),t=row&&row[ix('last_load')];
   const hrs=t?(Date.now()-Date.parse(t))/3600e3:Infinity;return {ok:hrs<=c.hours,text:`${c.table}: last load ${t?Math.round(hrs)+' h ago':'never'} · alerts after ${c.hours} h`}}
  const x=await api('flow_runs',{flow:c.flow}).catch(()=>({}));const one=x.runs?.[0]||x;return {ok:one.status!=='failed',text:`${c.flow}: last run ${one.status||'never'} · alerts when a run fails`}}
-function newMonitor(box){if(box.querySelector('.monform'))return;const c=card('New monitor','what to watch; it turns red when the condition holds');c.classList.add('monform','wide');
- const nm=h('input','f'),kind=h('select','f'),f=h('div');nm.placeholder='e.g. Views dropped';[['measure','A measure crosses a value'],['fresh','A table is not loaded in time'],['flow','A flow\'s last run failed']].forEach(([k,l])=>kind.append(new Option(l,k)));
- const draw=()=>{f.innerHTML='';const s=x=>{const e=h('select','f');x.forEach(([v,l])=>e.append(new Option(l,v)));return e};
-  if(kind.value==='measure'){const m=s(D.measures.map(x=>[x.id,x.name||x.id])),op=s([['<','is below'],['<=','is at most'],['>','is above'],['>=','is at least'],['=','equals'],['!=','is not']]),v=h('input','f');v.type='number';v.placeholder='value';
-   f.append(h('label','l','Measure'),m,h('label','l','Alert when it'),op,h('label','l','Value'),v);f.get=()=>({measure:m.value,op:op.value,value:Number(v.value)})}
-  else if(kind.value==='fresh'){const t=s((D.tables||[]).map(x=>[x,x])),hr=h('input','f');hr.type='number';hr.value=36;f.append(h('label','l','Table'),t,h('label','l','Alert after (hours without a load)'),hr);f.get=()=>({table:t.value,hours:Number(hr.value)})}
-  else{const fl=s((D.flows||[]).map(x=>[x.id,x.name||x.id]));f.append(h('label','l','Flow'),fl);f.get=()=>({flow:fl.value})}};kind.onchange=draw;draw();
- c.append(h('label','l','Name'),nm,h('label','l','Watch'),kind,f);
- act(c,'Create',async()=>{if(!nm.value.trim())throw new Error('Give it a name.');const ck={id:nm.value.trim().toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')||'check',name:nm.value.trim(),kind:kind.value,...f.get()};
-  const all=[...(D.app.monitor.checks||[]).filter(x=>x.id!==ck.id),ck];const r=await fetch('/monitor',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({checks:all})}).then(x=>x.json());
-  if(r.error)throw new Error(r.error);D.app.monitor.checks=all;show('monitor')},1);(box.querySelector('.pghead')||box).after(c)}
+function newMonitor(box,ck){box.querySelector('.monform')?.remove();ck=ck||{};const c=card(ck.id?'Edit monitor':'New monitor','what to watch, against what; it turns red when the condition holds');c.classList.add('monform','wide');
+ const nm=h('input','f'),kind=h('select','f'),f=h('div');nm.value=ck.name||'';nm.placeholder='e.g. Views below target';[['measure','A measure crosses a value, a target or its last period'],['fresh','A table is not loaded in time'],['flow','A flow\'s last run failed']].forEach(([k,l])=>kind.append(new Option(l,k)));kind.value=ck.kind||'measure';
+ const s=(x,v)=>{const e=h('select','f');x.forEach(([v,l])=>e.append(new Option(l,v)));if(v!==undefined)e.value=v;return e},L=t=>h('label','l',t);
+ const draw=()=>{f.innerHTML='';
+  if(kind.value==='measure'){const ms=D.measures.map(x=>[x.id,x.name||x.id]),m=s(ms,ck.measure),vs=s([['value','a value'],['measure','another measure (e.g. a target)'],['prev','its previous period (% change)']],ck.against||'value'),
+    op=s(OPS,ck.op),v=h('input','f'),other=s(ms,ck.other),per=s(D.dims.filter(d=>d.startsWith('calendar.')).map(d=>[d,d]),ck.period),by=s([['','the total'],...D.dims.map(d=>[d,'each '+d])],ck.by||''),
+    fc=s([['','no filter'],...D.dims.map(d=>[d,d])],ck.filters?.[0]?.column||''),fv=h('input','f');v.type='number';v.placeholder='value';v.value=ck.value??'';fv.placeholder='equals…';fv.value=ck.filters?.[0]?.value??'';
+   const lv=L('Value'),lo=L('Other measure'),lp=L('Period'),lb=L('Check');const vis=()=>{const a=vs.value;lv.hidden=v.hidden=a==='measure';lv.textContent=a==='prev'?'Change in %':'Value';lo.hidden=other.hidden=a!=='measure';lp.hidden=per.hidden=a!=='prev';lb.hidden=by.hidden=a==='prev'};vs.onchange=vis;
+   f.append(L('Measure'),m,L('Compare with'),vs,L('Alert when it'),op,lv,v,lo,other,lp,per,lb,by,L('Only where (optional)'),fc,fv);vis();
+   f.get=()=>{const a=vs.value;if(a!=='measure'&&v.value==='')throw new Error('Give the value to compare with.');if(a==='prev'&&!per.value)throw new Error('The model has no calendar to compare periods.');
+    return {measure:m.value,against:a,op:op.value,...(a==='measure'?{other:other.value}:{value:Number(v.value)}),...(a==='prev'?{period:per.value}:by.value?{by:by.value}:{}),...(fc.value?{filters:[{column:fc.value,op:'=',value:fv.value}]}:{})}}}
+  else if(kind.value==='fresh'){const t=s((D.tables||[]).map(x=>[x,x]),ck.table),hr=h('input','f');hr.type='number';hr.value=ck.hours??36;f.append(L('Table'),t,L('Alert after (hours without a load)'),hr);f.get=()=>({table:t.value,hours:Number(hr.value)})}
+  else{const fl=s((D.flows||[]).map(x=>[x.id,x.name||x.id]),ck.flow);f.append(L('Flow'),fl);f.get=()=>({flow:fl.value})}};kind.onchange=draw;draw();
+ c.append(L('Name'),nm,L('Watch'),kind,f);
+ act(c,ck.id?'Save':'Create',async()=>{if(!nm.value.trim())throw new Error('Give it a name.');const nc={id:ck.id||nm.value.trim().toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')||'check',name:nm.value.trim(),kind:kind.value,...f.get()};
+  const all=[...(D.app.monitor.checks||[]).filter(x=>x.id!==nc.id),nc];const r=await fetch('/monitor',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({checks:all})}).then(x=>x.json());
+  if(r.error)throw new Error(r.error);D.app.monitor.checks=all;show('monitor')},1);act(c,'Cancel',()=>c.remove());(box.querySelector('.pghead')||box).after(c)}
 function monitorPage(box){const bar=h('div','row bar top');bar.append(btn('New monitor',()=>newMonitor(box),1));box.append(bar);
  const mine=h('div','cards');box.append(mine);(D.app?.monitor?.checks||[]).forEach(ck=>{const c=card(ck.name);c.querySelector('h3').append(pinBtn({kind:'monitor',ref:ck.id,title:ck.name}));const st=h('p','file','checking…');c.append(st);mine.append(c);
   monEval(ck).then(x=>{st.className=x.ok?'ok':'bad';st.textContent=(x.ok?'OK · ':'Alert · ')+x.text}).catch(e=>{st.className='bad';st.textContent=e.message});
-  if(MODE==='developer')act(c,'Delete',async()=>{const all=D.app.monitor.checks.filter(x=>x.id!==ck.id);await fetch('/monitor',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({checks:all})});D.app.monitor.checks=all;show('monitor')})});
+  if(MODE==='developer')act(c,'Edit',()=>newMonitor(box,ck));if(MODE==='developer')act(c,'Delete',async()=>{const all=D.app.monitor.checks.filter(x=>x.id!==ck.id);await fetch('/monitor',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({checks:all})});D.app.monitor.checks=all;show('monitor')})});
  const g=h('div','cards');box.append(g);const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),rs=q.rows||[],when=t=>t?String(t).slice(0,16).replace('T',' '):'—';
  const M=D.app?.monitor||{watch:[],fresh_within_hours:36},watch=t=>M.watch?.length?M.watch.includes(t):/stream/.test(t),old=r=>watch(r[0])&&(!r[ix('last_load')]||Date.now()-Date.parse(r[ix('last_load')])>M.fresh_within_hours*3600e3);
  const fr=card('Data freshness',`ABI data quality; watched tables must load within ${M.fresh_within_hours} h (monitor.json)`),bad=rs.filter(r=>(r[ix('problems')]||[]).length||r[ix('missing_periods')]||old(r));
@@ -552,10 +589,10 @@ function monitorPage(box){const bar=h('div','row bar top');bar.append(btn('New m
  [...bad,...rs.filter(r=>watch(r[0])&&!bad.includes(r))].forEach(r=>{const tr=t.insertRow();[r[0],when(r[ix('last_load')]),fmt(r[ix('rows')]),r[ix('missing_periods')]||0,[...(r[ix('problems')]||[]).map(p=>p.message||p.kind||JSON.stringify(p)),...(old(r)?[`no load for over ${M.fresh_within_hours} h`]:[])].join('; ')||'—'].forEach(v=>tr.insertCell().textContent=v)});
  const sc=h('div','scroll');sc.append(t);fr.append(h('p','file','tables with problems, then the watched tables'),sc);
  const rd=D.readiness||{},mo=card('Model','readiness');mo.append(h('p',rd.ready?'ok':'bad',rd.ready?'Ready':'Not ready'),...(rd.missing||[]).map(m=>h('p','file',typeof m==='string'?m:JSON.stringify(m))));
- const ml=card('ML models','latest training and scoring');if(!D.ml.length)ml.append(h('p','empty','No ML models yet.'));
+ const ml=card('ML models','latest training and scoring');[[fr,'freshness'],[mo,'model'],[ml,'ml']].forEach(([c,r])=>c.querySelector('h3').append(pinBtn({kind:'status',ref:r,title:{freshness:'Data freshness',model:'Model readiness',ml:'ML models'}[r]})));if(!D.ml.length)ml.append(h('p','empty','No ML models yet.'));
  D.ml.forEach(m=>{const tr=m.latest_run||{},sc2=m.latest_score||{};ml.append(h('h4','',m.name||m.id),
   h('p',tr.status==='ok'?'ok':'bad',`trained: ${tr.status||'never'} · ${when(tr.finished||tr.created)}`),h('p',sc2.status==='ok'?'ok':'bad',`scored: ${sc2.status||'never'} · ${when(sc2.finished||sc2.created)}`))});
- const fl=card('Flows','switched on or off, last run');if(!D.flows.length)fl.append(h('p','empty','No flows yet.'));
+ const fl=card('Flows','switched on or off, last run');fl.querySelector('h3').append(pinBtn({kind:'status',ref:'flows',title:'Flows'}));if(!D.flows.length)fl.append(h('p','empty','No flows yet.'));
  D.flows.forEach(f=>{const l=h('p','file','last run: …');fl.append(h('h4','',f.name||f.id),h('p',f.enabled?'ok':'',f.enabled?'on':'off'),l);
   if(LIVE)api('flow_runs',{flow:f.id}).then(x=>{const r=(x.runs||[])[0];l.textContent=r?`last run: ${r.status} · ${when(r.finished||r.started||r.created)}`:'last run: never'}).catch(e=>l.textContent='last run: '+e.message)});
  g.append(fr,mo,ml,fl);fr.style.gridColumn='1/-1'}
@@ -945,21 +982,54 @@ let PREV='home';
 function show(k){if(!PAGES[k])k='home';if(k!=='chat'&&CUR!=='chat')PREV=k;else if(k==='chat'&&CUR!=='chat')PREV=CUR;{const cb=$('#chat');if(cb.classList.contains('full')){cb.classList.remove('full');$('#chat .wide-t').textContent='Full page';document.body.append(cb);cb.classList.remove('open');document.body.classList.remove('chat-open')}}CUR=k;setTimeout(ctx);const sk=k.startsWith('rep:')?'reports':k.startsWith('mdl:')?'model':k.startsWith('flw:')?'flows':k;side.querySelectorAll('button.it').forEach(b=>b.classList.toggle('on',b.dataset.k===sk));
  const act=side.querySelector('button.it.on');if(act)act.closest('.sec').classList.remove('folded');
  const box=$('main');box.innerHTML='';const pg=h('div','pg'),head=h('div','pghead'),pn=$('#pgname');pn.textContent=PAGES[k][0];document.title=PAGES[k][0]+' · '+D.project;
- pn.title=(k.startsWith('rep:')?'Filter the report or click a bar to filter by it. Every number comes from ABI.':LEDE[k])||'';pg.append(head);box.append(pg);PAGES[k][1](pg);
+ pn.title=(k.startsWith('rep:')?'Filter the report or click a bar to filter by it. Every number comes from ABI.':LEDE[k])||'';pg.append(head);box.append(pg);PAGES[k][1](pg);lay(pg,k);new MutationObserver(()=>lay(pg,k)).observe(pg,{childList:true,subtree:true});
  const top=pg.querySelector(':scope>.bar.top'),lead=pg.querySelector(':scope>.bar.lead');if(lead)head.append(lead);if(top)head.append(top);if(!top&&!lead)head.remove();if(MODE==='viewer')pg.querySelectorAll('.ed').forEach(e=>e.readOnly=true);
  try{localStorage.setItem('abi-app-'+D.project,k)}catch(e){}try{window.history.replaceState(null,'','#'+k)}catch(e){}}
+// ---------- layout: Layout (Developer, desktop) lets you drag a card to move it and drag its corner to resize it (12
+// columns, 20 px steps). A report keeps it in ABI's report (x, y, w, h: commit, then publish); every other page in the
+// app's layouts.json, a draft that Publish copies to what Viewer sees ----------
+let LAYING=false;const LG=':scope .cards:not(.rows):not(.stack),:scope .home,:scope .layers,:scope .grid';
+const layFile=()=>(D.app||={}).layouts||={},laySaved=k=>(layFile()[MODE==='viewer'?'published':'draft']||{})[k]||{};
+const layKids=g=>[...g.children].filter(c=>!c.classList.contains('rowhead')),ttl=c=>(c.querySelector(':scope>h3>span')?.textContent||'').trim();
+const lkey=(g,c,i)=>c.dataset.lk||ttl(c)+'#'+layKids(g).slice(0,i).filter(x=>ttl(x)===ttl(c)).length;
+function lay(pg,k){if(document.body.classList.contains('mobile')||innerWidth<820)return;const S=laySaved(k);
+ pg.querySelectorAll(LG).forEach((g,gi)=>{const s=S[gi]||{};if(!LAYING&&!Object.keys(s).length&&!g.classList.contains('lay')&&!g.dataset.page)return;g.classList.add('lay');
+  layKids(g).forEach((c,i)=>{const x=s[lkey(g,c,i)];
+   c.dataset.w||=(c.style.gridColumn.match(/span (\d+)/)||[])[1]||(c.classList.contains('full')?12:c.classList.contains('wide')?(g.classList.contains('home')?8:12):4);
+   const ht=x?x.h:c.dataset.h;c.style.gridColumn='span '+(x?.w||c.dataset.w);c.style.order=x?.o??i;c.style.height=ht?ht+'px':'';c.classList.toggle('sized',!!+ht);
+   c.draggable=LAYING;if(LAYING&&!c.querySelector(':scope>.rz'))c.append(rz(c))});
+  if(LAYING&&!g.dataset.dnd){g.dataset.dnd=1;let src=null;const on=e=>{const t=e.target.closest?.('.lay>*');return t?.parentElement===g?t:null},clr=()=>g.querySelectorAll('.over').forEach(x=>x.classList.remove('over'));
+   g.addEventListener('dragstart',e=>{src=on(e);if(!src)return;src.classList.add('drag');e.dataTransfer.effectAllowed='move'});
+   g.addEventListener('dragover',e=>{const t=on(e);if(!src||!t)return;e.preventDefault();clr();if(t!==src)t.classList.add('over')});
+   g.addEventListener('drop',e=>{const t=on(e);if(!src||!t||t===src)return;e.preventDefault();const ks=layKids(g).sort((a,b)=>a.style.order-b.style.order);
+    ks.splice(ks.indexOf(src),1);ks.splice(ks.indexOf(t),0,src);ks.forEach((c,i)=>c.style.order=i);layStore()});
+   g.addEventListener('dragend',()=>{src?.classList.remove('drag');clr();src=null})}})}
+function rz(c){const r=h('div','rz');r.title='Drag to resize';r.onpointerdown=e=>{e.preventDefault();e.stopPropagation();const g=c.parentElement,gap=parseFloat(getComputedStyle(g).columnGap)||16,col=(g.clientWidth-11*gap)/12,b=c.getBoundingClientRect();
+ r.setPointerCapture(e.pointerId);r.onpointermove=m=>{c.style.gridColumn='span '+Math.max(1,Math.min(12,Math.round((m.clientX-b.left+gap)/(col+gap))));c.style.height=Math.max(80,Math.round((m.clientY-b.top)/20)*20)+'px';c.classList.add('sized')};
+ r.onpointerup=()=>{r.onpointermove=r.onpointerup=null;layStore()}};return r}
+async function layStore(reset){const k=CUR,pg=$('main .pg'),out={};
+ pg.querySelectorAll(LG).forEach((g,gi)=>{if(!g.classList.contains('lay'))return;const o={};layKids(g).forEach((c,i)=>o[lkey(g,c,i)]={o:+c.style.order||0,w:+(c.style.gridColumn.match(/\d+/)||[4])[0],h:c.classList.contains('sized')?parseInt(c.style.height):0});out[gi]=o});
+ if(k.startsWith('rep:')){const rep=D.reports.find(r=>'rep:'+r.id===k),g=pg.querySelector('.grid'),spec=structuredClone(rep.spec),sp=spec.pages.find(p=>p.id===g.dataset.page),vp=rep.pages.find(p=>p.id===g.dataset.page);
+  let x=0,y=0,rh=0;layKids(g).sort((a,b)=>a.style.order-b.style.order).forEach(c=>{const v=sp.visuals.find(v=>v.id===c.dataset.lk);if(!v)return;const w=+(c.style.gridColumn.match(/\d+/)||[6])[0],
+   hh=c.classList.contains('sized')?Math.max(1,Math.round((parseInt(c.style.height)+10)/70)):(v.layout?.h||4);if(x+w>12){x=0;y+=rh;rh=0}v.layout={x,y,w,h:hh};vp.visuals.find(z=>z.id===v.id).layout=v.layout;x+=w;rh=Math.max(rh,hh)});
+  try{await api('save_report',{report:spec});rep.spec=spec;toast('Saved in the report: commit, then publish, and Viewer sees it.')}catch(e){toast(e.message)}return}
+ const r=await fetch('/layouts',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({page:k,layout:reset?null:out})}).then(x=>x.json()).catch(e=>({error:e.message}));
+ if(r.error)toast(r.error);else{layFile().draft=r.result;vc();if(reset)show(k)}}
+function layMode(on){LAYING=on;document.body.classList.toggle('laying',on);const b=$('#layout');b.classList.toggle('on',on);b.textContent=on?'Done':'Layout';$('#layreset').hidden=!on}
+$('#layout').onclick=()=>{if(!LIVE){toast('Snapshot: start the app to change the layout.');return}layMode(!LAYING);show(CUR);if(LAYING)toast('Drag a card to move it, its corner to resize it. Publish shows it to Viewer.')};
+$('#layreset').onclick=()=>{if(CUR.startsWith('rep:')){toast('A report\'s layout is in the report: undo it under Changes.');return}layStore(true)};
 const boot=loadVault();sidebar();
 const R=document.documentElement,TB=$('#theme');const dark=()=>R.dataset.theme?R.dataset.theme==='dark':matchMedia('(prefers-color-scheme: dark)').matches;
 const setTheme=t=>{if(t)R.dataset.theme=t;TB.textContent=dark()?'Light':'Dark'};try{setTheme(localStorage.getItem('abi-theme'))}catch(e){setTheme()}
 TB.onclick=()=>{const t=dark()?'light':'dark';setTheme(t);try{localStorage.setItem('abi-theme',t)}catch(e){}};
 $('.snap').hidden=LIVE;$('.snap').title=`Snapshot of ${D.stamp}. Run scripts/app.py ${D.project} to work live.`;
-function setMode(md){if(window.ME&&!['editor','owner'].includes(ME.role))md='viewer';MODE=md;setTimeout(()=>{ctx();const g=log.querySelector('.hello');if(g)g.replaceWith(hello())});document.body.dataset.mode=md;$('#m-dev').classList.toggle('on',md==='developer');$('#m-view').classList.toggle('on',md==='viewer');
+function setMode(md){if(window.ME&&!['editor','owner'].includes(ME.role))md='viewer';MODE=md;if(md==='viewer'&&LAYING)layMode(false);setTimeout(()=>{ctx();const g=log.querySelector('.hello');if(g)g.replaceWith(hello())});document.body.dataset.mode=md;$('#m-dev').classList.toggle('on',md==='developer');$('#m-view').classList.toggle('on',md==='viewer');
  $('#chat textarea').placeholder=md==='viewer'?'Ask a question. In Viewer the agent only reads.':'Ask a question or for a change.'}
 async function pickMode(md){if(!LIVE){toast('Snapshot: start the app to switch modes.');return}
  await fetch('/mode',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({mode:md})})}
 function vc(){const n=D.pending?.files?.length||0,cb=$('#changes'),pb=$('#publish');cb.textContent=n?`${n} change${n>1?'s':''}`:'No changes';cb.classList.toggle('pri',!!n);
- const head=(D.history||[])[0]?.id?.slice(0,7),pubc=(D.published?.commit||'').split(' ')[0];pb.disabled=!!n||!head||head===pubc;
- pb.title=n?'Commit first: Publish sends the last commit.':head===pubc?'Viewer already shows the last commit.':'Make the last commit what Viewer sees.'}
+ const head=(D.history||[])[0]?.id?.slice(0,7),pubc=(D.published?.commit||'').split(' ')[0];const L=D.app?.layouts||{},ld=JSON.stringify(L.draft||{})!==JSON.stringify(L.published||{});pb.disabled=!!n||!head||(head===pubc&&!ld);
+ pb.title=n?'Commit first: Publish sends the last commit.':head===pubc?(ld?'Show the new page layouts to Viewer.':'Viewer already shows the last commit.'):'Make the last commit what Viewer sees.'}
 $('#changes').onclick=()=>{const d=$('#commit'),f=$('.files',d);f.innerHTML='';const fl=D.pending?.files||[];
  if(!fl.length)f.append(h('p','empty','Everything is committed.'));fl.forEach(x=>{const det=h('details');const su=h('summary','',`${x.status}  ${x.path}`);det.append(su,h('pre','',x.patch||''));f.append(det)});
  $('#c-message').value=D.pending?.proposed_message||'';$('.msg',d).textContent='';$('#c-undo').disabled=!D.pending?.can_undo;d.showModal()};
@@ -1130,7 +1200,7 @@ def snapshot(dest: Path, project: str) -> dict:
     base = project.removesuffix("_pub")
     import pack  # noqa: PLC0415 (sibling script)
     out["app"] = {"analyses": j(app_dir(base) / "analyses.json", []) or [], "monitor": MONITOR | (j(app_dir(base) / "monitor.json", {}) or {}),
-                  "packs": pack.listing(base)}
+                  "packs": pack.listing(base), "layouts": j(app_dir(base) / "layouts.json", {}) or {}}
     return out
 
 
@@ -1168,7 +1238,15 @@ def docs_pdf(project: str) -> bytes:
         return (Path(d) / "docs.pdf").read_bytes()
 
 
+def publish_layouts(project: str, by: str = "") -> None:
+    """Publish also copies the page layouts Developer arranged (layouts.json "draft") to what Viewer sees ("published")."""
+    lay = render.j(app_dir(project) / "layouts.json", {}) or {}
+    if lay.get("draft") != lay.get("published"):
+        app_save(project, "layouts.json", lay | {"published": lay.get("draft") or {}}, by)
+
+
 def published_now(project: str, pub: str, head: str) -> dict:
+    publish_layouts(project)
     for src in sorted((abi.folder(project) / "sources").glob("*.json")):  # the import writes definitions; load the data
         try:
             abi.call("refresh", project=pub, table=src.stem)
@@ -1199,7 +1277,7 @@ def page_html(project: str, snap: dict) -> str:
     name = (render.j(dest / "project.json", {}) or {}).get("name", project)
     page = render.shell(name, "", "", "")
     head = (f"<header><button class=btn id=menu aria-label=Menu>Menu</button><span class=brand>ABI</span><button class=crumb id=switch title='Switch workspace or project'>{render.esc(dest.parent.name)}<i>/</i><b>{render.esc(project)}</b><i class=car>▾</i></button><span class=pgname id=pgname></span>"
-            "<span class=snap hidden>snapshot</span><span class=right><span class='vc w'><button class=btn id=changes>No changes</button>"
+            "<span class=snap hidden>snapshot</span><span class=right><span class='vc w'><button class=btn id=layout title='Drag cards to move them, drag a corner to resize'>Layout</button><button class=btn id=layreset hidden title='Put this page back as it was built'>Reset</button><button class=btn id=changes>No changes</button>"
             "<button class=btn id=publish title='Make the last commit what Viewer sees'>Publish</button></span><span class=modes role=group aria-label=Mode>"
             "<button id=m-dev class=on title='Build and change: you and the agent'>Developer</button>"
             "<button id=m-view title='Read only: the agent answers as an analyst'>Viewer</button></span>"
@@ -1812,6 +1890,10 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                 if hub.mode == "viewer":
                     return self.reply(403, b'{"error":"Publish from Developer."}')
                 pub, bundle, head = publish_bundle(project)
+                if head and (published(project).get("commit") or "").split(" ")[0] == head.split(" ")[0]:  # same commit: only layouts
+                    publish_layouts(project, hub.user)
+                    changed(project)
+                    return self.reply(200, json.dumps({"result": published(project)}).encode())
                 out = run("import_project", {"project": pub, "bundle": bundle}, None, lambda: published_now(project, pub, head))
                 return self.reply(200, json.dumps(out, default=str).encode())
             if self.path == "/docs/pdf":  # the documentation as a PDF, printed by the engine's Chromium
@@ -1896,6 +1978,17 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                         return self.reply(400, b'{"error":"at most 60 pins, each with a kind"}')
                     app_save(project, "pins.json", allp | {who: pins}, hub.user)
                 return self.reply(200, json.dumps({"result": (render.j(app_dir(project) / "pins.json", {}) or {}).get(who, [])}).encode())
+            if self.path == "/layouts":  # a page's card layout: Developer edits the draft, Publish copies it for Viewer
+                if hub.mode == "viewer":
+                    return self.reply(403, b'{"error":"Arrange pages in Developer mode."}')
+                page, lay = body.get("page"), body.get("layout")
+                if not isinstance(page, str) or not 0 < len(page) <= 200 or len(raw) > 100_000 or not (lay is None or isinstance(lay, dict)):
+                    return self.reply(400, b'{"error":"a page and its layout"}')
+                allp = render.j(app_dir(project) / "layouts.json", {}) or {}
+                draft = {k: v for k, v in (allp.get("draft") or {}).items() if k != page} | ({page: lay} if lay else {})
+                app_save(project, "layouts.json", allp | {"draft": draft}, hub.user)
+                changed(project)
+                return self.reply(200, json.dumps({"result": draft}).encode())
             if self.path == "/monitor":  # Monitor's own checks (monitor.json): what a person wants watched
                 if hub.mode == "viewer":
                     return self.reply(403, b'{"error":"Make monitors in Developer mode."}')

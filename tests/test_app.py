@@ -164,6 +164,7 @@ def test_viewer_mode_is_read_only_on_the_server(srv):
         assert post(port, "/vault/add", {"name": "x.md", "data": ""}, key)[0] == 403
         assert post(port, "/team/answer", {"id": "p1", "decision": "approve"}, key)[0] == 403, "no approvals in Viewer"
         assert post(port, "/transfer/export", {}, key)[0] == 403, "no export or import in Viewer"
+        assert post(port, "/layouts", {"page": "home", "layout": {}}, key)[0] == 403, "no layout changes in Viewer"
         code, r = post(port, "/api/semantic_model", {"project": P}, key)
         assert code == 200 and "result" in r, "reads still work"
         req = urllib.request.Request(f"http://127.0.0.1:{port}/agent/mode", b"{}", {"X-Abi-Agent": HUB.agent_key, "X-Abi-Client": "default"})
@@ -502,3 +503,18 @@ print(json.dumps(out))
     out = json.loads(r.stdout.strip().splitlines()[-1])
     assert out["pages"] >= 25 and out["errors"] == [] and out["blank"] == [], out
     assert out["viewer"] == "viewer" and out["developer"] == "developer", out
+
+
+def test_page_layouts_are_a_draft_until_publish(srv):
+    """Layout edits land in layouts.json "draft"; Publish copies them to "published", which Viewer reads."""
+    port, key, _ = srv
+    lay = {"0": {"Needs attention#0": {"o": 1, "w": 6, "h": 200}}}
+    assert post(port, "/layouts", {"page": "x" * 201, "layout": lay}, key)[0] == 400
+    code, r = post(port, "/layouts", {"page": "home", "layout": lay}, key)
+    assert code == 200 and r["result"]["home"] == lay
+    f = app.app_dir(P) / "layouts.json"
+    assert json.loads(f.read_text()).get("published", {}).get("home") != lay, "Viewer does not see a draft"
+    app.publish_layouts(P)
+    assert json.loads(f.read_text())["published"]["home"] == lay
+    code, r = post(port, "/layouts", {"page": "home", "layout": None}, key)
+    assert code == 200 and "home" not in r["result"], "Reset drops the page's layout"
