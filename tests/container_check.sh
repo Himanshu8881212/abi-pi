@@ -4,7 +4,7 @@
 #   tests/container_check.sh     (needs Docker, the image abi-pi:latest, the model endpoint via scripts/creds.py)
 set -eu
 cd "$(dirname "$0")/.."
-S=$(mktemp -d); trap 'rm -rf "$S"; docker rm -f abi-pi-test abi-pi-restored >/dev/null 2>&1; docker volume rm abi-pi-restore >/dev/null 2>&1 || true' EXIT
+S=$(mktemp -d); trap 'rm -rf "$S"; docker rm -f abi-pi-restored >/dev/null 2>&1; docker volume rm abi-pi-restore >/dev/null 2>&1 || true' EXIT
 ok() { echo "ok   $1"; }; bad() { echo "FAIL $1"; FAILED=1; }; FAILED=0
 up() { for _ in $(seq 1 90); do curl -fs -o /dev/null "127.0.0.1:$1/" && return 0; sleep 2; done; return 1; }
 in_c() { docker exec "$1" sh -c "cd /app && eval \"\$(scripts/engine.sh env)\" && $2"; }

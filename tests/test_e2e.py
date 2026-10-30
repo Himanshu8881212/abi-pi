@@ -127,11 +127,12 @@ def test_rapid_mode_flips_and_project_switches_stay_consistent(srv):  # noqa: F8
 
 def test_a_huge_body_is_refused_cleanly(srv):  # noqa: F811
     port, key, _ = srv
-    rq = urllib.request.Request(f"http://127.0.0.1:{port}/api/readiness", b'{"project": "' + b"x" * (65 << 20) + b'"}',
-                                {"X-Abi-App": key, "Content-Type": "application/json"})
-    with pytest.raises(urllib.error.HTTPError) as e:
-        urllib.request.urlopen(rq, timeout=120)
-    assert e.value.code in (400, 413)
+    for _ in range(3):  # every time: unread bytes once reset the line before the answer arrived (REPORT #49)
+        rq = urllib.request.Request(f"http://127.0.0.1:{port}/api/readiness", b'{"project": "' + b"x" * (65 << 20) + b'"}',
+                                    {"X-Abi-App": key, "Content-Type": "application/json"})
+        with pytest.raises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(rq, timeout=120)
+        assert e.value.code == 413 and "too large" in json.loads(e.value.read())["error"]
 
 
 def test_the_agent_tools_know_every_page():

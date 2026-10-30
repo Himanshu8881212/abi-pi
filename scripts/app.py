@@ -1459,7 +1459,14 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
             self.reply(200, page.replace(KEY_SLOT, key, 1).replace(ME_SLOT, json.dumps(me).replace("</", "<\\/"), 1).encode(), "text/html; charset=utf-8")
 
         def post(self):
-            raw = self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 64 << 20)) or b"{}"
+            n = int(self.headers.get("Content-Length") or 0)
+            if n > 64 << 20:  # read the rest away first: closing on unread bytes resets the line before the answer arrives
+                left = min(n, 256 << 20)  # beyond that the line is simply closed
+                while left > 0 and (got := len(self.rfile.read(min(left, 1 << 20)))):
+                    left -= got
+                self.close_connection = True
+                return self.reply(413, b'{"error":"That request is too large (64 MB at most)."}')
+            raw = self.rfile.read(n) or b"{}"
             if self.path == "/signin" and signin and self.allowed():  # ABI checks the password; the app keeps only the session
                 ip = self.client_address[0]
                 f = urllib.parse.parse_qs(raw.decode(errors="replace"))
