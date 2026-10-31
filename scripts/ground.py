@@ -395,7 +395,8 @@ def check(answer: str, results: list, vocab: set[str] = frozenset(), members: se
     part = lambda w: w in parts or w.endswith("s") and w[:-1] in parts or w + "s" in parts  # noqa: E731
     # a yes/no column's other side: "Nonmembers", "Non-members", "Not members" for `loyalty_member` (release run 30 Oct)
     neg = lambda n: bool(m := re.fullmatch(r"(?:non[- ]?|not |no )([a-z]+)", n.lower())) and part(m[1])  # noqa: E731
-    bad_names = [(at, n) for n, vocab_ok, at in cands if not _has(n, found) and not _has(n, asked, case=True) and not (
+    typed = lambda n: _has(n, asked, case=True) or n.endswith("s") and _has(n[:-1], asked, case=True)  # noqa: E731 ("Mondays" for "Monday")
+    bad_names = [(at, n) for n, vocab_ok, at in cands if not _has(n, found) and not typed(n) and not (
         vocab_ok and (_has(n, words) or " ".join(n.lower().split()) in spelled or part(n.lower()) or neg(n)
                       or all(w.lower() in COMMON or _has(w, "\n".join(PRODUCT)) for w in n.split())))]
     out = {"numbers": list(dict.fromkeys(t for _, t in bad_nums)), "names": list(dict.fromkeys(n for _, n in bad_names))}

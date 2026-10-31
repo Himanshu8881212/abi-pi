@@ -51,3 +51,10 @@ def test_the_other_side_of_a_yes_no_column_is_no_invented_name():
     ans = "Members and nonmembers.\n\n| Loyalty status | Average ticket |\n|---|---:|\n| Members | 5.6544 |\n| Nonmembers | 5.6574 |\n| Non-members | 5.6574 |"
     assert ground.check(ans, res, fields={"dim_customers.loyalty_member"})["names"] == []
     assert "Nonbuyers" in ground.check("| Loyalty status | Average ticket |\n|---|---:|\n| Nonbuyers | 5.6574 |", res, fields={"dim_customers.loyalty_member"})["names"]
+
+
+def test_the_plural_of_a_name_the_person_typed_is_theirs():
+    """Release run 31 Oct: asked "every Monday at 8", the answer's "Mondays at 08:00" came back "[not verified] at 08:00"."""
+    asked = "email me a weekly summary every Monday at 8"
+    assert ground.check("Runs on **Mondays at 08:00 UTC**.", [], asked=asked)["names"] == []
+    assert ground.check("Runs on **Tuesdays at 08:00 UTC**.", [], asked=asked)["names"] == ["Tuesdays"]

@@ -344,3 +344,6 @@ Open findings:
   "never compute" stopped the model from turning a ratio into a percent, so it answered with nothing; it now says what
   the check already accepts (rounding, ratio as percent, naming the filtered period). After: 0 of 9 fell back; the
   store-manager evaluation set still passes 7 of 7.
+- **1.0.1 (31 Oct 2026):** offline 80, live agent tests 18 of 18, `tests/container_check.sh` 13 of 13 on the Proxmox
+  machine. Found in the live run: the answer's "Mondays" for the person's "every Monday" was masked; the plural of a
+  name the person typed now grounds.

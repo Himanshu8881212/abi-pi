@@ -1,4 +1,4 @@
-# ABI-PI 1.0.0
+# ABI-PI 1.0.1
 
 A self-hosted agentic BI app in one container: ABI-PI's own copy of ABI's engine (Postgres, semantic engine, flows,
 ML, custom agents), the Pi agent with a team of specialists, and a one-page app. Install: see [README.md](README.md)
@@ -21,7 +21,7 @@ ML, custom agents), the Pi agent with a team of specialists, and a one-page app.
   before destructive or outward steps, and can be followed live from another window.
 - **Models:** from Settings only (an OpenAI-compatible proxy or an API provider); no ChatGPT account link.
 
-## Checked for this release (31 Oct 2026)
+## Checked for 1.0.0 (31 Oct 2026)
 
 - Offline tests: 78 passed (`.venv/bin/python -m pytest -q tests`), including a real-browser pass over every page.
 - Container check on a fresh machine (Proxmox, Debian 13, Docker): 13 of 13 (`tests/container_check.sh`): fresh
@@ -33,7 +33,10 @@ ML, custom agents), the Pi agent with a team of specialists, and a one-page app.
   no uncommitted work in its page or its queries).
 - Live agent tests: 18 of 18 (`ABI_PI_LIVE=1 .venv/bin/python -m pytest -q -m live tests`), the agent driven like a person.
 
-## Since 1.0.0
+## 1.0.1 (31 Oct 2026)
+
+Checked: offline 80 passed, live agent tests 18 of 18, container check 13 of 13 on the Proxmox machine.
+
 
 - Custom agents answer in words instead of falling back to raw tool rows: they may name the period their query
   was filtered on (a year, a month, a date range's start) and show a ratio as a percent, and the run trace keeps what
@@ -42,6 +45,7 @@ ML, custom agents), the Pi agent with a team of specialists, and a one-page app.
   proposed edits, your tools and other published agents, plus tables in its scope; a chosen tool brings its measures
   and tables into the scope. Custom agents send or post only when asked, and a send's number check knows the period.
 - Every agent card has **Evaluation set**: see, add, change and remove its test questions, save, and run them.
+- A name the person typed also grounds in its plural ("Monday" → "Mondays"), so it is no longer masked.
 
 ## Known limits
 
