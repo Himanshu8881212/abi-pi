@@ -1,4 +1,5 @@
 """The own engine's housekeeping and loading (needs the engine: scripts/engine.sh start)."""
+import json
 import subprocess
 from pathlib import Path
 
@@ -85,3 +86,17 @@ def test_named_models_narrow_the_model_queries_and_reports(tmp_path):
         abi.call("delete_model", project=P, id="sales")
     abi.call("delete_model", confirm=e.value.body["confirm_token"], project=P, id="sales")
     assert abi.call("semantic_model", project=P, all=True)["models"] == []
+
+
+@pytest.mark.skipif(not PY.exists(), reason="no engine venv")
+def test_a_custom_agent_may_say_the_period_its_query_was_filtered_on():
+    """Release follow-up 31 Oct: "the average ticket in 2025 was €5.66" fell back to raw rows: 2025 was only the query's
+    filter. A date-table filter value that exists comes back from filtered() as a row; an invented figure stays caught."""
+    r = engine("import json\nfrom abi.agents import grounding as g\n"
+               "q = {'columns': ['average_ticket'], 'rows': [[5.6579]], 'measures': {'average_ticket': 'x'}, 'filters': []}\n"
+               "y, d = {'columns': ['calendar.year'], 'rows': [[2025]]}, {'columns': ['calendar.day'], 'rows': [['2025-12-01']]}\n"
+               "print(json.dumps([g.check('The average ticket in 2025 was €5.66.', [q])['numbers'],"
+               " g.check('The average ticket in 2025 was €5.66.', [q, y])['numbers'],"
+               " g.check('In December 2025 it was €5.66.', [q, d])['numbers'],"
+               " g.check('In 2025 it was €6.10.', [q, y])['numbers']]))")
+    assert json.loads(r.stdout.strip().splitlines()[-1]) == [["2025"], [], [], ["€6.10"]], r.stderr[-500:]

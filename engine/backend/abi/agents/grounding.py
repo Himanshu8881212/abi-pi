@@ -312,24 +312,31 @@ def filtered(project: str, user_id: int | None, results: list) -> list:
     `user_id` through the semantic engine, so RLS applies): pass them to `check` with the results. A value no row of
     the column holds is never returned (an invented member stays ungrounded); a measure's total proves nothing
     (IGNORE/WHERE measures). Live (ClickHouse) columns and failed reads ground nothing.
-    ABI-PI: a number filter on the date table (calendar.year = 2025, calendar.month = 11) that exists there comes back as
-    a result row, so "revenue in 2025" grounds its year like a member; measure figures still come only from result rows."""
+    ABI-PI: a number or date filter on the date table (calendar.year = 2025, calendar.day >= '2025-12-01') that exists
+    there comes back as a result row, so "revenue in 2025" or "in December 2025" grounds like a member; a range's end
+    never does, and measure figures still come only from result rows."""
     from abi import semantic, storage
     from abi.semantic import live, model
 
     cal = ((model._read(project, "model.json") or {}).get("date_table") or {}).get("table")
-    num = lambda v: str(int(v)) if float(v).is_integer() else str(v)  # noqa: E731 (as DuckDB casts it to text)
+    num = lambda v: v if isinstance(v, str) else str(int(v)) if float(v).is_integer() else str(v)  # noqa: E731 (as DuckDB casts it)
     asked: dict[str, set[str]] = {}
     dates: dict[str, set] = {}
     for r in results:
         for f in r["filters"] if _query(r) else []:
-            vals = f.get("value") if isinstance(f, dict) and f.get("op") in ("=", "in") else None
+            if not (isinstance(f, dict) and isinstance(f.get("column"), str) and "." in f["column"]):
+                continue
+            on_cal = f["column"].split(".", 1)[0] == cal
+            if on_cal and f.get("op") == ">=" and isinstance(f.get("value"), str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", f["value"]):
+                dates.setdefault(f["column"], set()).add(f["value"])  # a date range's start ("December 2025"); never its end
+            vals = f.get("value") if f.get("op") in ("=", "in") else None
             for v in vals if isinstance(vals, list) else [vals]:
-                if isinstance(f.get("column"), str) and "." in f["column"]:
-                    if isinstance(v, str):
-                        asked.setdefault(f["column"], set()).add(v)
-                    elif isinstance(v, int | float) and not isinstance(v, bool) and f["column"].split(".", 1)[0] == cal:
+                if isinstance(v, str):
+                    asked.setdefault(f["column"], set()).add(v)
+                    if on_cal and re.fullmatch(r"\d{4}-\d{2}-\d{2}", v):
                         dates.setdefault(f["column"], set()).add(v)
+                elif isinstance(v, int | float) and not isinstance(v, bool) and on_cal:
+                    dates.setdefault(f["column"], set()).add(v)
 
     def held(col: str, vals: set[str]) -> list[str]:
         t, c = col.split(".", 1)
@@ -346,7 +353,7 @@ def filtered(project: str, user_id: int | None, results: list) -> list:
         out += held(col, vals)
     for col, vals in dates.items():
         found = set(held(col, {num(v) for v in vals}))
-        if rows := [[v] for v in sorted(vals) if num(v) in found]:
+        if rows := [[v] for v in sorted(vals, key=str) if num(v) in found]:
             out.append({"columns": [col], "rows": rows})
     return out
 
