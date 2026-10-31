@@ -196,6 +196,9 @@ def _answer(project: str, a: dict, question: str, user: User, via: str, files: d
                 bad = grounding.check(text, outputs + sampled(seen) + grounding.filtered(project, user.id, outputs), *scope,
                                        notes=notes, question=question, spans=True, today=day)
                 grounded = not (bad["numbers"] or bad["names"])
+                if not grounded:  # ABI-PI: the trace keeps what the check rejected (the draft masked, the figures and names)
+                    trace.append({"tool": "grounding", "input": {"draft": grounding.mask(text, bad)[:4000]},
+                                  "output": {"numbers": bad["numbers"], "names": bad["names"]}})
                 if not grounded and not retried:
                     retried = True
                     messages += [{"role": "assistant", "content": grounding.mask(text, bad)},
@@ -242,7 +245,7 @@ def _answer(project: str, a: dict, question: str, user: User, via: str, files: d
     data = next((o for o in reversed(outputs) if isinstance(o, dict) and {"columns", "rows"} <= o.keys()
                  and "snapshot" not in o), None)  # GATE-9-fix-3: a load's snapshot row is not the data
     return {"run": run_id, "answer": text, "grounded": grounded, "retried": retried, "template": template,
-            "tools": [t["tool"] for t in trace], "data": data,
+            "tools": [t["tool"] for t in trace if t["tool"] != "grounding"], "data": data,
             **({"columns": data["columns"], "rows": data["rows"]} if data else {}),  # D-22: its figures ground the Main Agent
             # the last report_snapshot it took (`artifact:<project>/<file>`): an email reply attaches it (X-02.6)
             "snapshot": next((o["snapshot"] for o in reversed(outputs) if isinstance(o, dict) and isinstance(o.get("snapshot"), str)), None)}
