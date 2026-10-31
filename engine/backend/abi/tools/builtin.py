@@ -427,17 +427,19 @@ def _data(conn, user: User, project: str, data: ToolCall | SemanticQuery | None)
         out["rows"] = [dict(zip(out["columns"], map(semantic.norm, r))) for r in out["rows"]]
     else:
         return None
-    return {"columns": out["columns"], "rows": out["rows"]}
+    return {"columns": out["columns"], "rows": out["rows"]} | {k: out[k] for k in ("filters", "measures") if k in out}
 
 
-def _grounded(texts: list[str], data: dict | None) -> None:
+def _grounded(texts: list[str], data: dict | None, project: str | None = None, user: User | None = None) -> None:
     """Principle 7 for agent sends: every number in `texts` is a value of the attached result's rows, as written,
     rounded or a ratio x 100 shown as a percent (AG-2 check). Request parameters (tool inputs, filter values) never
-    count (D-22): an agent could otherwise put a figure it computed into a filter and quote it."""
+    count (D-22): an agent could otherwise put a figure it computed into a filter and quote it. ABI-PI: a date-table
+    filter value that exists in the data does ("revenue in 2025"; grounding.filtered), as in the agent's answers."""
     if not actions.by_agent():
         return  # people write their own words; flow agent steps are grounded by AG-2 (T-02)
     for text in texts:
-        if bad := grounding.check(text, [data or {}])["numbers"]:
+        found = grounding.filtered(project, user.id, [data]) if data and project and user and "filters" in data else []
+        if bad := grounding.check(text, [data or {}, *(x for x in found if isinstance(x, dict))])["numbers"]:
             raise ActionFailed(422, f"The number {bad[0]} isn't in the attached result; numbers come from tools"
                                     " (principle 7): attach the tool call or semantic query that gives it as `data`.")
 
@@ -466,7 +468,7 @@ class SendEmail(storage.ProjectRef):
 def send_email(conn, user: User, args: SendEmail) -> dict:
     """Sends an email, optionally with a tool or query result, a report snapshot and the project's documentation attached. The first send to a domain not yet used in this project asks the user to confirm (FL-6). Every number in subject and body must come from the attached `data`."""
     data = _data(conn, user, args.project, args.data)
-    _grounded([args.subject, args.body], data)
+    _grounded([args.subject, args.body], data, args.project, user)
     if (test := flows.TEST_RUN.get()) is None:
         _first_send(conn, args.project, {"email:" + a.rsplit("@", 1)[1].lower() for a in args.to})  # before any render
     snap = args.report and report_snapshot(conn, user, ReportSnapshot(project=args.project, **args.report.model_dump()))["snapshot"]
@@ -493,7 +495,7 @@ class PostMessage(storage.ProjectRef):
 def post_message(conn, user: User, args: PostMessage) -> dict:
     """Posts a message to a channel, optionally with a tool or query result. The first post to a channel not yet used in this project asks the user to confirm (FL-6). Every number in the text must come from the attached `data`."""
     data = _data(conn, user, args.project, args.data)
-    _grounded([args.text], data)
+    _grounded([args.text], data, args.project, user)
     test = flows.TEST_RUN.get()
     if args.channel != INBOX and test is None:  # the inbox is internal: no FL-6 confirmation
         _first_send(conn, args.project, {"channel:" + args.channel})  # before any render

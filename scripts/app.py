@@ -897,12 +897,24 @@ function toolForm(c){const nm=inpt('e.g. Store KPIs for a month'),de=inpt('what 
    inputs:{type:'object',additionalProperties:false,properties:Object.fromEntries(I.map(i=>[i.name,i.spec])),required:I.map(i=>i.name)},
    query:{measures:m,dimensions:[...by.selectedOptions].map(o=>o.value),filters:I.map(i=>({column:i.col,op:'=',value:{$input:i.name}})),...(lim.value?{limit:+lim.value}:{})},
    outputs:{type:'array',items:{type:'object'}},permissions:{role:'viewer'},tests:[]}}}
-function agentForm(c){const nm=inpt('e.g. Store manager assistant'),pu=inpt('who it is for and what it answers'),ins=h('textarea','f'),tl=multi(['semantic_query',...(D.tools||[]).map(t=>t.id)],['semantic_query']),sc=multi(D.measures.map(m=>m.id),[]),mo=sel([['tools_only','Answers only through its tools'],['exploratory','May also explore the measures in scope']]),cs=h('div','stack');
+// what a custom agent may call (ABI: its project's tools, two reads, four actions, other published agents)
+const AGENT_TOOLS=[['semantic_query','Query the measures in its scope (read)'],['report_snapshot','Render a report as PDF or PNG (read)'],
+ ['send_email','Send an email (sends)'],['post_message','Post a message: app inbox, Slack or Teams (sends)'],['refresh','Reload a table from its source (changes data)'],
+ ['propose_edit','Propose a change to an edit table; a person approves it (changes data)']];
+const lmulti=(opts,on)=>{const m=h('select','f');m.multiple=true;m.size=Math.min(8,Math.max(3,opts.length));opts.forEach(([v,l])=>{const o=new Option(l,v);o.selected=(on||[]).includes(v);m.append(o)});return m};
+function agentForm(c){const nm=inpt('e.g. Store manager assistant'),pu=inpt('who it is for and what it answers'),ins=h('textarea','f'),
+ tl=lmulti([...AGENT_TOOLS,...(D.tools||[]).map(t=>[t.id,`${t.name||t.id} (your tool)`])],['semantic_query']),
+ ask=lmulti((D.agents||[]).filter(x=>x.status==='published').map(x=>[x.id,x.name||x.id]),[]),sc=multi(D.measures.map(m=>m.id),[]),st=multi(D.tables||[],[]),mo=sel([['tools_only','Answers only through its tools'],['exploratory','May also explore the measures in scope']]),cs=h('div','stack');
  ins.rows=3;ins.placeholder='how it answers: tone, what to refuse, what to ask for';const addc=btn('+ Test question',()=>{const r=h('div','row'),q=inpt('a question a user would ask'),e=inpt('the answer must contain (comma separated)'),x=h('button','btn','Remove');r.append(q,e,x);x.onclick=()=>r.remove();r.get=()=>q.value?{question:q.value,expect:{contains:e.value.split(',').map(s=>s.trim()).filter(Boolean)}}:null;cs.append(r)});addc.click();
- c.append(lab('Name'),nm,lab('Purpose'),pu,lab('Instructions'),ins,lab('Tools it may use'),tl,lab('Measures in its scope'),sc,lab('Mode'),mo,lab('Evaluation: questions it must answer correctly before it can be published'),cs,addc);
+ if(!ask.options.length){ask.append(new Option('No published agents yet',''));ask.disabled=true;ask.size=1}
+ c.append(lab('Name'),nm,lab('Purpose'),pu,lab('Instructions'),ins,lab('What it may do (sends and changes never run during its evaluation; a tool brings its measures and tables into the scope)'),tl,lab('Agents it may ask (published ones)'),ask,lab('Measures in its scope'),sc,lab('Tables in its scope (for grouping and filters)'),st,lab('Mode'),mo,lab('Evaluation: questions it must answer correctly before it can be published'),cs,addc);
  return ()=>{if(!nm.value.trim()||!pu.value.trim()||!ins.value.trim())throw new Error('Give it a name, a purpose and instructions.');
   return {$schema:'https://schema.abi.invalid/v1/agent.json',id:slug(nm.value,'agent'),name:nm.value.trim(),purpose:pu.value.trim(),instructions:ins.value.trim(),mode:mo.value,grounding:true,channels:[{type:'in_app'}],
-   scope:{measures:[...sc.selectedOptions].map(o=>o.value),tables:[]},tools:[...tl.selectedOptions].map(o=>o.value),cases:[...cs.children].map(r=>r.get()).filter(Boolean)}}}
+   scope:(()=>{const pick=[...tl.selectedOptions].map(o=>(D.tools||[]).find(t=>t.id===o.value)?.query).filter(Boolean),  // a chosen tool brings what it reads
+     cols=pick.flatMap(q=>[...(q.dimensions||[]),...(q.filters||[]).map(f=>f.column),...(q.order_by||[]).map(o=>o.field)]).filter(x=>String(x).includes('.'));
+     return {measures:[...new Set([...[...sc.selectedOptions].map(o=>o.value),...pick.flatMap(q=>q.measures||[])])],
+      tables:[...new Set([...[...st.selectedOptions].map(o=>o.value),...cols.map(x=>x.split('.')[0])])]}})(),tools:[...tl.selectedOptions].map(o=>o.value),
+   ...(ask.selectedOptions.length?{agents:[...ask.selectedOptions].map(o=>o.value)}:{}),cases:[...cs.children].map(r=>r.get()).filter(Boolean)}}}
 const FORMS={flow:[flowForm,'flows'],ml:[mlForm,'ml'],tool:[toolForm,'tools'],agent:[agentForm,'agents']};
 function newBtn(box,kind){const bar=box.querySelector(':scope>.bar.top')||h('div','row bar top'),L=KIND[kind].label;
  bar.append(btn(`New ${L}`,()=>{if(box.querySelector('.newkind'))return;const c=card(`New ${L}`,'fill it in and create it; it is checked by ABI like everything else');c.classList.add('newkind','wide');

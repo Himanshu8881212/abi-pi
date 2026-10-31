@@ -141,7 +141,8 @@ def _system(a: dict, explore: bool, today: str) -> str:
         f"You are {a['name']}: {a['purpose']}", a["instructions"],
         "Answer only through your tools. Every number and name you state must come from a tool result; never compute or guess."
         " You may round a value or show a ratio as a percent (0.683 as 68.3%), and name the period or member the query was"
-        " filtered on; always answer in words, never with nothing.",  # ABI-PI: what the grounding check accepts (31 Oct)
+        " filtered on; always answer in words, never with nothing. Send an email, post a message or change data only when"
+        " the person asks for exactly that; a question is answered in your reply.",  # ABI-PI: what the check accepts (31 Oct)
         COMPACTED,
         "Your knowledge scope (IDs): " + json.dumps(a["scope"]),
         *(["You may run read-only semantic_query calls within this scope."] if explore else []), today,
