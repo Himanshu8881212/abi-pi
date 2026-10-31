@@ -337,3 +337,10 @@ Open findings:
   snapshot every sync rewrote (and recomputed), with the snapshot-only branches of the page script and the `/views`
   prompt; the yt_cms converters and `build_cms.py` of the old ABI preview; the raw benchmark runs (their results stay in
   bench/RESULTS.md). Local only: `scratch/` and `converters/.venv` (about 3 GB) moved to the Trash.
+- **Custom agents fell back to raw rows (31 Oct):** a probe agent answered 1 of 6 plain questions with "here are the
+  results as the tools returned them". Causes, from the trace (which now keeps the rejected draft and empty answers):
+  (1) the year or month the query was filtered on ("in 2025") isn't in the result rows; filtered() now returns a
+  date-table filter value that exists in the data (and a date range's start) as a row; (2) the engine's instruction
+  "never compute" stopped the model from turning a ratio into a percent, so it answered with nothing; it now says what
+  the check already accepts (rounding, ratio as percent, naming the filtered period). After: 0 of 9 fell back; the
+  store-manager evaluation set still passes 7 of 7.

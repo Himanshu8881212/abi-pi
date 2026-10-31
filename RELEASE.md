@@ -33,8 +33,13 @@ ML, custom agents), the Pi agent with a team of specialists, and a one-page app.
   no uncommitted work in its page or its queries).
 - Live agent tests: 18 of 18 (`ABI_PI_LIVE=1 .venv/bin/python -m pytest -q -m live tests`), the agent driven like a person.
 
+## Since 1.0.0
+
+- Custom agents answer in words instead of falling back to raw tool rows: they may name the period their query
+  was filtered on (a year, a month, a date range's start) and show a ratio as a percent, and the run trace keeps what
+  the number check rejected or an empty model answer (9 of 9 plain questions answered, all figures checked).
+
 ## Known limits
 
 - HTTP only: put it behind an HTTPS reverse proxy for other devices (`X-Forwarded-Proto: https`).
 - Email (invitations, flow emails) needs the engine's mail settings.
-- A custom agent sometimes answers with its tool rows when ABI's strict number check rejects its wording.
