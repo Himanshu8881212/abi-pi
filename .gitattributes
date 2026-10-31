@@ -1,0 +1,6 @@
+# The container runs these as Linux files: keep LF endings even on a Windows checkout
+*.sh text eol=lf
+bin/abi text eol=lf
+Dockerfile text eol=lf
+*.py text eol=lf
+*.ts text eol=lf

@@ -6,7 +6,7 @@ services:
     build: .
     image: abi:latest
     container_name: abi
-    ports: ["8790:8790"]
+    ports: ["${ABI_PORT:-8790}:8790"]              # ABI_PORT in .env when 8790 is taken
     environment:
       ABI_USER: ${ABI_USER:?set ABI_USER in .env (the workspace owner)}
       ABI_PASSWORD: ${ABI_PASSWORD:?set ABI_PASSWORD in .env (8 characters or more)}
@@ -14,6 +14,8 @@ services:
       ABI_PI_WORKSPACE: ${ABI_WORKSPACE:-main}
       ABI_PI_LLM_BASE: ${ABI_LLM_BASE:-}          # optional: or connect providers in the app (Govern › Settings)
       ABI_PI_LLM_KEY: ${ABI_LLM_KEY:-}
+      ABI_PI_LLM_MODEL: ${ABI_LLM_MODEL:-}        # the model's id at that endpoint, e.g. gpt-5 or llama3.1
+      ABI_PI_LLM_API: ${ABI_LLM_API:-}            # optional: openai-completions (default with a model) or openai-responses
       ABI_PI_SECRET_KEY: ${ABI_SECRET_KEY:-}      # encrypts the API keys admins save; empty: a key file in the volume
     volumes:
       - abi-data:/data                           # everything: the engine's database and lake, projects, chats, packs

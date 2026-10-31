@@ -1,4 +1,5 @@
 """app.html and its local server (needs the engine at :8780, no LLM): the build, and every guard on the server."""
+import contextlib
 import json
 import subprocess
 import os
@@ -294,6 +295,59 @@ def test_people_sign_in_with_their_abi_account_and_get_only_their_access():
         s.shutdown()
 
 
+def test_an_owner_adds_a_person_without_email_and_they_change_their_own_password():
+    """No mail server needed: the owner adds an account with a starting password; its owner changes it in the app."""
+    import http.client
+    import secrets as _s
+    if not _account("himanshu"):
+        pytest.skip("no accounts file")
+    s = app.serve(P, 0, open_browser=False, signin=True)
+    port, name = s.server_address[1], "probe_" + _s.token_hex(4)
+    pw1, pw2 = _s.token_urlsafe(12), _s.token_urlsafe(12)
+
+    def sign(n, pw):
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
+        c.request("POST", "/signin", urllib.parse.urlencode({"name": n, "password": pw}), {"Content-Type": "application/x-www-form-urlencoded"})
+        r = c.getresponse()
+        r.read()
+        sid = (r.getheader("Set-Cookie") or "").split(";")[0]
+        if not sid:
+            return None, None
+        page = urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{port}/", headers={"Cookie": sid})).read().decode()
+        return sid, (re.search(r"KEY='([^']+)'", page) or [None, None])[1]
+
+    def post(sid, key, path, body):
+        r = urllib.request.Request(f"http://127.0.0.1:{port}{path}", json.dumps(body).encode(), {"Cookie": sid, "X-Abi-App": key or "", "Content-Type": "application/json"})
+        try:
+            return 200, json.loads(urllib.request.urlopen(r).read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read() or b"{}")
+    try:
+        osid, okey = sign("himanshu", _account("himanshu"))
+        code, r = post(osid, okey, "/admin/adduser", {"name": name, "password": "short"})
+        assert code == 400 and "short" not in json.dumps(r), "a short password is refused here, never echoed"
+        code, r = post(osid, okey, "/admin/adduser", {"name": name, "password": pw1})
+        assert code == 200 and "result" in r, r
+        sid, key = sign(name, pw1)
+        assert sid, "the new person signs in with the starting password"
+        code, r = post(sid, key, "/admin/adduser", {"name": name + "x", "password": pw1})
+        assert code == 403, "only owners add people"
+        code, r = post(sid, key, "/password", {"current": "wrong-" + pw1, "password": pw2})
+        assert "error" in r and pw2 not in json.dumps(r)
+        code, r = post(sid, key, "/password", {"current": pw1, "password": pw2})
+        assert code == 200 and "result" in r, r
+        assert sign(name, pw1)[0] is None and sign(name, pw2)[0], "the old password is gone, the new one works"
+    finally:
+        with abi.as_user(abi.login("himanshu", _account("himanshu"))[1]["token"]):
+            with contextlib.suppress(abi.ActionError):
+                try:
+                    abi.call("delete_user", name=name)
+                except abi.ActionError as e:
+                    if e.status == 409 and (e.body or {}).get("confirm_token"):
+                        abi.call("delete_user", confirm=e.body["confirm_token"], name=name)
+        s.shutdown()
+
+
 def test_no_html_template_puts_text_in_unescaped():
     """Measure names, titles and errors come from projects (anyone with Editor): into HTML only through E()."""
     import render
@@ -574,3 +628,37 @@ def test_a_new_chat_is_not_answered_by_the_old_agent_ending(srv):
         assert h.busy and not [x for x in q if b'"answer"' in x], "the old agent's end says nothing about the new turn"
     finally:
         h.pi.kill()
+
+
+def test_a_big_upload_arrives_in_pieces(srv, tmp_path):
+    """A file over the 64 MB request limit can't come in one request: the page sends pieces, the last one loads it."""
+    import base64
+    import duckdb
+    port, key, _ = srv
+    f = tmp_path / "pieces.parquet"
+    duckdb.sql(f"COPY (SELECT range AS id, range % 7 AS k FROM range(5000)) TO '{f}' (FORMAT parquet)")
+    raw, uid = f.read_bytes(), "ab" * 16
+    half = len(raw) // 2
+    code, r = post(port, "/upload", {"table": "pieces_probe", "name": f.name, "id": uid, "data": base64.b64encode(raw[:half]).decode(), "last": False}, key)
+    assert code == 200 and r["result"]["received"] == half
+    code, r = post(port, "/upload", {"table": "pieces_probe", "name": f.name, "id": uid, "data": base64.b64encode(raw[half:]).decode(), "last": True}, key)
+    assert code == 200 and r["result"].get("snapshot"), r  # the joined pieces are a valid Parquet file: it loaded
+    assert post(port, "/upload", {"table": "x", "name": "a.parquet", "id": "../../etc", "data": ""}, key)[0] == 400
+
+
+def test_s3_keys_become_secrets_bound_to_the_bucket_host_and_never_come_back(srv):
+    port, key, _ = srv
+    assert post(port, "/s3key", {"table": "s3_probe", "location": "s3://bucket/x/*.parquet", "key_id": "AKIAEXAMPLE"}, key)[0] == 400
+    code, r = post(port, "/s3key", {"table": "s3_probe", "location": "s3://probe-bucket/x/*.parquet", "region": "eu-west-1",
+                                    "key_id": "AKIAEXAMPLEPROBE", "secret": "probe-secret-value-123"}, key)
+    try:
+        assert code == 200 and r["result"] == {"key_id": "${secret:S3_S3_PROBE_KEY_ID}", "secret": "${secret:S3_S3_PROBE_SECRET}"}, r
+        listed = json.dumps(abi.call("list_secrets", project=P))
+        assert "S3_S3_PROBE_SECRET" in listed and "probe-secret-value-123" not in listed
+    finally:
+        for n in ("S3_S3_PROBE_KEY_ID", "S3_S3_PROBE_SECRET"):
+            try:
+                abi.call("delete_secret", name=n)
+            except abi.ActionError as e:
+                if e.status == 409 and (e.body or {}).get("confirm_token"):
+                    abi.call("delete_secret", confirm=e.body["confirm_token"], name=n)

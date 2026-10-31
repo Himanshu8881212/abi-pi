@@ -154,7 +154,7 @@ def engine_sync() -> str:
             base, key = creds.proxy("API base URL").rstrip("/"), creds.proxy("API key")
         except (OSError, SystemExit):
             return "skipped: no model connected"
-        mid = json.loads((Path(__file__).resolve().parent.parent / ".pi/settings.json").read_text())["defaultModel"]
+        mid = os.environ.get("ABI_PI_LLM_MODEL") or json.loads((Path(__file__).resolve().parent.parent / ".pi/settings.json").read_text())["defaultModel"]
     if not base:
         return "skipped: no model connected"
     args = {"id": "abi-pi", "base_url": base, "models": {"small": mid, "large": mid}}

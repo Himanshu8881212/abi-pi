@@ -27,6 +27,7 @@ import os
 import re
 import signal
 import secrets
+import shutil
 import subprocess
 import sys
 import threading
@@ -463,6 +464,8 @@ async function usersPage(box){
  const post=(op,b)=>fetch('/admin/'+op,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json());
  const r=await post('users');if(r.error){box.append(h('p','bad',r.error));return}const U=r.result,g=h('div','cards');box.append(g);
  const inv=card('Invite','ABI creates the account and emails a link to choose a password'),em=h('input','f');em.type='email';em.placeholder='name@company.com';inv.append(em);
+ const ad=card('Add a person','no email needed: you choose a starting password and hand it over; they change it by clicking their name'),an=h('input','f'),ap=h('input','f');an.placeholder='name';an.autocomplete='off';ap.type='password';ap.placeholder='starting password (8+ characters)';ap.autocomplete='new-password';ad.append(an,ap);
+ act(ad,'Add',async()=>{const x=await post('adduser',{name:an.value,password:ap.value});if(x.error)throw new Error(x.error);ap.value='';setTimeout(()=>show(CUR),1200);return 'Added. Give them a role below.'},1);g.append(ad);
  act(inv,'Invite',async()=>{let x=await post('invite',{email:em.value});if(x.confirm){if(!await ask(x.confirm))return 'Not invited.';x=await fetch('/confirm/'+x.confirm.id,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(y=>y.json())}
   if(x.error)throw new Error(x.error);return 'Invited through ABI. Give them a role below.'},1);g.append(inv);
  const t=card(`People in ${U.project}`,'role: Viewer reads the published copy; Editor and Owner build (Developer)');t.style.gridColumn='1/-1';g.append(t);
@@ -655,20 +658,27 @@ function glossary(box){const list=h('div','cards rows');box.append(list);
  list.append(rowhead('Term','Definition','Implemented by (measure IDs)',''));D.glossary.forEach(t=>list.append(edit(t)));if(!D.glossary.length)list.append(h('p','empty pad','No terms yet. New term adds the first.'))}
 
 // ---------- Data ----------
-async function upload(table,file){const data=await new Promise(r=>{const fr=new FileReader();fr.onload=()=>r(fr.result.split(',')[1]);fr.readAsDataURL(file)});
- const r=await fetch('/upload',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({table,name:file.name,data})}).then(r=>r.json());
- if(r.error)throw new Error(r.error);return r.result}
+async function upload(table,file){const id=[...crypto.getRandomValues(new Uint8Array(16))].map(b=>b.toString(16).padStart(2,'0')).join(''),N=24<<20;let r;
+ for(let o=0;;o+=N){const last=o+N>=file.size,data=await new Promise(res=>{const fr=new FileReader();fr.onload=()=>res(fr.result.split(',')[1]||'');fr.readAsDataURL(file.slice(o,o+N))});  // 24 MB pieces: under the 64 MB request limit
+  r=await fetch('/upload',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({table,name:file.name,data,id,last})}).then(x=>x.json());
+  if(r.error)throw new Error(r.error);if(last)return r.result}}
 function sources(box){const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),qr=Object.fromEntries((q.rows||[]).map(r=>[r[ix('table')],r]));
  const g=h('div','cards'),bar=h('div','row bar top');box.append(bar,g);
  const add=()=>{const c=card('Add a source','a Parquet file you upload, or an S3 folder of Parquet files');c.classList.add('editor');
   const t=h('input','f ed');t.placeholder='table id, e.g. bronze_orders';const loc=h('input','f ed');loc.placeholder='s3://bucket/folder/*.parquet';
-  const ep=h('input','f ed');ep.placeholder='S3 endpoint host:port, e.g. 127.0.0.1:9100 (blank for AWS)';  const file=h('input');file.type='file';file.accept='.parquet';file.className='f ed';
-  c.append(h('label','l','Table'),t,h('label','l','Upload a Parquet file'),file,h('label','l','Or an S3 folder of Parquet files'),loc,h('label','l','S3 endpoint'),ep);
+  const ep=h('input','f ed');ep.placeholder='blank for AWS; or host[:port] for MinIO, R2, Wasabi…';const file=h('input');file.type='file';file.accept='.parquet';file.className='f ed';
+  const rg=h('input','f ed');rg.value='us-east-1';const ki=h('input','f ed');ki.placeholder='access key ID (blank for a public bucket)';ki.autocomplete='off';
+  const ks=h('input','f ed');ks.type='password';ks.placeholder='secret access key';ks.autocomplete='new-password';
+  const tl=h('label','chk'),tls=h('input');tls.type='checkbox';tls.checked=true;tl.append(tls,h('span','','HTTPS (untick for a plain-HTTP endpoint such as a local MinIO)'));
+  c.append(h('label','l','Table'),t,h('label','l','Upload a Parquet file'),file,h('label','l','Or an S3 folder of Parquet files'),loc,h('label','l','Region'),rg,h('label','l','S3 endpoint'),ep,tl,
+   h('label','l','Keys (workspace owners; stored encrypted for this bucket only, never shown again)'),ki,ks);
   act(c,'Add source',async()=>{if(!t.value)throw new Error('Name the table first.');
    if(file.files[0]&&!/\.parquet$/i.test(file.files[0].name))throw new Error('Choose a .parquet file.');if(file.files[0]){await upload(t.value,file.files[0]);return `Uploaded and loaded into ${t.value}.`}
    if(!/^s3:\/\/.+\.parquet$/i.test(loc.value))throw new Error('Choose a Parquet file, or give an S3 folder like s3://bucket/folder/*.parquet.');
-   const s3=loc.value.startsWith('s3://')?{...(ep.value?{endpoint:ep.value,url_style:'path',use_ssl:false}:{}),region:'us-east-1'}:null;
-   await api('add_data',{table:t.value,location:loc.value,format:'parquet',...(s3?{s3}:{})});return `Loaded ${t.value}.`},1);return c};
+   const s3={region:rg.value.trim()||'us-east-1',...(ep.value?{endpoint:ep.value.trim(),url_style:'path'}:{}),...(tls.checked?{}:{use_ssl:false})};
+   if(ki.value||ks.value){const r=await fetch('/s3key',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({table:t.value,location:loc.value,...s3,key_id:ki.value,secret:ks.value})}).then(x=>x.json());
+    ks.value='';if(r.error)throw new Error(r.error);Object.assign(s3,r.result)}
+   await api('add_data',{table:t.value,location:loc.value,format:'parquet',s3});return `Loaded ${t.value}.`},1);return c};
  bar.append(btn('Add source',()=>g.prepend(add()),1));
  if(!D.sources.length)box.append(h('p','empty','No sources yet: upload a Parquet file or add an S3 folder of Parquet files.'));
  D.sources.forEach(id=>{const sp=D.source_specs?.[id]||{},r=qr[id],c=card(id,`sources/${id}.json`),k=h('div','kv');
@@ -1133,7 +1143,12 @@ $('#publish').onclick=async()=>{if(!await ask({message:'Publish the last commit?
 const sideOff=on=>{document.body.classList.toggle('side-off',on);try{localStorage.setItem('abi-side-off',on?'1':'')}catch(e){}};try{sideOff(localStorage.getItem('abi-side-off')==='1')}catch(e){}
 $('#menu').title='Show or hide the sidebar';$('#menu').onclick=()=>R.classList.contains('mobile')?document.body.classList.toggle('menu-open'):sideOff(!document.body.classList.contains('side-off'));side.addEventListener('click',e=>{if(e.target.closest('button.it'))document.body.classList.remove('menu-open')});
 $('#switch').onclick=switcher;
-if(window.ME?.signin){const w=h('span','who',ME.name),f=h('form');f.method='post';f.action='/signout';f.append(h('button','btn','Sign out'));const r0=$('header .right');r0.prepend(w,f)}
+function pwDialog(){const d=h('dialog'),c=h('div','card'),cur=h('input','f'),nw=h('input','f'),m=h('div','msg');c.append(h('h3','','Change your password'));
+ cur.type=nw.type='password';cur.placeholder='current password';cur.autocomplete='current-password';nw.placeholder='new password (8+ characters)';nw.autocomplete='new-password';
+ const ok=btn('Change',async()=>{const r=await fetch('/password',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({current:cur.value,password:nw.value})}).then(x=>x.json()).catch(e=>({error:e.message}));
+  cur.value=nw.value='';if(r.error){say(m,r.error,1);return}say(m,'Changed. Sign in again with the new one.');setTimeout(()=>location.reload(),1500)}),no=btn('Cancel',()=>{d.close();d.remove()});
+ const row=h('div','row acts');row.append(ok,no);c.append(cur,nw,row,m);d.append(c);document.body.append(d);d.showModal()}
+if(window.ME?.signin){const w=h('button','btn who',ME.name);w.title='Change your password';w.onclick=pwDialog;const f=h('form');f.method='post';f.action='/signout';f.append(h('button','btn','Sign out'));const r0=$('header .right');r0.prepend(w,f)}
 if(window.ME&&!['editor','owner'].includes(ME.role))$('.modes').hidden=true;/* Viewer access only: no switch at all */$('#m-dev').onclick=()=>pickMode('developer');$('#m-view').onclick=()=>pickMode('viewer');
 let first=decodeURIComponent(location.hash.slice(1));if(!first)try{first=localStorage.getItem('abi-app-'+D.project)}catch(e){}setTimeout(()=>show(first||'home'));  // after the whole script: the chat page's parts are declared further down
 boot.then(()=>{sidebar();show(CUR)});setMode('developer');vc();
@@ -1520,7 +1535,8 @@ class Hub:
             session = str(self.chats_dir / f"{self.chat_id}.session.jsonl")  # Pi's own transcript: this chat's context
             import settings  # noqa: PLC0415 (sibling script): the admin's model and reasoning, also for the specialists
             conf = settings.load()
-            flags = (["--model", conf["model"]] if conf["model"] else []) + ["--thinking", conf["thinking"]]
+            model = conf["model"] or (f"cliproxy/{os.environ['ABI_PI_LLM_MODEL']}" if os.environ.get("ABI_PI_LLM_MODEL") else None)  # Settings, else the deployment's
+            flags = (["--model", model] if model else []) + ["--thinking", conf["thinking"]]
             env |= {"ABI_PI_MODEL": conf["model"] or "", "ABI_PI_THINKING": conf["thinking"]}
             self.pi = subprocess.Popen(["pi", "--mode", "rpc", "--session", session, *flags], cwd=abi.ROOT, env=env, text=True, bufsize=1,
                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=open(abi.ROOT / "logs" / "pi-stderr.log", "ab"))
@@ -2064,6 +2080,29 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
             rid = body.get("report")
             if acc.get("reports") is not None and rid and (self.path.split("/")[-1] in REPORT_ACTIONS or sec == "Export") and rid not in acc["reports"]:
                 return self.reply(403, json.dumps({"error": "That report isn't open to you; ask an admin."}).encode())
+            if self.path == "/s3key":  # an S3 source's keys as two ABI secrets bound to the bucket's host (owners; never shown again)
+                tbl, kid, sec = str(body.get("table") or ""), str(body.get("key_id") or ""), str(body.get("secret") or "")
+                m = re.match(r"s3://([A-Za-z0-9.-]+)/", str(body.get("location") or ""))
+                ep, region = str(body.get("endpoint") or ""), str(body.get("region") or "us-east-1")
+                if not (re.fullmatch(r"\w{1,60}", tbl) and m and kid and sec and re.fullmatch(r"[a-z0-9-]{1,50}", region)
+                        and re.fullmatch(r"[A-Za-z0-9.-]+(:\d+)?", ep or "x")):
+                    return self.reply(400, b'{"error":"An s3:// folder, its region, and both the access key ID and the secret key."}')
+                # the host ABI's engine sends to (its _host): the endpoint with path style, else <bucket>.s3.<region>.amazonaws.com
+                host = ep.split(":")[0].lower() if ep else f"{m[1]}.s3.{region}.amazonaws.com".lower()
+                name = "S3_" + tbl.upper()
+                for suffix, value in (("_KEY_ID", kid), ("_SECRET", sec)):
+                    r = run("set_secret", {"name": name + suffix, "value": value, "allowed_hosts": [host]}, None)
+                    if "error" in r:
+                        return self.reply(200, json.dumps({"error": r["error"]}).encode())
+                return self.reply(200, json.dumps({"result": {"key_id": f"${{secret:{name}_KEY_ID}}", "secret": f"${{secret:{name}_SECRET}}"}}).encode())
+            if self.path == "/password" and self.sess:  # your own password, with your current one (ABI's set_password)
+                cur, new = str(body.get("current") or ""), str(body.get("password") or "")
+                if not cur or not 8 <= len(new) <= 1024:  # checked here: ABI's 422 would echo the password
+                    return self.reply(400, b'{"error":"Your current password, and a new one of 8 characters or more."}')
+                r = run("set_password", {"current": cur, "password": new}, None)
+                if "result" in r:  # ABI signed this account out everywhere: so does the app
+                    people.pop(next((k for k, v in people.items() if v is self.sess), ""), None)
+                return self.reply(200, json.dumps(r, default=str).encode())
             if self.path.startswith("/admin/"):
                 if self.sess and not self.sess["admin"]:
                     return self.reply(403, b'{"error":"Users & access is for workspace owners."}')
@@ -2109,15 +2148,22 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                     return self.reply(403, b'{"error":"Viewer mode is read-only."}')
                 import base64  # noqa: PLC0415
                 import tempfile  # noqa: PLC0415
-                name = Path(str(body.get("name"))).name
-                with tempfile.TemporaryDirectory() as d:
-                    f = Path(d) / name
-                    f.write_bytes(base64.b64decode(body.get("data") or ""))
-                    try:
-                        res = abi.upload(project, str(body.get("table")), f)
-                        out = {"result": res}
-                    except abi.ActionError as e:
-                        out = {"error": str(e.body.get("message") if isinstance(e.body, dict) else e.body)}
+                uid, name = str(body.get("id") or ""), Path(str(body.get("name"))).name
+                if not re.fullmatch(r"[0-9a-f]{32}", uid) or not name:
+                    return self.reply(400, b'{"error":"That upload isn\'t valid."}')
+                d = Path(tempfile.gettempdir()) / "abi-uploads" / uid  # ponytail: an abandoned upload's pieces stay until the temp folder is cleared
+                d.mkdir(parents=True, exist_ok=True)
+                f = d / name
+                with f.open("ab") as part:
+                    part.write(base64.b64decode(body.get("data") or ""))
+                if not body.get("last"):
+                    return self.reply(200, json.dumps({"result": {"received": f.stat().st_size}}).encode())
+                try:
+                    out = {"result": abi.upload(project, str(body.get("table")), f)}
+                except abi.ActionError as e:
+                    out = {"error": str(e.body.get("message") if isinstance(e.body, dict) else e.body)}
+                finally:
+                    shutil.rmtree(d, ignore_errors=True)
                 changed(project)
                 return self.reply(200, json.dumps(out, default=str).encode())
             if self.path == "/edits/rows":
@@ -2338,6 +2384,11 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
             if role == "none":
                 return 200, json.dumps(run("remove_role", {"project": p, "user": who}, None, mirror), default=str).encode()
             return 200, json.dumps(run("set_role", {"project": p, "user": who, "role": role}, None, mirror), default=str).encode()
+        if op == "adduser":  # a local account with a starting password the owner hands over (no email needed)
+            name, pw = str(body.get("name") or "").strip(), str(body.get("password") or "")
+            if not re.fullmatch(r"[\w.@+-]{2,64}", name) or not 8 <= len(pw) <= 1024:  # checked here: ABI's 422 would echo the password
+                return 400, b'{"error":"A name (letters, digits, . _ - @ +) and a password of 8 characters or more."}'
+            return 200, json.dumps(run("create_user", {"name": name, "password": pw}, None), default=str).encode()
         if op == "invite":
             email = str(body.get("email") or "").strip()
             if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):

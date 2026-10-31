@@ -113,16 +113,18 @@ function inside(p: string, cwd: string): string | null {
 }
 
 export default async function abi(pi: ExtensionAPI) {
-	// ---------- model: GPT-6.1 Sol via CLIProxyAPI ----------
+	// ---------- the built-in model endpoint: ABI_PI_LLM_BASE/KEY/MODEL at deployment (else the proxy credentials file) ----------
 	try {
 		const baseUrl = execFileSync("python3", [CREDS, "llm-base"], { encoding: "utf8" }).trim();
+		const model = process.env.ABI_PI_LLM_MODEL || "gpt-6.1-sol";
 		pi.registerProvider("cliproxy", {
-			name: "CLIProxyAPI",
+			name: "Built-in endpoint",
 			baseUrl,
 			apiKey: `!python3 ${CREDS} llm-key`,
-			api: "openai-responses",
-			models: [{ id: "gpt-6.1-sol", name: "GPT-6.1 Sol (CLIProxyAPI)", reasoning: true, input: ["text", "image"],
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 272000, maxTokens: 128000 }],
+			// chat completions when a model is named (OpenAI, OpenRouter, Ollama, vLLM, Gemini…); the original proxy speaks responses
+			api: (process.env.ABI_PI_LLM_API || (process.env.ABI_PI_LLM_MODEL ? "openai-completions" : "openai-responses")) as any,
+			models: [{ id: model, name: `${model} (built-in endpoint)`, reasoning: true, input: ["text", "image"],
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 200000, maxTokens: 32000 }],
 		});
 	} catch (e) {
 		log({ event: "provider_unavailable", error: String(e).slice(0, 200) });
