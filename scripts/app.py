@@ -902,10 +902,20 @@ const AGENT_TOOLS=[['semantic_query','Query the measures in its scope (read)'],[
  ['send_email','Send an email (sends)'],['post_message','Post a message: app inbox, Slack or Teams (sends)'],['refresh','Reload a table from its source (changes data)'],
  ['propose_edit','Propose a change to an edit table; a person approves it (changes data)']];
 const lmulti=(opts,on)=>{const m=h('select','f');m.multiple=true;m.size=Math.min(8,Math.max(3,opts.length));opts.forEach(([v,l])=>{const o=new Option(l,v);o.selected=(on||[]).includes(v);m.append(o)});return m};
+function caseRow(x){const r=h('div','row'),q=inpt('a question a user would ask',x?.question),e=inpt('the answer must contain (comma separated)',(x?.expect?.contains||[]).join(', ')),
+ rm=h('button','btn','Remove');q.style.flex='3 1 320px';e.style.flex='2 1 220px';r.style.flexWrap='nowrap';r.append(q,e,rm);rm.onclick=()=>r.remove();r.get=()=>q.value.trim()?{question:q.value.trim(),expect:{...(x?.expect||{}),contains:e.value.split(',').map(s=>s.trim()).filter(Boolean)}}:null;return r}
+function evalSet(c,a){if(c.nextElementSibling?.classList.contains('evalset')){c.nextElementSibling.remove();return}
+ const e=card(`Evaluation set · ${a.name||a.id}`,'questions it must answer correctly before it can be published; ABI reruns them when its model or tools change'),cs=h('div','stack');e.classList.add('evalset','wide');
+ (D.agent_evals?.[a.id]||[]).forEach(x=>cs.append(caseRow(x)));if(!cs.children.length)cs.append(caseRow());
+ e.append(cs,btn('+ Test question',()=>cs.append(caseRow())));
+ act(e,'Save evaluation set',async()=>{const cases=[...cs.children].map(r=>r.get()).filter(Boolean);if(!cases.length)throw new Error('Add at least one question.');
+  await KIND.agent.save({...clean(a),cases});(D.agent_evals||={})[a.id]=cases;return 'Saved through ABI. Run it to see which pass.'},1);
+ act(e,'Run evaluation set',async()=>{const r=await api('test_agent',{agent:a.id});return (r.cases||[]).map(x=>`${x.passed?'✓':'✗'} ${x.question}${x.missing?.length?' · missing '+x.missing.join(', '):''}`).join('\n')});
+ c.after(e)}
 function agentForm(c){const nm=inpt('e.g. Store manager assistant'),pu=inpt('who it is for and what it answers'),ins=h('textarea','f'),
  tl=lmulti([...AGENT_TOOLS,...(D.tools||[]).map(t=>[t.id,`${t.name||t.id} (your tool)`])],['semantic_query']),
  ask=lmulti((D.agents||[]).filter(x=>x.status==='published').map(x=>[x.id,x.name||x.id]),[]),sc=multi(D.measures.map(m=>m.id),[]),st=multi(D.tables||[],[]),mo=sel([['tools_only','Answers only through its tools'],['exploratory','May also explore the measures in scope']]),cs=h('div','stack');
- ins.rows=3;ins.placeholder='how it answers: tone, what to refuse, what to ask for';const addc=btn('+ Test question',()=>{const r=h('div','row'),q=inpt('a question a user would ask'),e=inpt('the answer must contain (comma separated)'),x=h('button','btn','Remove');r.append(q,e,x);x.onclick=()=>r.remove();r.get=()=>q.value?{question:q.value,expect:{contains:e.value.split(',').map(s=>s.trim()).filter(Boolean)}}:null;cs.append(r)});addc.click();
+ ins.rows=3;ins.placeholder='how it answers: tone, what to refuse, what to ask for';const addc=btn('+ Test question',()=>cs.append(caseRow()));cs.append(caseRow());
  if(!ask.options.length){ask.append(new Option('No published agents yet',''));ask.disabled=true;ask.size=1}
  c.append(lab('Name'),nm,lab('Purpose'),pu,lab('Instructions'),ins,lab('What it may do (sends and changes never run during its evaluation; a tool brings its measures and tables into the scope)'),tl,lab('Agents it may ask (published ones)'),ask,lab('Measures in its scope'),sc,lab('Tables in its scope (for grouping and filters)'),st,lab('Mode'),mo,lab('Evaluation: questions it must answer correctly before it can be published'),cs,addc);
  return ()=>{if(!nm.value.trim()||!pu.value.trim()||!ins.value.trim())throw new Error('Give it a name, a purpose and instructions.');
@@ -982,6 +992,7 @@ function agents(box){newBtn(box,'agent');const g=h('div','cards');box.append(g);
  D.agents.forEach(a=>{const c=card(a.name||a.id,`agents/${a.id}.json · ${a.status||''}`);c.append(h('div','file',(a.purpose||a.instructions||'').slice(0,240)));
   const q=h('input','f');q.placeholder='e.g. revenue in North?';const out=h('div','msg');c.append(h('label','l','Question'),q);
   act(c,'Ask',async()=>{const r=await api('run_agent',{agent:a.id,question:q.value});out.textContent=r.answer||JSON.stringify(r,null,1)},1);
+  act(c,'Evaluation set',()=>evalSet(c,a));
   act(c,'Run evaluation set',async()=>{const r=await api('test_agent',{agent:a.id});out.textContent=(r.cases||[]).map(x=>`${x.passed?'✓':'✗'} ${x.question}${x.missing?.length?' · missing '+x.missing.join(', '):''}`).join('\n')||JSON.stringify(r,null,1)});editBtns(c,'agent',a);c.append(out);g.append(c)})}
 
 // ---------- Govern ----------
@@ -1273,7 +1284,8 @@ def _snapshot(dest: Path, project: str, pending: dict | None) -> dict:
     sections["Model"] = f"<div class=card>{render.diagram(model, kinds)}</div>"
     out = {"project": project, "measures": measures, "reports": reports, "dims": dims, "flows": live("list_flows", "flows", "flows"),
            "ml": live("ml_models", "models", "ml"), "tools": live("list_tools", "tools", "tools"),
-           "agents": live("list_agents", "agents", "agents"), "glossary": sm.get("glossary") or [], "models": sm.get("models") or [],
+           "agents": live("list_agents", "agents", "agents"),
+           "agent_evals": {f.name.removesuffix(".eval.json"): (j(f, {}) or {}).get("cases", []) for f in sorted((dest / "agents").glob("*.eval.json"))}, "glossary": sm.get("glossary") or [], "models": sm.get("models") or [],
            "datasets": [queries.get(d["id"], {}) | d for d in sm.get("datasets") or []], "model": model,
            "columns": sm.get("columns") or {}, "sources": sorted(sources), "source_specs": sources, "table_steps": table_steps,
            "tables": sorted(model["tables"]), "readiness": read("readiness", project), "pending": pending,

@@ -38,6 +38,10 @@ ML, custom agents), the Pi agent with a team of specialists, and a one-page app.
 - Custom agents answer in words instead of falling back to raw tool rows: they may name the period their query
   was filtered on (a year, a month, a date range's start) and show a ratio as a percent, and the run trace keeps what
   the number check rejected or an empty model answer (9 of 9 plain questions answered, all figures checked).
+- The agent form offers everything a custom agent may use: queries, report snapshots, email, messages, table refresh,
+  proposed edits, your tools and other published agents, plus tables in its scope; a chosen tool brings its measures
+  and tables into the scope. Custom agents send or post only when asked, and a send's number check knows the period.
+- Every agent card has **Evaluation set**: see, add, change and remove its test questions, save, and run them.
 
 ## Known limits
 
