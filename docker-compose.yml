@@ -1,20 +1,22 @@
 # docker compose up -d   then open http://localhost:8790 and sign in as ABI_USER.
-# Put the secrets in a .env file next to this one (never committed): ABI_PASSWORD, and ABI_PI_SECRET_KEY if you set one.
+# Put the settings in a .env file next to this one (never committed): see .env.example.
+name: abi
 services:
-  abi-pi:
+  abi:
     build: .
-    image: abi-pi:latest
+    image: abi:latest
+    container_name: abi
     ports: ["8790:8790"]
     environment:
       ABI_USER: ${ABI_USER:?set ABI_USER in .env (the workspace owner)}
       ABI_PASSWORD: ${ABI_PASSWORD:?set ABI_PASSWORD in .env (8 characters or more)}
-      ABI_PI_PROJECT: ${ABI_PI_PROJECT:-main}
-      ABI_PI_WORKSPACE: ${ABI_PI_WORKSPACE:-main}
-      ABI_PI_LLM_BASE: ${ABI_PI_LLM_BASE:-}       # optional: or connect providers in the app (Govern › Settings)
-      ABI_PI_LLM_KEY: ${ABI_PI_LLM_KEY:-}
-      ABI_PI_SECRET_KEY: ${ABI_PI_SECRET_KEY:-}   # encrypts the API keys admins save; empty: a key file in the volume
+      ABI_PI_PROJECT: ${ABI_PROJECT:-main}
+      ABI_PI_WORKSPACE: ${ABI_WORKSPACE:-main}
+      ABI_PI_LLM_BASE: ${ABI_LLM_BASE:-}          # optional: or connect providers in the app (Govern › Settings)
+      ABI_PI_LLM_KEY: ${ABI_LLM_KEY:-}
+      ABI_PI_SECRET_KEY: ${ABI_SECRET_KEY:-}      # encrypts the API keys admins save; empty: a key file in the volume
     volumes:
-      - abi-pi-data:/data                        # everything: the engine's database and lake, projects, chats, packs
+      - abi-data:/data                           # everything: the engine's database and lake, projects, chats, packs
     restart: unless-stopped
 volumes:
-  abi-pi-data:
+  abi-data:

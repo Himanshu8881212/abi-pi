@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ABI</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="ABI is open-source agentic BI you host yourself: describe what you need, it builds the pipeline, model, report and automation, and every number comes from a query it ran.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a product page in ABI's own palette (ink, paper, signal orange) with the medallion metals as the data colours;
+   one orchestrated moment (the hero window building a report), everything else quiet. */
+:root {
+  --bg: #0b0b0b; --panel: #141414; --panel2: #1b1b1a; --line: #2a2a28; --ink: #f2f2ef; --mute: #9b9b96;
+  --sig: #ff6a3d; --sig-ink: #0b0b0b; --sig-soft: rgba(255, 106, 61, .14);
+  --bronze: #c98a58; --silver: #b4bac1; --gold: #e0b94f; --ok: #6cc98b; --bad: #ff8a73;
+  --display: "Inter Tight", "Helvetica Neue", Arial, sans-serif;
+  --text: "Inter Tight", "Helvetica Neue", Arial, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --r: 10px; --wrap: 1180px;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+  --bg: #f7f7f5; --panel: #ffffff; --panel2: #f0f0ed; --line: #e1e1dd; --ink: #0b0b0b; --mute: #62625e;
+  --sig: #ff4f1f; --sig-ink: #ffffff; --sig-soft: rgba(255, 79, 31, .1);
+  --bronze: #9c5d2c; --silver: #6f7780; --gold: #9c7a12; --ok: #23824a; --bad: #c4361a; color-scheme: light } }
+:root[data-theme="light"] {
+  --bg: #f7f7f5; --panel: #ffffff; --panel2: #f0f0ed; --line: #e1e1dd; --ink: #0b0b0b; --mute: #62625e;
+  --sig: #ff4f1f; --sig-ink: #ffffff; --sig-soft: rgba(255, 79, 31, .1);
+  --bronze: #9c5d2c; --silver: #6f7780; --gold: #9c7a12; --ok: #23824a; --bad: #c4361a; color-scheme: light }
+
+* { box-sizing: border-box }
+html { scroll-behavior: smooth }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 400 17px/1.6 var(--text); -webkit-font-smoothing: antialiased }
+a { color: inherit }
+:focus-visible { outline: 2px solid var(--sig); outline-offset: 3px; border-radius: 4px }
+.wrap { max-width: var(--wrap); margin: 0 auto; padding-left: max(20px, env(safe-area-inset-left, 0px)); padding-right: max(20px, env(safe-area-inset-right, 0px)) }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0 }
+h2 { font-size: clamp(32px, 4.4vw, 56px); line-height: 1.02; letter-spacing: -.035em; font-weight: 700 }
+.lede { color: var(--mute); max-width: 60ch; font-size: 19px; margin: 18px 0 0 }
+.eyebrow { font: 500 12px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--sig) }
+code, .mono { font-family: var(--mono) }
+section { padding-block: clamp(72px, 10vw, 128px) }
+
+/* nav */
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg) }
+nav.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 9; background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line) }
+nav.top .wrap { display: flex; align-items: center; gap: 24px; height: 60px }
+.mark { display: flex; align-items: center; gap: 10px; text-decoration: none; font: 800 21px/1 var(--display); letter-spacing: -.04em }
+.mark i { width: 22px; height: 22px; border-radius: 6px; background: var(--sig); display: grid; place-items: center }
+.mark i::after { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--sig-ink) }
+.pill { font: 500 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--sig); border: 1px solid color-mix(in srgb, var(--sig) 50%, transparent); padding: 5px 8px; border-radius: 99px }
+nav.top .links { display: flex; gap: 22px; margin-left: auto; font-size: 15px }
+nav.top .links a { text-decoration: none; color: var(--mute) }
+nav.top .links a:hover { color: var(--ink) }
+.btn { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; font: 600 16px/1 var(--text); padding: 14px 20px; border-radius: var(--r); border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; transition: transform .15s, border-color .15s, background .15s }
+.btn:hover { transform: translateY(-1px); border-color: var(--mute) }
+.btn.go { background: var(--sig); color: var(--sig-ink); border-color: var(--sig) }
+.btn.go:hover { background: color-mix(in srgb, var(--sig) 88%, var(--ink)) }
+.btn.sm { padding: 9px 14px; font-size: 14px }
+.btn svg { width: 18px; height: 18px; fill: currentColor }
+@media (max-width: 760px) { nav.top .links { display: none } nav.top .btn { margin-left: auto } }
+
+/* hero */
+.hero { padding-block: clamp(48px, 7vw, 96px) clamp(56px, 8vw, 104px); background-image: radial-gradient(var(--line) 1px, transparent 1px); background-size: 26px 26px; background-position: -13px -13px }
+.hero .wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr); gap: clamp(32px, 5vw, 72px); align-items: center }
+.hero h1 { font-size: clamp(46px, 6.6vw, 92px); line-height: .94; letter-spacing: -.05em; font-weight: 800 }
+.hero h1 em { font-style: normal; color: var(--sig) }
+.hero .lede { font-size: clamp(18px, 1.6vw, 21px) }
+.cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px }
+.cmd { display: flex; align-items: center; gap: 12px; margin-top: 18px; font: 14px var(--mono); color: var(--mute); max-width: 100% }
+.cmd code { color: var(--ink); background: var(--panel); border: 1px solid var(--line); padding: 9px 12px; border-radius: 8px; overflow-x: auto; white-space: nowrap; min-width: 0 }
+.copy { font: 500 12px var(--mono); background: none; border: 1px solid var(--line); color: var(--mute); border-radius: 6px; padding: 7px 9px; cursor: pointer; flex: none }
+.copy:hover { color: var(--ink); border-color: var(--mute) }
+.alpha-note { display: flex; gap: 10px; align-items: baseline; margin-top: 28px; font-size: 14px; color: var(--mute); max-width: 52ch }
+.alpha-note b { color: var(--ink); font-weight: 600 }
+@media (max-width: 980px) { .hero .wrap { grid-template-columns: minmax(0, 1fr) } }
+
+/* the product window */
+.win { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; box-shadow: 0 40px 80px -40px rgba(0, 0, 0, .55), 0 0 0 1px color-mix(in srgb, var(--sig) 8%, transparent); min-width: 0 }
+.win .bar { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--line); font: 12px var(--mono); color: var(--mute) }
+.win .bar span { width: 10px; height: 10px; border-radius: 50%; background: var(--line) }
+.win .bar em { font-style: normal; margin-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.win .bar .demo { margin-left: auto; letter-spacing: .08em; text-transform: uppercase; font-size: 10px; white-space: nowrap }
+.win .body { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); min-height: 430px }
+.chat { padding: 16px; display: flex; flex-direction: column; gap: 10px; border-right: 1px solid var(--line); font-size: 13.5px; line-height: 1.5; min-width: 0 }
+.msg { padding: 10px 12px; border-radius: 10px; max-width: 100% }
+.msg.you { align-self: flex-end; background: var(--sig-soft); border: 1px solid color-mix(in srgb, var(--sig) 30%, transparent) }
+.msg.you .caret { display: inline-block; width: 7px; height: 1em; background: var(--sig); vertical-align: -2px; margin-left: 2px; animation: blink 1s steps(1) infinite }
+@keyframes blink { 50% { opacity: 0 } }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font: 12px/1.45 var(--mono); color: var(--mute) }
+.steps li { display: flex; gap: 8px; align-items: baseline; transition: opacity .3s, transform .3s }
+.steps li::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--mute); transform: translateY(1px) }
+.steps li.done::before { background: var(--ok); border-color: var(--ok) }
+.steps li.run::before { border-color: var(--sig); border-top-color: transparent; animation: spin .7s linear infinite }
+.steps li b { color: var(--ink); font-weight: 500 }
+.steps li .t { margin-left: auto; padding-left: 8px; white-space: nowrap }
+.steps .bz { color: var(--bronze) } .steps .sv { color: var(--silver) } .steps .gd { color: var(--gold) }
+@keyframes spin { to { transform: translateY(1px) rotate(360deg) } }
+.msg.abi { background: var(--panel2); border: 1px solid var(--line) }
+.g { color: var(--ink); font-weight: 600; border-bottom: 1.5px solid var(--ok); font-variant-numeric: tabular-nums }
+.nv { font: 500 11.5px var(--mono); color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); padding: 1px 5px; border-radius: 4px }
+.ask { border: 1px solid var(--sig); border-radius: 10px; padding: 10px 12px; display: grid; gap: 8px; background: var(--sig-soft) }
+.ask p { margin: 0; font-size: 13px }
+.ask div { display: flex; gap: 8px; align-items: center; font: 11px var(--mono); color: var(--mute) }
+.ask b { font: 600 12px var(--text); padding: 5px 12px; border-radius: 6px; background: var(--sig); color: var(--sig-ink) }
+.ask b + b { background: transparent; color: var(--ink); border: 1px solid var(--line) }
+.ask div span { margin-left: auto }
+.viz { padding: 16px; display: flex; flex-direction: column; gap: 14px; min-width: 0 }
+.viz h4 { margin: 0; font: 600 13px var(--text) }
+.viz h4 small { display: block; font: 11px var(--mono); color: var(--mute); margin-top: 2px; font-weight: 400 }
+.kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 8px }
+.kpi { border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px }
+.kpi span { display: block; font: 10.5px var(--mono); color: var(--mute); letter-spacing: .06em; text-transform: uppercase }
+.kpi b { font: 700 20px var(--display); letter-spacing: -.02em; font-variant-numeric: tabular-nums }
+.bars { display: grid; gap: 9px; flex: 1; align-content: start }
+.bars .row { display: grid; grid-template-columns: 44px minmax(0, 1fr) 46px; align-items: center; gap: 8px; font: 11.5px var(--mono); color: var(--mute) }
+.bars .track { height: 18px; border-radius: 4px; background: var(--panel2); overflow: hidden }
+.bars .fill { height: 100%; width: var(--w); background: var(--silver); border-radius: 4px; transition: width .9s cubic-bezier(.2, .8, .2, 1) }
+.bars .row.top .fill { background: var(--sig) }
+.bars .row b { color: var(--ink); font-weight: 500; text-align: right; font-variant-numeric: tabular-nums }
+.layers { display: flex; gap: 6px; font: 10.5px var(--mono) }
+.layers span { flex: 1; text-align: center; padding: 6px 4px; border-radius: 6px; border: 1px solid var(--line); color: var(--mute); transition: all .4s }
+.layers span.on.b { color: var(--bronze); border-color: var(--bronze) }
+.layers span.on.s { color: var(--silver); border-color: var(--silver) }
+.layers span.on.gl { color: var(--gold); border-color: var(--gold) }
+.win.reset .bars .fill { width: 0 !important; transition: none }
+.hide { opacity: 0; transform: translateY(6px) }
+.chat > * , .viz > * { transition: opacity .35s, transform .35s }
+@media (max-width: 620px) { .win .body { grid-template-columns: minmax(0, 1fr) } .chat { border-right: 0; border-bottom: 1px solid var(--line) } }
+
+/* pipeline strip */
+.strip { border-block: 1px solid var(--line); overflow: hidden; padding-block: 18px; background: var(--panel) }
+.strip .track { display: flex; gap: 48px; width: max-content; animation: slide 38s linear infinite; font: 600 clamp(20px, 2.4vw, 30px)/1 var(--display); letter-spacing: -.02em; color: var(--mute) }
+.strip .track span { display: flex; align-items: center; gap: 48px; white-space: nowrap }
+.strip .track span::after { content: "→"; color: var(--sig) }
+@keyframes slide { to { transform: translateX(-50%) } }
+
+/* receipts */
+.receipts .wrap { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: clamp(32px, 5vw, 72px); align-items: start }
+.answer { margin-top: 36px; font-size: clamp(19px, 1.8vw, 23px); line-height: 1.55; font-family: var(--display); letter-spacing: -.01em; max-width: 34ch }
+.answer button { font: inherit; color: var(--ink); font-weight: 700; background: none; border: 0; padding: 0 1px; border-bottom: 2px solid var(--ok); cursor: pointer; font-variant-numeric: tabular-nums }
+.answer button[aria-pressed="true"] { background: color-mix(in srgb, var(--ok) 18%, transparent); border-radius: 3px 3px 0 0 }
+.answer .nv { font-size: .62em; vertical-align: .15em; cursor: pointer; border: 0 }
+.answer .nv[aria-pressed="true"] { outline: 2px solid var(--bad); outline-offset: 2px }
+.hint { margin-top: 18px; font: 13px var(--mono); color: var(--mute) }
+.receipt { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; min-width: 0 }
+.receipt header { display: flex; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px dashed var(--line); font: 12px var(--mono); color: var(--mute) }
+.receipt header b { color: var(--ok); font-weight: 500 }
+.receipt header b.x { color: var(--bad) }
+.receipt pre { margin: 0; padding: 16px 18px; font: 12.5px/1.6 var(--mono); color: var(--mute); overflow-x: auto; border-bottom: 1px dashed var(--line) }
+.receipt pre .k { color: var(--sig) } .receipt pre .s { color: var(--ink) }
+.receipt .tbl { overflow-x: auto }
+.receipt table { width: 100%; border-collapse: collapse; font: 13px var(--mono); font-variant-numeric: tabular-nums }
+.receipt th, .receipt td { text-align: left; padding: 9px 18px; border-bottom: 1px solid var(--line); white-space: nowrap }
+.receipt th { font-weight: 500; color: var(--mute); font-size: 11px; letter-spacing: .08em; text-transform: uppercase }
+.receipt td:last-child, .receipt th:last-child { text-align: right }
+.receipt tr.hit td { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ink) }
+.receipt .why { padding: 14px 18px; font-size: 14px; color: var(--mute) }
+.receipt .why b { color: var(--ink) }
+@media (max-width: 900px) { .receipts .wrap { grid-template-columns: minmax(0, 1fr) } }
+
+/* three promises */
+.promises { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; margin-top: 48px }
+.promises > div { background: var(--bg); padding: 28px; display: grid; gap: 10px; align-content: start }
+.promises h3 { font-size: 22px; letter-spacing: -.02em }
+.promises p { margin: 0; color: var(--mute); font-size: 16px }
+.promises .ic { font: 500 12px var(--mono); color: var(--sig) }
+@media (max-width: 860px) { .promises { grid-template-columns: minmax(0, 1fr) } }
+
+/* medallion */
+.medal .wrap { display: grid; gap: 48px }
+.flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; position: relative }
+.flow > div { border: 1px solid var(--line); border-radius: 12px; padding: 22px; background: var(--panel); display: grid; gap: 8px; align-content: start; position: relative; overflow: hidden }
+.flow > div::before { content: ""; position: absolute; inset: 0 0 auto; height: 3px; background: var(--c) }
+.flow h3 { font-size: 20px; letter-spacing: -.02em; display: flex; align-items: baseline; justify-content: space-between; gap: 8px }
+.flow h3 small { font: 11px var(--mono); color: var(--c); letter-spacing: .1em; text-transform: uppercase }
+.flow p { margin: 0; color: var(--mute); font-size: 15px }
+.flow code { font-size: 12px; color: var(--ink); background: var(--panel2); padding: 2px 6px; border-radius: 4px; overflow-wrap: anywhere }
+.flow .pulse { position: absolute; top: 0; left: 0; width: 40%; height: 3px; background: linear-gradient(90deg, transparent, var(--ink), transparent); opacity: .5; animation: sweep 3.2s ease-in-out infinite; animation-delay: var(--d) }
+@keyframes sweep { from { transform: translateX(-100%) } to { transform: translateX(260%) } }
+@media (max-width: 900px) { .flow { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
+@media (max-width: 520px) { .flow { grid-template-columns: minmax(0, 1fr) } }
+
+/* features */
+.feats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 0; border-top: 1px solid var(--line); margin-top: 48px }
+.feats > div { padding: 26px 26px 26px 0; border-bottom: 1px solid var(--line); display: grid; gap: 6px; align-content: start }
+.feats h3 { font-size: 19px; letter-spacing: -.015em; display: flex; gap: 10px; align-items: baseline }
+.feats h3 span { font: 500 11px var(--mono); color: var(--sig) }
+.feats p { margin: 0; color: var(--mute); font-size: 15.5px; max-width: 40ch }
+
+/* team */
+.team { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 36px }
+.team span { font: 500 14px var(--mono); padding: 10px 14px; border: 1px solid var(--line); border-radius: 99px; background: var(--panel); transition: border-color .2s, color .2s }
+.team span:first-child { border-color: var(--sig); color: var(--sig) }
+.team span:hover { border-color: var(--mute) }
+
+/* install */
+.install { background: var(--panel); border-block: 1px solid var(--line) }
+.install .wrap { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: clamp(32px, 5vw, 72px); align-items: start }
+.term { background: var(--bg); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; min-width: 0 }
+.term .bar { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--line); font: 12px var(--mono); color: var(--mute) }
+.term .bar span { width: 10px; height: 10px; border-radius: 50%; background: var(--line) }
+.term ol { list-style: none; margin: 0; padding: 8px 0; counter-reset: s }
+.term li { counter-increment: s; padding: 14px 18px; display: grid; gap: 8px }
+.term li + li { border-top: 1px dashed var(--line) }
+.term li p { margin: 0; font-size: 14px; color: var(--mute) }
+.term li p::before { content: counter(s) ". "; color: var(--sig); font-family: var(--mono) }
+.term .line { display: flex; gap: 10px; align-items: flex-start }
+.term pre { margin: 0; flex: 1; min-width: 0; font: 13.5px/1.6 var(--mono); color: var(--ink); overflow-x: auto; white-space: pre }
+.term pre .p { color: var(--sig); user-select: none }
+.term pre .c { color: var(--mute) }
+.req { display: grid; gap: 10px; margin-top: 28px; padding: 0; list-style: none; font-size: 15.5px; color: var(--mute) }
+.req li { display: flex; gap: 10px } .req li::before { content: "—"; color: var(--sig) }
+.req b { color: var(--ink); font-weight: 600 }
+@media (max-width: 900px) { .install .wrap { grid-template-columns: minmax(0, 1fr) } }
+
+/* plans */
+.tiers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 48px }
+.tier { border: 1px solid var(--line); border-radius: 16px; padding: clamp(24px, 4vw, 40px); background: var(--panel); display: grid; gap: 14px; align-content: start }
+.tier.dark { border-color: var(--ink) }
+.tier .ic { font: 500 12px var(--mono); color: var(--sig); letter-spacing: .1em; text-transform: uppercase }
+.tier h3 { font-size: 28px; letter-spacing: -.03em }
+.tier .price { margin: 0; font: 800 clamp(36px, 4vw, 48px)/1 var(--display); letter-spacing: -.04em }
+.tier .price small { display: block; font: 400 13px var(--mono); color: var(--mute); letter-spacing: 0; margin-top: 8px }
+.tier ul { list-style: none; margin: 8px 0 12px; padding: 0; display: grid; gap: 10px; color: var(--mute); font-size: 15.5px }
+.tier li { display: flex; gap: 10px } .tier li::before { content: "✓"; color: var(--ok); flex: none }
+.tier .btn { justify-self: start }
+@media (max-width: 760px) { .tiers { grid-template-columns: minmax(0, 1fr) } }
+
+/* alpha / contribute */
+.alpha { position: relative; overflow: hidden }
+.alpha .card { border: 1px solid var(--sig); border-radius: 18px; padding: clamp(28px, 5vw, 56px); background: linear-gradient(135deg, var(--sig-soft), transparent 60%); display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, .8fr); gap: 40px; align-items: end }
+.alpha .card .stamp { display: inline-block; font: 600 12px var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--sig); border: 1.5px solid var(--sig); padding: 6px 10px; border-radius: 4px; transform: rotate(-3deg); margin-bottom: 20px }
+.alpha ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px }
+.alpha ul a { display: flex; justify-content: space-between; gap: 12px; text-decoration: none; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); font-weight: 600 }
+.alpha ul a:hover { border-color: var(--sig) }
+.alpha ul a small { color: var(--mute); font: 12px var(--mono); font-weight: 400; align-self: center }
+@media (max-width: 860px) { .alpha .card { grid-template-columns: minmax(0, 1fr) } }
+
+footer { border-top: 1px solid var(--line); padding-block: 36px calc(36px + env(safe-area-inset-bottom, 0px)); color: var(--mute); font-size: 14px }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 16px 28px; align-items: center }
+footer .wrap > :last-child { margin-left: auto }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important }
+  html { scroll-behavior: auto }
+}
+</style>
+</head>
+<body>
+
+<nav class="top">
+  <div class="wrap">
+    <a class="mark" href="#top" aria-label="ABI home"><i></i>ABI</a>
+    <span class="pill">alpha</span>
+    <div class="links">
+      <a href="#receipts">Grounded answers</a>
+      <a href="#features">What it does</a>
+      <a href="#install">Self-host</a>
+      <a href="#plans">Plans</a>
+      <a href="#contribute">Contribute</a>
+    </div>
+    <a class="btn sm" href="https://github.com/Himanshu8881212/abi-pi">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.72 1.22 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.65-.89-3.65-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+      GitHub
+    </a>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <div>
+      <div class="eyebrow">Open-source agentic BI · self-hosted</div>
+      <h1 style="margin-top:20px">Ask for the dashboard.<br>Get the <em>receipts.</em></h1>
+      <p class="lede">Tell ABI what you need in plain words. It loads your data, builds the model, draws the report and
+        schedules the flow, on your own server. Every number it tells you comes from a query it actually ran.</p>
+      <div class="cta">
+        <a class="btn go" href="https://github.com/Himanshu8881212/abi-pi">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.72 1.22 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.65-.89-3.65-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+          Get ABI on GitHub
+        </a>
+        <a class="btn" href="#install">Run it with Docker</a>
+      </div>
+      <div class="cmd"><code id="c0">docker compose up -d --build</code><button class="copy" data-copy="c0" type="button">copy</button></div>
+      <p class="alpha-note"><span class="pill">alpha</span><span><b>Early and moving fast.</b> It works end to end and
+        every release is tested, but expect rough edges.</span></p>
+    </div>
+
+    <div class="win" id="win" aria-label="Illustrative animation: ABI building a report from one request">
+      <div class="bar"><span></span><span></span><span></span><em>localhost:8790 · Manager overview</em><b class="demo">illustrative</b></div>
+      <div class="body">
+        <div class="chat">
+          <div class="msg you" data-s="0"><span id="typed">Load the orders from s3://brewline and show revenue by region for 2025.</span><span class="caret"></span></div>
+          <ul class="steps">
+            <li class="done" data-s="1"><span><b class="bz">bronze</b> 36 Parquet files · 7.4M rows</span><span class="t">14 s</span></li>
+            <li class="done" data-s="2"><span><b class="sv">silver</b> cleaned, typed, deduped</span><span class="t">9 s</span></li>
+            <li class="done" data-s="3"><span><b class="gd">gold</b> orders · stores · calendar</span><span class="t">6 s</span></li>
+            <li class="done" data-s="4"><span><b>measure</b> revenue = SUM(amount)</span><span class="t">tested</span></li>
+            <li class="done" data-s="5"><span><b>report</b> Revenue by region</span><span class="t">drawn</span></li>
+          </ul>
+          <div class="msg abi" data-s="6">Revenue in 2025 was <span class="g">€41.4M</span>. West led with <span class="g">€12.9M</span>; its growth was <span class="nv">[not verified]</span>, so I left it out. Ask me to compare with 2024?</div>
+          <div class="ask" data-s="7">
+            <p><b style="all:unset;font-weight:600">Publish</b> “Manager overview” so Viewers can see it?</p>
+            <div><b>Yes</b><b>No</b><span>waiting for you</span></div>
+          </div>
+        </div>
+        <div class="viz">
+          <div class="layers" data-s="3"><span class="b on">bronze</span><span class="s on">silver</span><span class="gl on">gold</span></div>
+          <div class="kpis" data-s="5">
+            <div class="kpi"><span>Revenue 2025</span><b>€41.4M</b></div>
+            <div class="kpi"><span>Top region</span><b>West</b></div>
+          </div>
+          <h4 data-s="5">Revenue by region<small>gold_orders · year = 2025</small></h4>
+          <div class="bars" data-s="5">
+            <div class="row top"><span>West</span><div class="track"><div class="fill" style="--w:100%"></div></div><b>12.9M</b></div>
+            <div class="row"><span>East</span><div class="track"><div class="fill" style="--w:83.7%"></div></div><b>10.8M</b></div>
+            <div class="row"><span>North</span><div class="track"><div class="fill" style="--w:70.5%"></div></div><b>9.1M</b></div>
+            <div class="row"><span>South</span><div class="track"><div class="fill" style="--w:66.7%"></div></div><b>8.6M</b></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="strip" aria-hidden="true">
+  <div class="track">
+    <span>Data</span><span>Data model</span><span>Visualize</span><span>Export</span><span>Automate</span><span>Knowledge</span><span>Govern</span>
+    <span>Data</span><span>Data model</span><span>Visualize</span><span>Export</span><span>Automate</span><span>Knowledge</span><span>Govern</span>
+  </div>
+</div>
+
+<section class="receipts" id="receipts">
+  <div class="wrap">
+    <div>
+      <div class="eyebrow">Grounded answers</div>
+      <h2 style="margin-top:16px">Every number has a receipt.</h2>
+      <p class="lede">Before an answer reaches you, ABI checks each figure and name against the rows its tools returned
+        and the words you typed. Anything it can’t back up is checked once more, then masked. You never get a
+        confident made-up total.</p>
+      <p class="answer" id="answer">Revenue in 2025 was <button type="button" data-r="0" aria-pressed="true">€41.4M</button>.
+        West led with <button type="button" data-r="1" aria-pressed="false">€12.9M</button>, and the top store was
+        <button type="button" data-r="2" aria-pressed="false">Harbour St</button>. Growth vs 2024:
+        <button type="button" class="nv" data-r="3" aria-pressed="false">[not verified]</button></p>
+      <p class="hint">Tap a number to see where it came from. (Illustrative example.)</p>
+    </div>
+    <div class="receipt" aria-live="polite">
+      <header><span id="rt">semantic_query · 0.41 s</span><b id="rs">✓ grounded</b></header>
+      <pre id="rq"></pre>
+      <div class="tbl"><table><thead id="rh"></thead><tbody id="rb"></tbody></table></div>
+      <div class="why" id="rw"></div>
+    </div>
+  </div>
+</section>
+
+<section style="padding-top:0">
+  <div class="wrap">
+    <div class="eyebrow">Three promises</div>
+    <h2 style="margin-top:16px;max-width:18ch">An agent you can leave alone with your data.</h2>
+    <div class="promises">
+      <div><span class="ic">01 · grounded</span><h3>Numbers from tools, words from you</h3><p>Figures and member names must appear in a tool result or in what you said. One retry, then masking.</p></div>
+      <div><span class="ic">02 · asks first</span><h3>Your yes, every time</h3><p>Deleting, publishing, sending and syncing wait for your click in the app. The agent never sees the confirmation token.</p></div>
+      <div><span class="ic">03 · one door</span><h3>Only through ABI</h3><p>The agent reads data only through the semantic engine and changes projects only through ABI’s actions, as you, with your row-level security.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="medal" style="padding-top:0">
+  <div class="wrap">
+    <div>
+      <div class="eyebrow">From raw files to answers</div>
+      <h2 style="margin-top:16px">Medallion layers, built for you.</h2>
+      <p class="lede">Point ABI at Parquet files or an S3 folder. It builds the layers a data engineer would, reconciles
+        each one, and keeps the history in Git so every change can be reviewed and undone.</p>
+    </div>
+    <div class="flow">
+      <div style="--c:var(--bronze)"><i class="pulse" style="--d:0s"></i><h3>Bronze <small>raw</small></h3><p>Your files as they arrived, from an upload or <code>s3://bucket/folder/</code>.</p></div>
+      <div style="--c:var(--silver)"><i class="pulse" style="--d:.4s"></i><h3>Silver <small>clean</small></h3><p>Typed, deduplicated and combined, with data-quality checks.</p></div>
+      <div style="--c:var(--gold)"><i class="pulse" style="--d:.8s"></i><h3>Gold <small>model</small></h3><p>Facts, dimensions, keys, joins and a calendar, ready to query.</p></div>
+      <div style="--c:var(--sig)"><i class="pulse" style="--d:1.2s"></i><h3>Answers <small>use</small></h3><p>Measures, reports, monitors, forecasts and flows on top.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="features" style="padding-top:0">
+  <div class="wrap">
+    <div class="eyebrow">What it does</div>
+    <h2 style="margin-top:16px">The whole BI stack, in the order the work happens.</h2>
+    <div class="feats">
+      <div><h3><span>A</span>Data</h3><p>Parquet uploads and S3 folders into bronze, silver and gold tables, with profiling and cleaning.</p></div>
+      <div><h3><span>B</span>Data model</h3><p>Measures, glossary, saved queries, joins, calendar, row-level and column security, a model canvas.</p></div>
+      <div><h3><span>C</span>Visualize</h3><p>Reports with cross-filtering and drag-and-resize layouts, Explore, Monitor checks and a Home of pinned widgets.</p></div>
+      <div><h3><span>D</span>Export</h3><p>Board packs as PDF, PPTX and PNG, data extracts, and short explainer videos of a report.</p></div>
+      <div><h3><span>E</span>Automate</h3><p>Scheduled flows, ML forecasts, tools and custom agents that must pass their own evaluation sets.</p></div>
+      <div><h3><span>F</span>Knowledge</h3><p>A vault of your business definitions. The agent cites it before it defines or judges a measure.</p></div>
+      <div><h3><span>G</span>Govern</h3><p>Developer and Viewer modes, commits and history, Publish to a read-only copy, roles, any model provider.</p></div>
+      <div><h3><span>H</span>Chat everywhere</h3><p>The chat sits on every page, navigates for you, and can be followed live from another window.</p></div>
+    </div>
+    <div class="team" aria-label="The agent team">
+      <span>lead</span><span>data-engineer</span><span>analytics-engineer</span><span>analyst</span><span>ml-engineer</span>
+      <span>automation-engineer</span><span>agent-builder</span><span>reviewer</span><span>release-ops</span><span>board-pack</span>
+    </div>
+    <p class="hint">A lead agent plans the work and hands it to specialists, then checks what they built.</p>
+  </div>
+</section>
+
+<section class="install" id="install">
+  <div class="wrap">
+    <div>
+      <div class="eyebrow">Self-host</div>
+      <h2 style="margin-top:16px">One container. Your machine.</h2>
+      <p class="lede">Postgres, the engine, the agent and the app ship in a single Docker image. All your data lives in
+        one volume you can back up with one command.</p>
+      <ul class="req">
+        <li><span><b>Docker</b> with Compose, on Linux or macOS</span></li>
+        <li><span><b>About 5 GB</b> of disk for the image</span></li>
+        <li><span><b>A model:</b> OpenAI, Anthropic, OpenRouter, Gemini, Ollama or any OpenAI-compatible endpoint</span></li>
+      </ul>
+      <div class="cta"><a class="btn go" href="https://github.com/Himanshu8881212/abi-pi#quick-start">Read the full guide</a></div>
+    </div>
+    <div class="term">
+      <div class="bar"><span></span><span></span><span></span>&nbsp;terminal</div>
+      <ol>
+        <li><p>Get the code</p><div class="line"><pre id="c1"><span class="p">$ </span>git clone https://github.com/Himanshu8881212/abi-pi.git abi
+<span class="p">$ </span>cd abi</pre><button class="copy" data-copy="c1" type="button">copy</button></div></li>
+        <li><p>Set the owner account</p><div class="line"><pre id="c2"><span class="p">$ </span>cp .env.example .env
+<span class="c"># then edit .env: ABI_USER=admin  ABI_PASSWORD=8+ characters</span></pre><button class="copy" data-copy="c2" type="button">copy</button></div></li>
+        <li><p>Start it</p><div class="line"><pre id="c3"><span class="p">$ </span>docker compose up -d --build</pre><button class="copy" data-copy="c3" type="button">copy</button></div></li>
+        <li><p>Open <span class="mono" style="color:var(--ink)">http://localhost:8790</span>, sign in, connect a model in Govern › Settings, and ask.</p></li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section class="plans" id="plans" style="padding-top:0">
+  <div class="wrap">
+    <div class="eyebrow">Plans</div>
+    <h2 style="margin-top:16px">Run it yourself, or run it with us.</h2>
+    <div class="tiers">
+      <div class="tier">
+        <span class="ic">self-hosted</span>
+        <h3>Community</h3>
+        <p class="price">Free <small>open source · AGPL-3.0</small></p>
+        <ul>
+          <li>Every feature: data, model, reports, flows, ML, custom agents</li>
+          <li>The agent team, with grounded answers and confirmations</li>
+          <li>One Docker container on your own machine</li>
+          <li>Any model provider you choose</li>
+          <li>Help from the community on GitHub</li>
+        </ul>
+        <a class="btn go" href="https://github.com/Himanshu8881212/abi-pi#quick-start">Get started</a>
+      </div>
+      <div class="tier dark">
+        <span class="ic">enterprise</span>
+        <h3>Enterprise</h3>
+        <p class="price">Let’s talk <small>tailored to your team</small></p>
+        <ul>
+          <li>Everything in Community</li>
+          <li>Help with rollout, data sources and security review</li>
+          <li>Support from the people who build ABI</li>
+          <li>A say in what we build next</li>
+        </ul>
+        <a class="btn" href="https://github.com/Himanshu8881212/abi-pi/issues/new?title=Enterprise%20enquiry">Contact us</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="alpha" id="contribute">
+  <div class="wrap">
+    <div class="card">
+      <div>
+        <span class="stamp">Alpha · in development</span>
+        <h2>ABI is early. Build it with us.</h2>
+        <p class="lede">The core works and every release is tested end to end, but screens, settings and formats can still
+          change. It’s free software under the AGPL-3.0, so you can run it, read every line, and change it. Bug reports,
+          ideas and pull requests all shape what comes next.</p>
+      </div>
+      <ul>
+        <li><a href="https://github.com/Himanshu8881212/abi-pi">Star and clone the repo <small>github</small></a></li>
+        <li><a href="https://github.com/Himanshu8881212/abi-pi/issues/new">Report a bug or idea <small>issues</small></a></li>
+        <li><a href="https://github.com/Himanshu8881212/abi-pi#contributing">Send a pull request <small>guide</small></a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <a class="mark" href="#top"><i></i>ABI</a>
+    <span>Free software under the <a href="https://github.com/Himanshu8881212/abi-pi/blob/main/LICENSE">GNU AGPL-3.0</a></span>
+    <a href="https://github.com/Himanshu8881212/abi-pi/blob/main/RELEASE.md">Release notes</a>
+    <span class="mono" style="font-size:12px">v1.0.1 · alpha</span>
+  </div>
+</footer>
+
+<script>
+(() => {
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // copy buttons
+  document.querySelectorAll(".copy").forEach(b => b.addEventListener("click", () => {
+    const el = document.getElementById(b.dataset.copy);
+    const text = el.innerText.split("\n").filter(l => !l.trim().startsWith("#")).map(l => l.replace(/^\$ /, "")).join("\n");
+    const done = ok => { b.textContent = ok ? "copied" : "select"; setTimeout(() => b.textContent = "copy", 1600) };
+    const select = () => { const r = document.createRange(); r.selectNodeContents(el); const s = getSelection(); s.removeAllRanges(); s.addRange(r); done(false) };
+    try { navigator.clipboard.writeText(text).then(() => done(true), select) } catch (e) { select() }
+  }));
+
+  // receipts
+  const R = [
+    { t: "semantic_query · 0.41 s", ok: true,
+      q: '<span class="k">measures</span>  <span class="s">["revenue"]</span>\n<span class="k">filters</span>   <span class="s">calendar.year = 2025</span>',
+      h: ["revenue"], rows: [["41,382,107.55"]], hit: 0,
+      w: "<b>€41.4M</b> is 41,382,107.55 rounded. Rounding is allowed; a figure no row supports is not." },
+    { t: "semantic_query · 0.37 s", ok: true,
+      q: '<span class="k">measures</span>  <span class="s">["revenue"]</span>\n<span class="k">by</span>        <span class="s">dim_store.region</span>\n<span class="k">filters</span>   <span class="s">calendar.year = 2025</span>',
+      h: ["region", "revenue"], rows: [["West", "12,904,311.20"], ["East", "10,832,950.04"], ["North", "9,081,226.79"], ["South", "8,563,619.52"]], hit: 0,
+      w: "<b>West</b> and <b>€12.9M</b> are both in row 1 of this result." },
+    { t: "semantic_query · 0.52 s", ok: true,
+      q: '<span class="k">measures</span>  <span class="s">["revenue"]</span>\n<span class="k">by</span>        <span class="s">dim_store.name</span>\n<span class="k">order_by</span>  <span class="s">revenue desc</span>   <span class="k">limit</span> <span class="s">3</span>',
+      h: ["store", "revenue"], rows: [["Harbour St", "512,880.10"], ["Mill Lane", "498,214.67"], ["Old Market", "486,002.31"]], hit: 0,
+      w: "Member names count too: <b>Harbour St</b> appears in the rows, so it may be named." },
+    { t: "no tool returned this", ok: false,
+      q: '<span class="k">model said</span>  <span class="s">"West grew 18% on 2024"</span>\n<span class="k">checked</span>     <span class="s">every row of this answer\'s tool results</span>',
+      h: ["figure", "found in"], rows: [["18%", "nothing"]], hit: -1,
+      w: "No query compared 2025 with 2024, so <b>18%</b> had no receipt. ABI asked the model to fix it once, then masked it." }
+  ];
+  const $ = id => document.getElementById(id);
+  const esc = s => s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+  function show(i) {
+    const r = R[i];
+    $("rt").textContent = r.t;
+    $("rs").textContent = r.ok ? "✓ grounded" : "✕ masked";
+    $("rs").className = r.ok ? "" : "x";
+    $("rq").innerHTML = r.q;
+    $("rh").innerHTML = "<tr>" + r.h.map(x => `<th>${esc(x)}</th>`).join("") + "</tr>";
+    $("rb").innerHTML = r.rows.map((row, j) => `<tr class="${j === r.hit ? "hit" : ""}">` + row.map(c => `<td>${esc(c)}</td>`).join("") + "</tr>").join("");
+    $("rw").innerHTML = r.w;
+    document.querySelectorAll("#answer button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.r === i)));
+  }
+  document.querySelectorAll("#answer button").forEach(b => {
+    b.addEventListener("click", () => show(+b.dataset.r));
+    b.addEventListener("mouseenter", () => show(+b.dataset.r));
+  });
+  show(0);
+
+  // the hero window: rests on the finished state, then replays the build
+  if (reduce) return;
+  const win = $("win"), typed = $("typed"), full = typed.textContent;
+  const parts = [...win.querySelectorAll("[data-s]")];
+  const steps = [...win.querySelectorAll(".steps li")];
+  const layers = [...win.querySelectorAll(".layers span")];
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const at = s => parts.filter(p => +p.dataset.s === s);
+  async function play() {
+    win.classList.add("reset");
+    parts.forEach(p => { if (+p.dataset.s > 0) p.classList.add("hide") });
+    steps.forEach(li => li.classList.remove("done", "run"));
+    layers.forEach(l => l.classList.remove("on"));
+    typed.textContent = "";
+    await wait(300);
+    for (let i = 1; i <= full.length; i++) { typed.textContent = full.slice(0, i); await wait(22) }
+    await wait(350);
+    for (let s = 1; s <= 5; s++) {
+      const li = steps[s - 1];
+      li.classList.remove("hide"); li.classList.add("run");
+      if (s <= 3) layers[s - 1].classList.add("on");
+      if (s === 3) at(3).forEach(p => p.classList.remove("hide"));
+      await wait(s === 1 ? 900 : 650);
+      li.classList.replace("run", "done");
+      if (s === 5) { at(5).forEach(p => p.classList.remove("hide")); await wait(60); win.classList.remove("reset") }
+    }
+    await wait(900); at(6).forEach(p => p.classList.remove("hide"));
+    await wait(1400); at(7).forEach(p => p.classList.remove("hide"));
+    await wait(6500);
+    play();
+  }
+  let started = false;
+  const go = () => { if (!started) { started = true; setTimeout(play, 2600) } };
+  "IntersectionObserver" in window ? new IntersectionObserver(e => e[0].isIntersecting && go()).observe(win) : go();
+})();
+</script>
+</body>
+</html>

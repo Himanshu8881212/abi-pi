@@ -1,7 +1,7 @@
 #!/bin/sh
 # The release container as a stranger runs it (the loop's area E): fresh volume, data, exports, the agent, a hard kill,
 # backup + restore into a new volume, secrets nowhere, non-root, health. Secrets only in this shell's environment.
-#   tests/container_check.sh     (needs Docker, the image abi-pi:latest, the model endpoint: ABI_PI_LLM_BASE/KEY or scripts/creds.py)
+#   tests/container_check.sh     (needs Docker, the image abi:latest, the model endpoint: ABI_PI_LLM_BASE/KEY or scripts/creds.py)
 set -eu
 cd "$(dirname "$0")/.."
 S=$(mktemp -d); trap 'rm -rf "$S"; docker rm -f abi-pi-restored >/dev/null 2>&1; docker volume rm abi-pi-restore >/dev/null 2>&1 || true' EXIT
@@ -13,7 +13,7 @@ export ABI_PASSWORD; ABI_PASSWORD=$(openssl rand -hex 12)
 export ABI_PI_LLM_BASE ABI_PI_LLM_KEY  # given in the environment (another machine), else from scripts/creds.py
 ABI_PI_LLM_BASE=${ABI_PI_LLM_BASE:-$(python3 scripts/creds.py llm-base)}; ABI_PI_LLM_KEY=${ABI_PI_LLM_KEY:-$(python3 scripts/creds.py llm-key)}
 run() { docker run -d --name "$1" -p "127.0.0.1:$2:8790" -v "$3:/data" -e ABI_USER=admin -e ABI_PASSWORD -e ABI_PI_LLM_BASE \
-  -e ABI_PI_LLM_KEY -e ABI_PI_PROJECT=pi_app_test -e ABI_PI_WORKSPACE=demo abi-pi:latest >/dev/null; }
+  -e ABI_PI_LLM_KEY -e ABI_PI_PROJECT=pi_app_test -e ABI_PI_WORKSPACE=demo abi:latest >/dev/null; }
 t=$(date +%s); run abi-pi-test 8796 abi-pi-e2e; up 8796 && ok "fresh volume up in $(( $(date +%s) - t )) s" || bad "fresh start"
 [ "$(docker exec abi-pi-test ps -o comm= -p 1)" = tini ] && ok "tini is PID 1" || bad "PID 1"
 [ "$(docker exec abi-pi-test id -un)" = abi ] && ok "runs as abi" || bad "user"
@@ -33,15 +33,15 @@ docker kill -s KILL abi-pi-test >/dev/null; docker start abi-pi-test >/dev/null;
 cmp -s "$S/after" "$(printf '%s' "$S/rows")" 2>/dev/null; [ "$(tail -1 "$S/after")" = "$(tail -1 "$S/rows")" ] && ok "hard kill keeps data" || bad "after kill: $(tail -1 "$S/after")"
 docker exec abi-pi-test scripts/backup.sh backup > "$S/b.tar" 2>/dev/null && docker exec abi-pi-test scripts/backup.sh keys > "$S/k.tar" && ok "backup $(du -h "$S/b.tar" | cut -f1)" || bad "backup"
 docker volume create abi-pi-restore >/dev/null
-docker run --rm -i -v abi-pi-restore:/data -v "$S/k.tar:/k.tar:ro" --entrypoint scripts/backup.sh abi-pi:latest restore /k.tar < "$S/b.tar" >/dev/null 2>&1 || bad "restore"
+docker run --rm -i -v abi-pi-restore:/data -v "$S/k.tar:/k.tar:ro" --entrypoint scripts/backup.sh abi:latest restore /k.tar < "$S/b.tar" >/dev/null 2>&1 || bad "restore"
 run abi-pi-restored 8797 abi-pi-restore; up 8797 && in_c abi-pi-restored 'python3 -c "import sys; sys.path.insert(0, \"scripts\"); import abi; print(abi.call(\"semantic_query\", project=\"pi_app_test\", measures=[\"orders_rows\"], dimensions=[\"orders.region\"])[\"rows\"])"' > "$S/restored" 2>&1
 [ "$(tail -1 "$S/restored")" = "$(tail -1 "$S/rows")" ] && ok "restore into a new volume answers the same rows" || bad "restored: $(tail -1 "$S/restored")"
 LEAK=0; for s in "$ABI_PASSWORD" "$ABI_PI_LLM_KEY"; do
   n=$(docker logs abi-pi-test 2>&1 | grep -cF "$s" || true); n=$((n + $(docker exec -e P="$s" abi-pi-test sh -c 'grep -rlF "$P" /data /app 2>/dev/null | wc -l')))
-  n=$((n + $(docker history --no-trunc abi-pi:latest | grep -cF "$s" || true))); n=$((n + $(tar -xOf "$S/b.tar" 2>/dev/null | grep -caF "$s" || true)))
+  n=$((n + $(docker history --no-trunc abi:latest | grep -cF "$s" || true))); n=$((n + $(tar -xOf "$S/b.tar" 2>/dev/null | grep -caF "$s" || true)))
   [ "$n" = 0 ] || { LEAK=1; bad "a secret appears in logs, files, layers or the backup ($n)"; }
 done; [ "$LEAK" = 0 ] && ok "no secret in logs, the volume, the image or the backup"
-docker run --rm -e ABI_USER=a -e ABI_PASSWORD=short abi-pi:latest 2>&1 | grep -q "8 characters" && ok "short password: clear message" || bad "short password message"
-docker run --rm abi-pi:latest 2>&1 | grep -q "Set ABI_USER" && ok "missing env: clear message" || bad "missing env message"
+docker run --rm -e ABI_USER=a -e ABI_PASSWORD=short abi:latest 2>&1 | grep -q "8 characters" && ok "short password: clear message" || bad "short password message"
+docker run --rm abi:latest 2>&1 | grep -q "Set ABI_USER" && ok "missing env: clear message" || bad "missing env message"
 sleep 35; [ "$(docker inspect abi-pi-test --format '{{.State.Health.Status}}')" = healthy ] && ok "healthy" || bad "health"
-echo "image $(docker images abi-pi:latest --format '{{.Size}}')"; exit "$FAILED"
+echo "image $(docker images abi:latest --format '{{.Size}}')"; exit "$FAILED"

@@ -4,15 +4,15 @@
 # The two key files (data/secret.key: the engine's secrets; workspaces/_settings/secret.key: the saved API keys) are
 # kept apart, as ABI does: whoever holds a backup and its keys can open every stored secret.
 #
-#   scripts/backup.sh backup > abi-pi-backup.tar      a backup to stdout (the worker pauses meanwhile; the app keeps serving)
-#   scripts/backup.sh keys   > abi-pi-keys.tar        the two key files; keep them somewhere else than the backups
-#   scripts/backup.sh restore [keys.tar] < abi-pi-backup.tar   into an empty data folder (a new volume); keys are optional
+#   scripts/backup.sh backup > abi-backup.tar      a backup to stdout (the worker pauses meanwhile; the app keeps serving)
+#   scripts/backup.sh keys   > abi-keys.tar        the two key files; keep them somewhere else than the backups
+#   scripts/backup.sh restore [keys.tar] < abi-backup.tar   into an empty data folder (a new volume); keys are optional
 #   A restore goes to the same data path the backup came from (the lake catalog records it): always /data in the container.
 #
-# In the container:   docker exec abi-pi scripts/backup.sh backup > abi-pi-backup.tar
-#                     docker exec abi-pi scripts/backup.sh keys > abi-pi-keys.tar
+# In the container:   docker exec abi scripts/backup.sh backup > abi-backup.tar
+#                     docker exec abi scripts/backup.sh keys > abi-keys.tar
 #   restore (new volume, container stopped):
-#                     docker run --rm -i -v abi-pi-data:/data --entrypoint scripts/backup.sh abi-pi:latest restore < abi-pi-backup.tar
+#                     docker run --rm -i -v abi-data:/data --entrypoint scripts/backup.sh abi:latest restore < abi-backup.tar
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
 eval "$("$ROOT/scripts/engine.sh" env)"
