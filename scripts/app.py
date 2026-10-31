@@ -1933,7 +1933,10 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
             me = {"name": self.sess["name"] if self.sess else None, "admin": bool(not self.sess or self.sess["admin"]), "signin": signin,
                   "role": role_of(self.sess, p), **access(self.sess, p)}
             # the page's data as this person (their row-level security, sections and reports); live, never the synced file
-            page = page_html(p, own_packs(viewed(cached(p, self.sess["name"] if self.sess else ""), access(self.sess, p)), self.sess, p))
+            # a person who can't edit reads only the published copy, from the first page on (release run 31 Oct: the first
+            # page came from the working project, uncommitted work included, and only later requests went to the copy)
+            cur = pub_id(p) if me["role"] not in ("editor", "owner") and abi.folder(pub_id(p)) else p
+            page = page_html(p, own_packs(viewed(cached(cur, self.sess["name"] if self.sess else ""), access(self.sess, p)), self.sess, p))
             self.reply(200, page.replace(KEY_SLOT, key, 1).replace(ME_SLOT, json.dumps(me).replace("</", "<\\/"), 1).encode(), "text/html; charset=utf-8")
 
         def post(self):
