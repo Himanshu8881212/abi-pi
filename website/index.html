@@ -78,7 +78,8 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .hero h1 { font-size: clamp(54px, 9.4vw, 152px); line-height: .9; letter-spacing: -.05em; word-spacing: .06em; font-weight: 900; max-width: 11ch; margin-top: 28px }
 .hero h1 .ln { display: block; overflow: hidden; padding-bottom: .06em }
 .hero h1 .ln > span { display: block; animation: rise 1s var(--ease) both }
-.hero h1 .ln:nth-child(2) > span { animation-delay: 1.48s } .hero h1 .ln:nth-child(1) > span { animation-delay: 1.38s } .hero h1 .ln:nth-child(3) > span { animation-delay: 1.58s }
+.hero h1 .ln:nth-child(2) > span { animation-delay: 1.48s } .hero h1 .ln:nth-child(4) > span { animation-delay: 1.68s }
+.hero h1 .sub { font: 400 italic .36em/1.1 var(--serif); letter-spacing: -.01em; color: var(--mute); margin-top: .35em } .hero h1 .ln:nth-child(1) > span { animation-delay: 1.38s } .hero h1 .ln:nth-child(3) > span { animation-delay: 1.58s }
 @keyframes rise { from { transform: translateY(105%) } }
 .hero .lede { margin-top: 36px; font-size: clamp(18px, 1.55vw, 22px); color: color-mix(in srgb, var(--ink) 72%, transparent); max-width: 50ch }
 .hero .lede b { color: var(--ink); font-weight: 600 }
@@ -100,7 +101,7 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .frame .bar { display: flex; align-items: center; gap: 7px; padding: 12px 16px; border-bottom: 1px solid var(--line); font: 12px var(--mono); color: var(--mute); background: var(--bg3) }
 .frame .bar i { width: 11px; height: 11px; border-radius: 50%; background: var(--line2) }
 .frame .bar span { margin: 0 auto; padding: 4px 14px; border-radius: 6px; background: var(--bg); max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
-.frame img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top left }
+.frame img { width: 100%; height: auto }
 .reveal .cap { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-top: 22px; color: var(--mute); font: 13px var(--mono) }
 .reveal .cap b { color: var(--ink); font-weight: 500 }
 
@@ -144,15 +145,12 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .step ul { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px }
 .step li { font: 13px var(--mono); border: 1px solid var(--line2); border-radius: 99px; padding: 6px 12px; color: color-mix(in srgb, var(--ink) 80%, transparent) }
 .step .file { font: 13px var(--mono); color: var(--dim) } .step .file b { color: var(--gold); font-weight: 400 }
-.step .shot { display: none; border: 1px solid var(--line2); border-radius: 12px; overflow: hidden; margin-top: 8px }
+.step .shot { display: none; width: 100%; height: auto; border: 1px solid var(--line2); border-radius: 12px; margin-top: 8px }
 .stage { position: sticky; top: calc(96px + env(safe-area-inset-top, 0px)); height: fit-content; align-self: start }
 .stage .frame { --p: 1; transform: none }
 .stage .pics { position: relative; aspect-ratio: 16 / 10; background: var(--bg) }
-.stage .pics img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: top left; opacity: 0; transform: scale(1.03); transition: opacity .6s var(--ease), transform 1.2s var(--ease) }
+.stage .pics img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; transform: scale(1.03); transition: opacity .6s var(--ease), transform 1.2s var(--ease) }
 .stage .pics img.on { opacity: 1; transform: none }
-.stage .over { position: absolute; left: 16px; bottom: 16px; display: flex; flex-wrap: wrap; gap: 8px; opacity: 0; transition: opacity .4s }
-.stage .over.on { opacity: 1 }
-.stage .over span { font: 600 14px var(--sans); background: var(--sig); color: var(--sig-ink); padding: 8px 12px; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.5) }
 .stage .prog { display: flex; gap: 6px; margin-top: 18px }
 .stage .prog i { flex: 1; height: 3px; border-radius: 2px; background: var(--line2); transition: background .4s }
 .stage .prog i.on { background: var(--sig) }
@@ -208,6 +206,8 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .receipt td:last-child, .receipt th:last-child { text-align: right }
 .receipt tr.hit td { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ink) }
 .receipt .why { padding: 16px 22px 22px; font-size: 15px; color: var(--mute) } .receipt .why b { color: var(--ink) }
+.chatshot { margin: clamp(56px, 8vw, 96px) 0 0 }
+.chatshot figcaption { margin-top: 16px; font: 13px var(--mono); color: var(--mute) }
 .promises { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; margin-top: clamp(56px, 8vw, 96px) }
 .promises > div { background: var(--bg); padding: 30px; display: grid; gap: 12px; align-content: start }
 .promises .i { font: 500 12px var(--mono); color: var(--sig); letter-spacing: .1em; text-transform: uppercase }
@@ -304,19 +304,19 @@ footer .top > :last-child { margin-left: auto; font: 12px var(--mono) }
   <canvas id="flow" aria-hidden="true"></canvas>
   <div class="wrap">
     <div class="label fade" style="animation-delay:1.3s">Open-source BI · self-hosted · agent-built</div>
-    <h1><span class="ln"><span>From raw data</span></span><span class="ln"><span>to <em>automated</em></span></span><span class="ln"><span>reports.</span></span></h1>
-    <p class="lede fade"><b>ABI is the whole BI stack in one container.</b> Ingestion, modeling, reports, monitoring,
-      write-back, flows and AI agents, built for you by an agent you talk to, and every piece of it saved as a JSON
-      file you can read, diff and undo.</p>
+    <h1><span class="ln"><span>From raw data</span></span><span class="ln"><span>to <em>automated</em></span></span><span class="ln"><span>reports.</span></span><span class="ln sub"><span>And everything in between.</span></span></h1>
+    <p class="lede fade"><b>ABI is the whole BI stack in one open-source container.</b> Data loading, modeling,
+      reports, monitoring, write-back, flows, forecasts and AI agents. Build it in the app or ask the agent in plain
+      words, and every piece is saved as a JSON file you can read, diff and undo.</p>
     <div class="cta fade">
       <a class="btn go" href="https://github.com/Himanshu8881212/abi-pi">Get ABI on GitHub <span class="arr">→</span></a>
       <a class="btn" href="#tour">See the product</a>
     </div>
     <div class="stats fade">
       <div><b data-n="1">1</b><span>container: Postgres, lake, engine, agent and app</span></div>
-      <div><b data-n="160">160</b><span>ABI actions the agent builds with</span></div>
+      <div><b data-n="160">160<small>+</small></b><span>ABI actions the agent builds with</span></div>
       <div><b data-n="10">10</b><span>agents: a lead and nine specialists</span></div>
-      <div><b data-n="0">0</b><span>numbers without a query behind them</span></div>
+      <div><b data-n="7.4">7.4<small>M</small></b><span>orders in our release test, matched to the cent</span></div>
     </div>
   </div>
 </header>
@@ -324,10 +324,10 @@ footer .top > :last-child { margin-left: auto; font: 12px var(--mono) }
 <div class="reveal" id="product">
   <div class="wrap">
     <div class="frame" id="tilt">
-      <div class="bar"><i></i><i></i><i></i><span>localhost:8790 · youtube_trending · Home</span></div>
-      <img src="shots/home.webp" alt="ABI's Home page: pinned widgets with a daily chart, two big numbers and a category bar chart, with the sidebar listing Data, Data model, Visualizations, Export and Automate" width="1600" height="1000">
+      <div class="bar"><i></i><i></i><i></i><span>localhost:8790 · Brewline Coffee · Manager overview</span></div>
+      <img src="shots/report.webp" alt="ABI showing the Brewline Coffee manager report: tabs for overview, geography, products, stores, customers, margin and forecast; tables of orders by day and region; KPI cards for estimated revenue, orders, average ticket and items sold" width="1600" height="1000">
     </div>
-    <div class="cap"><span><b>The real app</b>, not a mock-up: 360,577 chart rows from 10 markets, built by the agent.</span><span>Every screen on this page is ABI as it ships.</span></div>
+    <div class="cap"><span><b>The real app</b> on our test project: Brewline Coffee, 7.4 million orders from S3, built by the agent from plain requests.</span><span>Every screen on this page is ABI as it ships, uncropped.</span></div>
   </div>
 </div>
 
@@ -347,17 +347,17 @@ footer .top > :last-child { margin-left: auto; font: 12px var(--mono) }
         sync. ABI ships all of it, end to end, out of the box.</p>
     </div>
     <div class="rows" id="rows">
-      <div class="row"><span class="n">01</span><span class="old">ETL & ingestion tool</span><span class="to">→</span><span class="new"><b>Sources</b>: Parquet files and S3 folders, refreshed on change or on a schedule, incrementally</span></div>
+      <div class="row"><span class="n">01</span><span class="old">ETL & ingestion tool</span><span class="to">→</span><span class="new"><b>Sources</b>: Parquet uploads and S3 folders, public or with keys, refreshed on change or on a schedule</span></div>
       <div class="row"><span class="n">02</span><span class="old">Data warehouse</span><span class="to">→</span><span class="new"><b>Built in</b>: Postgres and a Parquet lake with bronze, silver and gold layers</span></div>
       <div class="row"><span class="n">03</span><span class="old">Semantic layer</span><span class="to">→</span><span class="new"><b>Measures, glossary and joins</b>: one definition of revenue, everywhere</span></div>
       <div class="row"><span class="n">04</span><span class="old">Dashboard tool</span><span class="to">→</span><span class="new"><b>Reports, Explore and Home</b> with cross-filtering and drag-and-resize layouts</span></div>
       <div class="row"><span class="n">05</span><span class="old">Alerting service</span><span class="to">→</span><span class="new"><b>Monitor</b>: targets, last-period checks, freshness and failed flows</span></div>
       <div class="row"><span class="n">06</span><span class="old">Planning spreadsheets</span><span class="to">→</span><span class="new"><b>Write-back</b>: edit rows and totals in the app, approve, sync to the source</span></div>
-      <div class="row"><span class="n">07</span><span class="old">Scheduler & Zapier</span><span class="to">→</span><span class="new"><b>Flows</b>: schedules and triggers that refresh, score, ask, post and send</span></div>
+      <div class="row"><span class="n">07</span><span class="old">Scheduler & workflow tool</span><span class="to">→</span><span class="new"><b>Flows</b>: schedules and triggers that refresh, score, ask, post and send</span></div>
       <div class="row"><span class="n">08</span><span class="old">Notebooks for ML</span><span class="to">→</span><span class="new"><b>ML models</b>: forecasts, predictions, clusters and anomalies</span></div>
       <div class="row"><span class="n">09</span><span class="old">AI chatbot</span><span class="to">→</span><span class="new"><b>Agents and tools</b> that act only through ABI, and prove every number</span></div>
     </div>
-    <div class="sum"><b>One install. One volume. One bill: zero.</b><span>docker compose up -d</span></div>
+    <div class="sum"><b>One install. One volume. Free to self-host.</b><span>docker compose up -d --build</span></div>
   </div>
 </section>
 
@@ -365,7 +365,7 @@ footer .top > :last-child { margin-left: auto; font: 12px var(--mono) }
   <div class="wrap">
     <div class="intro">
       <div class="label">The product</div>
-      <h2>Every step, from the file <em>to the board pack.</em></h2>
+      <h2>Every step, from the file <em>to the forecast.</em></h2>
       <p class="lede">Do it yourself in the app, or ask the agent and watch it build each piece through the same
         screens. Scroll through a real project.</p>
     </div>
@@ -373,95 +373,101 @@ footer .top > :last-child { margin-left: auto; font: 12px var(--mono) }
       <div class="steps" id="steps">
         <article class="step" data-shot="0">
           <div class="k">01 <i>/ data</i></div><h3>Bring the data in.</h3>
-          <p>Upload Parquet or point at an S3 folder. Each source refreshes when it changes or on a schedule, loading only new rows where it can.</p>
-          <ul><li>Parquet</li><li>S3 folders</li><li>incremental</li><li>on change</li></ul>
-          <div class="file">saved as <b>sources/usvideos.json</b></div>
-          <img class="shot" src="shots/sources.webp" alt="Sources page listing loaded files with rows, format and refresh mode" loading="lazy" width="1600" height="1000">
+          <p>Upload Parquet files, or point at an S3 folder of them: public, or private with keys that are stored encrypted for that bucket only. Each source refreshes when it changes or on a schedule.</p>
+          <ul><li>Parquet</li><li>S3 / MinIO / R2</li><li>keys stay encrypted</li><li>on change</li></ul>
+          <div class="file">saved as <b>sources/bronze_orders.json</b></div>
+          <img class="shot" src="shots/sources.webp" alt="Sources page with four S3 Parquet sources: customers, orders (7.4 million rows), products and stores" loading="lazy" width="1600" height="1000">
         </article>
         <article class="step" data-shot="1">
           <div class="k">02 <i>/ layers</i></div><h3>Bronze, silver, gold.</h3>
-          <p>Clean, type, deduplicate, join and reshape with steps, then model facts and dimensions with keys and a calendar. The agent reconciles each layer.</p>
+          <p>Clean, type, deduplicate and join with steps, then model facts and dimensions with keys and a calendar. The agent reconciles each layer against the one before.</p>
           <ul><li>rename</li><li>filter</li><li>join</li><li>dedupe</li><li>fill nulls</li><li>SQL</li></ul>
-          <div class="file">saved as <b>tables/gold_trending.json</b></div>
-          <img class="shot" src="shots/tables.webp" alt="Tables page with calendar, dimension and fact tables and their columns" loading="lazy" width="1600" height="1000">
+          <div class="file">saved as <b>model/model.json</b></div>
+          <img class="shot" src="shots/tables.webp" alt="Tables page with the store and product dimensions and the gold orders fact, their keys and columns" loading="lazy" width="1600" height="1000">
         </article>
         <article class="step" data-shot="2">
           <div class="k">03 <i>/ semantic layer</i></div><h3>One definition of every number.</h3>
-          <p>Measures, a glossary and named models. Test a measure before you save it; every report, flow and agent uses the same one.</p>
-          <ul><li>measures</li><li>glossary</li><li>models</li><li>test</li></ul>
+          <p>Measures and a glossary, each with a plain description. Test a measure before you save it; every report, flow, monitor and agent uses the same one.</p>
+          <ul><li>measures</li><li>glossary</li><li>test</li></ul>
           <div class="file">saved as <b>model/measures.json</b></div>
-          <img class="shot" src="shots/measures.webp" alt="Measures page listing measures with their expressions and descriptions" loading="lazy" width="1600" height="1000">
+          <img class="shot" src="shots/measures.webp" alt="Measures page listing items sold, active customers, orders, estimated revenue and cost with their expressions" loading="lazy" width="1600" height="1000">
         </article>
         <article class="step" data-shot="3">
           <div class="k">04 <i>/ reports</i></div><h3>Reports people actually read.</h3>
-          <p>Pages of KPIs, tables and charts with filters and cross-filtering. Drag and resize cards, pin them to Home, publish them to Viewers.</p>
-          <ul><li>KPIs</li><li>charts</li><li>filters</li><li>layouts</li><li>pins</li></ul>
-          <div class="file">saved as <b>reports/overview.json</b></div>
-          <img class="shot" src="shots/rep_overview.webp" alt="A report with KPI cards, tables and a daily line chart" loading="lazy" width="1600" height="1000">
+          <p>Pages of KPIs, tables and charts with filters and cross-filtering. Drag and resize cards, pin them to Home, publish them to Viewers, and export them as PDF, PowerPoint or PNG, the data as Excel or CSV, or a short video.</p>
+          <ul><li>KPIs</li><li>charts</li><li>filters</li><li>layouts</li><li>export</li></ul>
+          <div class="file">saved as <b>reports/manager_overview.json</b></div>
+          <img class="shot" src="shots/report.webp" alt="The manager report with tabs, daily orders, orders by region and KPI cards" loading="lazy" width="1600" height="1000">
         </article>
         <article class="step" data-shot="4">
           <div class="k">05 <i>/ explore</i></div><h3>Ask your own questions.</h3>
           <p>Pick measures, split by up to two dimensions, filter, sort and chart. Keep the analyses worth keeping.</p>
           <ul><li>ad hoc</li><li>2 dimensions</li><li>saved analyses</li></ul>
-          <div class="file">saved in the app's <b>analyses</b></div>
-          <img class="shot" src="shots/explore.webp" alt="Explore page with a measure picker and saved analyses" loading="lazy" width="1600" height="1000">
+          <div class="file">kept as <b>saved analyses</b></div>
+          <img class="shot" src="shots/explore.webp" alt="Explore page with a measure picker and three saved analyses" loading="lazy" width="1600" height="1000">
         </article>
         <article class="step" data-shot="5">
           <div class="k">06 <i>/ monitor</i></div><h3>Know before anyone asks.</h3>
-          <p>Checks for a measure against a value, a target or its last completed period; tables that are late; flows that failed.</p>
+          <p>Checks for a measure against a value, a target or its last completed period; tables that are late; flows that failed. All on one page, pinnable to Home.</p>
           <ul><li>targets</li><li>vs last period</li><li>freshness</li><li>failed flows</li></ul>
-          <div class="file">checks run on every refresh</div>
-          <img class="shot" src="shots/monitor.webp" alt="Monitor page with data freshness problems listed per table" loading="lazy" width="1600" height="1000">
+          <div class="file">one page of <b>checks</b></div>
+          <img class="shot" src="shots/monitor.webp" alt="Monitor page with three checks, data freshness problems and model, ML and flow status" loading="lazy" width="1600" height="1000">
         </article>
         <article class="step" data-shot="6">
           <div class="k">07 <i>/ write-back</i></div><h3>Plan in place.</h3>
-          <p>Edit rows, or change a total and let ABI spread it across the rows below. Every edit waits for approval, undoes in one step and can sync back to your Postgres or MySQL source.</p>
+          <p>Edit rows, or change a total and let ABI spread it across the rows below. Every edit waits for approval, undoes in one step and can sync back to a Postgres or MySQL source.</p>
           <ul><li>edit rows</li><li>spread totals</li><li>approve</li><li>sync to source</li></ul>
-          <div class="file">tracked as an <b>edit batch</b> with history</div>
-          <img class="shot" src="shots/edits.webp" alt="Edits page with editable rows and a waiting-for-approval panel" loading="lazy" width="1600" height="1000">
+          <div class="file">tracked as <b>edit batches</b> with history</div>
+          <img class="shot" src="shots/edits.webp" alt="Edits page with editable customer rows and a waiting-for-approval panel" loading="lazy" width="1600" height="1000">
         </article>
         <article class="step" data-shot="7">
           <div class="k">08 <i>/ automate</i></div><h3>Flows that run themselves.</h3>
           <p>Start on a schedule, after a refresh, when a measure crosses a value or when data quality slips. Refresh, run a tool, ask an agent, score a model, post or send.</p>
           <ul><li>schedules</li><li>triggers</li><li>canvas</li><li>run traces</li></ul>
-          <div class="file">saved as <b>flows/weekly_source_refresh.json</b></div>
-          <img class="shot" src="shots/flows.webp" alt="Flows page with a data-quality flow and a weekly refresh flow" loading="lazy" width="1600" height="1000">
+          <div class="file">saved as <b>flows/daily_morning_refresh.json</b></div>
+          <img class="shot" src="shots/flows.webp" alt="Flows page with a daily refresh, a data-quality alert to the inbox and a weekly summary" loading="lazy" width="1600" height="1000">
         </article>
         <article class="step" data-shot="8">
-          <div class="k">09 <i>/ agents & tools</i></div><h3>Your own agents, with tests.</h3>
-          <p>Build agents scoped to the measures and tables they may use, and tools with typed inputs. Each agent carries an evaluation set it must pass.</p>
-          <ul><li>custom agents</li><li>tools</li><li>evaluation sets</li><li>grounded</li></ul>
-          <div class="file">saved as <b>agents/category_trends_marketing.json</b></div>
-          <img class="shot" src="shots/agents.webp" alt="Agents page with a custom agent, its question box and evaluation set buttons" loading="lazy" width="1600" height="1000">
+          <div class="k">09 <i>/ forecast</i></div><h3>Forecasts on your measures.</h3>
+          <p>Forecast, predict, cluster or find unusual days. Each model is trained on your measures and compared with a simple baseline before you trust it.</p>
+          <ul><li>forecast</li><li>predict</li><li>cluster</li><li>anomalies</li></ul>
+          <div class="file">saved as <b>ml/daily_revenue_28d.json</b></div>
+          <img class="shot" src="shots/forecast.webp" alt="The report's Forecast tab with a 28-day forecast total and its backtest against a baseline" loading="lazy" width="1600" height="1000">
         </article>
         <article class="step" data-shot="9">
-          <div class="k">10 <i>/ govern</i></div><h3>Everyone sees only their rows.</h3>
-          <p>Row-level rules, hidden columns and roles. Developers change and commit; Viewers read a published, read-only copy.</p>
-          <ul><li>row-level security</li><li>column rules</li><li>roles</li><li>publish</li></ul>
-          <div class="file">saved as <b>security/rls.json</b></div>
-          <img class="shot" src="shots/security.webp" alt="Security page with row-level rules and the rls.json file" loading="lazy" width="1600" height="1000">
+          <div class="k">10 <i>/ agents & tools</i></div><h3>Your own agents, with tests.</h3>
+          <p>Agents scoped to the measures and tables they may use, and tools with typed inputs. Each agent carries an evaluation set; this one passes all 7 of its questions.</p>
+          <ul><li>custom agents</li><li>tools</li><li>evaluation sets</li><li>grounded</li></ul>
+          <div class="file">saved as <b>agents/store_manager.json</b></div>
+          <img class="shot" src="shots/agents.webp" alt="Agents page with the store monthly performance assistant, its question box and evaluation set" loading="lazy" width="1600" height="1000">
         </article>
         <article class="step" data-shot="10">
-          <div class="k">11 <i>/ export</i></div><h3>Out the door, any format.</h3>
-          <p>Board packs, one-pagers and data extracts, plus a short explainer video of a report, checked before they go out.</p>
-          <ul><li>PDF</li><li>PowerPoint</li><li>PNG</li><li>Excel / CSV</li><li>MP4 video</li></ul>
-          <div class="file">from the <b>Export</b> menu, or a flow</div>
-          <img class="shot" src="shots/rep_overview.webp" alt="A report ready to export" loading="lazy" width="1600" height="1000">
+          <div class="k">11 <i>/ govern</i></div><h3>Everyone sees only what they should.</h3>
+          <p>Roles, row-level rules and hidden columns. Developers change and commit; Viewers read a published, read-only copy.</p>
+          <ul><li>roles</li><li>row-level security</li><li>column rules</li><li>publish</li></ul>
+          <div class="file">saved as <b>security/roles.json</b></div>
+          <img class="shot" src="shots/security.webp" alt="Security page with row-level rules, hidden columns, roles and the roles file" loading="lazy" width="1600" height="1000">
         </article>
       </div>
       <div class="stage" aria-hidden="true">
         <div class="frame">
           <div class="bar"><i></i><i></i><i></i><span id="url">localhost:8790 · Sources</span></div>
           <div class="pics" id="pics">
-            <img class="on" src="shots/sources.webp" alt=""><img src="shots/tables.webp" alt="" loading="lazy"><img src="shots/measures.webp" alt="" loading="lazy">
-            <img src="shots/rep_overview.webp" alt="" loading="lazy"><img src="shots/explore.webp" alt="" loading="lazy"><img src="shots/monitor.webp" alt="" loading="lazy">
-            <img src="shots/edits.webp" alt="" loading="lazy"><img src="shots/flows.webp" alt="" loading="lazy"><img src="shots/agents.webp" alt="" loading="lazy">
-            <img src="shots/security.webp" alt="" loading="lazy"><img src="shots/rep_overview.webp" alt="" loading="lazy">
-            <div class="over" id="over"><span>PDF</span><span>PPTX</span><span>PNG</span><span>XLSX</span><span>MP4</span></div>
+            <img class="on" src="shots/sources.webp" alt="">
+            <img src="shots/tables.webp" alt="" loading="lazy">
+            <img src="shots/measures.webp" alt="" loading="lazy">
+            <img src="shots/report.webp" alt="" loading="lazy">
+            <img src="shots/explore.webp" alt="" loading="lazy">
+            <img src="shots/monitor.webp" alt="" loading="lazy">
+            <img src="shots/edits.webp" alt="" loading="lazy">
+            <img src="shots/flows.webp" alt="" loading="lazy">
+            <img src="shots/forecast.webp" alt="" loading="lazy">
+            <img src="shots/agents.webp" alt="" loading="lazy">
+            <img src="shots/security.webp" alt="" loading="lazy">
           </div>
         </div>
         <div class="prog" id="prog"></div>
-        <div class="now"><span id="nowk">01 / data</span><span>real screens · YouTube Trending project</span></div>
+        <div class="now"><span id="nowk">01 / data</span><span>real screens · Brewline Coffee test project</span></div>
       </div>
     </div>
   </div>
@@ -477,29 +483,29 @@ footer .top > :last-child { margin-left: auto; font: 12px var(--mono) }
     </div>
     <div class="ide">
       <div class="tree" id="tree" role="tablist" aria-label="Project files">
-        <div class="root">YOUTUBE_TRENDING/</div>
+        <div class="root">BREWLINE COFFEE/</div>
         <div class="f">project.json</div>
-        <div class="d">sources/</div><button role="tab" data-f="0">usvideos.json</button><div class="f">… 19 more</div>
-        <div class="d">tables/</div><div class="f">silver_us.json</div><div class="f">gold_trending.json</div>
-        <div class="d">model/</div><button role="tab" data-f="1">measures.json</button><div class="f">glossary.json</div><div class="f">model.json</div>
-        <div class="d">reports/</div><div class="f">overview.json</div>
-        <div class="d">flows/</div><button role="tab" data-f="2">weekly_source_refresh.json</button><div class="f">quality_problem_inbox.json</div>
-        <div class="d">agents/</div><button role="tab" data-f="3">category_trends_marketing.json</button><div class="f">….eval.json</div>
-        <div class="d">tools/</div><button role="tab" data-f="4">top_videos_by_category.json</button>
-        <div class="d">security/</div><button role="tab" data-f="5">rls.json</button>
-        <div class="d">ml/ · docs/ · environments/</div>
+        <div class="d">sources/</div><button role="tab" data-f="0">bronze_orders.json</button><div class="f">bronze_stores.json · +2</div>
+        <div class="d">model/</div><button role="tab" data-f="1">measures.json</button><div class="f">model.json · glossary.json</div>
+        <div class="d">reports/</div><div class="f">manager_overview.json</div>
+        <div class="d">flows/</div><button role="tab" data-f="2">daily_morning_refresh.json</button><div class="f">data_quality_inbox.json · +1</div>
+        <div class="d">ml/</div><button role="tab" data-f="3">daily_revenue_28d.json</button>
+        <div class="d">tools/</div><button role="tab" data-f="4">store_month_kpis.json</button>
+        <div class="d">agents/</div><button role="tab" data-f="5">store_manager.json</button><button role="tab" data-f="6">store_manager.eval.json</button>
+        <div class="d">security/</div><div class="f">roles.json</div>
       </div>
       <div class="pane" role="tabpanel">
-        <div class="tabs"><b id="fname">sources/usvideos.json</b><span>✓ valid against its schema</span></div>
+        <div class="tabs"><b id="fname">sources/bronze_orders.json</b><span>✓ valid against its schema</span></div>
         <pre id="fbody"></pre>
         <div class="note" id="fnote"></div>
       </div>
     </div>
-    <div class="gitlog" aria-label="Commits from the same project">
-      <div><span>d90b44d</span><span>Add governed category analysis, planning, automation, and access controls</span><span>agent</span></div>
-      <div><span>a305fe3</span><span>save_report: reports/overview.json</span><span>agent</span></div>
-      <div><span>1d5e30f</span><span>set_glossary_term: model/glossary.json</span><span>agent</span></div>
-      <div><span>·····</span><span>216 commits in this project, every change reviewable and undoable</span><span>git log</span></div>
+    <div class="gitlog" aria-label="The project's Git history">
+      <div><span>05a6f3d</span><span>Add historical Forecast page to manager report</span><span>agent</span></div>
+      <div><span>a329445</span><span>Fix store manager grounding and refusal evaluations</span><span>agent</span></div>
+      <div><span>9a12af6</span><span>Build Brewline Coffee analytics model, manager reporting and automation</span><span>agent</span></div>
+      <div><span>5bfef3e</span><span>set_auto_commit: project.json</span><span>owner</span></div>
+      <div><span>5c44ef9</span><span>Create project</span><span>owner</span></div>
     </div>
     <div class="perks"><span>Git history</span><span>Diff & undo</span><span>JSON Schemas</span><span>Developer → Viewer publish</span><span>Environments</span><span>Import / export as zip</span><span>CLI: validate, diff, apply</span></div>
   </div>
@@ -513,19 +519,24 @@ footer .top > :last-child { margin-left: auto; font: 12px var(--mono) }
         <h2 style="margin-top:22px">Every number has a <em>receipt.</em></h2>
         <p class="lede" style="margin-top:28px">Before an answer reaches you, ABI checks each figure and name against the
           rows its tools returned and the words you typed. What it can't back up is retried once, then masked.</p>
-        <p class="answer" id="answer">Revenue in 2025 was <button type="button" data-r="0" aria-pressed="true">€41.4M</button>.
-          West led with <button type="button" data-r="1" aria-pressed="false">€12.9M</button>; the top store was
-          <button type="button" data-r="2" aria-pressed="false">Harbour St</button>. Growth on 2024:
+        <p class="answer" id="answer">Estimated revenue in 2025 was <button type="button" data-r="0" aria-pressed="true">€17.33M</button>.
+          North led with <button type="button" data-r="1" aria-pressed="false">€4.42M</button>; the top store was
+          <button type="button" data-r="2" aria-pressed="false">Stuttgart Hbf</button>. North's growth on 2024:
           <button type="button" class="nv" data-r="3" aria-pressed="false">[not verified]</button></p>
-        <p class="hint">Tap a figure to see where it came from · illustrative example</p>
+        <p class="hint">Tap a figure to see its query · real results from the Brewline test project</p>
       </div>
       <div class="receipt" aria-live="polite">
-        <header><span id="rt">semantic_query · 0.41 s</span><b id="rs">✓ grounded</b></header>
+        <header><span id="rt">semantic_query · Brewline</span><b id="rs">✓ grounded</b></header>
         <pre id="rq"></pre>
         <div class="tbl"><table><thead id="rh"></thead><tbody id="rb"></tbody></table></div>
         <div class="why" id="rw"></div>
       </div>
     </div>
+    <figure class="chatshot">
+      <div class="frame"><div class="bar"><i></i><i></i><i></i><span>localhost:8790 · Chat</span></div>
+        <img src="shots/chat.webp" alt="ABI's chat: the agent's answer comparing 2024 and 2025 estimated revenue by region in a table, then committing the work" loading="lazy" width="1600" height="1000"></div>
+      <figcaption>The agent's real answer in the app: 2024 against 2025 by region. Its 2025 total, €17,327,168.70, is the same row as the receipt above.</figcaption>
+    </figure>
     <div class="promises">
       <div><span class="i">01 · grounded</span><h3>Numbers from tools, words from you.</h3><p>Every figure and member name must appear in a tool result or in what you said.</p></div>
       <div><span class="i">02 · asks first</span><h3>Your yes, every time.</h3><p>Deleting, publishing, sending and syncing wait for your click. The agent never sees the confirmation token.</p></div>
@@ -544,7 +555,7 @@ footer .top > :last-child { margin-left: auto; font: 12px var(--mono) }
         <p class="lede" style="margin-top:28px">Postgres, the engine, the agent and the app ship as one Docker image. All your data lives in one volume you back up with one command.</p>
         <ul class="req">
           <li><span><b>Docker</b> with Compose, on Linux or macOS</span></li>
-          <li><span><b>About 5 GB</b> of disk for the image</span></li>
+          <li><span><b>4 GB of memory</b> (8 GB is comfortable) and <b>about 6 GB of disk</b> to build</span></li>
           <li><span><b>Any model:</b> OpenAI, Anthropic, OpenRouter, Gemini, Ollama or an OpenAI-compatible endpoint</span></li>
         </ul>
         <div class="cta"><a class="btn go" href="https://github.com/Himanshu8881212/abi-pi#quick-start">Full guide on GitHub <span class="arr">→</span></a></div>
@@ -555,7 +566,7 @@ footer .top > :last-child { margin-left: auto; font: 12px var(--mono) }
           <li><p>Get the code</p><div class="line"><pre id="c1"><span class="p">$ </span>git clone https://github.com/Himanshu8881212/abi-pi.git abi
 <span class="p">$ </span>cd abi</pre><button class="copy" data-copy="c1" type="button">copy</button></div></li>
           <li><p>Set the owner account</p><div class="line"><pre id="c2"><span class="p">$ </span>cp .env.example .env
-<span class="c"># edit .env: ABI_USER=admin  ABI_PASSWORD=8+ characters</span></pre><button class="copy" data-copy="c2" type="button">copy</button></div></li>
+<span class="c"># edit .env: ABI_USER=admin  ABI_PASSWORD=8+ characters (ABI_PORT if 8790 is taken)</span></pre><button class="copy" data-copy="c2" type="button">copy</button></div></li>
           <li><p>Start it</p><div class="line"><pre id="c3"><span class="p">$ </span>docker compose up -d --build</pre><button class="copy" data-copy="c3" type="button">copy</button></div></li>
           <li><p>Open <span class="mono" style="color:var(--ink)">localhost:8790</span>, connect a model in Govern › Settings, and ask for what you need.</p></li>
         </ol>
@@ -703,8 +714,8 @@ footer .top > :last-child { margin-left: auto; font: 12px var(--mono) }
 
   // stat counters
   const stats = document.querySelectorAll(".stats b");
-  if (!reduce) { const io = new IntersectionObserver((es) => es.forEach(e => { if (!e.isIntersecting) return; io.unobserve(e.target); const n = +e.target.dataset.n, t0 = performance.now();
-    const t = now => { const k = Math.min(1, (now - t0) / 1400); e.target.textContent = Math.round(n * (1 - Math.pow(1 - k, 3))); if (k < 1) requestAnimationFrame(t) }; requestAnimationFrame(t) }), { threshold: .6 }); stats.forEach(s => io.observe(s)) }
+  if (!reduce) { const io = new IntersectionObserver((es) => es.forEach(e => { if (!e.isIntersecting) return; io.unobserve(e.target); const n = +e.target.dataset.n, t0 = performance.now(), dec = (String(n).split(".")[1] || "").length, suf = e.target.querySelector("small")?.outerHTML || "";
+    const t = now => { const k = Math.min(1, (now - t0) / 1400); e.target.innerHTML = (n * (1 - Math.pow(1 - k, 3))).toFixed(dec) + suf; if (k < 1) requestAnimationFrame(t) }; requestAnimationFrame(t) }), { threshold: .6 }); stats.forEach(s => io.observe(s)) }
 
   // stack rows strike through as they arrive
   const rows = document.querySelectorAll(".row");
@@ -713,13 +724,12 @@ footer .top > :last-child { margin-left: auto; font: 12px var(--mono) }
 
   // pinned tour
   const steps = [...document.querySelectorAll(".step")], pics = [...$("pics").querySelectorAll("img")], prog = $("prog");
-  const names = ["Sources", "Tables", "Measures", "YouTube Trending | Historical atlas", "Explore", "Monitor", "Edits", "Flows", "Agents", "Security", "Export"];
+  const names = ["Sources", "Tables", "Measures", "Manager overview", "Explore", "Monitor", "Edits", "Flows", "Manager overview · Forecast", "Agents", "Security"];
   steps.forEach(() => prog.append(document.createElement("i")));
   function act(i) {
     steps.forEach((s, j) => s.classList.toggle("on", j === i)); pics.forEach((p, j) => p.classList.toggle("on", j === i));
     [...prog.children].forEach((b, j) => b.classList.toggle("on", j <= i));
     $("url").textContent = "localhost:8790 · " + names[i]; $("nowk").textContent = steps[i].querySelector(".k").textContent.replace(/\s+/g, " ").trim();
-    $("over").classList.toggle("on", i === 10);
   }
   act(0);
   const tio = new IntersectionObserver(es => es.forEach(e => e.isIntersecting && act(+e.target.dataset.shot)), { rootMargin: "-48% 0px -48% 0px" });
@@ -727,18 +737,20 @@ footer .top > :last-child { margin-left: auto; font: 12px var(--mono) }
 
   // the code browser: real files from the project, trimmed
   const F = [
-    { n: "sources/usvideos.json", note: "A <b>source</b>: where the data comes from and when it refreshes. Change <b>refresh</b> to a schedule and the next load follows it.",
-      j: { "$schema": "https://schema.abi.invalid/v1/source.json", id: "usvideos", location: "uploads/d0c0…/USvideos.parquet", refresh: "on_change" } },
+    { n: "sources/bronze_orders.json", note: "A <b>source</b>: an S3 folder of Parquet files, reloaded when it changes. Keys, when a bucket needs them, appear here only as <b>${secret:…}</b> references.",
+      j: { "$schema": "https://schema.abi.invalid/v1/source.json", id: "bronze_orders", format: "parquet", location: "s3://brewline/orders/*.parquet", refresh: "on_change", s3: { endpoint: "172.17.0.1:9000", region: "us-east-1", url_style: "path", use_ssl: false } } },
     { n: "model/measures.json", note: "A <b>measure</b> is defined once and used by every report, flow, monitor and agent. Its description says what it is and what it isn't.",
-      j: { "$schema": "https://schema.abi.invalid/v1/measures.json", measures: [{ id: "views", name: "Views — latest global observation", expression: "WHERE(SUM(gold_trending.views), gold_trending.latest_global = TRUE)", description: "One full-window latest cumulative counter per video…" }, { id: "trending_appearances", name: "Valid chart appearances", expression: "…" }] } },
-    { n: "flows/weekly_source_refresh.json", note: "A <b>flow</b>: a trigger and its steps. The agent saved this one switched off, for the owner to review before it runs.",
-      j: { "$schema": "https://schema.abi.invalid/v1/flow.json", id: "weekly_source_refresh", name: "Monday source refresh", enabled: false, trigger: { type: "schedule", cron: "0 8 * * 1", timezone: "UTC" }, steps: [{ id: "refresh_us_videos", type: "refresh", table: "usvideos" }, { id: "refresh_gb_videos", type: "refresh", table: "gbvideos" }, "… 18 more"] } },
-    { n: "agents/category_trends_marketing.json", note: "A <b>custom agent</b>: its instructions, what it may use, and the evaluation set it has to pass before it's published.",
-      j: { "$schema": "https://schema.abi.invalid/v1/agent.json", id: "category_trends_marketing", grounding: true, channels: [{ type: "in_app" }], instructions: "You are a narrow, read-only category chart-presence assistant. Use only semantic_query…", evaluation: "agents/category_trends_marketing.eval.json" } },
-    { n: "tools/top_videos_by_category.json", note: "A <b>tool</b> with typed, bounded inputs. Agents and flows call it; nobody types SQL into a prompt.",
-      j: { "$schema": "https://schema.abi.invalid/v1/tool.json", id: "top_videos_by_category", description: "Returns up to 10 videos ranked by latest recorded global cumulative views for an exact category label…", inputs: { additionalProperties: false, properties: { category: { type: "string", description: "Exact local category label, for example Entertainment" } } } } },
-    { n: "security/rls.json", note: "<b>Row-level security</b>: person 3 sees only US rows, in every report, query, export and agent answer.",
-      j: { "$schema": "https://schema.abi.invalid/v1/rls.json", rules: [{ id: "trending_market_access", table: "gold_trending", column: "country_code", users: { "3": ["US"] } }, { id: "country_market_access", table: "dim_country", column: "country_code", users: { "3": ["US"] } }] } }
+      j: { "$schema": "https://schema.abi.invalid/v1/measures.json", measures: [{ id: "revenue", name: "Estimated revenue (EUR)", expression: "WHERE(SUM(gold_orders.revenue_amount), gold_orders.product_priced = TRUE)", description: "EUR estimate from the current catalogue: quantity * list_price * (1 - discount)…" }, { id: "target_attainment", name: "Revenue target attainment", expression: "DIVIDE([revenue], [target])" }] } },
+    { n: "flows/daily_morning_refresh.json", note: "A <b>flow</b>: a trigger and its steps. Every morning at 06:00 it reloads the four sources, then leaves a note in the app inbox.",
+      j: { "$schema": "https://schema.abi.invalid/v1/flow.json", id: "daily_morning_refresh", name: "Daily morning source refresh", enabled: true, trigger: { type: "schedule", cron: "0 6 * * *", timezone: "UTC" }, steps: [{ id: "refresh_orders", type: "refresh", table: "bronze_orders" }, "… 3 more refreshes", { id: "completed", type: "action", action: "post_message", input: { channel: "inbox", text: "Daily source refresh completed…" } }] } },
+    { n: "ml/daily_revenue_28d.json", note: "An <b>ML model</b>: what it predicts, from which measure, how far ahead. ABI compares it with a baseline on held-out days.",
+      j: { "$schema": "https://schema.abi.invalid/v1/ml.json", id: "daily_revenue_28d", name: "Daily estimated revenue — historical 28-day forecast (EUR)", task: "forecast", target: "revenue", time: "calendar.day", horizon: 28, method: "auto" } },
+    { n: "tools/store_month_kpis.json", note: "A <b>tool</b> with typed, bounded inputs. Agents and flows call it; nobody types SQL into a prompt.",
+      j: { "$schema": "https://schema.abi.invalid/v1/tool.json", id: "store_month_kpis", inputs: { type: "object", additionalProperties: false, required: ["store_id", "year", "month"], properties: { store_id: { type: "string", maxLength: 64 }, year: { type: "integer", minimum: 1900, maximum: 2100 }, month: { type: "integer", minimum: 1, maximum: 12 } } } } },
+    { n: "agents/store_manager.json", note: "A <b>custom agent</b>: its instructions, its channel, and the evaluation set it has to pass.",
+      j: { "$schema": "https://schema.abi.invalid/v1/agent.json", id: "store_manager", grounding: true, channels: [{ type: "in_app" }], instructions: "Answer only store monthly performance. Require explicit store_id, year and month; ask for missing parameters before calling any tool…", evaluation: "agents/store_manager.eval.json" } },
+    { n: "agents/store_manager.eval.json", note: "Its <b>evaluation set</b>: real questions and what the answer must contain. Run it from the agent's card; it passes 7 of 7.",
+      j: { "$schema": "https://schema.abi.invalid/v1/eval.json", cases: [{ question: "Give revenue and orders for store S000, December 2025. Quote revenue exactly as the tool returns it.", expect: { contains: ["6707.13", "1144"], tools: ["store_month_kpis"] } }, { question: "Give revenue for store S000, November 2025…", expect: { contains: ["5932.05"] } }, "… 5 more"] } }
   ];
   const esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
   const hl = o => esc(JSON.stringify(o, null, 2))
@@ -752,14 +764,14 @@ footer .top > :last-child { margin-left: auto; font: 12px var(--mono) }
 
   // receipts
   const R = [
-    { t: "semantic_query · 0.41 s", ok: true, q: '<span class="k">measures</span>  <span class="s">["revenue"]</span>\n<span class="k">filters</span>   <span class="s">calendar.year = 2025</span>',
-      h: ["revenue"], rows: [["41,382,107.55"]], hit: 0, w: "<b>€41.4M</b> is 41,382,107.55 rounded. Rounding is allowed; a figure no row supports is not." },
-    { t: "semantic_query · 0.37 s", ok: true, q: '<span class="k">measures</span>  <span class="s">["revenue"]</span>\n<span class="k">by</span>        <span class="s">dim_store.region</span>\n<span class="k">filters</span>   <span class="s">calendar.year = 2025</span>',
-      h: ["region", "revenue"], rows: [["West", "12,904,311.20"], ["East", "10,832,950.04"], ["North", "9,081,226.79"], ["South", "8,563,619.52"]], hit: 0, w: "<b>West</b> and <b>€12.9M</b> both sit in row 1 of this result." },
-    { t: "semantic_query · 0.52 s", ok: true, q: '<span class="k">measures</span>  <span class="s">["revenue"]</span>\n<span class="k">by</span>        <span class="s">dim_store.name</span>\n<span class="k">order_by</span>  <span class="s">revenue desc</span>  <span class="k">limit</span> <span class="s">3</span>',
-      h: ["store", "revenue"], rows: [["Harbour St", "512,880.10"], ["Mill Lane", "498,214.67"], ["Old Market", "486,002.31"]], hit: 0, w: "Names count too: <b>Harbour St</b> is in the rows, so it may be named." },
-    { t: "no tool returned this", ok: false, q: '<span class="k">model said</span>  <span class="s">"West grew 18% on 2024"</span>\n<span class="k">checked</span>     <span class="s">every row this answer\'s tools returned</span>',
-      h: ["figure", "found in"], rows: [["18%", "nothing"]], hit: -1, w: "No query compared 2025 with 2024, so <b>18%</b> had no receipt. ABI asked the model to fix it once, then masked it." }
+    { t: "semantic_query · Brewline", ok: true, q: '<span class="k">measures</span>  <span class="s">["revenue"]</span>\n<span class="k">filters</span>   <span class="s">calendar.year = 2025</span>',
+      h: ["revenue"], rows: [["17,327,168.70"]], hit: 0, w: "<b>€17.33M</b> is 17,327,168.70 rounded. Rounding is allowed; a figure no row supports is not." },
+    { t: "semantic_query · Brewline", ok: true, q: '<span class="k">measures</span>  <span class="s">["revenue"]</span>\n<span class="k">by</span>        <span class="s">dim_stores.region</span>\n<span class="k">filters</span>   <span class="s">calendar.year = 2025</span>',
+      h: ["region", "revenue"], rows: [["North", "4,415,822.61"], ["South", "4,365,506.11"], ["West", "4,352,713.45"], ["East", "4,193,126.53"]], hit: 0, w: "<b>North</b> and <b>€4.42M</b> both sit in row 1 of this result." },
+    { t: "semantic_query · Brewline", ok: true, q: '<span class="k">measures</span>  <span class="s">["revenue"]</span>\n<span class="k">by</span>        <span class="s">dim_stores.store_name</span>\n<span class="k">order_by</span>  <span class="s">revenue desc</span>  <span class="k">limit</span> <span class="s">3</span>',
+      h: ["store", "revenue"], rows: [["Stuttgart Hbf", "274,477.10"], ["Hanover West", "271,907.53"], ["Frankfurt West", "251,852.17"]], hit: 0, w: "Names count too: <b>Stuttgart Hbf</b> is in the rows, so it may be named." },
+    { t: "no tool returned this", ok: false, q: '<span class="k">model said</span>  <span class="s">"North grew 18% on 2024"</span>\n<span class="k">checked</span>     <span class="s">every row this answer\'s tools returned</span>',
+      h: ["figure", "found in"], rows: [["18%", "nothing"]], hit: -1, w: "No query in this answer compared 2025 with 2024, so <b>18%</b> had no receipt. ABI asked the model to fix it once, then masked it. (An example of what gets masked.)" }
   ];
   function show(i) { const r = R[i];
     $("rt").textContent = r.t; $("rs").textContent = r.ok ? "✓ grounded" : "✕ masked"; $("rs").className = r.ok ? "" : "x"; $("rq").innerHTML = r.q;

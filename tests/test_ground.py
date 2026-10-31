@@ -58,3 +58,11 @@ def test_the_plural_of_a_name_the_person_typed_is_theirs():
     asked = "email me a weekly summary every Monday at 8"
     assert ground.check("Runs on **Mondays at 08:00 UTC**.", [], asked=asked)["names"] == []
     assert ground.check("Runs on **Tuesdays at 08:00 UTC**.", [], asked=asked)["names"] == ["Tuesdays"]
+
+
+def test_a_status_word_opening_a_label_value_is_no_name():
+    """Live run 31 Oct: "- **Status:** Saved **disabled**" came back "[not verified] **disabled**"."""
+    for w in ("Saved", "Created", "Currently", "Kept", "Paused"):
+        assert ground.check(f"- **Status:** {w} **disabled**; no email sent.", [])["names"] == [], w
+    assert ground.check("- **Top region:** Narnia, by revenue.", [])["names"] == ["Narnia"], "a data name after a label is still checked"
+    assert ground.check("- **Tier:** Platinum", [])["names"] == ["Platinum"], "data-like values stay checked"

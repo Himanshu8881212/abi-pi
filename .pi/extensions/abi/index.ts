@@ -124,7 +124,7 @@ export default async function abi(pi: ExtensionAPI) {
 			// chat completions when a model is named (OpenAI, OpenRouter, Ollama, vLLM, Gemini…); the original proxy speaks responses
 			api: (process.env.ABI_PI_LLM_API || (process.env.ABI_PI_LLM_MODEL ? "openai-completions" : "openai-responses")) as any,
 			models: [{ id: model, name: `${model} (built-in endpoint)`, reasoning: true, input: ["text", "image"],
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 200000, maxTokens: 32000 }],
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, ...(process.env.ABI_PI_LLM_MODEL ? { contextWindow: 200000, maxTokens: 32000 } : { contextWindow: 272000, maxTokens: 128000 }) }],
 		});
 	} catch (e) {
 		log({ event: "provider_unavailable", error: String(e).slice(0, 200) });

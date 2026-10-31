@@ -20,7 +20,7 @@ automation, and every number it tells you comes from a query it actually ran.**
 > yourself or your team, keep backups, and expect rough edges. Help shaping it is very welcome: see
 > [Contributing](#contributing).
 
-![ABI's Home page with pinned charts, KPIs and the sidebar from Data to Automate](website/shots/home.webp)
+![ABI showing a manager report built by the agent on 7.4 million orders: tabs, daily orders, orders by region and KPI cards](website/shots/report.webp)
 
 ## Why ABI
 
@@ -81,8 +81,9 @@ flowchart LR
 
 ## Quick start
 
-You need [Docker](https://docs.docker.com/get-docker/) with Compose, about **5 GB of disk** for the image, and a model
-endpoint or API key. It builds and runs on Linux and macOS (x86-64 and ARM).
+You need [Docker](https://docs.docker.com/get-docker/) with Compose (Docker Desktop on macOS or Windows), **4 GB of
+memory** (8 GB is comfortable), **about 6 GB of free disk** to build, and a model: an API key for OpenAI, Anthropic,
+OpenRouter or Gemini, or a local Ollama. It builds on x86-64 and ARM (Apple Silicon).
 
 **1. Get the code**
 
@@ -91,19 +92,20 @@ git clone https://github.com/Himanshu8881212/abi-pi.git abi
 cd abi
 ```
 
-**2. Create your `.env`** (it's git-ignored; keep it to yourself)
+**2. Create your `.env`** (git-ignored; keep it to yourself)
 
 ```sh
 cp .env.example .env
 ```
 
-Then set at least the owner account:
+Set at least the owner account:
 
 ```ini
 ABI_USER=admin
-ABI_PASSWORD=change-me-to-something-long   # 8+ characters; try: openssl rand -base64 18
-ABI_PROJECT=main
+ABI_PASSWORD=change-me-to-something-long   # 8+ characters; try: openssl rand -hex 16
 ```
+
+Avoid `$` in values (Compose reads it as a variable), or wrap the value in single quotes.
 
 **3. Start it**
 
@@ -111,15 +113,33 @@ ABI_PROJECT=main
 docker compose up -d --build
 ```
 
-The first build takes a few minutes. The first start sets up the database and creates your owner account; `docker
-compose logs -f` shows the progress, and the container reports `healthy` when it's ready.
+The first build takes several minutes. The first start sets up the database and creates your owner account; the
+container shows `healthy` when it's ready (`docker compose ps`; `docker compose logs -f` to follow along).
 
-**4. Open <http://localhost:8790>** and sign in as `ABI_USER`. Then, as the owner:
+**4. Open <http://localhost:8790>** and sign in as `ABI_USER`. Port taken? Set `ABI_PORT=8791` in `.env` and run step 3
+again.
 
-- **Govern › Settings:** connect a model provider and pick the model and how hard it reasons. Keys are stored encrypted
-  and never shown again. (Or set one endpoint in `.env` as `ABI_LLM_BASE` and `ABI_LLM_KEY`.)
-- **Data › Sources:** upload a Parquet file or point at an S3 folder of Parquet files.
-- **Ask in the chat:** "Build a model of this and show me revenue by month."
+**5. Connect a model.** Go to **Govern › Settings**, add a provider (presets for OpenAI, Anthropic, OpenRouter, Ollama
+and Gemini, or any OpenAI-compatible URL), paste its key and pick the model. Keys are stored encrypted and never shown
+again. Ollama on the same machine is `http://host.docker.internal:11434/v1` (the preset); on Linux, start Ollama with `OLLAMA_HOST=0.0.0.0`.
+
+**6. Bring data.** **Data › Sources › Add source**: upload a Parquet file (any size; it goes up in pieces), or give an
+S3 folder like `s3://bucket/sales/*.parquet` with its region. For a private bucket, add the access key and secret
+there: they're stored encrypted, usable only for that bucket's host, and never shown again or given to the agent.
+MinIO, Cloudflare R2 and other S3-compatible stores take their host as the endpoint; untick HTTPS for a plain-HTTP one.
+
+ABI reads Parquet. Have CSV or Excel? One line with [DuckDB](https://duckdb.org/docs/installation/) converts it:
+
+```sh
+duckdb -c "COPY (SELECT * FROM 'sales.csv') TO 'sales.parquet' (FORMAT parquet)"
+```
+
+**7. Ask.** Open the chat and say what you need: "Model this data and build me a report of revenue by month and
+region."
+
+**8. Add your team.** **Govern › Users & access › Add a person**: a name and a starting password you hand over; they
+change it by clicking their name at the top. Then give them a role (Viewer reads, Editor builds) and, if you like,
+limit the sections and reports they see. (Email invitations need a mail server; adding people doesn't.)
 
 ### All settings
 
@@ -127,15 +147,18 @@ compose logs -f` shows the progress, and the container reports `healthy` when it
 |---|---|---|
 | `ABI_USER` | yes | The workspace owner, created on the first start. |
 | `ABI_PASSWORD` | yes | The owner's password, 8 characters or more. |
+| `ABI_PORT` | no | The port on this machine. Default `8790`. |
 | `ABI_PROJECT` | no | The project to open first; created if missing. Default `main`. |
 | `ABI_WORKSPACE` | no | Its workspace. Default `main`. |
-| `ABI_LLM_BASE`, `ABI_LLM_KEY` | no | One OpenAI-compatible model endpoint and key. You can also add providers in Settings. |
+| `ABI_LLM_BASE`, `ABI_LLM_KEY`, `ABI_LLM_MODEL` | no | One OpenAI-compatible model endpoint, its key and the model's id there (e.g. `https://api.openai.com/v1`, `gpt-5`), instead of Settings. |
+| `ABI_LLM_API` | no | `openai-completions` (the default with a model) or `openai-responses`. |
 | `ABI_SECRET_KEY` | no | A Fernet key that encrypts the API keys admins save. Default: a key file in the volume. Make one with `python3 -c "import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())"`. |
 
 ### Use it from other devices (HTTPS)
 
-ABI serves plain HTTP on port 8790. For anything beyond your own machine, put it behind an HTTPS reverse proxy that
-sends `X-Forwarded-Proto: https`. With [Caddy](https://caddyserver.com) that's one line:
+ABI serves plain HTTP. Other machines on your network can open `http://<server>:8790`, but for anything beyond a
+trusted network put it behind an HTTPS reverse proxy that sends `X-Forwarded-Proto: https`. With
+[Caddy](https://caddyserver.com) that's one line:
 
 ```sh
 caddy reverse-proxy --from abi.example.com --to localhost:8790
@@ -148,7 +171,17 @@ git pull
 docker compose up -d --build
 ```
 
-Your data stays in the `abi-data` volume. Take a backup first while ABI is alpha.
+Your data stays in the volume. Take a backup first while ABI is alpha.
+
+### If something goes wrong
+
+| What you see | What to do |
+|---|---|
+| `set ABI_PASSWORD in .env` | `.env` is missing or the line is empty: step 2. |
+| `port is already allocated` | Set `ABI_PORT` in `.env`. |
+| The chat says nothing for two minutes | The model isn't reachable: check Govern › Settings (the key, the model id, the URL). |
+| A file is refused | Only Parquet loads: convert it (step 6). |
+| `ABI isn't answering right now` | The engine is still starting or restarting: wait a minute, or check `docker compose logs`. |
 
 ## Back up and restore
 
@@ -189,8 +222,8 @@ requests, and its revenue by region matched an independent DuckDB sum to the cen
 ### Known limits
 
 - HTTP only; use a reverse proxy for HTTPS (above).
-- Email (invitations, flow emails) needs the engine's mail settings; until then flows deliver to the app's inbox.
-- Data comes in as Parquet only (files or S3).
+- Email (invitations, flow emails) needs a mail server; until then add people with a password and flows deliver to the app's inbox.
+- Data comes in as Parquet only (files or S3); convert other formats first (Quick start, step 6).
 
 ## Contributing
 

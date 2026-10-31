@@ -58,6 +58,11 @@ ID_AFTER = re.compile(r"(?:$|[\s)\]`'\"!?]|[.,;:](?!\d))")
 FUNCTION = {"A", "An", "The", "This", "These", "That", "Those", "It", "Its", "There", "Here", "We", "You", "They", "He",
             "She", "I", "Our", "Your", "Their", "And", "But", "Or", "So", "If", "When", "Each", "All", "Both",
             "None", "Nothing", "Every"}  # GATE-9-fix-2: also opening a table cell ("| None |")
+# the agent's words for the state of its own work, opening a value after a label ("**Status:** Saved **disabled**");
+# never data members, so not names. Data-like values (Active, Yes, No) stay checked.
+STATUS = {"Saved", "Created", "Updated", "Added", "Removed", "Deleted", "Enabled", "Disabled", "Scheduled", "Unscheduled",
+          "Paused", "Stopped", "Started", "Running", "Done", "Ready", "Failed", "Pending", "Draft", "Off", "On", "Kept",
+          "Left", "Currently", "Still", "Not", "Deliberately", "Intentionally", "Safely", "Awaiting", "Waiting"}
 # GATE-9-fix-2, D-75: the product's own words (role names, MEL; the MEL function names and conditions and the action
 # names spelled out are added in `check`). GATE-9-fix-10 (a): its technical words, from the code's own vocabulary
 PRODUCT = {"Viewer", "Viewers", "Editor", "Editors", "Owner", "Owners", "MEL",
@@ -196,7 +201,7 @@ def _caps(text: str, quoted: bool = False) -> list[tuple[int, str]]:
             phrase = phrase.partition(" ")[2]
         elif not pre and " " not in phrase:  # LLM-2-fix-4: "Total revenue is 10,863.9" → no "Total"
             phrase = ""
-        elif pre and pre[-1] in ":;(|" and phrase.partition(" ")[0] in FUNCTION:  # LLM-2-fix-15: "Note: This sums"
+        elif pre and pre[-1] in ":;(|" and phrase.partition(" ")[0] in FUNCTION | STATUS:  # LLM-2-fix-15: "Note: This sums"
             phrase = phrase.partition(" ")[2]
         at = m.end() - len(phrase.lstrip())
         phrase = re.sub(r"(['’]s?|-)$", "", phrase.strip())

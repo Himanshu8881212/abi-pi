@@ -19,6 +19,7 @@ services:
       ABI_PI_SECRET_KEY: ${ABI_SECRET_KEY:-}      # encrypts the API keys admins save; empty: a key file in the volume
     volumes:
       - abi-data:/data                           # everything: the engine's database and lake, projects, chats, packs
+    extra_hosts: ["host.docker.internal:host-gateway"]   # a model on this machine (Ollama) on Linux too
     restart: unless-stopped
 volumes:
   abi-data:
