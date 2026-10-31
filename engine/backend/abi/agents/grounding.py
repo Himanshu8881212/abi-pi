@@ -307,31 +307,47 @@ def _query(r) -> bool:
         and isinstance(r.get("columns"), list) and isinstance(r.get("rows"), list)
 
 
-def filtered(project: str, user_id: int | None, results: list) -> list[str]:
+def filtered(project: str, user_id: int | None, results: list) -> list:
     """LLM-2-fix-2: the text values of the `=`/`in` filters of query results that exist in their column (read as
     `user_id` through the semantic engine, so RLS applies): pass them to `check` with the results. A value no row of
     the column holds is never returned (an invented member stays ungrounded); a measure's total proves nothing
-    (IGNORE/WHERE measures). Live (ClickHouse) columns and failed reads ground nothing."""
+    (IGNORE/WHERE measures). Live (ClickHouse) columns and failed reads ground nothing.
+    ABI-PI: a number filter on the date table (calendar.year = 2025, calendar.month = 11) that exists there comes back as
+    a result row, so "revenue in 2025" grounds its year like a member; measure figures still come only from result rows."""
     from abi import semantic, storage
-    from abi.semantic import live
+    from abi.semantic import live, model
 
+    cal = ((model._read(project, "model.json") or {}).get("date_table") or {}).get("table")
+    num = lambda v: str(int(v)) if float(v).is_integer() else str(v)  # noqa: E731 (as DuckDB casts it to text)
     asked: dict[str, set[str]] = {}
+    dates: dict[str, set] = {}
     for r in results:
         for f in r["filters"] if _query(r) else []:
             vals = f.get("value") if isinstance(f, dict) and f.get("op") in ("=", "in") else None
             for v in vals if isinstance(vals, list) else [vals]:
-                if isinstance(v, str) and isinstance(f.get("column"), str) and "." in f["column"]:
-                    asked.setdefault(f["column"], set()).add(v)
-    out = []
-    for col, vals in asked.items():
+                if isinstance(f.get("column"), str) and "." in f["column"]:
+                    if isinstance(v, str):
+                        asked.setdefault(f["column"], set()).add(v)
+                    elif isinstance(v, int | float) and not isinstance(v, bool) and f["column"].split(".", 1)[0] == cal:
+                        dates.setdefault(f["column"], set()).add(v)
+
+    def held(col: str, vals: set[str]) -> list[str]:
         t, c = col.split(".", 1)
         if live.is_live(project, t):
-            continue
+            return []
         x = f"CAST({storage._q(c)} AS VARCHAR)"
         sql = f"SELECT DISTINCT {x} FROM {storage._q(t)} WHERE {x} IN (" + ", ".join(
             "'" + storage._lit(v) + "'" for v in sorted(vals)) + ")"
         with contextlib.suppress(ActionFailed, duckdb.Error):  # a refused or failed read only means nothing grounds
-            out += [r[0] for r in semantic.execute(project, sql, {"grounding": col}, user_id)]
+            return [r[0] for r in semantic.execute(project, sql, {"grounding": col}, user_id)]
+        return []
+    out: list = []
+    for col, vals in asked.items():
+        out += held(col, vals)
+    for col, vals in dates.items():
+        found = set(held(col, {num(v) for v in vals}))
+        if rows := [[v] for v in sorted(vals) if num(v) in found]:
+            out.append({"columns": [col], "rows": rows})
     return out
 
 

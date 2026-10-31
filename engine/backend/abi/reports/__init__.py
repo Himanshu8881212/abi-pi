@@ -344,7 +344,7 @@ def visuals(text: str, project: str | None, user_id: int) -> tuple[str, list[str
             asked = {x for f in q["filters"] if f["op"] in ("=", "in") for x in
                      (f["value"] if isinstance(f["value"], list) else [f["value"]]) if isinstance(x, str)}
             fake = {"filters": q["filters"], "measures": {}, "columns": [], "rows": []}  # filtered() reads only filters
-            if asked - set(grounding.filtered(project, user_id, [fake])):
+            if asked - {x for x in grounding.filtered(project, user_id, [fake]) if isinstance(x, str)}:
                 raise ActionFailed(400, "unknown member")
             out.append(json.dumps(v.model_dump(mode="json", exclude_defaults=True), ensure_ascii=False))
         except (ValidationError, ActionFailed):
