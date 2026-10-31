@@ -139,7 +139,9 @@ def _call(project: str, name: str, payload: dict, user: User, dry: bool, outside
 def _system(a: dict, explore: bool, today: str) -> str:
     return "\n".join([  # D-117: today, the only part that moves between runs, last (providers cache the prefix)
         f"You are {a['name']}: {a['purpose']}", a["instructions"],
-        "Answer only through your tools. Every number and name you state must come from a tool result; never compute or guess.",
+        "Answer only through your tools. Every number and name you state must come from a tool result; never compute or guess."
+        " You may round a value or show a ratio as a percent (0.683 as 68.3%), and name the period or member the query was"
+        " filtered on; always answer in words, never with nothing.",  # ABI-PI: what the grounding check accepts (31 Oct)
         COMPACTED,
         "Your knowledge scope (IDs): " + json.dumps(a["scope"]),
         *(["You may run read-only semantic_query calls within this scope."] if explore else []), today,
@@ -181,6 +183,8 @@ def _answer(project: str, a: dict, question: str, user: User, via: str, files: d
         tokens = [t + s for t, s in zip(tokens, resp.spent, strict=True)]  # every attempt, failovers too (OB-1)
         msg = resp.choices[0].message
         if not msg.tool_calls and not msg.content:  # every provider empty (LLM-2-fix-6): one nudge, then the template
+            trace.append({"tool": "empty answer", "input": {}, "output": {"finish_reason": resp.choices[0].finish_reason,  # ABI-PI
+                                                                              "refusal": getattr(msg, "refusal", None)}})
             if not nudged:  # LLM-2-fix-12: never a blank answer, and the run (an eval case) keeps its trace
                 nudged = True
                 messages.append({"role": "user", "content": "Answer the question now from the tool results."})
@@ -245,7 +249,7 @@ def _answer(project: str, a: dict, question: str, user: User, via: str, files: d
     data = next((o for o in reversed(outputs) if isinstance(o, dict) and {"columns", "rows"} <= o.keys()
                  and "snapshot" not in o), None)  # GATE-9-fix-3: a load's snapshot row is not the data
     return {"run": run_id, "answer": text, "grounded": grounded, "retried": retried, "template": template,
-            "tools": [t["tool"] for t in trace if t["tool"] != "grounding"], "data": data,
+            "tools": [t["tool"] for t in trace if t["tool"] not in ("grounding", "empty answer")], "data": data,
             **({"columns": data["columns"], "rows": data["rows"]} if data else {}),  # D-22: its figures ground the Main Agent
             # the last report_snapshot it took (`artifact:<project>/<file>`): an email reply attaches it (X-02.6)
             "snapshot": next((o["snapshot"] for o in reversed(outputs) if isinstance(o, dict) and isinstance(o.get("snapshot"), str)), None)}
