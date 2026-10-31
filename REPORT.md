@@ -186,9 +186,13 @@ Before hosting on the local infrastructure:
 - [x] Import refuses zip bombs and never brings waiting steps; pack file names are safe IDs.
 - [x] Backup and restore: `scripts/backup.sh backup|keys|restore` in a running container; a restore into a new volume answers the same rows.
 - [x] Tests pass (30 Oct 2026, from a clean engine; the tests remove their own projects): offline 66 (`.venv/bin/python -m pytest -q tests`), live agent 18 of 18, `tests/container_check.sh` 13 of 13, `tests/container_fuzz.py` 17 of 17; all 30 pages draw in Chrome with no script error.
+- [x] V1 (31 Oct 2026): offline 78 passed; `tests/container_check.sh` 13 of 13 on a fresh Proxmox container (Debian 13,
+  Docker); deployed there end to end (7.4M orders from S3, the agent's build and figures checked); Publish and a real
+  Viewer-only sign-in 12 of 12; live agent tests 15 of 18 with the other 3 blocked by the model provider's usage limit
+  (rerun when it resets).
 - [ ] Later (owner, 30 Oct 2026): put the app behind an HTTPS reverse proxy (it speaks HTTP; the proxy should send `X-Forwarded-Proto: https`) and run it with `--open` only behind that proxy.
 - [ ] Later (owner, 30 Oct 2026): configure the engine's email delivery (`ABI_PUBLIC_URL` and the account mail server) so Users & access invitations and flow emails reach people.
-- [ ] Bring yt_cms onto the own engine: its sources (RustFS S3) and about 100M rows need the data loaded again (the old ABI's copy stays in `workspaces.old-abi/`).
+- [x] yt_cms dropped (31 Oct 2026): its converters were removed in the ponytail cut. Was: its sources (RustFS S3) and about 100M rows need the data loaded again (the old ABI's copy stays in `workspaces.old-abi/`).
 - [x] Deeper trim checked (30 Oct 2026), nothing more cut: the engine's UI is where ABI's emailed invite and password-reset links land and what PDF/PPTX render through, and its home is the chat; the chat code is shared with the MCP server Pi uses, ABI's shared agents and flows. The image's weight is all in use (DuckDB, Arrow, ML, Playwright, Chromium).
 - [x] Clean start (30 Oct 2026): every engine project deleted and purged; one small project `demo/trending` (real YouTube trending data, 4 files, 560,271 rows: trending, videos, categories, countries) with its 4 relationships found by ABI.
 - [x] ABI preview updated on 29 Oct 2026 (owner's approval) from 87018dff to fcc3aa35 with ABI's own `preview.sh` (backup first: Postgres dump and the old UI in `~/abi-preview-backups/`): PPTX (16:9, a slide per page, speaker notes say how each number is calculated) and several pages in one PDF work, also from the app's Export.
