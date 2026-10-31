@@ -20,16 +20,21 @@ automation, and every number it tells you comes from a query it actually ran.**
 > yourself or your team, keep backups, and expect rough edges. Help shaping it is very welcome: see
 > [Contributing](#contributing).
 
+![ABI's Home page with pinned charts, KPIs and the sidebar from Data to Automate](website/shots/home.webp)
+
 ## Why ABI
 
-BI tools make you do the plumbing: load the files, clean them, model them, write the measures, lay out the
-dashboard, schedule the refresh. Chat-with-your-data tools skip the plumbing and make up numbers.
-
-ABI does the plumbing *for* you and refuses to make anything up:
+A typical data team stitches together an ETL tool, a warehouse, a semantic layer, dashboards, alerting, planning
+spreadsheets, a scheduler, notebooks and an AI chatbot, then spends its time keeping them in sync. **ABI is all of
+it in one container, end to end, out of the box**: from raw data to models, reports, monitoring, write-back,
+automated flows and agents.
 
 - **You say it, it builds it.** "Load the orders from S3, clean them, and give me revenue by region per month" turns
   into bronze, silver and gold tables, a semantic model, measures and a report, built step by step in front of you
-  through ABI's own actions, never by editing files behind your back.
+  through ABI's own actions. Or click it yourself; the screens are the same.
+- **Everything as code.** Every source, table, measure, report, flow, agent, tool and security rule is a plain JSON
+  file in a Git repository, checked against a schema. Read it, diff it, undo it, publish it, move it between
+  environments.
 - **Every number has a receipt.** Each figure and name in an answer must appear in a tool result or in your own words.
   Anything the agent can't back up is checked again, then masked as `[not verified]`. No invented totals.
 - **It asks before it acts.** Deleting, publishing, sending and syncing wait for your explicit yes in the app. The agent
@@ -43,13 +48,14 @@ One app, in the order the work happens:
 
 | | |
 |---|---|
-| **Data** | Parquet files (upload, or an S3 folder of them) into medallion layers: bronze sources, silver cleaned tables, gold facts and dimensions. |
+| **Data** | Parquet files (upload, or an S3 folder of them) into medallion layers: bronze sources, silver cleaned tables, gold facts and dimensions. Sources refresh on change or on a schedule, incrementally where the source allows. |
 | **Data model** | Measures, a glossary, saved queries, joins and a calendar, row-level and column security, a model canvas. |
+| **Write-back** | Edit rows, or change a total and let ABI spread it over the rows below; every edit waits for approval, undoes in one step and can sync back to a Postgres or MySQL source. |
 | **Visualize** | Reports with cross-filtering, drag-and-resize layouts, Explore with saved analyses, Monitor checks (a measure against a target or its last period, freshness, failed flows), a Home page of pinned widgets. |
-| **Export** | Board packs: PDF, PPTX, PNG, data extracts and short explainer videos of a report. |
+| **Export** | Board packs and one-pagers as PDF, PPTX and PNG, data extracts (Excel, CSV), and short explainer videos (MP4) of a report. |
 | **Automate** | Flows on a schedule, ML forecasts, tools, and custom agents with their own evaluation sets, each from a form, from a sentence to the agent, or as JSON. |
 | **Knowledge** | A vault for your business definitions; the agent cites it before it defines or judges a measure. |
-| **Govern** | Developer and Viewer modes, commits and history, Publish to a read-only copy, users, roles and model settings. |
+| **Govern** | Row-level security and hidden columns, roles, Developer and Viewer modes, commits and history, Publish to a read-only copy, model settings. |
 
 The chat sits on every page. Behind it is a lead agent with a team of specialists (data engineer, analytics engineer,
 analyst, ML engineer, automation engineer, agent builder, reviewer, release ops, board pack) that it hands work to and
