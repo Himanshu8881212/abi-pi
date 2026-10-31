@@ -1327,8 +1327,25 @@ def publish_layouts(project: str, by: str = "") -> None:
         app_save(project, "layouts.json", lay | {"published": lay.get("draft") or {}}, by)
 
 
+def publish_roles(project: str, pub: str) -> None:
+    """Everyone with a role on the project reads its published copy: Viewer there. A role given before the first Publish,
+    or in ABI's own app, left that person an empty Viewer (release run 31 Oct). Removing a role stays with Users & access
+    (it is destructive and asks first)."""
+    try:
+        users = abi.call("list_users").get("users") or []
+    except abi.ActionError:
+        return  # not an owner: the owner's Publish does it
+    for u in users:
+        if (u.get("roles") or {}).get(project) and not (u.get("roles") or {}).get(pub) and not u.get("workspace_owner"):
+            try:
+                abi.call("set_role", project=pub, user=u["name"], role="viewer")
+            except abi.ActionError as e:
+                print(f"abi-pi: viewer role on {pub} for {u['name']} not set: {e.body.get('message')}", file=sys.stderr)
+
+
 def published_now(project: str, pub: str, head: str) -> dict:
     publish_layouts(project)
+    publish_roles(project, pub)
     for src in sorted((abi.folder(project) / "sources").glob("*.json")):  # the import writes definitions; load the data
         try:
             abi.call("refresh", project=pub, table=src.stem)
@@ -2046,6 +2063,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                 pub, bundle, head = publish_bundle(project)
                 if head and (published(project).get("commit") or "").split(" ")[0] == head.split(" ")[0]:  # same commit: only layouts
                     publish_layouts(project, hub.user)
+                    publish_roles(project, pub)
                     changed(project)
                     return self.reply(200, json.dumps({"result": published(project)}).encode())
                 out = run("import_project", {"project": pub, "bundle": bundle}, None, lambda: published_now(project, pub, head))

@@ -24,11 +24,13 @@ def figures(text: str) -> set[int]:
 
 
 def scenario1(project: str) -> dict:
-    """Load a new CSV, model it, top 5 categories by views. Returns the check."""
+    """Load a new Parquet file (the CSV, converted: ABI-PI takes Parquet), model it, top 5 categories by views."""
     drop = ROOT / "scratch" / project
     drop.mkdir(parents=True, exist_ok=True)
     shutil.copy2(CSV, drop / CSV.name)
-    run = ask(f"Load the file {drop / CSV.name} into a new ABI project {project} in workspace demo, make sure the model is "
+    pq = drop / (CSV.stem + ".parquet")
+    duckdb.sql(f"COPY (SELECT * FROM read_csv('{drop / CSV.name}', {OPTS})) TO '{pq}' (FORMAT parquet)")
+    run = ask(f"Load the file {pq} into a new ABI project {project} in workspace demo, make sure the model is "
               "Ready, and tell me the top 5 categories (category_id) by total views (the sum of the views column) with their figures.")
     hand = duckdb.sql(f"SELECT category_id, SUM(views) v FROM read_csv('{drop / CSV.name}', {OPTS}) GROUP BY 1 "
                       "ORDER BY v DESC NULLS LAST LIMIT 5").fetchall()
