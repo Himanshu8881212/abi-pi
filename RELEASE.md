@@ -31,7 +31,7 @@ ML, custom agents), the Pi agent with a team of specialists, and a one-page app.
   baseline, a custom agent passed its evaluation set.
 - Publish and a real Viewer-only sign-in: 12 of 12 (reads only the published copy and layout; every change refused;
   no uncommitted work in its page or its queries).
-- Live agent tests: see REPORT.md (Release checklist).
+- Live agent tests: 18 of 18 (`ABI_PI_LIVE=1 .venv/bin/python -m pytest -q -m live tests`), the agent driven like a person.
 
 ## Known limits
 

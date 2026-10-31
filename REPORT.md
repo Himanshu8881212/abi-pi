@@ -188,8 +188,8 @@ Before hosting on the local infrastructure:
 - [x] Tests pass (30 Oct 2026, from a clean engine; the tests remove their own projects): offline 66 (`.venv/bin/python -m pytest -q tests`), live agent 18 of 18, `tests/container_check.sh` 13 of 13, `tests/container_fuzz.py` 17 of 17; all 30 pages draw in Chrome with no script error.
 - [x] V1 (31 Oct 2026): offline 78 passed; `tests/container_check.sh` 13 of 13 on a fresh Proxmox container (Debian 13,
   Docker); deployed there end to end (7.4M orders from S3, the agent's build and figures checked); Publish and a real
-  Viewer-only sign-in 12 of 12; live agent tests 15 of 18 with the other 3 blocked by the model provider's usage limit
-  (rerun when it resets).
+  Viewer-only sign-in 12 of 12; live agent tests 18 of 18 (3 of them rerun after the model provider's usage limit
+  reset).
 - [ ] Later (owner, 30 Oct 2026): put the app behind an HTTPS reverse proxy (it speaks HTTP; the proxy should send `X-Forwarded-Proto: https`) and run it with `--open` only behind that proxy.
 - [ ] Later (owner, 30 Oct 2026): configure the engine's email delivery (`ABI_PUBLIC_URL` and the account mail server) so Users & access invitations and flow emails reach people.
 - [x] yt_cms dropped (31 Oct 2026): its converters were removed in the ponytail cut. Was: its sources (RustFS S3) and about 100M rows need the data loaded again (the old ABI's copy stays in `workspaces.old-abi/`).
