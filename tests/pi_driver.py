@@ -27,6 +27,7 @@ class Run:
     usage: dict = field(default_factory=lambda: {"input": 0, "output": 0, "cacheRead": 0, "turns": 0})
     seconds: float = 0.0
     events: int = 0
+    model: str = ""  # provider/model of the last reply (a fallback's when the first model failed)
 
     def called(self, name: str) -> list:
         return [t for t in self.tools if t[0].endswith(name)]
@@ -68,6 +69,7 @@ def ask(prompt: str, confirm: bool = False, timeout: float = 1200, session: str 
                 for k in ("input", "output", "cacheRead"):
                     run.usage[k] += u.get(k, 0) or 0
                 run.usage["turns"] += 1
+                run.model = f"{m.get('provider')}/{m.get('model')}"
                 txt = "".join(c.get("text", "") for c in m.get("content", []) if c.get("type") == "text")
                 if txt.strip():
                     run.answer = txt

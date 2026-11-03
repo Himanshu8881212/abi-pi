@@ -12,6 +12,7 @@ The steps are in the [README](README.md#contributing). The container is the rele
 .venv/bin/python -m pytest -q tests                  # offline: needs the engine running, no model
 ABI_PI_LIVE=1 .venv/bin/python -m pytest -q -m live tests   # the agent end to end: needs a model, takes minutes
 ABI_PI_LIVE_MODEL=provider/model ABI_PI_LIVE_FALLBACK=provider/other ...   # another model, a fallback on 429/5xx
+.venv/bin/python bench/bench.py --runs 10 --model provider/model   # the agent bench on generated data: medians into bench/RESULTS.md
 ```
 
 A fix comes with the test that failed before it. Keep changes small and in the style of the file around them.

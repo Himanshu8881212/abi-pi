@@ -23,30 +23,33 @@ def parquet(*csvs) -> list[str]:
 TEST_PROJECT = re.compile(r"(pi_app_test|pi_test_layout|pi_date_test|pi_model_test|yt|(sec|s1)_\d{8})(_pub)?")
 
 
+def drop(projects) -> None:
+    """Throwaway projects (a test run's, the bench's) go through ABI's delete_project, confirmed here because the run
+    made them, with their copies under workspaces/."""
+    import abi
+    for p in projects:
+        copies = [f for ws in abi.WORKSPACES.iterdir() for f in [ws / p, *(ws / s / p for s in ("_views", "_app", "_team", "_vault"))]]
+        try:
+            abi.call("delete_project", project=p)
+        except abi.ActionError as e:
+            abi.call("delete_project", confirm=e.body["confirm_token"], project=p)
+        for f in copies:
+            shutil.rmtree(f, ignore_errors=True)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _remove_test_projects():
-    """The projects this run created for its tests go after it (24 had piled up): through ABI's delete_project,
-    confirmed here because they are this run's throwaway projects, and their copies under workspaces/."""
+    """The projects this run created for its tests go after it (24 had piled up)."""
     import abi
-
-    def drop(projects):
-        for p in [p for p in projects if TEST_PROJECT.fullmatch(p)]:
-            copies = [f for ws in abi.WORKSPACES.iterdir() for f in [ws / p, *(ws / s / p for s in ("_views", "_app", "_team", "_vault"))]]
-            try:
-                abi.call("delete_project", project=p)
-            except abi.ActionError as e:
-                abi.call("delete_project", confirm=e.body["confirm_token"], project=p)
-            for f in copies:
-                shutil.rmtree(f, ignore_errors=True)
     try:
         before = {p["project"] for p in abi.call("list_projects")["projects"]}
     except Exception:  # noqa: BLE001 (no engine: nothing to clean)
         yield
         return
-    drop(before)  # a throwaway project an interrupted run left would be reused, stale (release run 31 Oct)
+    drop(p for p in before if TEST_PROJECT.fullmatch(p))  # one an interrupted run left would be reused, stale (release run 31 Oct)
     before = {p["project"] for p in abi.call("list_projects")["projects"]}
     yield
-    drop({p["project"] for p in abi.call("list_projects")["projects"]} - before)
+    drop(p for p in {p["project"] for p in abi.call("list_projects")["projects"]} - before if TEST_PROJECT.fullmatch(p))
 
 
 def pytest_collection_modifyitems(config, items):
