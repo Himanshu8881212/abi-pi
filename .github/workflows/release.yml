@@ -1,4 +1,5 @@
-# A tag v1.2.3 publishes ghcr.io/<owner>/abi:1.2.3 and :latest for amd64 and arm64 (docker compose pull uses it).
+# A tag v1.2.3 publishes ghcr.io/<owner>/abi:1.2.3 and :latest for amd64 and arm64 (docker compose pull uses it),
+# once the offline tests (test.yml) pass on that commit.
 name: release
 on:
   push:
@@ -8,7 +9,10 @@ permissions:
   contents: read
   packages: write
 jobs:
+  tests:
+    uses: ./.github/workflows/test.yml
   image:
+    needs: tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

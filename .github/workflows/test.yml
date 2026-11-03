@@ -1,0 +1,68 @@
+# The offline tests on every push and pull request, set up as README › Contributing and the Dockerfile do: Postgres 17,
+# both Python environments, the engine's UI, DuckDB extensions and Chromium, the engine and its first-run accounts.
+# release.yml runs this workflow before it builds an image.
+name: test
+on:
+  push:
+    branches: ["**"]  # not tags: release.yml calls this workflow for them
+  pull_request:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PGBIN: /usr/lib/postgresql/17/bin  # scripts/engine.sh's Postgres, as in the Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - name: Postgres 17 (PGDG)
+        run: |
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-17
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.x"  # the Dockerfile's uv
+          python-version: "3.13"
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: engine/frontend/package-lock.json
+      - name: Python environments
+        run: |
+          uv sync --frozen
+          cd engine/backend && uv sync --frozen --no-dev
+      - name: The engine's UI
+        working-directory: engine/frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npx vite build --outDir ../backend/static --emptyOutDir --logLevel warn
+      - name: DuckDB extensions and Chromium, as the Dockerfile installs them
+        run: |
+          engine/backend/.venv/bin/python -c "import duckdb; [duckdb.install_extension(e) for e in ('ducklake', 'postgres', 'mysql', 'httpfs', 'excel', 'delta', 'iceberg', 'avro', 'sqlite')]; duckdb.install_extension('nanoarrow', repository='community')"
+          engine/backend/.venv/bin/playwright install --with-deps --only-shell chromium
+      - name: The engine and its accounts
+        run: |
+          git config --global user.name ABI-PI  # the project copies' local commits (the Dockerfile sets the same)
+          git config --global user.email abi-pi@localhost
+          scripts/engine.sh start
+          python3 scripts/accounts.py
+      - name: Offline tests
+        # tests/test_guardrails.py's secret scan also asks macOS's keychain (`security`) and needs a model key: here a
+        # `security` that finds nothing, and a random key that must not turn up in logs, files or git either
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          printf '#!/bin/sh\nexit 44\n' > "$RUNNER_TEMP/bin/security"
+          chmod +x "$RUNNER_TEMP/bin/security"
+          ABI_PI_LLM_KEY=$(openssl rand -hex 16) PATH="$RUNNER_TEMP/bin:$PATH" .venv/bin/python -m pytest -q -rs tests
+      - if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: |
+            data/logs
+            logs

@@ -258,7 +258,7 @@ ABI is early, and that's the best time to shape it. Bug reports, ideas and pull 
 3. **Keep the rules.** The agent reads data only through ABI's engine, changes projects only through ABI's actions,
    grounds every number, and asks before anything destructive or outward-facing. [AGENTS.md](AGENTS.md) lists them; a
    change that weakens one won't be merged.
-4. **Test it.** `.venv/bin/python -m pytest -q tests` must pass; add a test that fails without your fix.
+4. **Test it.** `.venv/bin/python -m pytest -q tests` must pass (CI runs it on every push and pull request); add a test that fails without your fix.
 5. **Small pull requests** with a plain description of what changed and why.
 
 To find your way around the code, `python3 scripts/codegraph.py` writes an Obsidian vault with one note per file.
