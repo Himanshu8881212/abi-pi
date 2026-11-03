@@ -1,25 +1,29 @@
 # docker compose up -d   then open http://localhost:8790 and sign in as ABI_USER.
 # Put the settings in a .env file next to this one (never committed): see .env.example.
+# Prebuilt image: docker compose pull && docker compose up -d   (else `up` builds it here). Upgrade: scripts/upgrade.sh
+# 1.0's .env names (ABI_PI_PROJECT, ABI_PI_LLM_BASE, ...) still work.
 name: abi
 services:
   abi:
     build: .
-    image: abi:latest
+    image: ${ABI_IMAGE:-ghcr.io/himanshu8881212/abi:latest}
     container_name: abi
     ports: ["${ABI_PORT:-8790}:8790"]              # ABI_PORT in .env when 8790 is taken
     environment:
       ABI_USER: ${ABI_USER:?set ABI_USER in .env (the workspace owner)}
       ABI_PASSWORD: ${ABI_PASSWORD:?set ABI_PASSWORD in .env (8 characters or more)}
-      ABI_PI_PROJECT: ${ABI_PROJECT:-main}
-      ABI_PI_WORKSPACE: ${ABI_WORKSPACE:-main}
-      ABI_PI_LLM_BASE: ${ABI_LLM_BASE:-}          # optional: or connect providers in the app (Govern › Settings)
-      ABI_PI_LLM_KEY: ${ABI_LLM_KEY:-}
-      ABI_PI_LLM_MODEL: ${ABI_LLM_MODEL:-}        # the model's id at that endpoint, e.g. gpt-5 or llama3.1
-      ABI_PI_LLM_API: ${ABI_LLM_API:-}            # optional: openai-completions (default with a model) or openai-responses
-      ABI_PI_SECRET_KEY: ${ABI_SECRET_KEY:-}      # encrypts the API keys admins save; empty: a key file in the volume
+      ABI_PI_PROJECT: ${ABI_PROJECT:-${ABI_PI_PROJECT:-main}}
+      ABI_PI_WORKSPACE: ${ABI_WORKSPACE:-${ABI_PI_WORKSPACE:-main}}
+      ABI_PI_LLM_BASE: ${ABI_LLM_BASE:-${ABI_PI_LLM_BASE:-}}   # optional: or connect providers in the app (Govern › Settings)
+      ABI_PI_LLM_KEY: ${ABI_LLM_KEY:-${ABI_PI_LLM_KEY:-}}
+      ABI_PI_LLM_MODEL: ${ABI_LLM_MODEL:-${ABI_PI_LLM_MODEL:-}}  # the model's id at that endpoint, e.g. gpt-5 or llama3.1
+      ABI_PI_LLM_API: ${ABI_LLM_API:-${ABI_PI_LLM_API:-}}        # optional: openai-completions (default with a model) or openai-responses
+      ABI_PI_SECRET_KEY: ${ABI_SECRET_KEY:-${ABI_PI_SECRET_KEY:-}}  # encrypts the API keys admins save; empty: a key file in the volume
+      ABI_PUBLIC_URL: ${ABI_PUBLIC_URL:-}         # optional: the address people open (https://abi.example.com): email links and SSO
     volumes:
       - abi-data:/data                           # everything: the engine's database and lake, projects, chats, packs
     extra_hosts: ["host.docker.internal:host-gateway"]   # a model on this machine (Ollama) on Linux too
     restart: unless-stopped
 volumes:
   abi-data:
+    name: ${ABI_VOLUME:-abi_abi-data}            # an install from 1.0 keeps its volume: ABI_VOLUME=abi-pi_abi-pi-data

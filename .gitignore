@@ -17,3 +17,4 @@ workspaces.old-abi/
 
 # the Obsidian vault scripts/codegraph.py writes (a copy of the code, the notes, the plugin)
 codegraph/
+backups/

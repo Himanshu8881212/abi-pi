@@ -66,3 +66,13 @@ def test_a_status_word_opening_a_label_value_is_no_name():
         assert ground.check(f"- **Status:** {w} **disabled**; no email sent.", [])["names"] == [], w
     assert ground.check("- **Top region:** Narnia, by revenue.", [])["names"] == ["Narnia"], "a data name after a label is still checked"
     assert ground.check("- **Tier:** Platinum", [])["names"] == ["Platinum"], "data-like values stay checked"
+
+
+def test_a_figure_in_a_definitions_title_grounds_as_written():
+    """1.1 #6: answers about the reports themselves came back half-masked: "28-day" from a visual title is the
+    project's own words. A figure of the data, an ID's digits or a rounded figure still need a result row."""
+    rep = {"reports": [{"id": "daily_revenue_28d", "title": "Revenue over the last 28 days", "pages": [{"layout": {"w": 12}}]}]}
+    check = ground.check
+    assert check("The page shows revenue over the last 28 days.", [rep])["numbers"] == []
+    assert check("Revenue was 17,327,168.70 over 12 weeks.", [rep])["numbers"] == ["17,327,168.70", "12"]
+    assert check("It covers 30 days.", [rep])["numbers"] == ["30"]

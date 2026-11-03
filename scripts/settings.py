@@ -44,7 +44,16 @@ def _fernet():
 def load() -> dict:
     f = home() / "settings.json"
     s = json.loads(f.read_text()) if f.exists() else {}
-    return {"providers": s.get("providers", []), "model": s.get("model"), "thinking": s.get("thinking", "medium")}
+    return {"providers": s.get("providers", []), "model": s.get("model"), "thinking": s.get("thinking", "medium"),
+            "fallbacks": s.get("fallbacks", []), "mail": s.get("mail")}
+
+
+def note(key: str, value) -> None:
+    """A setting the app shows but ABI keeps (the account mail server, never its password)."""
+    f = home() / "settings.json"
+    s = json.loads(f.read_text()) if f.exists() else {}
+    s[key] = value
+    _save(s)
 
 
 def _save(s: dict) -> None:
@@ -105,21 +114,36 @@ def remove_provider(pid: str) -> dict:
     s["providers"] = [x for x in s["providers"] if x["id"] != pid]
     if (s.get("model") or "").split("/")[0] == pid:
         s["model"] = None
+    s["fallbacks"] = [m for m in s["fallbacks"] if m.split("/")[0] != pid]
     _save(s)
     return public()
 
 
-def set_default(model: str | None, thinking: str) -> dict:
+def set_default(model: str | None, thinking: str, fallbacks: list | None = None) -> dict:
+    """The agent's model and reasoning, and the models it moves to, in order, when one fails (quota, outage)."""
     s = load()
     if thinking not in LEVELS:
         raise ValueError(f"Reasoning is one of {', '.join(LEVELS)}.")
-    if model:
-        pid, _, mid = model.partition("/")
+    fallbacks = [] if fallbacks is None else fallbacks
+    if not isinstance(fallbacks, list) or len(fallbacks) > 5:
+        raise ValueError("At most 5 fallback models.")
+    for m in [model, *fallbacks] if model else fallbacks:
+        pid, _, mid = str(m).partition("/")
         if not any(p["id"] == pid and mid in p["models"] for p in s["providers"]):
             raise ValueError("Pick a model of a configured provider.")
-    s["model"], s["thinking"] = model or None, thinking
+    s["model"], s["thinking"], s["fallbacks"] = model or None, thinking, [m for m in dict.fromkeys(fallbacks) if m != model]
     _save(s)
     return public()
+
+
+RETRY = re.compile(r"^(429|5\d\d|an error)$")  # quota, rate limit, outage or no status: worth another model; 401/400 are not
+
+
+def next_model(failed: str, tried: list) -> str | None:
+    """The fallback to try after a model answered `failed` (its HTTP status): the first one not tried in this turn."""
+    if not RETRY.match(failed):
+        return None
+    return next((m for m in load()["fallbacks"] if m not in tried), None)
 
 
 def _builtin(base: str) -> str:
@@ -225,6 +249,11 @@ def demo(tmp: Path) -> None:
     assert key_of("openrouter") == "sk-test-123456789", "no key given keeps the stored one"
     set_default("openrouter/m2", "high")
     assert load()["model"] == "openrouter/m2" and load()["thinking"] == "high"
+    save_provider({"id": "openrouter", "api": "openai-completions", "base_url": "https://openrouter.ai/api/v1", "models": ["m2", "m3"]})
+    set_default("openrouter/m2", "high", ["openrouter/m3", "openrouter/m2"])
+    assert load()["fallbacks"] == ["openrouter/m3"], "the default is never its own fallback"
+    assert next_model("429", ["openrouter/m2"]) == "openrouter/m3" and next_model("503", ["openrouter/m3"]) is None
+    assert next_model("401", []) is None, "a wrong key is not fixed by another model"
     for bad in ({"id": "X!", "api": "openai-completions", "base_url": "https://x", "models": ["m"]},
                 {"id": "x", "api": "nope", "base_url": "https://x", "models": ["m"]}, {"id": "x", "api": "openai-completions", "base_url": "ftp://x", "models": ["m"]}):
         try:
@@ -233,7 +262,7 @@ def demo(tmp: Path) -> None:
         except ValueError:
             pass
     remove_provider("openrouter")
-    assert load()["model"] is None and (home() / "settings.json").stat().st_mode & 0o077 == 0
+    assert load()["model"] is None and load()["fallbacks"] == [] and (home() / "settings.json").stat().st_mode & 0o077 == 0
     print("ok")
 
 

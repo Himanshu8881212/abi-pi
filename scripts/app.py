@@ -35,6 +35,7 @@ import traceback
 import time
 import urllib.error
 import urllib.parse
+import urllib.request
 import webbrowser
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -262,6 +263,8 @@ function btn(label,fn,pri){const b=h('button','btn'+(pri?' pri':'')+(W.test(labe
 const cell=v=>v!==null&&typeof v==='object'?JSON.stringify(v):typeof v==='string'&&/^\d{4}-\d\d-\d\dT\d\d:\d\d/.test(v)?new Date(v).toLocaleString():v;
 function rows(box,d){box.innerHTML='';box.classList.add('out');if(!(d&&d.columns&&Array.isArray(d.rows))){box.append(h('pre','',JSON.stringify(d,null,1)));return}
  const rs=d.rows.map(r=>(Array.isArray(r)?r:d.columns.map(c=>r[c])).map(cell));table(box,{measures:d.measures||{},format:d.format||{},columns:d.columns,rows:rs})}
+// an admin action ABI wants confirmed: the person's own click in ABI's dialog, then the server runs it (null: they said no)
+async function confirmed(x){if(x.confirm){if(!await ask(x.confirm))return null;x=await fetch('/confirm/'+x.confirm.id,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(y=>y.json())}if(x.error)throw new Error(x.error);return x}
 function act(c,label,fn,pri){const m=c.querySelector(':scope>.msg')||c.appendChild(h('div','msg'));let r=c.querySelector(':scope>.acts');if(!r){r=h('div','row acts');c.insertBefore(r,m)}
  r.append(btn(label,async()=>{try{const t=await fn(m);if(t)say(m,t)}catch(e){say(m,e.message,1)}},pri));return m}
 
@@ -477,8 +480,10 @@ async function usersPage(box){
     if(x.confirm){if(!await ask(x.confirm))throw new Error('Not changed.');x=await fetch('/confirm/'+x.confirm.id,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(y=>y.json())}if(x.error)throw new Error(x.error)}
    const pick=el=>{const v=[...el.querySelectorAll('input:checked')].map(c=>c.value);return v.length===el.querySelectorAll('input').length?null:v};
    const y=await post('access',{user:u.name,sections:pick(sx),reports:pick(rx)});if(y.error)throw new Error(y.error);say(m,'Saved.')}catch(e){say(m,e.message,1)}},1);
+  const np=h('input','f');np.type='password';np.autocomplete='new-password';np.placeholder='a new password for them (8+ characters)';
+  const setp=btn('Set password',async()=>{try{const x=await confirmed(await post('setpass',{user:u.name,password:np.value}));np.value='';if(x)say(m,'Set: hand it over; they are signed out everywhere.')}catch(e){say(m,e.message,1)}});
   row.append(h('div','',`${u.name}${u.workspace_owner?' · workspace owner (sees everything)':''}${u.tenant?' · tenant '+u.tenant:''}`),h('label','l','Role in this project'),sel,
-   h('label','l','Sections'),sx,h('label','l','Reports'),rx,save,m);t.append(row)});
+   h('label','l','Sections'),sx,h('label','l','Reports'),rx,save,h('label','l','Forgot their password?'),np,setp,m);t.append(row)});
  const note=card('What this controls','and what it does not');note.append(h('p','','Role, sign-in and row-level security are ABI\'s: they decide what data a person can read or change, everywhere. Sections and reports decide what this app shows them and the app\'s own routes refuse the rest. Row and column rules are on the Security page.'));g.append(note)}
 // Settings (admins): the agent's model and reasoning, and the providers (API keys go in, never come out)
 const PRESETS={openai:['OpenAI','openai-responses','https://api.openai.com/v1','gpt-5'],anthropic:['Anthropic','anthropic-messages','https://api.anthropic.com','claude-sonnet-4-5'],
@@ -490,7 +495,13 @@ async function settingsPage(box){
  const draw=()=>{g.innerHTML='';
   const def=card('Agent','the model every chat and specialist uses'),ms=h('select','f'),th=h('select','f');ms.append(new Option('the built-in default',''));
   S.providers.forEach(p=>p.models.forEach(m=>ms.append(new Option(`${p.name} · ${m}`,`${p.id}/${m}`))));ms.value=S.model||'';S.levels.forEach(l=>th.append(new Option(l,l)));th.value=S.thinking||'medium';
-  def.append(h('label','l','Model'),ms,h('label','l','Reasoning'),th);act(def,'Save',async()=>{const x=await post('settings/default',{model:ms.value||null,thinking:th.value});if(x.error)throw new Error(x.error);S=x.result;return 'Saved: new chats and specialists use it.'},1);g.append(def);
+  const fb=h('div','checks');S.providers.forEach(p=>p.models.forEach(m=>{const l=h('label','chk'),i=h('input');i.type='checkbox';i.value=`${p.id}/${m}`;i.checked=(S.fallbacks||[]).includes(i.value);l.append(i,h('span','',`${p.name} · ${m}`));fb.append(l)}));
+  def.append(h('label','l','Model'),ms,h('label','l','Reasoning'),th,h('label','l','If it fails (quota, outage), try in order'),fb);
+  const dm=act(def,'Save',async()=>{const x=await post('settings/default',{model:ms.value||null,thinking:th.value,fallbacks:[...fb.querySelectorAll('input:checked')].map(i=>i.value)});if(x.error)throw new Error(x.error);S=x.result;return 'Saved: new chats and specialists use it.'},1);
+  def.addEventListener('change',()=>say(dm,'Not saved yet: click Save to use it.',1));g.append(def);
+  const us=card('Usage','the agents\' model work, last 30 days');g.append(us);post('usage').then(x=>{const U=x.result;if(!U||!U.model.length){us.append(h('p','empty','No answers yet.'));return}
+   const n=v=>Number(v).toLocaleString(),tb=(k,t)=>{us.append(h('label','l',t));const tt=h('table');tt.innerHTML='<tr><th></th><th>answers</th><th>failed</th><th>input</th><th>output</th><th>cache</th><th>cost</th></tr>';
+    U[k].forEach(r=>{const tr=h('tr');[r.name,n(r.answers),n(r.failed),n(r.input),n(r.output),n(r.cache),r.cost?r.cost.toFixed(2):'–'].forEach(v=>tr.append(h('td','',v)));tt.append(tr)});us.append(tt)};tb('user','Per person');tb('model','Per model')});
   S.providers.forEach(p=>{const c=card(p.name,`${p.id} · ${S.apis[p.api]||p.api}`);c.append(h('p','file',p.base_url),h('p','',`Models: ${p.models.join(', ')}`),h('p',p.key_set?'ok':'',p.key_builtin?'Uses the built-in connection\'s key':p.key_set?`API key set, ends in ${p.key_ends}`:'No API key'));
    act(c,'Test connection',async()=>{const x=await post('settings/test',{id:p.id});if(x.error)throw new Error(x.error);if(!x.result.ok)throw new Error(x.result.message);return x.result.message});
    act(c,'Remove',async()=>{const x=await post('settings/remove',{id:p.id});S=x.result;draw()});g.append(c)});
@@ -505,7 +516,19 @@ async function settingsPage(box){
   add.append(h('label','l','Preset'),pre,h('label','l','ID'),id,h('label','l','Name'),nm,h('label','l','API'),api,h('label','l','Base URL'),base,h('label','l','API key'),key,h('label','l','Models'),pick,mods);
   act(add,'Fetch models',fetchM);
   act(add,'Save provider',async()=>{const x=await post('settings/provider',{provider:{id:id.value.trim(),name:nm.value,api:api.value,base_url:base.value.trim(),models:mods.value.split(',').map(s=>s.trim()).filter(Boolean)},key:key.value});if(!mods.value)throw new Error('Fetch models and tick at least one.');
-   key.value='';if(x.error)throw new Error(x.error);S=x.result;draw();return 'Saved.'},1);g.append(add)};draw()}
+   key.value='';if(x.error)throw new Error(x.error);S=x.result;draw();return 'Saved.'},1);g.append(add);people()};
+ const people=async()=>{const r=(await post('sso')).result||{providers:[]},M=r.mail||{},f=(ph,v,t)=>{const i=h('input','f');i.placeholder=ph;i.value=v??'';if(t)i.type=t;i.autocomplete='off';return i};
+  const warn=r.reachable?null:h('p','bad','Set ABI_PUBLIC_URL (the address people open, e.g. https://abi.example.com) in .env and restart: emailed links and SSO go there.');
+  const em=card('Email','invites and "forgot your password" links; without it you set passwords in Users & access'),host=f('smtp.example.com',M.host),port=f('587',M.port),from=f('abi@example.com',M.from),sec=h('select','f'),us=f('user name (optional)',M.username),pw=f(M.username?'password (stored in ABI; empty keeps it)':'password','','password');
+  ['starttls','tls','none'].forEach(x=>sec.append(new Option({starttls:'STARTTLS (port 587)',tls:'TLS (port 465)',none:'none (a local relay)'}[x],x)));sec.value=M.security||'starttls';
+  em.append(...(warn?[warn.cloneNode(true)]:[]),h('p','',M.host?`On: ${M.host}:${M.port} from ${M.from}`:'Off.'),h('label','l','Server'),host,h('label','l','Port'),port,h('label','l','Connection'),sec,h('label','l','From'),from,h('label','l','Sign-in'),us,pw);
+  act(em,'Save',async()=>{const x=await confirmed(await post('mail',{host:host.value,port:Number(port.value),security:sec.value,from:from.value,username:us.value,password:pw.value}));pw.value='';if(!x)return 'Not changed.';draw();return 'Saved.'},1);
+  if(M.host)act(em,'Turn off',async()=>{const x=await confirmed(await post('mail',{off:true}));if(x)draw();return x?'Off.':'Not changed.'});g.append(em);
+  const so=card('Single sign-on','people sign in with your company account (OpenID Connect: Google, Microsoft Entra, Okta, Keycloak, …)'),pid=f('id, e.g. google'),pn=f('button name, e.g. Google'),iss=f('issuer, e.g. https://accounts.google.com'),cl=f('client ID'),cs=f('client secret (stored in ABI)','','password');
+  so.append(...(warn?[warn]:[]),h('p','file','Redirect URI at your provider: '+r.callback.replace('<id>','{id}')),...r.providers.map(x=>{const row=h('div','row');row.append(h('span','',x.name+' · '+x.id),btn('Remove',async()=>{const y=await confirmed(await post('sso/remove',{id:x.id}));if(y)draw()}));return row}),
+   h('label','l','Add a provider'),pid,pn,iss,cl,cs,h('p','','Each person links it once: they sign in with their password, click their name and Link.'));
+  act(so,'Add',async()=>{const x=await confirmed(await post('sso/save',{id:pid.value.trim(),name:pn.value.trim(),issuer:iss.value.trim(),client_id:cl.value.trim(),secret:cs.value}));cs.value='';if(!x)return 'Not added.';draw();return 'Added.'},1);g.append(so)};
+ draw()}
 function transferPage(box){if(MODE==='viewer'){box.append(h('p','empty','Export and import work in Developer mode with the live app.'));return}
  const ex=card('Export','the whole project as one zip'),im=card('Import','replace this project with a zip; ABI checks it first'),g=h('div','cards');
  ex.append(h('p','','ABI\'s committed files (sources, tables, model, measures, glossary, queries, reports, flows, ML, tools, agents, security, environments, docs), the app\'s JSON (Monitor settings, saved analyses), the vault\'s documents and the team\'s plan. Not inside: the data (refresh the sources after an import), secret values, people\'s roles, chats, uncommitted changes.'));
@@ -1065,7 +1088,7 @@ function navAll(){return [['Start',[['home','Home',home],['chat','Chat',chatPage
  ['Automate',[['flows','Flows',flows,D.flows.length],['ml','ML models',ml,D.ml.length],['tools','Tools',tools,D.tools.length],['agents','Agents',agents,D.agents.length]]],
  ['Knowledge',[['vault','Vault',vaultPage,(VAULT||[]).length],['docs','Docs',docs]]],
  ['Govern',[['security','Security',security],['environments','Environments',b=>{const x=(D.sections.Environments||'').trim();if(x&&!/^<p[^>]*>\s*<\/p>$/.test(x))b.insertAdjacentHTML('beforeend',x);if(b.innerText.trim().length<10)b.append(h('p','empty','No environments yet: a dev/prod pair lets you test changes before they reach production. Ask the agent to set one up.'))}],['history','History',commits,(D.history||[]).length],...((window.ME||{admin:true}).admin?[['people','Users & access',usersPage],['settings','Settings',settingsPage]]:[])]]]}
-let MODE='developer',VAULT=[];
+let MODE='developer',VAULT=[],MODEL='';
 let FOLD={};try{FOLD=JSON.parse(localStorage.getItem('abi-fold')||'{}')}catch(e){}
 function sidebar(){side.innerHTML='';PAGES={};nav().forEach(([g,items])=>{const sec=h('div','sec'),hd=h('button','grp'),list=h('div','items');
  hd.append(h('span','',g),h('span','car'));hd.setAttribute('aria-expanded',String(!FOLD[g]));sec.classList.toggle('folded',!!FOLD[g]);
@@ -1147,7 +1170,11 @@ function pwDialog(){const d=h('dialog'),c=h('div','card'),cur=h('input','f'),nw=
  cur.type=nw.type='password';cur.placeholder='current password';cur.autocomplete='current-password';nw.placeholder='new password (8+ characters)';nw.autocomplete='new-password';
  const ok=btn('Change',async()=>{const r=await fetch('/password',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({current:cur.value,password:nw.value})}).then(x=>x.json()).catch(e=>({error:e.message}));
   cur.value=nw.value='';if(r.error){say(m,r.error,1);return}say(m,'Changed. Sign in again with the new one.');setTimeout(()=>location.reload(),1500)}),no=btn('Cancel',()=>{d.close();d.remove()});
- const row=h('div','row acts');row.append(ok,no);c.append(cur,nw,row,m);d.append(c);document.body.append(d);d.showModal()}
+ const row=h('div','row acts');row.append(ok,no);c.append(cur,nw,row,m);d.append(c);document.body.append(d);d.showModal();
+ fetch('/signin/sso').then(r=>r.json()).then(L=>{if(!L.length)return;const l=h('div','row acts');c.insertBefore(h('h3','','Sign in with your company account'),m);c.insertBefore(l,m);
+  L.forEach(x=>l.append(btn('Link '+x.name,async()=>{const r=await fetch('/api/oidc/'+encodeURIComponent(x.id)+'/start',{method:'POST',headers:{'Content-Type':'application/json'},body:'{"link":true}'}).then(y=>y.json());
+   if(r.url)location.href=r.url;else say(m,r.error||'Not available.',1)})))}).catch(()=>{})}
+{const q=new URLSearchParams(location.search).get('signin');if(q){setTimeout(()=>toast({linked:'Linked: you can sign in with it now.',conflict:'That account is linked to another person here.'}[q]||'Linking didn\'t work: try again.'));history.replaceState(null,'',location.pathname+location.hash)}}
 if(window.ME?.signin){const w=h('button','btn who',ME.name);w.title='Change your password';w.onclick=pwDialog;const f=h('form');f.method='post';f.action='/signout';f.append(h('button','btn','Sign out'));const r0=$('header .right');r0.prepend(w,f)}
 if(window.ME&&!['editor','owner'].includes(ME.role))$('.modes').hidden=true;/* Viewer access only: no switch at all */$('#m-dev').onclick=()=>pickMode('developer');$('#m-view').onclick=()=>pickMode('viewer');
 let first=decodeURIComponent(location.hash.slice(1));if(!first)try{first=localStorage.getItem('abi-app-'+D.project)}catch(e){}setTimeout(()=>show(first||'home'));  // after the whole script: the chat page's parts are declared further down
@@ -1184,7 +1211,7 @@ function hello(){const d=h('div','hello'),pg=PAGES[CUR]?.[0]||'this page';d.appe
   :'Ask a question, ask where something is, or say what to build or change. Changes stay uncommitted until you commit them.'));
  [`What is on ${pg}, and what should I look at?`,...(MODE==='viewer'?['What changed last month, and why?','Where do I see revenue by country?']
   :['What is still open in this project?','Where are the flows, and what do they do?'])].forEach(t=>{const b=h('button','sg',t);b.onclick=()=>{inp.value=t;sendChat()};d.append(b)});return d}
-function ctx(){const c=$('#chat .ctx'),g=log.querySelector('.hello');if(c)c.textContent=`${MODE==='viewer'?'Viewer · read-only':'Developer'} · on ${PAGES[CUR]?.[0]||CUR}`;if(g&&CUR!=='chat')g.replaceWith(hello())}
+function ctx(){const c=$('#chat .ctx'),g=log.querySelector('.hello');if(c)c.textContent=`${MODE==='viewer'?'Viewer · read-only':'Developer'} · on ${PAGES[CUR]?.[0]||CUR}${MODEL?' · '+MODEL:''}`;if(g&&CUR!=='chat')g.replaceWith(hello())}
 const INTRO='';log.append(hello());
 async function cpost(u,b){return fetch(u,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json())}
 async function chats(sel){const r=await cpost('/chat/list'),pk=$('#chat-pick');pk.innerHTML='';
@@ -1210,7 +1237,7 @@ $('#chat .stop').onclick=()=>fetch('/chat/stop',{method:'POST',headers:{'X-Abi-A
    if(e.state==='run'||!last){const l=h('div','',`${e.state==='run'?'…':e.state==='ok'?'✓':'✗'} ${stepName(e.tool)}`);l.dataset.t=e.tool;l.dataset.s=e.state;steps.append(l)}
    else{last.textContent=`${e.state==='ok'?'✓':'✗'} ${stepName(e.tool)}`;last.dataset.s=e.state;last.className=e.state==='ok'?'':'bad'}log.scrollTop=log.scrollHeight}
   else if(e.type==='said')bubble('me',e.text)
-  else if(e.type==='answer'){steps=null;bubble('ai',e.text);chats();if(!chatBox.classList.contains('open'))toast('The agent answered')}
+  else if(e.type==='answer'){steps=null;if(e.model){MODEL=e.model;ctx()}bubble('ai',e.text);chats();if(!chatBox.classList.contains('open'))toast('The agent answered')}
   else if(e.type==='ask'){const yes=await ask({message:e.title||'ABI asks for your confirmation',preview:e.message});bubble('sys',yes?'You confirmed.':'You declined.');
    fetch('/chat/answer',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({id:e.id,yes})})}
   else if(e.type==='open'){location.href='/?p='+encodeURIComponent(e.project)+'#'+encodeURIComponent(e.page)}
@@ -1552,6 +1579,7 @@ class Hub:
         self.emit({"type": "said", "text": message}, here=False)
         self.last = self.heard = time.time()
         self.told = False
+        self.asked = text  # asked again of a fallback model when this one fails
         self.send({"type": "follow_up" if self.busy else "prompt", "message": text})
         self.busy = True
         self.emit({"type": "busy", "on": True})
@@ -1560,8 +1588,22 @@ class Hub:
         self.pi.stdin.write(json.dumps(cmd) + "\n")
         self.pi.stdin.flush()
 
+    def usage(self, model: str, u: dict, error: bool = False, agent: str = "chat") -> None:
+        """One line per model answer in logs/usage.jsonl (tokens and cost as the provider reported them): Settings
+        shows the totals per person and model. No text of the chat goes in."""
+        cost = u.get("cost") or 0
+        rec = {"t": time.strftime("%Y-%m-%dT%H:%M:%S"), "user": getattr(self, "user", "") or "", "project": getattr(self, "project", ""),
+               "chat": getattr(self, "chat_id", None), "agent": agent, "model": model, "error": error,
+               **{k: int(u.get(k) or 0) for k in ("input", "output", "cacheRead", "cacheWrite")},
+               "cost": float(cost.get("total") or 0 if isinstance(cost, dict) else cost)}
+        try:
+            with USAGE_LOCK, open(abi.ROOT / "logs" / "usage.jsonl", "a") as f:
+                f.write(json.dumps(rec) + "\n")
+        except OSError:  # no logs folder: the answer matters more than its count
+            pass
+
     def read(self) -> None:
-        started, final, failed = {}, "", ""
+        started, final, failed, model, tried, by = {}, "", "", "", [], ""
         proc = self.pi  # this reader's agent: a new chat replaces self.pi while an old one is still ending
         for line in proc.stdout:
             self.heard, self.told = time.time(), False
@@ -1578,22 +1620,39 @@ class Hub:
                 started[e["toolCallId"]] = e["toolName"]
                 self.emit({"type": "step", "tool": e["toolName"].removeprefix("mcp__abi__"), "state": "run"})
             elif t == "tool_execution_end":
+                for r in ((e.get("result") or {}).get("details") or {}).get("results") or []:  # a specialist's own model work
+                    if isinstance(r, dict) and r.get("usage"):
+                        self.usage(r.get("model") or "?", r["usage"], bool(r.get("errorMessage")), r.get("agent") or "specialist")
                 self.emit({"type": "step", "tool": started.get(e["toolCallId"], e.get("toolName", "")).removeprefix("mcp__abi__"),
                            "state": "error" if e.get("isError") else "ok"})
             elif t == "message_end" and (m := e.get("message", {})).get("role") == "assistant":
+                model = f"{m.get('provider')}/{m.get('model')}"
+                self.usage(model, m.get("usage") or {}, m.get("stopReason") == "error")
                 if m.get("stopReason") == "error":  # the model refused (quota, key, outage); Pi retries, then settles
                     failed = (re.search(r"\((\d{3})\)", m.get("errorMessage") or "") or re.search("()", "")).group(1) or "an error"
+                    tried.append(model)
                 txt = "".join(c.get("text", "") for c in m.get("content", []) if c.get("type") == "text")
                 if txt.strip() and not any(c.get("type") == "toolCall" for c in m.get("content", [])):
-                    final = txt  # after grounding; a first draft that failed it is followed by the retry: keep the last
+                    final, by = txt, model  # after grounding; a first draft that failed it is followed by the retry: keep the last
             elif t == "agent_settled":
+                import settings  # noqa: PLC0415 (sibling script)
+                if not final and failed and getattr(self, "asked", "") and (nxt := settings.next_model(failed, tried)):
+                    # the admin's fallbacks, in order: the same question to the next model, in the same chat
+                    self.emit({"type": "note", "text": f"{model.split('/', 1)[-1]} didn't answer ({failed}): asking {nxt.split('/', 1)[1]}."})
+                    pid, _, mid = nxt.partition("/")
+                    self.send({"type": "set_model", "provider": pid, "modelId": mid})
+                    self.send({"type": "prompt", "message": self.asked})
+                    tried.append(nxt)
+                    failed = ""
+                    continue
                 if not final and failed:  # say so, never just stop: the provider's own text stays in Pi's log
-                    final = (f"The model didn't answer ({failed}{': usage limit or too many requests' if failed == '429' else ''})."
+                    why = ": usage limit or too many requests" if failed == "429" else ": the provider is unavailable" if failed.startswith("5") else ""
+                    final = (f"The model didn't answer ({failed}{why})."
                              " Try again later, or pick another model or provider in Govern › Settings.")
                 if final:
-                    self.emit({"type": "answer", "text": final})
+                    self.emit({"type": "answer", "text": final, "model": by.split("/", 1)[-1]})
                     self.chat_note("ai", final)
-                final, failed = "", ""
+                final, failed, tried, by = "", "", [], ""
                 self.busy = False
                 self.emit({"type": "busy", "on": False})
         if self.busy and self.pi is proc:  # the agent ended without an answer (it couldn't start, or it crashed): say so
@@ -1603,6 +1662,30 @@ class Hub:
 
 
 HUBS: dict[str, Hub] = {}
+USAGE_LOCK = threading.Lock()
+
+
+def usage_totals(days: int = 30, f: Path | None = None) -> dict:
+    """logs/usage.jsonl summed per person and per model since `days` ago (answers, tokens, cost, failed answers)."""
+    since = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(time.time() - days * 86400))
+    by: dict = {"user": {}, "model": {}}
+    f = f or abi.ROOT / "logs" / "usage.jsonl"
+    for line in f.read_text().splitlines() if f.exists() else []:
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if r.get("t", "") < since:
+            continue
+        for k in by:
+            row = by[k].setdefault(r.get(k) or "?", {"answers": 0, "failed": 0, "input": 0, "output": 0, "cache": 0, "cost": 0.0})
+            row["answers"] += 1
+            row["failed"] += bool(r.get("error"))
+            row["input"] += r.get("input", 0)
+            row["output"] += r.get("output", 0)
+            row["cache"] += r.get("cacheRead", 0) + r.get("cacheWrite", 0)
+            row["cost"] = round(row["cost"] + r.get("cost", 0), 6)
+    return {"days": days, **{k: [{"name": n, **v} for n, v in sorted(d.items(), key=lambda x: -x[1]["output"])] for k, d in by.items()}}
 _SNAP: dict[tuple, dict] = {}
 _SNAP_LOCK = threading.Lock()
 
@@ -1632,11 +1715,28 @@ def changed(project: str) -> None:
 
 
 SIGNIN = """<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>Sign in · ABI</title>
-<link rel=stylesheet href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&display=swap"><style>:root{--bg:#f7f7f5;--card:#fff;--ink:#0b0b0b;--mute:#62625e;--line:#e4e4e1;--sig:#ff4f1f;color-scheme:light}@media (prefers-color-scheme:dark){:root{--bg:#0b0b0b;--card:#141414;--ink:#f2f2ef;--mute:#9b9b96;--line:#2a2a28;--sig:#ff6a3d;color-scheme:dark}}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);font:14px/1.5 "Inter Tight",system-ui,sans-serif;-webkit-font-smoothing:antialiased}form{display:flex;flex-direction:column;gap:6px;width:min(360px,calc(100vw - 32px));background:var(--card);border:1px solid var(--line);border-radius:8px;padding:32px}b{display:flex;align-items:center;gap:8px;font:700 20px "Inter Tight",sans-serif;letter-spacing:-.02em;margin-bottom:4px}b::before{content:"";width:12px;height:12px;background:var(--sig);border-radius:2px}label{font-size:12px;font-weight:500;color:var(--mute);margin-top:10px}input,button{font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:4px;background:var(--card);color:var(--ink)}input:focus{outline:none;border-color:var(--ink);box-shadow:0 0 0 3px color-mix(in srgb,var(--sig) 22%,transparent)}button{margin-top:16px;background:var(--ink);border-color:var(--ink);color:var(--card);font-weight:500;cursor:pointer}[hidden]{display:none}.m{min-height:1.4em;color:var(--sig);font-size:13px}small{color:var(--mute)}</style>
-<form method=post action=/signin><b>ABI</b><small>Sign in with your ABI account.</small><label for=n>Name or email</label>
+<link rel=stylesheet href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&display=swap"><style>:root{--bg:#f7f7f5;--card:#fff;--ink:#0b0b0b;--mute:#62625e;--line:#e4e4e1;--sig:#ff4f1f;color-scheme:light}@media (prefers-color-scheme:dark){:root{--bg:#0b0b0b;--card:#141414;--ink:#f2f2ef;--mute:#9b9b96;--line:#2a2a28;--sig:#ff6a3d;color-scheme:dark}}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);font:14px/1.5 "Inter Tight",system-ui,sans-serif;-webkit-font-smoothing:antialiased}form{display:flex;flex-direction:column;gap:6px;width:min(360px,calc(100vw - 32px));background:var(--card);border:1px solid var(--line);border-radius:8px;padding:32px}b{display:flex;align-items:center;gap:8px;font:700 20px "Inter Tight",sans-serif;letter-spacing:-.02em;margin-bottom:4px}b::before{content:"";width:12px;height:12px;background:var(--sig);border-radius:2px}label{font-size:12px;font-weight:500;color:var(--mute);margin-top:10px}input,button{font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:4px;background:var(--card);color:var(--ink)}input:focus{outline:none;border-color:var(--ink);box-shadow:0 0 0 3px color-mix(in srgb,var(--sig) 22%,transparent)}button{margin-top:16px;background:var(--ink);border-color:var(--ink);color:var(--card);font-weight:500;cursor:pointer}button.alt{margin-top:8px;width:100%;background:var(--card);color:var(--ink);border-color:var(--line)}#sso{display:contents}a{color:var(--mute);font-size:12px;margin-top:10px}[hidden]{display:none}.m{min-height:1.4em;color:var(--sig);font-size:13px}small{color:var(--mute)}</style>
+<form method=post action=/signin id=in><b>ABI</b><small>Sign in with your ABI account.</small><label for=n>Name or email</label>
 <input id=n name=name value="%NAME%" autocomplete=username autofocus required><label for=p>Password</label>
 <input id=p name=password type=password autocomplete=current-password required><label for=c %CODE%>Authenticator code</label>
-<input id=c name=code inputmode=numeric autocomplete=one-time-code %CODE%><button>Sign in</button><span class=m>%MSG%</span></form>"""
+<input id=c name=code inputmode=numeric autocomplete=one-time-code %CODE%><button>Sign in</button><span id=sso></span>
+<a href=# id=fg>Forgot your password?</a><span class=m>%MSG%</span></form>
+<form id=pw hidden><b>ABI</b><small id=pwt>Choose your password.</small><label for=p1>New password (8 characters or more)</label>
+<input id=p1 type=password autocomplete=new-password minlength=8 required><button>Save password</button><span class=m id=pm></span></form>
+<script>
+const $=s=>document.querySelector(s),m=$('#in .m'),J=(u,b)=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(async r=>({ok:r.ok,...await r.json().catch(()=>({}))}));
+const k=location.hash.match(/^#(reset|invite|signup)=([\\w-]+)$/);
+if(k){$('#in').hidden=true;$('#pw').hidden=false;$('#pwt').textContent={reset:'Choose a new password.',invite:'Welcome: choose your password.',signup:'Choose a password for your new account.'}[k[1]];
+ $('#pw').onsubmit=async e=>{e.preventDefault();const r=await J('/signin/token',{kind:k[1],token:k[2],password:$('#p1').value});$('#p1').value='';
+  if(r.ok){history.replaceState(null,'','/');$('#pw').hidden=true;$('#in').hidden=false;m.textContent=r.message}else $('#pm').textContent=r.error||'That didn’t work.'}}
+$('#fg').onclick=async e=>{e.preventDefault();const v=$('#n').value.trim();if(!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(v)){m.textContent='Type your email above, then click this again.';return}
+ const r=await J('/signin/forgot',{email:v});m.textContent=r.message||r.error};
+fetch('/signin/sso').then(r=>r.json()).then(L=>L.forEach(x=>{const b=document.createElement('button');b.type='button';b.className='alt';b.textContent='Sign in with '+x.name;
+ b.onclick=async()=>{const r=await J('/api/oidc/'+encodeURIComponent(x.id)+'/start');if(r.url)location.href=r.url;else m.textContent=r.error||'That sign-in isn’t available.'};$('#sso').append(b)})).catch(()=>{});
+const q=new URLSearchParams(location.search).get('signin');
+if(q==='ok')J('/api/oidc/session').then(r=>{if(r.ok)location.replace('/');else m.textContent=r.error});
+else if(q)m.textContent={unknown:'That sign-in isn’t linked to an ABI account yet: sign in with your password once, then link it (click your name).',expired:'The sign-in took too long: try again.',denied:'The sign-in was cancelled.',linked:'Linked: from now on you can sign in with it.'}[q]||'That sign-in didn’t work: try again.';
+</script>"""
 NO_PROJECT = """<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>ABI</title>
 <body style="font:14px/1.5 system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;background:#f7f7f5;color:#0b0b0b">
 <div style="max-width:340px"><b>Signed in as %NAME%</b><p>You have no project yet. Ask a workspace owner to give you a role in one.</p>
@@ -1908,6 +2008,73 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
             self.reply(200, SIGNIN.replace("%MSG%", html.escape(msg)).replace("%NAME%", html.escape(name))
                        .replace("%CODE%", "" if code else "hidden").encode(), "text/html; charset=utf-8")
 
+        def start(self, name: str, tok: str) -> None:
+            """A signed-in browser (ABI's session token stays here; the browser gets only the app's own cookie)."""
+            admin = False
+            with abi.as_user(tok):
+                try:
+                    admin = any(u["name"] == name and u.get("workspace_owner") for u in abi.call("list_users").get("users", []))
+                except abi.ActionError:
+                    pass
+            sid = secrets.token_urlsafe(32)
+            people[sid] = {"name": name, "token": tok, "admin": admin, "roles": {}, "t": time.time()}
+            tls = "; Secure" if self.headers.get("X-Forwarded-Proto", "").lower() == "https" else ""  # behind an HTTPS proxy
+            self.send_header("Set-Cookie", f"abi_u={sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200{tls}")
+
+        def account(self, raw: bytes) -> None:
+            """Before sign-in: a reset link by email, a link's new password, SSO's start and its last step. ABI does the
+            work; the browser sees ABI's own words only (a 422 would repeat the password), never a token or a key."""
+            if not self.headers.get("Content-Type", "").startswith("application/json"):  # other sites can't send JSON without asking
+                return self.reply(415, b'{"error":"JSON only"}')
+            try:
+                body = json.loads(raw)
+            except ValueError:
+                return self.reply(400, b'{"error":"bad JSON"}')
+            words = lambda b, d: (lambda x: x.get("detail") if isinstance(x.get("detail"), str) else (x.get("detail") or {}).get("message") or d)(  # noqa: E731
+                json.loads(b) if b.startswith(b"{") else {})
+            if self.path == "/signin/forgot":
+                st, b, _ = abi.raw("POST", "/api/password-reset", {"email": str(body.get("email") or "")[:254]})
+                if st == 404:
+                    return self.reply(200, b'{"error":"Email isn\'t set up here: ask a workspace owner to set a new password for you (Users & access)."}')
+                return self.reply(200, json.dumps({"message": words(b, "If an account has this email, a link is on its way.") if st == 202 else None,
+                                                   "error": None if st == 202 else "Too many requests: try again later."}).encode())
+            if self.path == "/signin/token":
+                kind, tok, pw = body.get("kind"), str(body.get("token") or ""), str(body.get("password") or "")
+                if kind not in ("reset", "invite", "signup") or not re.fullmatch(r"[\w-]{1,100}", tok) or not 8 <= len(pw) <= 1024:
+                    return self.reply(400, b'{"error":"A password of 8 characters or more."}')
+                st, b, _ = abi.raw("POST", {"reset": "/api/password-reset/confirm", "invite": "/api/invite/confirm", "signup": "/api/signup/confirm"}[kind],
+                                   {"token": tok, "password": pw})
+                pw = ""
+                ok = st == 200
+                return self.reply(200 if ok else 400, json.dumps({"message": "Saved: sign in with your new password."} if ok else
+                                                                 {"error": "That link is used or expired: ask for a new one." if st in (400, 401, 404, 410) else words(b, "That didn't work.")}).encode())
+            jar = re.search(r"(?:^|;\s*)(abi_oidc=[\w-]+)", self.headers.get("Cookie", ""))
+            if self.path == "/api/oidc/session":
+                st, b, _ = abi.raw("POST", "/api/oidc/session", {}, {"Cookie": jar.group(1)} if jar else {})
+                if st != 200:
+                    return self.reply(401, b'{"error":"That sign-in didn\'t finish: try again."}')
+                d = json.loads(b)
+                self.send_response(200)
+                self.start(d["name"], d["token"])
+                self.send_header("Set-Cookie", "abi_oidc=; HttpOnly; SameSite=Lax; Path=/api/oidc; Max-Age=0")
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"{}")
+                return None
+            # start: a sign-in, or linking your own account when signed in (your session's ABI token goes along)
+            st, b, hd = abi.raw("POST", self.path, {}, {"Authorization": f"Bearer {self.sess['token']}"} if self.sess and body.get("link") else {})
+            if st != 200:
+                return self.reply(st if st in (404, 429, 502) else 400, json.dumps({"error": words(b, "That sign-in isn't available.")}).encode())
+            self.send_response(200)
+            if c := hd.get("set-cookie") or hd.get("Set-Cookie"):
+                self.send_header("Set-Cookie", c)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+            return None
+
         def authed(self) -> bool:
             if not self.allowed():
                 return False
@@ -1918,6 +2085,17 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
         def get(self):
             route, _, query = self.path.partition("?")
             qs = dict(x.split("=", 1) for x in query.split("&") if "=" in x)
+            if signin and self.allowed() and route == "/signin/sso":  # the sign-in page's SSO buttons (id and name only)
+                st, b, _ = abi.raw("GET", "/api/oidc/providers")
+                return self.reply(200, b if st == 200 else b"[]")
+            if signin and self.allowed() and re.fullmatch(r"/api/oidc/[\w-]{1,64}/callback", route):  # back from the IdP
+                jar = re.search(r"(?:^|;\s*)(abi_oidc=[\w-]+)", self.headers.get("Cookie", ""))
+                st, _, hd = abi.raw("GET", self.path, headers={"Cookie": jar.group(1)} if jar else {})
+                out = re.search(r"[?&]signin=(\w+)", hd.get("location") or hd.get("Location") or "")
+                self.send_response(303)
+                self.send_header("Location", f"/?signin={out.group(1) if out else 'failed'}")  # always this app, never another address
+                self.end_headers()
+                return None
             if not self.authed():
                 if signin and self.allowed() and route in ("/", "/app.html"):
                     return self.signin_page()
@@ -2000,20 +2178,14 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                     msg = "Set up the authenticator for this account in ABI first." if b.get("mfa") == "setup" else b.get("message") or "Sign-in failed."
                     return self.signin_page(msg, name, b.get("mfa") == "code")
                 tries.pop(ip, None)
-                tok, admin = b["token"], False
-                with abi.as_user(tok):
-                    try:
-                        admin = any(u["name"] == name and u.get("workspace_owner") for u in abi.call("list_users").get("users", []))
-                    except abi.ActionError:
-                        pass
-                sid = secrets.token_urlsafe(32)
-                people[sid] = {"name": name, "token": tok, "admin": admin, "roles": {}, "t": time.time()}
                 self.send_response(303)
-                tls = "; Secure" if self.headers.get("X-Forwarded-Proto", "").lower() == "https" else ""  # behind an HTTPS proxy
-                self.send_header("Set-Cookie", f"abi_u={sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200{tls}")
+                self.start(name, b["token"])
                 self.send_header("Location", "/")
                 self.end_headers()
                 return None
+            if signin and self.allowed() and self.path in ("/signin/forgot", "/signin/token", "/api/oidc/session") or (
+                    signin and self.allowed() and re.fullmatch(r"/api/oidc/[\w-]{1,64}/start", self.path)):
+                return self.account(raw)
             if self.path == "/signout" and signin:
                 c = re.search(r"abi_u=([\w-]+)", self.headers.get("Cookie", ""))
                 gone = people.pop(c.group(1), None) if c else None
@@ -2341,6 +2513,8 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
             return 200, json.dumps({"result": {"project": p, "users": users, "sections": SECTIONS, "published": bool(abi.folder(pub)),
                                                "reports": [{"id": r["id"], "name": r.get("name") or r["id"]} for r in reps],
                                                "access": (render.j(app_dir(p) / "people.json", {}) or {}).get("users") or {}}}, default=str).encode()
+        if op == "usage":  # the agents' model work: tokens and cost per person and model, last 30 days
+            return 200, json.dumps({"result": usage_totals()}).encode()
         if op.startswith("settings"):  # the agent's model, reasoning and providers (keys go in, never come out)
             import settings  # noqa: PLC0415 (sibling script)
             try:
@@ -2349,7 +2523,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                 elif op == "settings/remove":
                     out = settings.remove_provider(str(body.get("id", "")))
                 elif op == "settings/default":
-                    out = settings.set_default(body.get("model") or None, str(body.get("thinking") or "medium"))
+                    out = settings.set_default(body.get("model") or None, str(body.get("thinking") or "medium"), body.get("fallbacks"))
                 elif op == "settings/test":
                     out = settings.test(str(body.get("id", "")))
                 elif op == "settings/models":  # the form's model list, fetched from the provider (the key stays here)
@@ -2389,6 +2563,58 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
             if not re.fullmatch(r"[\w.@+-]{2,64}", name) or not 8 <= len(pw) <= 1024:  # checked here: ABI's 422 would echo the password
                 return 400, b'{"error":"A name (letters, digits, . _ - @ +) and a password of 8 characters or more."}'
             return 200, json.dumps(run("create_user", {"name": name, "password": pw}, None), default=str).encode()
+        if op == "setpass":  # a new password for someone who forgot theirs (ABI asks the owner to confirm, then signs them out)
+            pw = str(body.get("password") or "")
+            if not who or not 8 <= len(pw) <= 1024:
+                return 400, b'{"error":"A person and a password of 8 characters or more."}'
+            return 200, json.dumps(run("set_password", {"name": who, "password": pw}, None), default=str).encode()
+        if op == "mail":  # the account mail server: invites and "forgot your password" links (its password: an ABI secret)
+            import settings  # noqa: PLC0415 (sibling script)
+            if body.get("off"):
+                r = run("set_account_mail", {"smtp": None}, None)
+                if "result" in r:
+                    settings.note("mail", None)
+                return 200, json.dumps(r, default=str).encode()
+            smtp = {"host": str(body.get("host") or "").strip(), "port": body.get("port"), "from": str(body.get("from") or "").strip(),
+                    "security": body.get("security")}
+            user, pw = str(body.get("username") or "").strip(), str(body.get("password") or "")
+            if not re.fullmatch(r"[A-Za-z0-9.-]{1,253}", smtp["host"]) or not isinstance(smtp["port"], int) or smtp["security"] not in ("starttls", "tls", "none"):
+                return 400, b'{"error":"A host, a port and how to connect (STARTTLS, TLS or none)."}'
+            if user:
+                if pw:
+                    r = run("set_secret", {"name": "SMTP_PASSWORD", "value": pw, "allowed_hosts": [smtp["host"].lower()]}, None)
+                    if "error" in r:
+                        return 200, json.dumps(r).encode()
+                smtp |= {"username": user, "password": "${secret:SMTP_PASSWORD}"}
+            r = run("set_account_mail", {"smtp": smtp}, None)
+            if "result" in r:
+                settings.note("mail", {k: v for k, v in smtp.items() if k != "password"})
+            return 200, json.dumps(r, default=str).encode()
+        if op == "sso":  # the sign-in providers people may use (OIDC), and whether links can reach this app
+            st, b, _ = abi.raw("GET", "/api/oidc/providers")
+            public = os.environ.get("ABI_PUBLIC_URL", "")
+            import settings  # noqa: PLC0415
+            return 200, json.dumps({"result": {"providers": json.loads(b) if st == 200 else [], "public_url": public,
+                                               "reachable": bool(public) and not re.match(r"https?://(127\.|localhost)", public),
+                                               "callback": f"{public.rstrip('/')}/api/oidc/<id>/callback", "mail": settings.load().get("mail")}}).encode()
+        if op == "sso/save":
+            pid, name, issuer, cid, sec = (str(body.get(k) or "").strip() for k in ("id", "name", "issuer", "client_id", "secret"))
+            if not re.fullmatch(r"[a-z][a-z0-9_-]{0,39}", pid) or not name or not re.fullmatch(r"https://[^\s?#]{1,490}", issuer) or not cid:
+                return 400, b'{"error":"An ID (lowercase), a name, the issuer (https://...) and the client ID."}'
+            try:  # the client secret goes to the IdP's token endpoint: bind it to that host and the issuer's
+                with urllib.request.urlopen(issuer.rstrip("/") + "/.well-known/openid-configuration", timeout=10) as r0:
+                    hosts = sorted({urllib.parse.urlsplit(u).hostname for u in (issuer, json.loads(r0.read(1 << 20)).get("token_endpoint") or issuer)})
+            except (OSError, ValueError):
+                return 200, b'{"error":"Can\'t read that issuer\'s OpenID configuration (/.well-known/openid-configuration)."}'
+            ref = f"OIDC_{pid.upper().replace('-', '_')}_SECRET"
+            if sec:
+                r = run("set_secret", {"name": ref, "value": sec, "allowed_hosts": hosts}, None)
+                if "error" in r:
+                    return 200, json.dumps(r).encode()
+            return 200, json.dumps(run("set_oidc_provider", {"id": pid, "name": name, "issuer": issuer, "client_id": cid,
+                                                             "client_secret": f"${{secret:{ref}}}"}, None), default=str).encode()
+        if op == "sso/remove":
+            return 200, json.dumps(run("delete_oidc_provider", {"id": str(body.get("id") or "")}, None), default=str).encode()
         if op == "invite":
             email = str(body.get("email") or "").strip()
             if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):

@@ -354,6 +354,11 @@ def check(answer: str, results: list, vocab: set[str] = frozenset(), members: se
     found = "\n".join(texts + named + _calendar(results) + [v for k, v in METRICS.items()
                                                     if re.search(rf"(?<![a-z0-9]){k}(?![a-z0-9])", low)])
     typed = {v for _, v, _, _, _ in numbers(asked, lists=True)}  # GATE-9-fix-3: "6. Alert" grounds "stage 6"
+    # 1.1: a figure written in a definition's prose (a report, page or visual title, a description: three words or more
+    # in one text, never an ID or a row cell) grounds that same figure exactly, like the person's own words: "the
+    # 28-day trend" from a title; never rounded, a ratio or a figure of the data
+    rows = set(cells)
+    typed |= {v for t in texts if t not in rows and len(t.split()) >= 3 for _, v, _, _, _ in numbers(t)}
     if today:
         typed.add(float(today.year))
         found += "\n" + "\n".join(_day(str(today.year), f"{today.month:02}", f"{today.day:02}"))

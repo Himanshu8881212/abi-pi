@@ -86,6 +86,23 @@ def login(name: str, password: str, code: str | None = None) -> tuple[int, dict]
         return e.code, {"message": "Sign-in failed."}  # never ABI's other bodies: a 422 repeats the password
 
 
+class _Here(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):  # a redirect goes back to the browser as it is
+        return None
+
+
+def raw(method: str, path: str, body: dict | None = None, headers: dict | None = None) -> tuple[int, bytes, dict]:
+    """One of ABI's own web routes (password reset, invite links, SSO): (status, body, headers), redirects not followed.
+    The caller passes on only what the browser should see."""
+    req = urllib.request.Request(URL + path, None if body is None else json.dumps(body).encode(),
+                                 {"Content-Type": "application/json", **(headers or {})}, method=method)
+    try:
+        with urllib.request.build_opener(_Here).open(req, timeout=30) as r:
+            return r.status, r.read(), dict(r.headers)
+    except urllib.error.HTTPError as e:
+        return e.code, e.read(), dict(e.headers)
+
+
 def logout(tok: str) -> None:
     """Ends that ABI session, so its token stops working (a failure is fine: it may be gone already)."""
     with contextlib.suppress(OSError, ValueError, ActionError), as_user(tok):

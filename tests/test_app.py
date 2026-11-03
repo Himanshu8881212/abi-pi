@@ -337,6 +337,31 @@ def test_an_owner_adds_a_person_without_email_and_they_change_their_own_password
         code, r = post(sid, key, "/password", {"current": pw1, "password": pw2})
         assert code == 200 and "result" in r, r
         assert sign(name, pw1)[0] is None and sign(name, pw2)[0], "the old password is gone, the new one works"
+        # they forgot it: the owner sets a new one (ABI asks the owner first), no mail server needed (1.1 #9)
+        pw3 = _s.token_urlsafe(12)
+        code, r = post(osid, okey, "/admin/setpass", {"user": name, "password": pw3})
+        assert code == 200 and "confirm" in r and pw3 not in json.dumps(r), r
+        assert sign(name, pw3)[0] is None, "nothing changes before the owner's yes"
+        code, r = post(osid, okey, f"/confirm/{r['confirm']['id']}", {})
+        assert code == 200 and "result" in r, r
+        assert sign(name, pw2)[0] is None and sign(name, pw3)[0]
+        # before sign-in: no mail server here says so; a link's password is checked here, JSON only; SSO lists none
+        code, r = post("", "", "/signin/forgot", {"email": "nobody@example.com"})
+        assert code == 200 and "Users & access" in r["error"], r
+        code, r = post("", "", "/signin/token", {"kind": "reset", "token": "abc", "password": "short"})
+        assert code == 400 and "short" not in json.dumps(r)
+        code, r = post("", "", "/signin/token", {"kind": "invite", "token": "not-a-real-token", "password": pw3})
+        assert code == 400 and pw3 not in json.dumps(r) and "error" in r
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
+        c.request("POST", "/signin/forgot", "email=a@b.co", {"Content-Type": "application/x-www-form-urlencoded"})
+        assert c.getresponse().status == 415, "another site's form can't send it"
+        assert json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/signin/sso").read()) == []
+        code, r = post("", "", "/api/oidc/nope/start", {})
+        assert code == 404 and "error" in r
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
+        c.request("GET", "/api/oidc/nope/callback?state=x&code=y")
+        r = c.getresponse()
+        assert r.status == 303 and r.getheader("Location").startswith("/?signin="), "back to this app only"
     finally:
         with abi.as_user(abi.login("himanshu", _account("himanshu"))[1]["token"]):
             with contextlib.suppress(abi.ActionError):
@@ -490,6 +515,50 @@ def test_a_model_that_refuses_is_told_not_silent():
     answers = [e["text"] for e in out if e["type"] == "answer"]
     assert answers and "429" in answers[0] and "Settings" in answers[0], out
     assert "credentials" not in answers[0], "the provider's own text stays in the log"
+
+
+def test_a_failing_model_hands_the_question_to_the_next_fallback(tmp_path, monkeypatch):
+    """A 429 from the default model took the agent down while other models at the same proxy worked (1.1 #1): the
+    admin's fallbacks answer the same question in the same chat, the answer says which model it came from, and every
+    model answer is counted in logs/usage.jsonl."""
+    import types
+    import settings
+    monkeypatch.setenv("ABI_PI_WORKSPACES", str(tmp_path))
+    settings.save_provider({"id": "proxy", "api": "openai-completions", "base_url": "http://127.0.0.1:9/v1", "models": ["a", "b"]}, "k-1234")
+    settings.set_default("proxy/a", "medium", ["proxy/b"])
+    monkeypatch.setattr(app.abi, "ROOT", tmp_path)
+    (tmp_path / "logs").mkdir()
+    use = {"input": 10, "output": 5, "cacheRead": 0, "cacheWrite": 0, "cost": {"total": 0.01}}
+    err = {"role": "assistant", "content": [], "stopReason": "error", "provider": "proxy", "model": "a", "usage": use,
+           "errorMessage": "proxy API error (429): usage limit"}
+    ok = {"role": "assistant", "content": [{"type": "text", "text": "Fine."}], "stopReason": "stop", "provider": "proxy", "model": "b", "usage": use}
+    lines = [{"type": "message_end", "message": err}, {"type": "agent_settled"}, {"type": "message_end", "message": ok}, {"type": "agent_settled"}]
+    h = app.Hub.__new__(app.Hub)
+    out, sent = [], []
+    h.pi, h.busy, h.emit, h.chat_note, h.send, h.asked = types.SimpleNamespace(stdout=iter(json.dumps(x) + "\n" for x in lines)), True, out.append, lambda *a: None, sent.append, "q?"
+    h.user, h.project, h.chat_id = "ann", P, "c1"
+    h.read()
+    assert {"type": "set_model", "provider": "proxy", "modelId": "b"} in sent and {"type": "prompt", "message": "q?"} in sent, sent
+    assert [e for e in out if e["type"] == "answer"] == [{"type": "answer", "text": "Fine.", "model": "b"}], out
+    assert any(e["type"] == "note" and "asking b" in e["text"] for e in out)
+    tot = app.usage_totals(f=tmp_path / "logs" / "usage.jsonl")
+    assert tot["user"][0] | {} == {"name": "ann", "answers": 2, "failed": 1, "input": 20, "output": 10, "cache": 0, "cost": 0.02}, tot
+    assert {r["name"] for r in tot["model"]} == {"proxy/a", "proxy/b"}
+    assert "q?" not in (tmp_path / "logs" / "usage.jsonl").read_text(), "no chat text in the usage log"
+
+
+def test_a_wrong_key_is_not_retried_on_other_models(tmp_path, monkeypatch):
+    import types
+    import settings
+    monkeypatch.setenv("ABI_PI_WORKSPACES", str(tmp_path))
+    settings.save_provider({"id": "proxy", "api": "openai-completions", "base_url": "http://127.0.0.1:9/v1", "models": ["a", "b"]}, "k-1234")
+    settings.set_default("proxy/a", "medium", ["proxy/b"])
+    err = {"role": "assistant", "content": [], "stopReason": "error", "provider": "proxy", "model": "a", "errorMessage": "proxy API error (401): bad key"}
+    h = app.Hub.__new__(app.Hub)
+    out, sent = [], []
+    h.pi, h.busy, h.emit, h.chat_note, h.send, h.asked = types.SimpleNamespace(stdout=iter(json.dumps(x) + "\n" for x in [{"type": "message_end", "message": err}, {"type": "agent_settled"}])), True, out.append, lambda *a: None, sent.append, "q?"
+    h.read()
+    assert not sent and "401" in [e for e in out if e["type"] == "answer"][0]["text"]
 
 
 def test_chat_answers_draw_markdown_tables_safely():

@@ -1,0 +1,8 @@
+name: Idea
+description: Something ABI should do
+body:
+  - type: textarea
+    attributes:
+      label: What you want to do, and what stops you today
+    validations:
+      required: true

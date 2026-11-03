@@ -1,0 +1,21 @@
+name: Bug
+description: Something in ABI doesn't work as it should
+body:
+  - type: textarea
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Steps to see it
+      placeholder: "1. Open Sources\n2. ..."
+  - type: input
+    attributes:
+      label: Version
+      description: "docker exec abi cat /data/VERSION"
+  - type: textarea
+    attributes:
+      label: Logs
+      description: "docker logs abi --tail 100 (check it holds no keys, passwords or customer data)"
+      render: text

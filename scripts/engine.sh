@@ -16,7 +16,7 @@ export PGHOST=$D/pg PGUSER=abi PGDATABASE=abi
 export ABI_LAKE_CATALOG=postgres: ABI_DATA_PATH=$D/lake ABI_FILES_PATH=$D/files ABI_PROJECTS_PATH=$D/projects
 export ABI_ARTIFACTS_PATH=$D/artifacts ABI_SECRET_KEY_FILE=$D/secret.key ABI_SNAPSHOT_RETENTION_DAYS=7
 export ABI_DUCKDB_MEMORY_LIMIT=\${ABI_DUCKDB_MEMORY_LIMIT:-1500MB} PYTHONPATH=$ROOT/engine/backend
-export ABI_PUBLIC_URL=http://127.0.0.1:$PORT ABI_APP_URL=http://127.0.0.1:$PORT ABI_URL=http://127.0.0.1:$PORT
+export ABI_PUBLIC_URL=${ABI_PUBLIC_URL:-http://127.0.0.1:$PORT} ABI_APP_URL=http://127.0.0.1:$PORT ABI_URL=http://127.0.0.1:$PORT
 EOF
 }
 alive() { [ -f "$D/run/$1.pid" ] && kill -0 "$(cat "$D/run/$1.pid")" 2>/dev/null; }
