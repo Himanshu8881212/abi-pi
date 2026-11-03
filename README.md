@@ -122,6 +122,8 @@ again.
 **5. Connect a model.** Go to **Govern › Settings**, add a provider (presets for OpenAI, Anthropic, OpenRouter, Ollama
 and Gemini, or any OpenAI-compatible URL), paste its key and pick the model. Keys are stored encrypted and never shown
 again. Ollama on the same machine is `http://host.docker.internal:11434/v1` (the preset); on Linux, start Ollama with `OLLAMA_HOST=0.0.0.0`.
+Tick one or more **fallback** models: when the model is out of quota or down, the chat asks the next one and says so.
+**Usage** on the same page shows the tokens (and cost, where the provider reports it) per person and model.
 
 **6. Bring data.** **Data › Sources › Add source**: upload a Parquet file (any size; it goes up in pieces), or give an
 S3 folder like `s3://bucket/sales/*.parquet` with its region. For a private bucket, add the access key and secret
@@ -139,7 +141,12 @@ region."
 
 **8. Add your team.** **Govern › Users & access › Add a person**: a name and a starting password you hand over; they
 change it by clicking their name at the top. Then give them a role (Viewer reads, Editor builds) and, if you like,
-limit the sections and reports they see. (Email invitations need a mail server; adding people doesn't.)
+limit the sections and reports they see. Someone forgot their password? Set a new one for them on the same page.
+
+With a mail server (**Govern › Settings › Email**) you can also invite people by email, and "Forgot your password?" on
+the sign-in page sends a reset link. With **Settings › Single sign-on** people sign in with your company account
+(Google, Microsoft Entra, Okta, Keycloak: any OpenID Connect provider); each person links theirs once by clicking
+their name. Both need `ABI_PUBLIC_URL`, the address people open, so the links come back to ABI.
 
 ### All settings
 
@@ -152,6 +159,9 @@ limit the sections and reports they see. (Email invitations need a mail server; 
 | `ABI_WORKSPACE` | no | Its workspace. Default `main`. |
 | `ABI_LLM_BASE`, `ABI_LLM_KEY`, `ABI_LLM_MODEL` | no | One OpenAI-compatible model endpoint, its key and the model's id there (e.g. `https://api.openai.com/v1`, `gpt-5`), instead of Settings. |
 | `ABI_LLM_API` | no | `openai-completions` (the default with a model) or `openai-responses`. |
+| `ABI_PUBLIC_URL` | no | The address people open, e.g. `https://abi.example.com`: emailed links and single sign-on return there. |
+| `ABI_VOLUME` | no | The data volume's name. Default `abi_abi-data`; an install from 1.0 keeps `abi-pi_abi-pi-data` (`scripts/upgrade.sh` sets it). |
+| `ABI_IMAGE` | no | The image to run. Default `ghcr.io/himanshu8881212/abi:latest` (pulled with `docker compose pull`, else built here). |
 | `ABI_SECRET_KEY` | no | A Fernet key that encrypts the API keys admins save. Default: a key file in the volume. Make one with `python3 -c "import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())"`. |
 
 ### Use it from other devices (HTTPS)
@@ -168,10 +178,13 @@ caddy reverse-proxy --from abi.example.com --to localhost:8790
 
 ```sh
 git pull
-docker compose up -d --build
+scripts/upgrade.sh
 ```
 
-Your data stays in the volume. Take a backup first while ABI is alpha.
+It backs up the running install to `backups/`, pulls the new image (or builds it here), starts it on the same volume
+and waits until it's healthy. An install from 1.0 moves over too: it keeps its volume and its `.env`. The volume
+remembers its version (`docker exec abi cat /data/VERSION`) and an older image refuses it: to go back, restore a
+backup into a new volume (below).
 
 ### If something goes wrong
 
@@ -222,7 +235,8 @@ requests, and its revenue by region matched an independent DuckDB sum to the cen
 ### Known limits
 
 - HTTP only; use a reverse proxy for HTTPS (above).
-- Email (invitations, flow emails) needs a mail server; until then add people with a password and flows deliver to the app's inbox.
+- Email (invitations, password resets, flow emails) needs a mail server; until then add people with a password, set
+  forgotten ones in Users & access, and flows deliver to the app's inbox.
 - Data comes in as Parquet only (files or S3); convert other formats first (Quick start, step 6).
 
 ## Contributing

@@ -4,14 +4,7 @@ Thanks for helping. ABI is AGPL-3.0: by sending a change you agree it is publish
 
 ## Run it from source
 
-```sh
-uv sync                                   # the app's Python (.venv)
-scripts/engine.sh start                   # ABI's engine with its own Postgres on 127.0.0.1:8780 (data/)
-scripts/accounts.py                       # the first run's accounts (data/accounts.txt, never committed)
-.venv/bin/python scripts/app.py main 8790 --open
-```
-
-The container is the release: `docker compose up -d --build` (see the README).
+The steps are in the [README](README.md#contributing). The container is the release: `docker compose up -d --build`.
 
 ## Tests
 
