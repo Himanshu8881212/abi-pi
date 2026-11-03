@@ -70,3 +70,47 @@ Parquet only); those doors weren't measured.
 |---|---|---|---|
 | idle | 30 | 101.9 | 108.8 |
 | while project A loads 50M orders (249.41 s) | 1193 | 230.0 (x2.26) | 317.3 (x2.92) |
+
+## 1.1.0 baseline (MacBook Air, 8 cores, 24 GB; model proxy/claude-sonnet-5-5)
+
+3-4 Nov 2026, 309ee47 (v1.1.0's app, engine and harness). Method: bench/bench.py at scale 0.01, --model
+proxy/claude-sonnet-5-5 --fallback proxy/claude-opus-5-5 (ask and why 10 runs, report 5, load 3; Sonnet answered all
+56 runs, no model call failed), once on a quiet Mac (load average 1.8-4.4) and once beside another session's Rust
+build (32-68); perf.py memory --chats 3 (Settings' model Sonnet for it) and pages --sessions 20 (quiet Mac) through a
+local app on Brewline 0.01 loaded with abi.load, a 300 KB page.
+
+Quiet Mac (4 Nov 00:17-00:27):
+
+| task | pass | median s | turns | tools | tool errors | masked | input tok | cached tok | output tok |
+|---|---|---|---|---|---|---|---|---|---|
+| ask | 1/10 | 9.4 | 3 | 2 | 0 | 1 | 1064 | 68327.5 | 722.5 |
+| why | 9/10 | 33.9 | 6.5 | 10 | 0 | 0 | 18201 | 172544.5 | 3902 |
+| report | 5/5 | 20.5 | 6 | 8 | 0 | 0 | 34163 | 182473 | 1732 |
+| load | 3/3 | 12 | 4 | 3 | 0 | 0 | 16400 | 99724 | 647 |
+
+Beside the Rust build (3 Nov 23:29-23:43):
+
+| task | pass | median s | turns | tools | tool errors | masked | input tok | cached tok | output tok |
+|---|---|---|---|---|---|---|---|---|---|
+| ask | 0/10 | 15.8 | 3 | 2 | 0 | 1 | 1092.5 | 68321 | 747.5 |
+| why | 3/10 | 35.6 | 6.5 | 10 | 0 | 1 | 18847.5 | 176358 | 4003.5 |
+| report | 3/5 | 27.5 | 6 | 7 | 0 | 0 | 53545 | 172061 | 1773 |
+| load | 3/3 | 24.5 | 4 | 3 | 0 | 0 | 16395 | 99726 | 688 |
+
+Every miss was a masked word, not a wrong figure. ask stated all four 2025 regions right in 20 of 20 and masked its own
+filter's end date ("from 2025-01-01 to [not verified]") in 19. why named North in 20 of 20; its 8 misses masked a word
+in the closing offer ("save this as an [not verified] analysis", 6 runs), a café name (2) or a word before "orders" (1).
+The 2 report misses masked a page title and a visual count.
+
+| pages: 20 sessions, 20 people (3 runs) | p50 s | p95 s | p99 s | max s | errors | dropped |
+|---|---|---|---|---|---|---|
+| first | 6.0 / 10.5 / 6.6 | 11.3 / 20.1 / 12.3 | 11.9 / 21.1 / 13.0 | 11.9 / 21.1 / 13.0 | 0 | 0 |
+| right after a commit | 13.2 / 7.1 / 6.4 | 20.1 / 13.3 / 12.2 | 20.8 / 14.0 / 12.9 | 20.8 / 14.0 / 12.9 | 0 | 0 |
+
+| memory MB | app | engine | worker | Postgres | Pi |
+|---|---|---|---|---|---|
+| idle, the pages project loaded | 38.8 | 845.8 | 1193.1 | 495.0 (30 processes) | 0 |
+| 3 chats started | 42.7 | 846.1 | 1193.3 | 496.3 | 463.4 |
+| after each answered (claude-sonnet-5-5) | 42.7 | 846.1 | 1193.3 | 496.3 | 463.4 |
+
+Per chat (app + Pi): 155.8 MB after start and after the answer.
