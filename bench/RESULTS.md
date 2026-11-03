@@ -31,3 +31,42 @@
 | variant | task | pass | median s | turns | tools | tool errors | input tok | cached tok | output tok |
 |---|---|---|---|---|---|---|---|---|---|
 | baseline | why | 0/3 | 74.2 | 6 | 7 | 0 | 15881 | 55552 | 1747 |
+
+## 1.1.0 baseline (pve1 LXC 100: 6 cores, 10 GB RAM)
+
+3 Nov 2026, bench/perf.py and bench/brewline.py of 309ee47. Method: the image the live install runs (2fcf2e3d5762, 2.84 GB;
+the 252 repo files in it are byte-identical to `git archive v1.1.0`) as a throwaway compose install beside the live one
+on the same LXC (own volume and port, removed after), 1.1.0's defaults (engine DuckDB limit 1500MB), no model
+configured. The bench ran inside the container (`docker cp bench`, `docker exec`). Pages: Brewline 0.01 (73,941 orders)
+loaded with abi.load, its starter Overview report, a 297 KB page. Load and isolation: generated orders in the files
+folder, loaded with the engine's add_data on a server path. Process MB are perf.py's RSS sums (shared pages count more
+than once); container MB is the cgroup's memory.current (every 2 s under load; with chats its memory.peak).
+
+| pages: 50 sessions, 50 people | p50 s | p95 s | p99 s | max s | errors | dropped |
+|---|---|---|---|---|---|---|
+| first | 44.2 | 84.7 | 88.3 | 88.3 | 0 | 0 |
+| right after a commit | 45.7 | 87.8 | 91.4 | 91.4 | 0 | 0 |
+
+| memory MB | app | engine | worker | Postgres | Pi | container |
+|---|---|---|---|---|---|---|
+| idle, the pages project loaded | 30.8 | 352.7 | 359.7 | 181.7 (12 processes) | 0 | 620 |
+| 8 chats started (3 runs) | 32.2 / 32.9 / 33.5 | 341.7 / 340.4 / 338.5 | 359.7 / 359.7 / 355.8 | 182.0 / 182.2 / 183.1 | 1250.5 / 850.4 / 845.5 | 1756 peak |
+| idle after pages, loads and isolation | 73.6 | 370.4 | 326.3 | 285.7 (16 processes) | 0 | 706 |
+
+Per chat (app + Pi after start; no model, so no answer): 156.5 MB in the first run after the container started, then
+106.4 and 105.8 MB.
+
+| load | orders | orders add_data s | rows/s | 4 tables s | Ready s | lake bytes | revenue by region | container peak MB |
+|---|---|---|---|---|---|---|---|---|
+| 10M | 9,999,949 | 46.51 | 215,006 | 48.34 | 54.31 | 251,216,670 | exact to the cent | 1565 |
+| 50M | 49,999,905 | 224.32 | 222,895 | 226.20 | 252.43 | 1,181,105,645 | exact to the cent | 2408 |
+
+The lake keeps each table twice, in raw/ and model/ (85 + 85 MB at 10M, 389 + 389 MB at 50M on ZFS's compressed
+disk; lake bytes are the files' sizes). 50M stayed inside the app's and the agent's timeout (they wait 900 s for an
+engine call, scripts/abi.py) and nothing failed. A server path isn't open to 1.1's app or agent (uploads and s3://
+Parquet only); those doors weren't measured.
+
+| isolation: project B (Brewline 0.005) uncached semantic_query | queries | p50 ms | p95 ms |
+|---|---|---|---|
+| idle | 30 | 101.9 | 108.8 |
+| while project A loads 50M orders (249.41 s) | 1193 | 230.0 (x2.26) | 317.3 (x2.92) |
