@@ -104,6 +104,13 @@ class Csv(BaseModel):
     strict_mode: bool | None = None  # false: read rows that break RFC 4180 (e.g. `"a"|"b"` in one field)
 
 
+class Xlsx(BaseModel):
+    """IN-4 Excel options: the sheet to read (default: the first). A sheet name as Excel allows it, without quotes."""
+
+    model_config = ConfigDict(extra="forbid")
+    sheet: str | None = Field(None, pattern=r"^[^\x00-\x1f'\[\]*?/\\:]{1,31}$")
+
+
 # SC-4: a login typed into a location (user:password@ after any '://', or a '?' anywhere, even past '#' or a newline,
 # in a location that doesn't start with http(s)://: DuckDB reads s3_secret_access_key and friends from an s3:// query)
 # is refused at input validation, before audit_log, Git or a log sees it. Unanchored, so leading whitespace doesn't
@@ -130,6 +137,7 @@ class Source(storage.ProjectRef):
                   Annotated[str, Field(pattern=rf"^[^\r\n]*{credentials.REF}[^\r\n]*$")]] = Field({})
     database: Database | None = None  # IN-2: with a postgres:// or mysql:// location
     csv: Csv | None = None  # IN-2: CSV dialect, with format csv
+    xlsx: Xlsx | None = None  # IN-4: the sheet, with format xlsx
     api: fetch.Api | None = None  # API-SRC: an https location that is a REST/JSON or CSV API
     _sid: str | None = PrivateAttr(None)  # sources/<id>.json when it isn't `table` (a stepped table's source)
 
@@ -141,7 +149,7 @@ class Source(storage.ProjectRef):
         """The definition; without `database`/`sqlite` exactly as before D-01.1, so file sources keep their fingerprints."""
         # `sync` off (the default) leaves it out, so database sources from before WB-10 keep their fingerprints too
         d = self.model_dump(mode="json", exclude={"database": {"sync"}} if self.database and not self.database.sync else None)
-        return {k: v for k, v in d.items() if v is not None or k not in ("database", "sqlite", "csv", "api")}
+        return {k: v for k, v in d.items() if v is not None or k not in ("database", "sqlite", "csv", "xlsx", "api")}
 
 
 DATABASES = {"postgres": 5432, "mysql": 3306}  # IN-2, D-27
@@ -153,6 +161,45 @@ ORDERABLE = r"U?(TINY|SMALL|BIG|HUGE)?INT(EGER)?|DECIMAL\(.*\)|FLOAT|DOUBLE|DATE
 
 def files_root() -> FsPath:
     return FsPath(os.environ.get("ABI_FILES_PATH", "/data/files")).resolve()
+
+
+UPLOADED = r"uploads/([0-9a-f]{32})/\w[\w .-]{0,199}"  # where an IN-7 upload lands: files/uploads/<id>/<its file name>
+
+
+def locations(files: dict) -> set[str]:
+    """Every location a project's files (a bundle) load, as any environment would (PC-9 overrides)."""
+    out = set()
+    for rel, f in files.items():
+        if isinstance(f, dict) and rel.startswith("sources/"):
+            out.add(f.get("location"))
+        elif isinstance(f, dict) and rel.startswith("environments/"):
+            out |= {s.get("location") for s in (f.get("sources") or {}).values() if isinstance(s, dict)}
+    return {x for x in out if isinstance(x, str)}
+
+
+def readable(conn, user: User, project: str, location: str) -> None:
+    """A server path loads only what the caller may read: an upload made into a project where they read every row
+    (Editor or Owner: row-level security restricts only roles below Editor), or a path such a project already loads.
+    Any other path in the files folder is the workspace owner's. 1.1 took any path there, so a restricted Viewer of one
+    project could load its uploaded file into a project they edit, past its row-level security. Existing sources keep
+    refreshing: the worker and `refresh` load what the project's files already say."""
+    if "://" in location or user.workspace_owner:
+        return
+    mine = {r["project"] for r in conn.execute(
+        "SELECT project FROM project_roles WHERE user_id = %s AND role IN ('editor', 'owner')", [user.id])}
+    if m := re.fullmatch(UPLOADED, location):  # the upload's record: in progress (.upload.json), then loaded (.owner.json)
+        for f in (".upload.json", ".owner.json"):
+            with contextlib.suppress(OSError, ValueError, KeyError, TypeError):
+                if json.loads((files_root() / "uploads" / m[1] / f).read_text())["project"] in mine:
+                    return
+    for p in mine:
+        root = git.path(p)
+        with contextlib.suppress(OSError, ValueError):
+            if location in locations({f"{f.parent.name}/{f.name}": json.loads(f.read_text())
+                                      for f in [*root.glob("sources/*.json"), *root.glob("environments/*.json")]}):
+                return
+    raise ActionFailed(403, "That server path isn't yours to load: upload the file into this project, or ask the"
+                            " workspace owner (who reads every path in the files folder).")
 
 
 @action(Role.editor, definition=True)
@@ -168,6 +215,7 @@ def add_data(conn, user: User, args: Source) -> dict:
     if steps and steps[0].source != args.table:
         raise ActionFailed(409, f"Table '{args.table}' is built by steps from source '{steps[0].source}';"
                                 " add data to that source or change the table's source step.")
+    readable(conn, user, args.project, args.location)
     if actions.needs_click() and (targets := hosts(args.spec())):  # §5 #3: the load (and every refresh) connects there
         from abi.tools import builtin  # not at top: builtin imports this module
 
@@ -471,8 +519,9 @@ def _load(conn, src: Source, author: str, unless: str | None = None, used: dict 
             raise ActionFailed(400, f"Can't tell the format of '{src.location}'; set format to one of {list(READERS)}.")
         if fmt == "sqlite" and (kind != "path" or not src.sqlite):
             raise ActionFailed(400, "A SQLite source needs a server path and the table to read (`sqlite`: {\"table\": …}).")
-        if src.csv and fmt != "csv":
-            raise ActionFailed(400, f"`csv` options apply to CSV files only; '{src.location}' is read as {fmt}.")
+        if src.csv and fmt != "csv" or src.xlsx and fmt != "xlsx":
+            k = "csv" if src.csv and fmt != "csv" else "xlsx"
+            raise ActionFailed(400, f"`{k}` options apply to {k.upper()} files only; '{src.location}' is read as {fmt}.")
         if fmt in ("delta", "iceberg") and (kind not in ("path", "s3") or fmt == "delta" and kind == "s3" and not (
                 src.s3 and src.s3.endpoint and src.s3.url_style == "path")):
             # D-2: Delta's own S3 client sends vhost requests to the bare endpoint, not <bucket>.<endpoint> as `_host` says
@@ -593,7 +642,8 @@ def _reader(fmt: str, loc: str, src: Source) -> str:
     if fmt == "sqlite":  # the table name is identifier-validated (`SQLite.table`)
         return f"SELECT * FROM sqlite_scan('{_lit(loc)}', '{src.sqlite.table}')"
     if fmt not in FOLDERS.values():
-        csv = src.csv.model_dump(exclude_none=True) if src.csv else {}  # whitelisted values only (`Csv`)
+        given = src.csv if fmt == "csv" else src.xlsx if fmt == "xlsx" else None
+        csv = given.model_dump(exclude_none=True) if given else {}  # whitelisted values only (`Csv`, `Xlsx`)
         opts = "".join(f", {'delim' if k == 'delimiter' else k} = {str(v).lower() if isinstance(v, bool) else f"'{_lit(v)}'"}"
                        for k, v in csv.items())
         return f"SELECT * FROM {READERS[fmt]}('{_lit(loc)}'{opts})"
@@ -743,7 +793,8 @@ router = APIRouter(prefix="/api")
 
 # IN-1 file uploads are IN-7 sessions (the single-request PUT wrote before its role check: H-01.2-fix-2).
 # IN-7 resumable chunked upload, tus 1.0 core semantics (work/validation/D-05.md): POST starts, HEAD tells the offset,
-# PATCH appends at it. A session is files/uploads/<id>/ with `.part` (the bytes) and `.upload.json` (who, where, size).
+# PATCH appends at it. A session is files/uploads/<id>/ with `.part` (the bytes) and `.upload.json` (who, where, size);
+# once loaded, the file under its own name and the record as `.owner.json`.
 UPLOAD_MAX = 500 * 1024**3  # §9 Scale: hundreds of GB; the free-disk check is the real bound
 CHUNK_MAX = 256 * 1024**2  # one PATCH body
 STALE = 24 * 3600  # a session with no write for this long is deleted when another upload starts
@@ -821,15 +872,16 @@ async def upload_chunk(
     request: Request,
     user: Annotated[User, Depends(current_user)],
     csv: str | None = None,  # query parameter: E-16.1 CSV options as JSON, for the load
+    xlsx: str | None = None,  # query parameter: Excel options as JSON ({"sheet": …}), for the load
 ):
-    """IN-7: appends the body at `offset`. When the file is complete, loads it with add_data (with `csv`, UI-2); if
-    that fails the bytes stay, and an empty PATCH at the final offset retries the load, also with other options."""
+    """IN-7: appends the body at `offset`. When the file is complete, loads it with add_data (with `csv` or `xlsx`,
+    UI-2); if that fails the bytes stay, and an empty PATCH at the final offset retries the load, also with other options."""
     if content_type != OCTETS:
         raise _fail(415, f"Content-Type must be {OCTETS}.")
-    try:
-        options = {} if csv is None else {"csv": json.loads(csv)}  # add_data validates them (422/400)
+    try:  # add_data validates them (422/400)
+        options = {k: json.loads(v) for k, v in (("csv", csv), ("xlsx", xlsx)) if v is not None}
     except json.JSONDecodeError:
-        raise _fail(422, "csv must be a JSON object of CSV options.")
+        raise _fail(422, "csv and xlsx must be JSON objects of options.")
     meta, folder = _session(uid, user)
     with (folder / ".part").open("r+b") as f:
         try:
@@ -863,7 +915,8 @@ async def upload_chunk(
         except ActionFailed as e:
             final.unlink()
             raise HTTPException(e.status, e.body)
-    (folder / ".upload.json").unlink()  # first, so `.part` exists whenever `.upload.json` does
+    # first, so `.part` exists whenever `.upload.json` does; the record stays as .owner.json: whose project the file is (`readable`)
+    os.replace(folder / ".upload.json", folder / ".owner.json")
     (folder / ".part").unlink()
     return result
 

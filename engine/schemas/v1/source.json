@@ -31,6 +31,12 @@
         "strict_mode": {"type": "boolean", "description": "false: also read rows that break RFC 4180, e.g. a quoted value followed by more text"}
       }
     },
+    "xlsx": {
+      "type": "object",
+      "description": "IN-4: Excel options (format xlsx only)",
+      "additionalProperties": false,
+      "properties": {"sheet": {"type": "string", "pattern": "^[^\\u0000-\\u001f'\\[\\]*?/\\\\:]{1,31}$", "description": "The sheet to read; default: the first"}}
+    },
     "s3": {
       "type": "object",
       "additionalProperties": false,

@@ -648,6 +648,9 @@ def apply(conn, user: User, project: str, files: dict, dry_run: bool = False) ->
         if (kind := _kind(rel)) in ("flow", "agent") and old.get(rel) != f and f["owner"] != str(user.id):
             raise ActionFailed(403, f"A changed {kind} must be owned by the person importing it; nothing changed.", errors=[_err(
                 rel, "$.owner", f"The {kind} would be saved in the name of user {f['owner']}.", f"Set owner to your user ID, {user.id}.")])
+    from abi import ingest  # not at top: ingest imports this package
+    for loc in sorted(ingest.locations(files) - ingest.locations(old)):  # a server path is only what the importer may read
+        ingest.readable(conn, user, project, loc)
     if dry_run:
         return out
     from abi import flows  # not at top: flows imports this module
@@ -666,7 +669,6 @@ def apply(conn, user: User, project: str, files: dict, dry_run: bool = False) ->
             shutil.rmtree(p) if p.is_dir() else p.unlink()
     # ponytail: a process crash mid-write leaves a partial tree (git.change rolls back only on exceptions); undo restores it
     bundle.unbundle(files, folder)
-    from abi import ingest  # not at top: ingest imports this package
     for rel in sorted(files):  # IN-6: a hand-set incremental column is checked at the source now (git.change undoes the write)
         if _kind(rel) == "source" and old.get(rel) != files[rel]:
             ingest.probe(conn, project, _id(rel))

@@ -808,18 +808,6 @@ def test_page_layouts_are_a_draft_until_publish(srv):
     assert code == 200 and "home" not in r["result"], "Reset drops the page's layout"
 
 
-def test_parquet_is_the_only_input(tmp_path):
-    """ABI-PI takes .parquet files and S3 folders of Parquet, nothing else: no CSV, Excel, JSON, local paths or databases."""
-    for args in ({"location": "s3://b/f/*.csv"}, {"location": "/data/x.parquet"}, {"location": "s3://b/f/*.parquet", "format": "csv"},
-                 {"location": "postgres://h/db"}, {}):
-        with pytest.raises(abi.ActionError, match="S3 folder of Parquet"):
-            abi.call("add_data", project="p", table="t", **args)
-    abi.parquet_only("add_data", {"location": "s3://b/f/*.parquet", "format": "parquet"})
-    (tmp_path / "x.csv").write_text("a\n1\n")
-    with pytest.raises(abi.ActionError, match="S3 folder of Parquet"):
-        abi.upload("p", "t", tmp_path / "x.csv")
-
-
 def test_the_agent_makes_monitor_checks_and_explore_analyses(srv):
     """abi_monitor and abi_explore: the app's own Monitor checks and Explore analyses, through the agent's channel."""
     port, _, _ = srv

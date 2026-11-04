@@ -202,7 +202,7 @@ export default async function abi(pi: ExtensionAPI) {
 	py("abi_project", "New ABI project", "Creates an ABI project (create_project, auto-commit on) and its folder workspaces/<workspace>/<project>/ with ABI's full empty layout. Project IDs: lowercase letters, digits and _, starting with a letter.",
 		Type.Object({ workspace: Type.String(), project: Type.String({ pattern: "^[a-z][a-z0-9_]{0,62}$" }), name: Type.Optional(Type.String()) }),
 		(p) => ["project", p.workspace, p.project, ...(p.name ? [p.name] : [])]);
-	py("abi_load", "Load files into ABI", "The fast path for 'here are some files': uploads every Parquet file of the folders/files (Parquet only) to ABI, types a date column, builds the model, adds starter measures (row count, sums) and an Overview report, and renders the HTML views. Returns what it did and what readiness still misses. The files' contents never reach you.",
+	py("abi_load", "Load files into ABI", "The fast path for 'here are some files': uploads every data file of the folders/files (csv, tsv, parquet, json, ndjson, xlsx (first sheet), avro, arrow) to ABI, CSVs with explicit quoting, types a date column, builds the model, adds starter measures (row count, sums) and an Overview report, and renders the HTML views. Returns what it did and what readiness still misses. The files' contents never reach you.",
 		Type.Object({ workspace: Type.String(), project: Type.String({ pattern: "^[a-z][a-z0-9_]{0,62}$" }), paths: Type.Array(Type.String(), { minItems: 1 }) }),
 		(p) => ["load", p.workspace, p.project, ...p.paths]);
 	py("abi_sync", "Sync project folder", "Pulls ABI's commits into the project folder. Run after changes. In a terminal, the person opens the app with `python scripts/app.py <project>`.",
@@ -515,10 +515,9 @@ export default async function abi(pi: ExtensionAPI) {
 
 	async function confirmBridge(tool: string, input: unknown, ctx: ExtensionContext) {
 		if (PERSON_CLICK.has(tool)) return { status: "This changes access or where the project goes: the person does it in ABI's app, never from an agent." };
-		const a: any = input ?? {}, loc = String(a.location ?? "");
-		if (tool === "add_data" && ((a.format ?? "parquet") !== "parquet" || !loc.startsWith("s3://") || !loc.toLowerCase().endsWith(".parquet")))
-			return { error: { message: "A source is an S3 folder of Parquet files (s3://bucket/folder/*.parquet), or a .parquet file the person uploads in the app." } };
-		const first = await rest(tool, input);
+		// a confirm header makes ABI ask everything it asks an agent (a new host to load from, a first send), as the MCP call
+		// replayed here did: without one, this REST call is the person's own, one step (actions.needs_click)
+		const first = await rest(tool, input, "ask");
 		if (first.status !== 409 || !first.body?.confirm_token) {
 			return first.status < 300 ? { result: first.body } : { error: first.body };
 		}

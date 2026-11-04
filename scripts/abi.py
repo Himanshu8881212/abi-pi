@@ -37,15 +37,8 @@ ABI_CLI = HERE.parent / "engine/backend"
 SCHEMAS = HERE.parent / "engine/schemas/v1"
 PROJECT_ID = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 SKELETON = ["sources", "tables", "model", "reports", "ml", "flows", "agents", "tools", "security", "environments", "docs"]
-DATA = {".parquet"}  # ABI-PI takes Parquet only: uploaded .parquet files, or S3 folders of Parquet (add_data)
-PARQUET_ONLY = "Upload a .parquet file, or add an S3 folder of Parquet files (s3://bucket/folder/*.parquet)."
-
-
-def parquet_only(action: str, args: dict) -> None:
-    """The one rule for data coming in: a source is an S3 folder of Parquet files; uploads are .parquet files (upload)."""
-    loc = str(args.get("location") or "")
-    if action == "add_data" and (args.get("format", "parquet") != "parquet" or not loc.startswith("s3://") or not loc.lower().endswith(".parquet")):
-        raise ActionError(400, {"message": PARQUET_ONLY})
+DATA = {".csv", ".tsv", ".parquet", ".json", ".jsonl", ".ndjson", ".xlsx", ".avro", ".arrow"}  # what ABI's engine reads
+CSV_SAFE = {"quote": '"', "escape": '"', "strict_mode": False}  # demo lesson: quoted fields with "" and line breaks
 CHUNK = 64 * 1024**2
 
 
@@ -147,22 +140,21 @@ def artifact(snapshot: str) -> bytes:
 
 def call(action: str, confirm: str | None = None, **args) -> dict:
     """One action as the person (SDK semantics). A 409 with a confirm token raises ActionError: callers show it."""
-    parquet_only(action, args)
     return _open("POST", f"/api/actions/{action}", args, {"X-Abi-Confirm": confirm} if confirm else None)[1]
 
 
-def upload(project: str, table: str, path: Path) -> dict:
-    """IN-7 resumable upload; the last PATCH runs add_data and returns its result. Bytes go to ABI, never to the LLM."""
-    if path.suffix.lower() != ".parquet":
-        raise ActionError(400, {"message": PARQUET_ONLY})
+def upload(project: str, table: str, path: Path, csv: dict | None = None, xlsx: dict | None = None) -> dict:
+    """IN-7 resumable upload; the last PATCH runs add_data (with these CSV or Excel options) and returns its result.
+    Bytes go to ABI, never to the LLM."""
     size = path.stat().st_size
     name = re.sub(r"[^\w .-]", "_", path.name)
     _, started, _ = _open("POST", f"/api/uploads/{project}/{table}/{urllib.parse.quote(name)}", headers={"Upload-Length": str(size)})
+    q = urllib.parse.urlencode({k: json.dumps(v) for k, v in (("csv", csv), ("xlsx", xlsx)) if v})
     off, out = 0, {}
     with path.open("rb") as f:
         while off < size:
             chunk = f.read(CHUNK)
-            _, out, hdr = _open("PATCH", f"/api/uploads/{started['id']}", raw=chunk,
+            _, out, hdr = _open("PATCH", f"/api/uploads/{started['id']}" + (f"?{q}" if q else ""), raw=chunk,
                                 headers={"Upload-Offset": str(off), "Content-Type": "application/offset+octet-stream"})
             off += len(chunk)
     return out
@@ -327,7 +319,7 @@ def load(ws: str, project: str, paths: list[str]) -> dict:
     for p in map(lambda s: Path(s).expanduser().resolve(), paths):
         files += sorted(f for f in (p.rglob("*") if p.is_dir() else [p]) if f.is_file() and f.suffix.lower() in DATA)
     if not files:
-        raise SystemExit("No Parquet files found there: " + PARQUET_ONLY)
+        raise SystemExit("No data files (csv, tsv, parquet, json, ndjson, xlsx, avro, arrow) found there.")
     for f in files:
         guard(f)
     log = {"project": new_project(ws, project), "loaded": [], "failed": []}
@@ -335,7 +327,13 @@ def load(ws: str, project: str, paths: list[str]) -> dict:
         t = table_id(f)
         t0 = time.time()
         try:
-            r = upload(project, t, f)
+            csv = f.suffix.lower() in (".csv", ".tsv")
+            try:  # demo lesson: DuckDB's guess splits quoted multi-line fields, so CSVs load with explicit quoting first
+                r = upload(project, t, f, CSV_SAFE if csv else None)
+            except ActionError:
+                if not csv:
+                    raise
+                r = upload(project, t, f)
             log["loaded"].append({"table": t, "file": f.name, "snapshot": r.get("snapshot"), "seconds": round(time.time() - t0, 1)})
         except ActionError as e:
             log["failed"].append({"table": t, "file": f.name, "error": e.body.get("message")})

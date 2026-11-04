@@ -48,7 +48,7 @@ One app, in the order the work happens:
 
 | | |
 |---|---|
-| **Data** | Parquet files (upload, or an S3 folder of them) into medallion layers: bronze sources, silver cleaned tables, gold facts and dimensions. Sources refresh on change or on a schedule, incrementally where the source allows. |
+| **Data** | CSV, Excel, JSON and Parquet files (upload, or an S3 folder of them), Delta and Iceberg tables, Postgres and MySQL tables, into medallion layers: bronze sources, silver cleaned tables, gold facts and dimensions. Sources refresh on change or on a schedule, incrementally where the source allows. |
 | **Data model** | Measures, a glossary, saved queries, joins and a calendar, row-level and column security, a model canvas. |
 | **Write-back** | Edit rows, or change a total and let ABI spread it over the rows below; every edit waits for approval, undoes in one step and can sync back to a Postgres or MySQL source. |
 | **Visualize** | Reports with cross-filtering, drag-and-resize layouts, Explore with saved analyses, Monitor checks (a measure against a target or its last period, freshness, failed flows), a Home page of pinned widgets. |
@@ -125,16 +125,17 @@ again. Ollama on the same machine is `http://host.docker.internal:11434/v1` (the
 Tick one or more **fallback** models: when the model is out of quota or down, the chat asks the next one and says so.
 **Usage** on the same page shows the tokens (and cost, where the provider reports it) per person and model.
 
-**6. Bring data.** **Data › Sources › Add source**: upload a Parquet file (any size; it goes up in pieces), or give an
-S3 folder like `s3://bucket/sales/*.parquet` with its region. For a private bucket, add the access key and secret
-there: they're stored encrypted, usable only for that bucket's host, and never shown again or given to the agent.
-MinIO, Cloudflare R2 and other S3-compatible stores take their host as the endpoint; untick HTTPS for a plain-HTTP one.
+**6. Bring data.** **Data › Sources › Add source**: upload a CSV, TSV, Excel (.xlsx: name the sheet, or the first is
+read), JSON/NDJSON, Parquet or Avro file (any size; it goes up in pieces), or give an S3 location like
+`s3://bucket/sales/*.csv` with its region: a glob of any of those formats, or a Delta or Iceberg table's folder (pick
+the format). CSVs load with standard quoting, so quoted values with line breaks and `""` inside stay one row. For a
+private bucket, add the access key and secret there: they're stored encrypted, usable only for that bucket's host, and
+never shown again or given to the agent. MinIO, Cloudflare R2 and other S3-compatible stores take their host as the
+endpoint; untick HTTPS for a plain-HTTP one.
 
-ABI reads Parquet. Have CSV or Excel? One line with [DuckDB](https://duckdb.org/docs/installation/) converts it:
-
-```sh
-duckdb -c "COPY (SELECT * FROM 'sales.csv') TO 'sales.parquet' (FORMAT parquet)"
-```
+**Add a database table** does the same for a Postgres or MySQL table: host, port, database, schema, table, the login
+and, optionally, an increasing column (an ID or an updated-at time). The login is stored encrypted for that host only,
+never shown again or given to the agent; the table reloads daily, appending the rows past the increasing column.
 
 **7. Ask.** Open the chat and say what you need: "Model this data and build me a report of revenue by month and
 region."
@@ -193,7 +194,7 @@ backup into a new volume (below).
 | `set ABI_PASSWORD in .env` | `.env` is missing or the line is empty: step 2. |
 | `port is already allocated` | Set `ABI_PORT` in `.env`. |
 | The chat says nothing for two minutes | The model isn't reachable: check Govern › Settings (the key, the model id, the URL). |
-| A file is refused | Only Parquet loads: convert it (step 6). |
+| A file is refused | The message under the form says why; CSV, TSV, Excel, JSON, Parquet and Avro files load (step 6). |
 | `ABI isn't answering right now` | The engine is still starting or restarting: wait a minute, or check `docker compose logs`. |
 
 ## Back up and restore
@@ -237,7 +238,11 @@ requests, and its revenue by region matched an independent DuckDB sum to the cen
 - HTTP only; use a reverse proxy for HTTPS (above).
 - Email (invitations, password resets, flow emails) needs a mail server; until then add people with a password, set
   forgotten ones in Users & access, and flows deliver to the app's inbox.
-- Data comes in as Parquet only (files or S3); convert other formats first (Quick start, step 6).
+- A database source copies one whole table (no custom query) and appends the rows past its increasing column each
+  day: rows changed or deleted in place at the source stay as loaded until a **Reload** on its card. No Snowflake,
+  BigQuery, SQL Server or Oracle yet, and no `gs://` or `az://` locations.
+- Files already in ABI's files folder on the server (server paths) are the workspace owner's to load; everyone else
+  uploads their files.
 
 ## Contributing
 

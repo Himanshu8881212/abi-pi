@@ -6,7 +6,8 @@ ML, custom agents), the Pi agent with a team of specialists, and a one-page app.
 
 ## What is in it
 
-- **Data in:** Parquet only, as an uploaded file or an S3 folder of Parquet files; medallion layers (bronze sources,
+- **Data in:** Parquet only, as an uploaded file or an S3 folder of Parquet files (from 1.2: CSV, TSV, Excel, JSON
+  and Avro too, Delta and Iceberg tables on S3, and Postgres and MySQL tables); medallion layers (bronze sources,
   silver staged tables, gold model) built by the agent or by hand.
 - **Model:** measures, glossary, saved queries, named models, row-level security, a model canvas.
 - **Visualize:** reports (drag and resize their cards; the layout is saved in the report), Explore with saved

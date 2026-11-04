@@ -680,29 +680,46 @@ function glossary(box){const list=h('div','cards rows');box.append(list);
  list.append(rowhead('Term','Definition','Implemented by (measure IDs)',''));D.glossary.forEach(t=>list.append(edit(t)));if(!D.glossary.length)list.append(h('p','empty pad','No terms yet. New term adds the first.'))}
 
 // ---------- Data ----------
-async function upload(table,file){const id=[...crypto.getRandomValues(new Uint8Array(16))].map(b=>b.toString(16).padStart(2,'0')).join(''),N=24<<20;let r;
+async function upload(table,file,sheet){const id=[...crypto.getRandomValues(new Uint8Array(16))].map(b=>b.toString(16).padStart(2,'0')).join(''),N=24<<20;let r;
  for(let o=0;;o+=N){const last=o+N>=file.size,data=await new Promise(res=>{const fr=new FileReader();fr.onload=()=>res(fr.result.split(',')[1]||'');fr.readAsDataURL(file.slice(o,o+N))});  // 24 MB pieces: under the 64 MB request limit
-  r=await fetch('/upload',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({table,name:file.name,data,id,last})}).then(x=>x.json());
+  r=await fetch('/upload',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({table,name:file.name,data,id,last,sheet})}).then(x=>x.json());
   if(r.error)throw new Error(r.error);if(last)return r.result}}
 function sources(box){const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),qr=Object.fromEntries((q.rows||[]).map(r=>[r[ix('table')],r]));
  const g=h('div','cards'),bar=h('div','row bar top');box.append(bar,g);
- const add=()=>{const c=card('Add a source','a Parquet file you upload, or an S3 folder of Parquet files');c.classList.add('editor');
-  const t=h('input','f ed');t.placeholder='table id, e.g. bronze_orders';const loc=h('input','f ed');loc.placeholder='s3://bucket/folder/*.parquet';
-  const ep=h('input','f ed');ep.placeholder='blank for AWS; or host[:port] for MinIO, R2, Wasabi…';const file=h('input');file.type='file';file.accept='.parquet';file.className='f ed';
+ const add=()=>{const c=card('Add a source','a file you upload (CSV, TSV, Excel, JSON, Parquet, Avro), or a file or folder on S3 (also Delta and Iceberg tables)');c.classList.add('editor');
+  const t=h('input','f ed');t.placeholder='table id, e.g. bronze_orders';const loc=h('input','f ed');loc.placeholder='s3://bucket/folder/*.csv  or  https://example.com/data.csv';
+  const ep=h('input','f ed');ep.placeholder='blank for AWS; or host[:port] for MinIO, R2, Wasabi…';const file=h('input');file.type='file';file.accept='.csv,.tsv,.xlsx,.json,.jsonl,.ndjson,.parquet,.avro';file.className='f ed';
+  const sh=h('input','f ed');sh.placeholder='blank: the first sheet';const fm=h('select','f ed');
+  ['','csv','xlsx','json','parquet','avro','delta','iceberg'].forEach(x=>fm.append(new Option(x||'from the file name',x)));
   const rg=h('input','f ed');rg.value='us-east-1';const ki=h('input','f ed');ki.placeholder='access key ID (blank for a public bucket)';ki.autocomplete='off';
   const ks=h('input','f ed');ks.type='password';ks.placeholder='secret access key';ks.autocomplete='new-password';
   const tl=h('label','chk'),tls=h('input');tls.type='checkbox';tls.checked=true;tl.append(tls,h('span','','HTTPS (untick for a plain-HTTP endpoint such as a local MinIO)'));
-  c.append(h('label','l','Table'),t,h('label','l','Upload a Parquet file'),file,h('label','l','Or an S3 folder of Parquet files'),loc,h('label','l','Region'),rg,h('label','l','S3 endpoint'),ep,tl,
+  c.append(h('label','l','Table'),t,h('label','l','Upload a file'),file,h('label','l','Excel sheet'),sh,h('label','l','Or a location: an S3 file or folder (a glob, or a Delta or Iceberg table), or an https:// file'),loc,
+   h('label','l','Format'),fm,h('label','l','Region'),rg,h('label','l','S3 endpoint'),ep,tl,
    h('label','l','Keys (workspace owners; stored encrypted for this bucket only, never shown again)'),ki,ks);
-  act(c,'Add source',async()=>{if(!t.value)throw new Error('Name the table first.');
-   if(file.files[0]&&!/\.parquet$/i.test(file.files[0].name))throw new Error('Choose a .parquet file.');if(file.files[0]){await upload(t.value,file.files[0]);return `Uploaded and loaded into ${t.value}.`}
-   if(!/^s3:\/\/.+\.parquet$/i.test(loc.value))throw new Error('Choose a Parquet file, or give an S3 folder like s3://bucket/folder/*.parquet.');
-   const s3={region:rg.value.trim()||'us-east-1',...(ep.value?{endpoint:ep.value.trim(),url_style:'path'}:{}),...(tls.checked?{}:{use_ssl:false})};
-   if(ki.value||ks.value){const r=await fetch('/s3key',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({table:t.value,location:loc.value,...s3,key_id:ki.value,secret:ks.value})}).then(x=>x.json());
+  act(c,'Add source',async()=>{if(!t.value)throw new Error('Name the table first.');const sheet=sh.value.trim();
+   if(file.files[0]){await upload(t.value,file.files[0],sheet);return `Uploaded and loaded into ${t.value}.`}
+   if(!loc.value)throw new Error('Choose a file, or give a location like s3://bucket/folder/*.csv.');
+   const s3=loc.value.startsWith('s3://')?{region:rg.value.trim()||'us-east-1',...(ep.value?{endpoint:ep.value.trim(),url_style:'path'}:{}),...(tls.checked?{}:{use_ssl:false})}:null;
+   if(s3&&(ki.value||ks.value)){const r=await fetch('/s3key',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({table:t.value,location:loc.value,...s3,key_id:ki.value,secret:ks.value})}).then(x=>x.json());
     ks.value='';if(r.error)throw new Error(r.error);Object.assign(s3,r.result)}
-   await api('add_data',{table:t.value,location:loc.value,format:'parquet',s3});return `Loaded ${t.value}.`},1);return c};
- bar.append(btn('Add source',()=>g.prepend(add()),1));
- if(!D.sources.length)box.append(h('p','empty','No sources yet: upload a Parquet file or add an S3 folder of Parquet files.'));
+   await api('add_data',{table:t.value,location:loc.value,...(fm.value?{format:fm.value}:{}),...(s3?{s3}:{}),...(sheet?{xlsx:{sheet}}:{})});return `Loaded ${t.value}.`},1);return c};
+ // a Postgres or MySQL table: the login goes to the app's admin endpoint only, which stores it as two ABI secrets bound to
+ // this host; the source names them (${secret:…}), so neither the page, the agent nor Git ever holds it
+ const addDb=()=>{const c=card('Add a database table','a Postgres or MySQL table; it reloads daily, appending past an increasing column if you name one');c.classList.add('editor');
+  const t=h('input','f ed'),kd=h('select','f ed'),ho=h('input','f ed'),po=h('input','f ed'),db=h('input','f ed'),sc=h('input','f ed'),tb=h('input','f ed'),us=h('input','f ed'),pw=h('input','f ed'),inc=h('input','f ed');
+  [['postgres','Postgres'],['mysql','MySQL']].forEach(([v,l])=>kd.append(new Option(l,v)));kd.onchange=()=>po.placeholder=kd.value==='mysql'?'3306':'5432';
+  t.placeholder='table id, e.g. bronze_customers';ho.placeholder='host, e.g. db.example.com';po.placeholder='5432';db.placeholder='database';sc.placeholder='schema (blank: public, or the database for MySQL)';
+  tb.placeholder='table';us.placeholder='user';us.autocomplete='off';pw.type='password';pw.placeholder='password';pw.autocomplete='new-password';inc.placeholder='e.g. id or updated_at (blank: the auto-increment key, if any)';
+  c.append(h('label','l','Table id'),t,h('label','l','Database'),kd,h('label','l','Host'),ho,h('label','l','Port'),po,h('label','l','Database name'),db,h('label','l','Schema'),sc,h('label','l','Table'),tb,
+   h('label','l','Login (workspace owners; stored encrypted for this host only, never shown again)'),us,pw,h('label','l','Increasing column (optional)'),inc);
+  act(c,'Add table',async()=>{if(!t.value||!ho.value.trim()||!db.value.trim()||!tb.value.trim())throw new Error('A table id, the host, the database name and the table.');
+   const r=await fetch('/admin/dbkey',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({table:t.value,host:ho.value.trim(),user:us.value,password:pw.value})}).then(x=>x.json());
+   pw.value='';if(r.error)throw new Error(r.error);const col=inc.value.trim();
+   await api('add_data',{table:t.value,location:`${kd.value}://${ho.value.trim()}:${po.value.trim()||po.placeholder}/${db.value.trim()}`,
+    database:{table:(sc.value.trim()?sc.value.trim()+'.':'')+tb.value.trim(),...r.result,...(col?{incremental:col}:{})}});return `Loaded ${t.value}.`},1);return c};
+ bar.append(btn('Add source',()=>g.prepend(add()),1),btn('Add a database table',()=>g.prepend(addDb())));
+ if(!D.sources.length)box.append(h('p','empty','No sources yet: upload a file, add a folder on S3 or a database table.'));
  D.sources.forEach(id=>{const sp=D.source_specs?.[id]||{},r=qr[id],c=card(id,`sources/${id}.json`),k=h('div','kv');
   [['location',sp.location||'—'],['format',sp.format||'from the file'],['refresh',sp.refresh||(r?r[ix('refresh')]:'—')],['rows',r?fmt(r[ix('rows')]):'—'],['last load',r?cell(r[ix('last_load')]):'—']]
    .forEach(([a,b])=>k.append(h('b','',a),h('span','',String(b))));c.append(k);
@@ -2277,7 +2294,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                 return self.reply(200, json.dumps(r, default=str).encode())
             if self.path.startswith("/admin/"):
                 if self.sess and not self.sess["admin"]:
-                    return self.reply(403, b'{"error":"Users & access is for workspace owners."}')
+                    return self.reply(403, b'{"error":"Users & access, Settings and database logins are for workspace owners."}')
                 return self.reply(*admin_route(hub, self.path.removeprefix("/admin/"), body))
             # the page: a local Host (no DNS rebinding) and the per-start key (a custom header other sites can't send)
             if not secrets.compare_digest(self.headers.get("X-Abi-App", ""), key):
@@ -2330,8 +2347,10 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                     part.write(base64.b64decode(body.get("data") or ""))
                 if not body.get("last"):
                     return self.reply(200, json.dumps({"result": {"received": f.stat().st_size}}).encode())
+                ext, sheet = f.suffix.lower(), str(body.get("sheet") or "")
                 try:
-                    out = {"result": abi.upload(project, str(body.get("table")), f)}
+                    out = {"result": abi.upload(project, str(body.get("table")), f, abi.CSV_SAFE if ext in (".csv", ".tsv") else None,
+                                                {"sheet": sheet} if sheet and ext == ".xlsx" else None)}
                 except abi.ActionError as e:
                     out = {"error": str(e.body.get("message") if isinstance(e.body, dict) else e.body)}
                 finally:
@@ -2590,6 +2609,17 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
             if "result" in r:
                 settings.note("mail", {k: v for k, v in smtp.items() if k != "password"})
             return 200, json.dumps(r, default=str).encode()
+        if op == "dbkey":  # a database source's login as two ABI secrets bound to its host (never shown again, never the agent's)
+            tbl, host = str(body.get("table") or ""), str(body.get("host") or "").strip().lower()
+            user, pw = str(body.get("user") or ""), str(body.get("password") or "")
+            if not (re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,62}", tbl) and re.fullmatch(r"[a-z0-9.-]{1,253}", host) and user and pw):
+                return 400, b'{"error":"A table id, the host, and the user and password of the login."}'
+            name = f"DB_{p}_{tbl}".upper()[:90]  # per project and table: another project's login is never overwritten
+            for suffix, value in (("_USER", user), ("_PASSWORD", pw)):
+                r = run("set_secret", {"name": name + suffix, "value": value, "allowed_hosts": [host]}, None)
+                if "error" in r:
+                    return 200, json.dumps({"error": r["error"]}).encode()
+            return 200, json.dumps({"result": {"user": f"${{secret:{name}_USER}}", "password": f"${{secret:{name}_PASSWORD}}"}}).encode()
         if op == "sso":  # the sign-in providers people may use (OIDC), and whether links can reach this app
             st, b, _ = abi.raw("GET", "/api/oidc/providers")
             public = os.environ.get("ABI_PUBLIC_URL", "")

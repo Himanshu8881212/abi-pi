@@ -11,7 +11,7 @@ sys.path[:0] = [str(ROOT / "scripts"), str(ROOT / "tests")]
 
 
 def parquet(*csvs) -> list[str]:
-    """ABI-PI takes Parquet only: tests write their small tables as CSV and load the Parquet copy (DuckDB converts)."""
+    """Tests write their small tables as CSV and load a Parquet copy (DuckDB converts)."""
     import duckdb
     out = []
     for f in map(Path, csvs):
