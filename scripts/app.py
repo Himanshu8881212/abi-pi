@@ -57,7 +57,7 @@ WRITES = {"set_measure", "delete_measure", "set_glossary_term", "delete_glossary
           "save_dataset", "delete_dataset", "save_report", "delete_report", "save_flow", "delete_flow", "save_ml_model",
           "delete_ml_model", "save_tool", "publish_tool", "delete_tool", "save_agent", "publish_agent", "delete_agent", "set_steps", "edit_cells", "approve_edit", "reject_edit", "undo_edits", "create_input_table"}
 READS = {"changes", "check_condition", "data_quality", "dataset_data", "docs", "edit_history", "edit_proposals", "export_visual",
-         "flow_runs", "history", "how_calculated", "list_agents", "list_flows", "list_reports", "list_tools",
+         "flow_runs", "history", "how_calculated", "list_agents", "list_flows", "list_reports", "list_tools", "load_runs",
          "ml_models", "preview_steps", "readiness", "report_snapshot", "rls_rules", "run_tool", "semantic_model",
          "semantic_query", "test_agent", "test_tool", "visual_data"}
 ALLOWED = READS | WRITES | READS_ONLY  # the page's actions; every other one is ABI's app's
@@ -569,7 +569,8 @@ function exportCard(rep,filters,curPage){const c=card('Export',`rendered by ABI 
   if(sel.length===1)rep.pages.find(p=>p.id===sel[0].value).visuals.forEach(v=>vs.append(new Option(v.title||v.id,v.id)))};pg.onchange=fill;fill();
  const al=h('label','chk');al.append(ap,h('span','','with the filters set now'));
  c.append(h('label','l','Format'),fm,h('label','l','Pages'),pg,h('label','l','Only one view (one page selected)'),vs,al);
- act(c,'Download',async()=>{const pages=[...pg.querySelectorAll('input:checked')].map(x=>x.value);if(!pages.length)return 'Pick at least one page.';
+ act(c,'Download',async m=>{const pages=[...pg.querySelectorAll('input:checked')].map(x=>x.value);if(!pages.length)return 'Pick at least one page.';
+  say(m,'Rendering… ABI draws two exports at a time, so this one may wait for a turn.');  // M3.2: a third waits, never fails
   const one=pages.length===1,body={report:rep.id,format:fm.value,filters:ap.checked?filters():[],...(one?{page:pages[0],visual:vs.value||null}:{pages})};
   const get=async b=>{const r=await fetch('/report/export',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b)});if(!r.ok)throw new Error((await r.json()).error);return r.blob()};
   const save=(blob,name)=>{const a=h('a');a.href=URL.createObjectURL(blob);a.download=name;a.click()};
@@ -735,6 +736,11 @@ async function upload(table,file,sheet){const id=[...crypto.getRandomValues(new 
  for(let o=0;;o+=N){const last=o+N>=file.size,data=await new Promise(res=>{const fr=new FileReader();fr.onload=()=>res(fr.result.split(',')[1]||'');fr.readAsDataURL(file.slice(o,o+N))});  // 24 MB pieces: under the 64 MB request limit
   r=await fetch('/upload',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({table,name:file.name,data,id,last,sheet})}).then(x=>x.json());
   if(r.error)throw new Error(r.error);if(last)return r.result}}
+// 1.2 M3.2: a big load answers at once with its run (status queued) and loads on the server: queued, then rows so far,
+// then done or failed with ABI's error, in the card's message (each check is a short call; the page follows when it is in)
+async function loaded(r,m,text){if(!r||r.status!=='queued')return text;
+ for(let x=r;;){say(m,x.status==='queued'?`${x.table}: queued, it starts when the loads ahead of it are done…`:`${x.table}: loading, about ${fmt(x.rows||0)} rows so far…`);
+  await wait(2000);x=(await api('load_runs',{run:r.run})).runs[0];if(x.status==='done')return `${text} ${fmt(x.rows)} rows.`;if(x.status==='failed')throw new Error(x.error)}}
 function sources(box){const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),qr=Object.fromEntries((q.rows||[]).map(r=>[r[ix('table')],r]));
  const g=h('div','cards'),bar=h('div','row bar top');box.append(bar,g);
  const add=()=>{const c=card('Add a source','a file you upload (CSV, TSV, Excel, JSON, Parquet, Avro), or a file or folder on S3 (also Delta and Iceberg tables)');c.classList.add('editor');
@@ -748,13 +754,13 @@ function sources(box){const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),qr=
   c.append(h('label','l','Table'),t,h('label','l','Upload a file'),file,h('label','l','Excel sheet'),sh,h('label','l','Or a location: an S3 file or folder (a glob, or a Delta or Iceberg table), or an https:// file'),loc,
    h('label','l','Format'),fm,h('label','l','Region'),rg,h('label','l','S3 endpoint'),ep,tl,
    h('label','l','Keys (workspace owners; stored encrypted for this bucket only, never shown again)'),ki,ks);
-  act(c,'Add source',async()=>{if(!t.value)throw new Error('Name the table first.');const sheet=sh.value.trim();
-   if(file.files[0]){await upload(t.value,file.files[0],sheet);return `Uploaded and loaded into ${t.value}.`}
+  act(c,'Add source',async m=>{if(!t.value)throw new Error('Name the table first.');const sheet=sh.value.trim();
+   if(file.files[0])return loaded(await upload(t.value,file.files[0],sheet),m,`Uploaded and loaded into ${t.value}.`);
    if(!loc.value)throw new Error('Choose a file, or give a location like s3://bucket/folder/*.csv.');
    const s3=loc.value.startsWith('s3://')?{region:rg.value.trim()||'us-east-1',...(ep.value?{endpoint:ep.value.trim(),url_style:'path'}:{}),...(tls.checked?{}:{use_ssl:false})}:null;
    if(s3&&(ki.value||ks.value)){const r=await fetch('/s3key',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({table:t.value,location:loc.value,...s3,key_id:ki.value,secret:ks.value})}).then(x=>x.json());
     ks.value='';if(r.error)throw new Error(r.error);Object.assign(s3,r.result)}
-   await api('add_data',{table:t.value,location:loc.value,...(fm.value?{format:fm.value}:{}),...(s3?{s3}:{}),...(sheet?{xlsx:{sheet}}:{})});return `Loaded ${t.value}.`},1);return c};
+   return loaded(await api('add_data',{table:t.value,location:loc.value,...(fm.value?{format:fm.value}:{}),...(s3?{s3}:{}),...(sheet?{xlsx:{sheet}}:{})}),m,`Loaded ${t.value}.`)},1);return c};
  // a Postgres or MySQL table: the login goes to the app's admin endpoint only, which stores it as two ABI secrets bound to
  // this host; the source names them (${secret:…}), so neither the page, the agent nor Git ever holds it
  const addDb=()=>{const c=card('Add a database table','a Postgres or MySQL table; it reloads daily, appending past an increasing column if you name one');c.classList.add('editor');
@@ -764,18 +770,18 @@ function sources(box){const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),qr=
   tb.placeholder='table';us.placeholder='user';us.autocomplete='off';pw.type='password';pw.placeholder='password';pw.autocomplete='new-password';inc.placeholder='e.g. id or updated_at (blank: the auto-increment key, if any)';
   c.append(h('label','l','Table id'),t,h('label','l','Database'),kd,h('label','l','Host'),ho,h('label','l','Port'),po,h('label','l','Database name'),db,h('label','l','Schema'),sc,h('label','l','Table'),tb,
    h('label','l','Login (workspace owners; stored encrypted for this host only, never shown again)'),us,pw,h('label','l','Increasing column (optional)'),inc);
-  act(c,'Add table',async()=>{if(!t.value||!ho.value.trim()||!db.value.trim()||!tb.value.trim())throw new Error('A table id, the host, the database name and the table.');
+  act(c,'Add table',async m=>{if(!t.value||!ho.value.trim()||!db.value.trim()||!tb.value.trim())throw new Error('A table id, the host, the database name and the table.');
    const r=await fetch('/admin/dbkey',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({table:t.value,host:ho.value.trim(),user:us.value,password:pw.value})}).then(x=>x.json());
    pw.value='';if(r.error)throw new Error(r.error);const col=inc.value.trim();
-   await api('add_data',{table:t.value,location:`${kd.value}://${ho.value.trim()}:${po.value.trim()||po.placeholder}/${db.value.trim()}`,
-    database:{table:(sc.value.trim()?sc.value.trim()+'.':'')+tb.value.trim(),...r.result,...(col?{incremental:col}:{})}});return `Loaded ${t.value}.`},1);return c};
+   return loaded(await api('add_data',{table:t.value,location:`${kd.value}://${ho.value.trim()}:${po.value.trim()||po.placeholder}/${db.value.trim()}`,
+    database:{table:(sc.value.trim()?sc.value.trim()+'.':'')+tb.value.trim(),...r.result,...(col?{incremental:col}:{})}}),m,`Loaded ${t.value}.`)},1);return c};
  bar.append(btn('Add source',()=>g.prepend(add()),1),...((window.ME||{admin:true}).admin?[btn('Add a database table',()=>g.prepend(addDb()))]:[]));  // its login is a workspace owner's (/admin/dbkey)
  if(!D.sources.length)box.append(h('p','empty','No sources yet: upload a file, add a folder on S3 or a database table.'));
  D.sources.forEach(id=>{const sp=D.source_specs?.[id]||{},r=qr[id],c=card(id,`sources/${id}.json`),k=h('div','kv');
   [['location',sp.location||'—'],['format',sp.format||'from the file'],['refresh',sp.refresh||(r?r[ix('refresh')]:'—')],['rows',r?fmt(r[ix('rows')]):'—'],['last load',r?cell(r[ix('last_load')]):'—']]
    .forEach(([a,b])=>k.append(h('b','',a),h('span','',String(b))));c.append(k);
   const p=r?(r[ix('problems')]||[]):[];if(p.length)c.append(h('div','bad',p.join('; ')));
-  act(c,'Reload '+id,async()=>{await api('refresh',{table:id});return 'Reloaded: a new snapshot.'});act(c,'Delete',async()=>{await api('delete_source',{source:id});return 'Deleted.'});g.append(c)})}
+  act(c,'Reload '+id,async m=>loaded(await api('refresh',{table:id}),m,'Reloaded: a new snapshot.'));act(c,'Delete',async()=>{await api('delete_source',{source:id});return 'Deleted.'});g.append(c)})}
 // New staged table: a source, steps picked from a menu (each a small JSON line, filled with the source's columns), a
 // preview of the rows, then set_steps and hidden (staged tables stay out of the model); or the cleaning in words, to the agent
 const STEP_KINDS=[['select','Keep columns',c=>({columns:c.slice(0,3)})],['rename','Rename columns',c=>({columns:{[c[0]]:c[0]+'_new'}})],
@@ -795,7 +801,7 @@ function newStaged(box){if(box.querySelector('.stform'))return;const c=card('New
  src.onchange=()=>{cols=[];out.innerHTML='';look().catch(()=>{})};how.rows=2;how.placeholder='or in words: e.g. keep the US rows, make trending_date a date, drop duplicates by video and day';
  c.append(h('label','l','Source'),src,h('label','l','Staged table name'),nm,h('label','l','Steps'),list,add);
  act(c,'Preview',async()=>{await look();return `${cols.length} columns; the first rows are below.`});
- act(c,'Create',async()=>{await api('set_steps',{table:name(),steps:steps()});await api('set_table',{table:name(),hidden:true});return `Created ${name()}: staged and hidden from the model. It appears in this list in a few seconds.`},1);
+ act(c,'Create',async m=>{await loaded(await api('set_steps',{table:name(),steps:steps()}),m,'');await api('set_table',{table:name(),hidden:true});return `Created ${name()}: staged and hidden from the model. It appears in this list in a few seconds.`},1);
  c.append(h('label','l','Or ask the agent'),how);act(c,'Ask the agent instead',async()=>{openChat(true);inp.value=`Stage the source ${src.value} as a hidden silver table ${name()}: ${how.value.trim()||'clean it for the model'}`;sendChat();return 'Asked: follow it in the chat.'});
  c.append(out);(box.querySelector('.pghead')||box).after(c);look().catch(()=>{})}
 function stagedPage(box){const sv=(D.layers||[]).filter(t=>t.layer==='silver').sort((a,b)=>a.table.localeCompare(b.table));
@@ -811,7 +817,7 @@ function tablesStepsEditor(box,t,steps){const c=card(`Steps of ${t}`,`tables/${t
  const ta=h('textarea','f ed code');ta.value=JSON.stringify(steps||[],null,2);ta.rows=Math.min(24,ta.value.split('\n').length+1);const out=h('div');c.append(ta);
  const parse=()=>{try{return JSON.parse(ta.value)}catch(e){throw new Error('Not valid JSON: '+e.message)}};
  act(c,'Preview',async()=>{rows(out,await api('preview_steps',{steps:parse()}))});
- act(c,'Save steps',async()=>{await api('set_steps',{table:t,steps:parse()});return 'Saved and loaded through the steps.'},1);c.append(out);box.append(c)}
+ act(c,'Save steps',async m=>loaded(await api('set_steps',{table:t,steps:parse()}),m,'Saved and loaded through the steps.'),1);c.append(out);box.append(c)}
 function tablesPage(box){
  const g=h('div','cards'),bar=h('div','row bar top');box.append(bar,g);
  const stepsEd=(t,steps,isNew)=>{const c=card(isNew?'New table (transform)':`Steps of ${t}`,isNew?'starts from a loaded source or table':`tables/${t}.json`);c.classList.add('editor');
@@ -820,7 +826,7 @@ function tablesPage(box){
   const out=h('div');if(isNew)c.append(h('label','l','Table'),id);c.append(h('label','l','Steps (JSON)'),ta);
   const parse=()=>{try{return JSON.parse(ta.value)}catch(e){throw new Error('Not valid JSON: '+e.message)}};
   act(c,'Preview',async()=>{rows(out,await api('preview_steps',{steps:parse()}))});
-  act(c,'Save steps',async()=>{await api('set_steps',{table:id.value,steps:parse()});return 'Saved and loaded through the steps.'},1);c.append(out);return c};
+  act(c,'Save steps',async m=>loaded(await api('set_steps',{table:id.value,steps:parse()}),m,'Saved and loaded through the steps.'),1);c.append(out);return c};
  bar.append(btn('New table',()=>g.prepend(stepsEd('',null,true)),1));
  const T=D.model?.tables||{};if(!Object.keys(T).length)box.append(h('p','empty','No tables yet: add a source first.'));
  Object.entries(T).forEach(([t,v])=>{const c=card(t);c.querySelector('h3').append(pinBtn({kind:'table',ref:t,title:t}));const kind=h('select','f ed');['fact','dimension'].forEach(x=>kind.append(new Option(x,x)));kind.value=v.kind||'fact';
@@ -1307,6 +1313,7 @@ $('#chat .stop').onclick=()=>fetch('/chat/stop',{method:'POST',headers:{'X-Abi-A
   else if(e.type==='step'){if(!steps){steps=h('div','m steps');log.append(steps)}const last=[...steps.children].reverse().find(x=>x.dataset.t===e.tool&&x.dataset.s==='run');
    if(e.state==='run'||!last){const l=h('div','',`${e.state==='run'?'…':e.state==='ok'?'✓':'✗'} ${stepName(e.tool)}`);l.dataset.t=e.tool;l.dataset.s=e.state;steps.append(l)}
    else{last.textContent=`${e.state==='ok'?'✓':'✗'} ${stepName(e.tool)}`;last.dataset.s=e.state;last.className=e.state==='ok'?'':'bad'}log.scrollTop=log.scrollHeight}
+  else if(e.type==='progress'){const r=steps&&[...steps.children].reverse().find(x=>x.dataset.s==='run');if(r)r.textContent=`… ${stepName(r.dataset.t)}${e.text?' · '+e.text:''}`}  // a big load the agent waits for (M3.2)
   else if(e.type==='said')bubble('me',e.text)
   else if(e.type==='answer'){steps=null;if(e.model){MODEL=e.model;ctx()}bubble('ai',e.text);chats();if(!chatBox.classList.contains('open'))toast('The agent answered')}
   else if(e.type==='ask'){const yes=await ask({message:e.title||'ABI asks for your confirmation',preview:e.message});bubble('sys',yes?'You confirmed.':'You declined.');
@@ -1518,13 +1525,11 @@ def publish_roles(project: str, pub: str) -> None:
 
 
 def published_now(project: str, pub: str, head: str) -> dict:
+    """After the import into the copy: its layouts, roles and record. No reload here (1.1 reloaded every source, 40 s at
+    7.4M orders even when only a measure changed): the import forgets the fingerprint of each table it changed, so ABI's
+    worker loads those within its minute (IN-6), and `watch` refreshes the pages when the copy's data moves (M3.2)."""
     publish_layouts(project)
     publish_roles(project, pub)
-    for src in sorted((abi.folder(project) / "sources").glob("*.json")):  # the import writes definitions; load the data
-        try:
-            abi.call("refresh", project=pub, table=src.stem)
-        except abi.ActionError:
-            pass  # reported by the published copy's data quality
     info = {"commit": head, "at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "project": pub}
     f = abi.folder(project).parent / "_views" / project / "published.json"
     f.parent.mkdir(parents=True, exist_ok=True)
@@ -1639,7 +1644,7 @@ class Hub:
 
     def emit(self, event: dict, here: bool = True) -> None:
         line = f"data: {json.dumps(event, default=str)}\n\n".encode()
-        for h in ([self] if here else []) + (self.watchers() if event.get("type") in ("step", "answer", "busy", "said") else []):
+        for h in ([self] if here else []) + (self.watchers() if event.get("type") in ("step", "progress", "answer", "busy", "said") else []):
             with h.lock:
                 for q in list(h.clients):
                     q.append(line)
@@ -1743,6 +1748,8 @@ class Hub:
                 self.emit({"type": "ask", "id": e["id"], "title": e.get("title"), "message": e.get("message")})
             elif t == "extension_ui_request" and e.get("method") in ("select", "input", "editor"):
                 self.send({"type": "extension_ui_response", "id": e["id"], "cancelled": True})
+            elif t == "extension_ui_request" and e.get("method") == "setStatus" and e.get("statusKey") == "abi-load":
+                self.emit({"type": "progress", "text": e.get("statusText") or ""})  # a big load's run (M3.2), on its step
             elif t == "tool_execution_start":
                 started[e["toolCallId"]] = e["toolName"]
                 self.emit({"type": "step", "tool": e["toolName"].removeprefix("mcp__abi__"), "state": "run"})
@@ -2649,7 +2656,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                 ext, sheet = f.suffix.lower(), str(body.get("sheet") or "")
                 try:
                     out = {"result": abi.upload(project, str(body.get("table")), f, abi.csv_options(f) if ext in (".csv", ".tsv") else None,
-                                                {"sheet": sheet} if sheet and ext == ".xlsx" else None)}
+                                                {"sheet": sheet} if sheet and ext == ".xlsx" else None, wait=False)}  # the page shows a big file's run
                 except abi.ActionError as e:
                     out = {"error": str(e.body.get("message") if isinstance(e.body, dict) else e.body)}
                 finally:
@@ -2850,7 +2857,8 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                 return self.reply(403, json.dumps({"error": "Viewer mode is read-only. Switch to Developer in the top bar to change things."}).encode())
             body = {**body, "project": hub.current()}  # Viewer reads the published copy
             out = run(action, body, None)
-            if "result" in out and action in WRITES:
+            if "result" in out and (action in WRITES or action == "load_runs" and body.get("run")  # the page saw a big load land
+                                    and out["result"]["runs"][0]["status"] == "done"):
                 changed(project)
             self.reply(200, json.dumps(out, default=str).encode())
 
@@ -3085,7 +3093,9 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                         abi.logout(gone["token"])
                 for p in {h.project for h in HUBS.values()} | {default}:
                     head = ((abi.call("history", project=p).get("commits") or [{}])[0].get("id"),
-                            len((abi.call("changes", project=p) or {}).get("files") or []))
+                            len((abi.call("changes", project=p) or {}).get("files") or []),
+                            # and the data (M3.2): the worker loads the published copy after a Publish, and files that changed
+                            *(abi.call("list_snapshots", project=x, limit=1)["rows"][0][0] for x in (p, pub_id(p)) if abi.folder(x)))
                     if p in last and head != last[p]:
                         changed(p)
                     last[p] = head

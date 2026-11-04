@@ -22,7 +22,10 @@ import mimetypes
 import os
 import re
 import secrets
+import signal
 import ssl
+import subprocess
+import threading
 import time
 import uuid
 import zipfile
@@ -261,11 +264,39 @@ def link(snapshot: str | None) -> str | None:
     return snapshot and "/api/artifacts/" + snapshot.removeprefix("artifact:")
 
 
+RENDERS = threading.BoundedSemaphore(2)  # M3.2: Chromium renders at once in a process (each takes hundreds of MB)
+RENDER_TIMEOUT = float(os.environ.get("ABI_RENDER_TIMEOUT", "120"))  # s: a render still drawing then loses its Chromium
+
+
 def render_snapshot(user: User, project: str, report: str, pages: list[str], visual: str | None, filters: list[dict],
                     fmt: str = "png") -> str:
     """Transport (T-05.2): render the frontend print view of report pages (in order, one sheet each, MULTI-EXPORT.1)
     or one visual with `filters` as PNG, PDF or PPTX (MULTI-EXPORT.2: a slide per page) in one headless Chromium, signed in as `user` (FL-6: a flow's owner)
-    through a session that exists only for this render. The page reads data only through visual_data (principle 4). Returns `artifact:<project>/<uuid>.<ext>`."""
+    through a session that exists only for this render. The page reads data only through visual_data (principle 4). Returns `artifact:<project>/<uuid>.<ext>`.
+    M3.2: two renders at a time; a third waits for a free one (its session is made after), and one past
+    ABI_RENDER_TIMEOUT has its Chromium killed (504)."""
+    with RENDERS:
+        return _render(user, project, report, pages, visual, filters, fmt)
+
+
+def _deadline(mark: str, late: list) -> threading.Timer:
+    """M3.2: at ABI_RENDER_TIMEOUT kill the render's Chromium: the process group Playwright starts it in, found by its
+    `mark` argument, so the call under way fails at once (a killed Playwright driver would hang the next call)."""
+    def kill():
+        late.append(True)
+        try:
+            for pid in subprocess.run(["pgrep", "-f", "--", mark], capture_output=True, text=True).stdout.split():
+                os.killpg(int(pid), signal.SIGKILL)
+        except OSError:  # gone meanwhile (or no pgrep: Playwright's own timeouts only)
+            pass
+    timer = threading.Timer(RENDER_TIMEOUT, kill)
+    timer.daemon = True
+    timer.start()
+    return timer
+
+
+def _render(user: User, project: str, report: str, pages: list[str], visual: str | None, filters: list[dict],
+            fmt: str) -> str:
     notes = fmt == "pptx" and _notes(user, project, report, pages, visual, filters)  # before the session exists
     token = secrets.token_urlsafe(32)
     with db.connect() as conn:  # committed now: Chromium's requests use other connections
@@ -275,9 +306,11 @@ def render_snapshot(user: User, project: str, report: str, pages: list[str], vis
                      " now() - interval '30 days' + interval '5 minutes')", [security._token_hash(token), user.id])
     q = urlencode({"print": report, "project": project, "pages": ",".join(pages), **({"visual": visual} if visual else {}),
                    "filters": json.dumps(filters)})
+    mark, late = f"--abi-render={uuid.uuid4().hex}", []
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(args=["--disable-dev-shm-usage"])  # containers have a 64 MB /dev/shm
+            browser = p.chromium.launch(args=["--disable-dev-shm-usage", mark])  # containers have a 64 MB /dev/shm
+            timer = _deadline(mark, late)
             try:
                 ctx = browser.new_context(viewport={"width": 1280, "height": 800})
                 ctx.add_init_script(f"sessionStorage.setItem('abi.token', {json.dumps(token)})")  # never in a URL
@@ -305,8 +338,11 @@ def render_snapshot(user: User, project: str, report: str, pages: list[str], vis
                 else:
                     pg.screenshot(path=path, full_page=True)
             finally:
+                timer.cancel()
                 browser.close()
     except PlaywrightError as e:  # 502: a flow retries it (FL-4)
+        if late:
+            raise ActionFailed(504, f"Snapshot not rendered within {RENDER_TIMEOUT:g} s (ABI_RENDER_TIMEOUT).") from None
         raise ActionFailed(502, f"Snapshot not rendered: {e.message.splitlines()[0]}")
     finally:
         with db.connect() as conn:
@@ -673,9 +709,16 @@ class TableRef(storage.ProjectRef):
 
 @action(Role.editor)
 def refresh(conn, user: User, args: TableRef) -> dict:
-    """Reloads a table from its source now (a new snapshot), then the tables that read it. On failure the previous snapshot stays live and the notification feed says why."""
-    if args.table not in transform.tables(args.project) and not (git.path(args.project) / "sources" / f"{args.table}.json").exists():
+    """Reloads a table from its source now (a new snapshot), then the tables that read it. On failure the previous snapshot stays live and the notification feed says why. A big table (millions of rows) answers at once with a run ID and reloads in the background: load_runs says when it is done."""
+    if args.table not in (steps := transform.tables(args.project)) and not (git.path(args.project) / "sources" / f"{args.table}.json").exists():
         raise ActionFailed(404, f"No table '{args.table}' with a source or steps in project '{args.project}'.")
+    try:  # M3.2: a source that fails the probe fails below, as in 1.1 (502, the feed says why)
+        rows = ingest._big(conn, ingest._source(args.project, steps[args.table][0].source if args.table in steps else args.table,
+                                                args.table))
+    except ActionFailed:
+        rows = None
+    if rows:
+        return ingest.queue(conn, user, "refresh", args, rows)
     if failed := ingest.refresh(conn, args.project, set(), user.name, reload={args.table}):
         # 502, the source failed: a flow retries it (FL-4), the file may be back
         raise ActionFailed(502, "Refresh failed: " + " ".join(f"'{t}': {e}" for t, e in failed.items()))

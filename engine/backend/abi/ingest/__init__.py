@@ -11,17 +11,23 @@ Postgres `sources` table keeps only runtime state per loaded table (the files' f
 with steps (tables/<t>.json, `set_steps`) loads its source's location into raw.<t> and builds
 model.<t> with `transform.compile`. Every load refreshes what reads the table, in dependency order
 (`refresh`, TR-4).
+
+M3.2: a load past ABI_INLINE_ROWS rows (`_big`, checked as the load checks its source) answers at once with a run ID;
+the heavy worker runs the same action inline (`job`) and `load_runs` tells its caller how far it got.
 """
 
 import contextlib
 import fcntl
+import functools
 import json
 import logging
 import os
 import re
 import shutil
+import threading
 import time
 import uuid
+from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from graphlib import TopologicalSorter
 from pathlib import Path as FsPath
@@ -34,6 +40,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Path, Request, Re
 from fastapi.concurrency import run_in_threadpool
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
+from psycopg.types.json import Jsonb
 from pydantic import (
     AfterValidator,
     BaseModel,
@@ -43,7 +50,7 @@ from pydantic import (
     ValidationError,
 )
 
-from abi import actions, db, flows, ml, semantic, storage, transform, writeback
+from abi import actions, db, flows, ml, security, semantic, storage, transform, writeback
 from abi.actions import ActionFailed, action, audit, current_user, production_refusal
 from abi.agent import notify_change
 from abi.project import SCHEMA, SCHEMAS, git, imports
@@ -61,6 +68,11 @@ ALIASES = {"tsv": "csv", "ndjson": "json", "jsonl": "json", "feather": "arrow", 
            "db": "sqlite"}  # read_csv/read_json auto-detect the rest
 FOLDERS = {"_delta_log": "delta", "metadata": "iceberg"}  # IN-4: a server folder holding this subfolder
 SECRET_ONLY = rf"^{credentials.REF}$"
+# M3.2: a load of more rows than this (about 20 s at the 220k rows/s pve1 loaded at, M0) runs as a heavy job. A text
+# file's rows are guessed from its bytes; a guess too high only makes a job of a load that could have run inline
+INLINE_ROWS = int(os.environ.get("ABI_INLINE_ROWS", "4400000"))
+ROW_BYTES = 32
+RUN: ContextVar[dict | None] = ContextVar("load_run", default=None)  # the load job this thread runs (`job`): its table, cursor
 SOURCE_SCHEMA = Draft202012Validator(json.loads((SCHEMAS / "source.json").read_text()))
 
 
@@ -204,7 +216,7 @@ def readable(conn, user: User, project: str, location: str) -> None:
 
 @action(Role.editor, definition=True)
 def add_data(conn, user: User, args: Source) -> dict:
-    """Loads a file, folder, database or HTTP API into the project's table as a new snapshot, replacing that table's data, saves the source as sources/<table>.json, then refreshes the tables that read it. A REST/JSON or CSV API is an https `location` (the endpoint, fixed query parameters in `api.query`) with an `api` object: `records` is the JSON pointer to the array of records (e.g. /data/items), `pagination` how to get the next page (page or offset number in `param`, a cursor at `pointer` sent as `param`, or a next link at `pointer` or in the Link header), `auth` takes only ${secret:NAME} references (names from list_secrets, never a typed key), `columns` maps and types fields, `incremental` {field, param} sends the largest loaded value of `field` to load only new records, and `every_hours` sets the schedule (default daily). Loading from a host the project hasn't loaded from yet waits for the person's Confirm click."""
+    """Loads a file, folder, database or HTTP API into the project's table as a new snapshot, replacing that table's data, saves the source as sources/<table>.json, then refreshes the tables that read it. A REST/JSON or CSV API is an https `location` (the endpoint, fixed query parameters in `api.query`) with an `api` object: `records` is the JSON pointer to the array of records (e.g. /data/items), `pagination` how to get the next page (page or offset number in `param`, a cursor at `pointer` sent as `param`, or a next link at `pointer` or in the Link header), `auth` takes only ${secret:NAME} references (names from list_secrets, never a typed key), `columns` maps and types fields, `incremental` {field, param} sends the largest loaded value of `field` to load only new records, and `every_hours` sets the schedule (default daily). Loading from a host the project hasn't loaded from yet waits for the person's Confirm click. A big load (millions of rows) answers at once with a run ID and loads in the background: load_runs says when it is in."""
     if args.table in transform.inputs(args.project):  # D-20: an input table's name is reserved; a load would drop its edits
         raise ActionFailed(409, f"'{args.table}' is an input table (its rows are edits), so no data loads into it. Load"
                                 " under another name, or delete the input table first.")
@@ -221,6 +233,8 @@ def add_data(conn, user: User, args: Source) -> dict:
 
         builtin._first_send(conn, args.project, targets, {"hosts": sorted(t[7:] for t in targets), "source": args.spec()})
     _lock(conn, args.project, args.table)  # before the file: a worker check seeing it waits for this load (IN-6)
+    if rows := _big(conn, args):  # M3.2: no file yet; the job writes it as this call would
+        return queue(conn, user, "add_data", args, rows)
     _write(args)  # a failed load rolls the file back (git.change)
     snap = _load(conn, args, user.name)
     conn.commit()  # the load is in; downstream loads use their own connections and must see this row (and its secret binding)
@@ -235,7 +249,7 @@ class TableSteps(storage.ProjectRef):
 
 @action(Role.editor, definition=True)
 def set_steps(conn, user: User, args: TableSteps) -> dict:
-    """Saves a table's transform steps (the first one names a loaded source), loads the table through them, then refreshes the tables that read it. On an input table (schema-first, declared columns) the steps map a source onto it: they must output exactly its declared column names with values that cast to the declared types; its hand-entered rows stay as edits."""
+    """Saves a table's transform steps (the first one names a loaded source), loads the table through them, then refreshes the tables that read it. On an input table (schema-first, declared columns) the steps map a source onto it: they must output exactly its declared column names with values that cast to the declared types; its hand-entered rows stay as edits. A big table answers at once with a run ID and loads in the background (load_runs)."""
     t = args.table
     try:
         transform.compile(t, args.steps)
@@ -260,6 +274,8 @@ def set_steps(conn, user: User, args: TableSteps) -> dict:
     # ponytail: the load and downstream refresh run inside git.change's repo lock, so a long load blocks the project's
     # other definition actions; refresh after the change (and roll back the file on failure) if that starts to hurt
     _lock(conn, args.project, t)  # as add_data
+    if rows := _big(conn, src):
+        return queue(conn, user, "set_steps", args, rows)
     write(old.get("columns", []))  # _load builds model.<t> from the file's steps
     snap = _load(conn, src, user.name, declared=declared)
     write(semantic.columns(args.project, t))
@@ -464,10 +480,117 @@ def _lock(conn, project: str, table: str, wait: bool = True) -> bool:
     return conn.execute(f"SELECT {f}(hashtext(%s)) AS ok", [f"load:{project}/{table}"]).fetchone()["ok"]
 
 
+def _big(conn, src: Source) -> int | None:
+    """M3.2: the rows a load of `src` copies when they are more than ABI_INLINE_ROWS, else None (it loads inline, as in
+    1.1; so do API and live sources, and every load in the worker). The probe checks the source as the load would, so a
+    wrong path, login or format fails now."""
+    if RUN.get() or flows.IN_FLOW.get() or src.api or src.location.split("://", 1)[0].lower() in live.SCHEMES:
+        return None
+    rows = _load(conn, src, "probe", probe=True)
+    return rows if rows and rows > INLINE_ROWS else None
+
+
+def queue(conn, user: User, name: str, args: storage.ProjectRef, rows: int) -> dict:
+    """M3.2: action `name` with `args` as a heavy job (`job`) for `user`, through the same door (VIA); the run ID now."""
+    run = str(uuid.uuid4())
+    conn.execute("INSERT INTO load_runs (id, project, table_name, action, payload, via, user_id, estimate)"
+                 " VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                 [run, args.project, args.table, name, Jsonb(args.model_dump(mode="json")), actions.VIA.get(), user.id, rows])
+    conn.commit()  # before the worker picks it up; the table's load lock goes with it (the job takes its own)
+    from abi import worker  # not at top: the worker imports every action module
+
+    try:
+        worker.defer(worker.load, run=run)
+    except Exception:
+        conn.execute("DELETE FROM load_runs WHERE id = %s", [run])
+        raise
+    return {"run": run, "table": args.table, "status": "queued", "columns": ["run", "table", "status"],
+            "rows": [[run, args.table, "queued"]], "message": f"Loading '{args.table}' in the background: load_runs with"
+            " this run says how far it got and when it is in. Don't load it again meanwhile."}
+
+
+def job(run: str) -> None:
+    """M3.2, the heavy worker's load (abi.worker.load): the queued action, inline, as the person who asked (their role
+    checked again) and through their door, so it lands as the inline call would: one Git change, one snapshot, the
+    quality scan and copies, then what reads the table. Rows so far, the outcome and its error go to load_runs."""
+    with db.connect() as conn:
+        r = conn.execute("UPDATE load_runs SET status = 'running', started = now() WHERE id = %s AND status = 'queued'"
+                         " RETURNING project, table_name, action, payload, via, user_id, estimate", [run]).fetchone()
+        u = r and security.user(conn, r["user_id"])
+    if r is None:
+        return
+    box, done = {"table": r["table_name"], "cur": None}, threading.Event()
+    threading.Thread(target=_progress, args=(run, box, r["estimate"], done), daemon=True).start()
+    held, snap, error, rows = RUN.set(box), None, None, None
+    try:
+        if u is None:
+            raise ActionFailed(400, "The person who asked for this load no longer has an account.")
+        snap = actions.run(r["action"], r["payload"], u, r["via"]).get("snapshot")
+    except ActionFailed as e:
+        error = str(e)
+    except Exception as e:  # noqa: BLE001 - any failure is the run's; its text (paths, SQL) to the server log only
+        logging.getLogger(__name__).error("Load run %s failed: %s", run, credentials.log_text(e))
+        error = f"Loading failed ({type(e).__name__}); the details are in the server log."
+    finally:
+        RUN.reset(held)
+        done.set()
+    with contextlib.suppress(Exception):  # the outcome stands either way
+        if error is None:
+            rows = semantic.execute(r["project"], f"SELECT count(*) FROM {_q(r['table_name'])}", {"load_run": run})[0][0]
+    with contextlib.suppress(OSError):
+        if r["action"] == "add_data":
+            _settled(r["payload"]["location"], error is None)
+    with db.connect() as conn:  # the definition (it may name secrets) isn't kept past the run
+        conn.execute("UPDATE load_runs SET status = %s, error = %s, snapshot = %s, rows = coalesce(%s, rows),"
+                     " finished = now(), payload = NULL WHERE id = %s", ["failed" if error else "done", error, snap, rows, run])
+
+
+PROGRESS_S = 2  # how often a load job writes its rows so far
+
+
+def _progress(run: str, box: dict, estimate: int, done: threading.Event) -> None:
+    """M3.2: a running load's rows so far, every PROGRESS_S: its query's progress (DuckDB) of the probe's estimate."""
+    best = 0
+    while not done.wait(PROGRESS_S):
+        with contextlib.suppress(duckdb.Error):
+            if box["cur"] and (n := int(estimate * min(box["cur"].query_progress(), 100) / 100)) > best:
+                best = n
+                with db.connect() as conn:
+                    conn.execute("UPDATE load_runs SET rows = %s WHERE id = %s AND status = 'running'", [n, run])
+
+
+def _watched(box: dict, hook, cur) -> None:
+    """`storage.refresh`'s hook in a load job: the job reads this load's progress (DuckDB prints none)."""
+    cur.execute("SET enable_progress_bar = true")
+    cur.execute("SET enable_progress_bar_print = false")
+    box["cur"] = cur
+    if hook:
+        hook(cur)
+
+
+class RunsOf(storage.ProjectRef):
+    run: str | None = Field(None, pattern=r"^[0-9a-f-]{36}$", description="the run ID add_data, set_steps or refresh"
+                                                                          " answered; omitted: your latest runs")
+
+
+@action(Role.viewer)
+def load_runs(conn, user: User, args: RunsOf) -> dict:
+    """Your loads that run in the background: add_data, set_steps or refresh of a big table answers at once with a run ID and status queued, and the server loads it. Each run: table, status (queued, running, done or failed), rows (while it runs: about how many so far, from the source's size; when done: the table's rows), the snapshot it made, its error, when it was asked and finished; newest first. Wait a few seconds between calls. Only your own runs."""
+    cols = ["run", "table", "action", "status", "rows", "snapshot", "error", "created", "finished"]
+    runs = conn.execute(
+        'SELECT id::text AS run, table_name AS "table", action, status, rows, snapshot, error, created, finished'
+        " FROM load_runs WHERE project = %s AND user_id = %s AND (%s::uuid IS NULL OR id = %s::uuid)"
+        " ORDER BY created DESC LIMIT 20", [args.project, user.id, args.run, args.run]).fetchall()
+    if args.run and not runs:  # someone else's run doesn't exist for you
+        raise ActionFailed(404, f"No load run '{args.run}' of yours in project '{args.project}'.")
+    return {"runs": runs, "columns": cols, "rows": [[r[c] for c in cols] for r in runs]}
+
+
 def _load(conn, src: Source, author: str, unless: str | None = None, used: dict | None = None, probe: bool = False,
           hook=None, declared: list[dict] | None = None) -> int | None:
     """Load `src`; skip (return None) when its files' fingerprint equals `unless`. `used` collects the resolved secrets.
-    `probe`: a database source only connects and checks `incremental`, then returns None. `hook`: `storage.refresh`'s."""
+    `probe`: connect (a database also checks `incremental`) or list the files and return the rows a full load would
+    copy (M3.2), loading nothing. `hook`: `storage.refresh`'s."""
     if not probe:
         _lock(conn, src.project, src.table)
     used = {} if used is None else used
@@ -597,10 +720,14 @@ def _load(conn, src: Source, author: str, unless: str | None = None, used: dict 
                         "file": sid, "path": "$.database.incremental", "error": bad + ".",
                         "fix": f"Name a numeric, date/time or text column of {src.database.table}, or remove `incremental`."}])
             if probe:
-                return None
+                return _db_rows(con, kind, name, m[4], schema, table)
             # IN-6: append past the monotonic column, if there is one
             if same and not bad and (col := col or _monotonic(con, kind, name, m[4], schema, table)):
                 append = lambda cur: _append(cur, raw_sql, src.table, col)
+        if probe:  # M3.2: what a full load copies (`_big`); nothing loaded
+            return None if src.api else _file_rows(con, fmt, loc)
+        if (box := RUN.get()) and box["table"] == src.table:  # a load job reports this load's progress
+            hook = functools.partial(_watched, box, hook)
         snap = raw_sql and storage.refresh(con, src.table, raw_sql, author=author, append=append, hook=hook,
                                            model_sql=lambda cur: _model_sql(cur, src.project, src.table, declared))
     except duckdb.OutOfMemoryException:  # actions.run says so (503); the worker's `refresh` logs it like any load error
@@ -666,6 +793,25 @@ def _arrow(path: str) -> pa.RecordBatchReader:
     except pa.ArrowInvalid:
         return pa.ipc.open_stream(pa.memory_map(path))
     return pa.RecordBatchReader.from_batches(f.schema, (f.get_batch(i) for i in range(f.num_record_batches)))
+
+
+def _file_rows(con, fmt: str, loc: str) -> int:
+    """M3.2: the rows a load of these files copies: Parquet's own count from its footers (a Delta or Iceberg table's
+    data files too, older versions' included), else their bytes over ROW_BYTES."""
+    if fmt in ("parquet", "delta", "iceberg"):
+        files = loc if fmt == "parquet" else loc.rstrip("/") + "/**/*.parquet"
+        return con.cursor().execute(f"SELECT sum(num_rows) FROM parquet_file_metadata('{_lit(files)}')").fetchone()[0] or 0
+    return (con.cursor().execute(f"SELECT sum(size) FROM read_blob('{_lit(loc)}')").fetchone()[0] or 0) // ROW_BYTES
+
+
+def _db_rows(con, kind: str, name: str, database: str, schema: str, table: str) -> int:
+    """M3.2: the source table's rows as its database's statistics count them (Postgres reltuples, MySQL table_rows), 0
+    before it has any. The names are identifier-validated, as in `_monotonic`."""
+    sql = (f"SELECT c.reltuples::bigint FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
+           f" WHERE n.nspname = '{schema or 'public'}' AND c.relname = '{table}'" if kind == "postgres"
+           else f"SELECT table_rows FROM information_schema.tables WHERE table_schema = '{schema or database}' AND table_name = '{table}'")
+    row = con.execute(f"SELECT * FROM {kind}_query('{name}', '{_lit(sql)}')").fetchone()
+    return max(int(row[0] or 0), 0) if row else 0
 
 
 def _monotonic(con, kind: str, name: str, database: str, schema: str, table: str) -> str | None:
@@ -921,10 +1067,24 @@ async def upload_chunk(
         except ActionFailed as e:
             final.unlink()
             raise HTTPException(e.status, e.body)
-    # first, so `.part` exists whenever `.upload.json` does; the record stays as .owner.json: whose project the file is (`readable`)
-    os.replace(folder / ".upload.json", folder / ".owner.json")
-    (folder / ".part").unlink()
+    if result.get("status") != "queued":  # M3.2: a big file's load job settles its session (`_settled`)
+        _settled(payload["location"], True)
     return result
+
+
+def _settled(location: str, loaded: bool) -> None:
+    """The end of an upload's load (IN-7): its record stays as .owner.json, whose project the file is (`readable`), after
+    `.part` goes (in that order, so `.part` exists whenever `.upload.json` does); a failed load (M3.2: a job's, as
+    upload_chunk's) takes the file's name away and leaves the session for a retry or the stale sweep. Only a session
+    still open counts: a location loaded before is another source's file."""
+    folder = files_root() / FsPath(location).parent
+    if not re.fullmatch(UPLOADED, location) or not (folder / ".upload.json").exists():
+        return
+    if loaded:
+        os.replace(folder / ".upload.json", folder / ".owner.json")
+        (folder / ".part").unlink()
+    else:
+        (files_root() / location).unlink(missing_ok=True)
 
 
 NAMED = re.compile(r"uploads/([0-9a-f]{32})(?![0-9a-f])")  # M3.5: an upload a file names (a location, a pattern's start)

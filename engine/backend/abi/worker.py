@@ -81,6 +81,12 @@ def score_model(run_id: str) -> None:
     ml.job(run_id)
 
 
+@app.task(queue="heavy")
+def load(run: str) -> None:
+    """M3.2: a big add_data, set_steps or refresh, queued by the action; the outcome is in load_runs."""
+    ingest.job(run)
+
+
 @app.task
 def answer_slack(id: int) -> None:
     """AG-5 (X-02.4): answer an accepted Slack slash command as its mapped user; the reply goes to its response_url."""

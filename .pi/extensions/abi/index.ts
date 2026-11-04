@@ -249,7 +249,8 @@ export default async function abi(pi: ExtensionAPI) {
 	const READS = new Set(["list_projects", "semantic_model", "semantic_query", "explain_change", "how_calculated", "lineage", "docs", "readiness", "detect_model",
 		"data_quality", "list_reports", "list_tools", "list_agents", "list_flows", "ml_models", "changes", "visual_data", "dataset_data", "rls_rules",
 		"list_snapshots", "preview_steps", "edit_history", "edit_proposals", "flow_runs", "agent_runs", "history", "diff", "ml_history", "get_sharing",
-		"list_share_links", "shared_with_me", "test_tool", "run_tool", "test_agent", "sql_query", "project_locale", "remote_settings", "check_condition"]);
+		"list_share_links", "shared_with_me", "test_tool", "run_tool", "test_agent", "sql_query", "project_locale", "remote_settings", "check_condition",
+		"load_runs"]);
 	const READ_STEPS = new Set(["abi_tools", "abi_show", "abi_explore", "abi_sync", "abi_health", "abi_cli", "abi_prefs", "abi_vault", "read", "ls", "grep", "find", "subagent", "tool_search"]);
 	let readsFrom: string | undefined;
 	let modeAt = 0, modeNow = process.env.ABI_PI_MODE === "viewer" ? "viewer" : "developer";
@@ -485,17 +486,22 @@ export default async function abi(pi: ExtensionAPI) {
 	pi.on("tool_result", async (event, ctx) => {
 		const name = event.toolName;
 		const ms = Date.now() - (state.started.get(event.toolCallId) ?? Date.now());
-		const raw = event.content.map((c: any) => (c.type === "text" ? c.text : "")).join("");
-		let out: any;
+		let raw = event.content.map((c: any) => (c.type === "text" ? c.text : "")).join("");
+		let out: any, waited = false;
 		try { out = JSON.parse(raw); } catch { out = undefined; }
 		log({ event: "tool", tool: name, ms, error: event.isError || !!out?.error });
 		if (name.startsWith(MCP)) {
 			const tool = name.slice(MCP.length);
 			if (typeof out?.error === "string" && out.error.includes("never given over MCP")) {
-				const r = await confirmBridge(tool, event.input, ctx);
+				const r = await loaded(tool, await confirmBridge(tool, event.input, ctx), (event.input as any)?.project, ctx);
 				status(ctx);
 				if ("result" in r && CHANGES.test(tool)) changed((event.input as any)?.project);
 				return { content: [{ type: "text", text: JSON.stringify(r) }], isError: !("result" in r) };
+			}
+			if (LOADS.has(tool) && out?.result?.status === "queued") {  // 1.2 M3.2: the tool answers with the load's outcome
+				out = await loaded(tool, out, (event.input as any)?.project, ctx);
+				raw = JSON.stringify(out);
+				waited = true;
 			}
 			if (!event.isError && !out?.error && CHANGES.test(tool)) changed((event.input as any)?.project);
 		}
@@ -505,9 +511,32 @@ export default async function abi(pi: ExtensionAPI) {
 			for (const t of d.tasks) await runTeam(["release", d.project, t]);
 			state.delegated.delete(event.toolCallId);
 		}
-		ingest(name, raw, event.isError);
+		ingest(name, raw, waited ? !("result" in out) : event.isError);
 		status(ctx);
+		if (waited) return { content: [{ type: "text", text: raw }], isError: !("result" in out) };
 	});
+
+	// 1.2 M3.2: a big add_data, set_steps or refresh answers at once with its run (status queued) and loads in ABI's
+	// worker. The tool's answer waits for it: a short load_runs call every 3 s (never one call as long as the load, which
+	// MCP's 600 s would cut off), the progress on the status line (the app's chat shows it on the step)
+	const LOADS = new Set(["add_data", "set_steps", "refresh"]);
+	async function loaded(tool: string, r: any, project: string, ctx: ExtensionContext): Promise<any> {
+		if (!LOADS.has(tool) || r?.result?.status !== "queued" || !r.result.run) return r;
+		const run = r.result.run;
+		try {
+			for (;;) {
+				await new Promise((ok) => setTimeout(ok, 3000));
+				if (ctx.signal?.aborted) return { result: { ...r.result, message: "Still loading: load_runs with this run says when it is in." } };
+				const s = await rest("load_runs", { project, run });
+				const x = s.body?.runs?.[0];
+				if (s.status >= 300 || !x) return { error: s.body };
+				if (x.status === "done") return { result: { ...x, columns: ["snapshot", "rows"], rows: [[x.snapshot, x.rows]] } };
+				if (x.status === "failed") return { error: { message: x.error, run } };
+				ctx.ui.setStatus?.("abi-load", x.status === "queued" ? `${x.table}: queued`
+					: `${x.table}: loading, about ${Number(x.rows ?? 0).toLocaleString("en")} rows so far`);
+			}
+		} finally { ctx.ui.setStatus?.("abi-load", undefined); }
+	}
 
 	// M2 review: outputs that hold what the model wrote (a SELECT of its own literals, a preference it set, a check or analysis
 	// it saved, the team's brief, plan and handoffs) ground its words, never a figure (D-22: an echoed input grounds none)

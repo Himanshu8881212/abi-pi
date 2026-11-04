@@ -77,14 +77,17 @@ def detect(project: str, user_id: int | None = None) -> dict:
     for t, info in tables.items():
         cols = [c for c, dt in info["columns"].items() if _family(dt)]
         dates = [c for c, dt in info["columns"].items() if dt == "DATE" or dt.startswith("TIMESTAMP")]
-        # min/max cast to text: JSON-ready, and timestamptz needs no pytz on fetch
+        # min/max cast to text: JSON-ready, and timestamptz needs no pytz on fetch. M3.2: one exact DISTINCT per read,
+        # which DuckDB spills to disk; several in one read hold their memory at once (100M orders ran out of 1500MB
+        # here). HyperLogLog (a few % off) only rules out columns with under half as many values as rows: no key
         n, *stats = read(
-            "SELECT count(*)" + "".join(f", count(DISTINCT {_q(c)}), count({_q(c)})" for c in cols)
+            "SELECT count(*)" + "".join(f", approx_count_distinct({_q(c)}), count({_q(c)})" for c in cols)
             + "".join(f", min({_q(c)})::VARCHAR, max({_q(c)})::VARCHAR" for c in dates)
             + f" FROM lake.model.{_q(t)}")
         stats, ranges = stats[:2 * len(cols)], stats[2 * len(cols):]
         info["date_range"] = {c: {"min": lo, "max": hi} for c, lo, hi in zip(dates, ranges[::2], ranges[1::2])}
-        unique = [c for c, d, nn in zip(cols, stats[::2], stats[1::2]) if n and d == n and nn == n]
+        unique = [c for c, d, nn in zip(cols, stats[::2], stats[1::2]) if n and nn == n and d >= n / 2
+                  and read(f"SELECT count(DISTINCT {_q(c)}) FROM lake.model.{_q(t)}")[0] == n]
         # prefer a name that says "key": id, <table>_id, then *_id / *key / *code, then the first unique column
         rank = [c for c in unique if _name_match(c, t, "id") or c.lower() == "id"] + \
                [c for c in unique if c.lower().endswith(("id", "key", "code"))] + unique

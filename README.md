@@ -178,6 +178,9 @@ people open, so the links come back to ABI.
 | `ABI_MAX_AGENTS` | no | Chats whose agent runs at once (each a Node process of about 100 MB). One more stops the agent idle longest; with every one busy, the next question waits its turn with a note in its chat. Default `8`. |
 | `ABI_QUERY_TIMEOUT` | no | Seconds a question's or a page visual's read may run before it is stopped with a plain error. Default `60`. |
 | `ABI_PG_POOL` | no | Postgres connections each engine process keeps open for reuse (`0`: a new one each time). Default `20`. |
+| `ABI_INLINE_ROWS` | no | A load (add a source, set a table's steps, reload) of more rows than this answers at once and loads in the background; the Sources page and the chat show its progress. Default `4400000` (about 20 s of loading). |
+| `ABI_RENDER_TIMEOUT` | no | Seconds a PDF, PNG or PowerPoint export may take before its browser is stopped. Two render at a time; the next waits its turn. Default `120`. |
+| `ABI_VIDEO_TIMEOUT` | no | Seconds a video export may take before it is stopped. Default `900`. |
 
 ### Use it from other devices (HTTPS)
 

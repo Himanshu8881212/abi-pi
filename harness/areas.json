@@ -28,6 +28,7 @@
         "delete_source",
         "delete_table",
         "list_snapshots",
+        "load_runs",
         "preview_steps",
         "refresh",
         "restore_snapshot",

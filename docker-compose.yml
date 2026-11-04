@@ -31,6 +31,9 @@ services:
       ABI_PG_POOL: ${ABI_PG_POOL:-20}  # Postgres connections each engine process keeps open for reuse
       ABI_DUCKDB_MEMORY_LIMIT: ${ABI_DUCKDB_MEMORY_LIMIT:-1500MB}  # DuckDB's memory per project in each engine process; it spills to disk above it
       ABI_QUERY_CACHE_MB: ${ABI_QUERY_CACHE_MB:-256}  # query results kept for reuse, megabytes per project in each engine process
+      ABI_INLINE_ROWS: ${ABI_INLINE_ROWS:-4400000}  # a load of more rows answers at once and loads in the background
+      ABI_RENDER_TIMEOUT: ${ABI_RENDER_TIMEOUT:-120}  # seconds a PDF, PNG or PowerPoint export may take (two at a time)
+      ABI_VIDEO_TIMEOUT: ${ABI_VIDEO_TIMEOUT:-900}  # seconds a video export may take
     volumes:
       - abi-data:/data                           # everything: the engine's database and lake, projects, chats, packs
     extra_hosts: ["host.docker.internal:host-gateway"]   # a model on this machine (Ollama) on Linux too

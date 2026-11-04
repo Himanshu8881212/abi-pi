@@ -131,7 +131,9 @@ def test_pages_and_memory_through_an_app_here(capsys, monkeypatch, tmp_path):
         assert projects() == before and set(perf.FILES.iterdir()) == files
         head = abi.call("history", project=P)["commits"][0]["id"]  # Publish as the button does, first and measure-only
         r = run(capsys, "publish", "--url", url, "--project", P)
-        assert set(r["first"]["reloads"]) == {"orders"} and r["measure_only"]["reloads"] == ["orders"], r  # 1.1 reloads every source
+        # 1.2 M3.2: the copy loads what the import changed (the worker, IN-6), so a measure-only Publish reloads nothing (1.1: every source)
+        assert set(r["first"]["reloads"]) == {"orders"} and r["first"]["loaded_s"] >= r["first"]["seconds"], r
+        assert r["measure_only"]["reloads"] == [], r
         assert r["measure_only"]["commit"].endswith(", a description") and "uncommitted" not in r, r
         assert all(0 < r[k]["answered_s"] <= r[k]["seconds"] for k in ("first", "measure_only")), r
         assert f"{P}_pub" not in projects() and not (abi.folder(P).parent / "_views" / P / "published.json").exists()

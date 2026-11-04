@@ -4,6 +4,7 @@ a step that asks for one is checked for its dialog and left."""
 import io
 import json
 import threading
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -173,9 +174,13 @@ def test_commit_publish_and_viewer_reads_only_the_published_copy(srv):  # noqa: 
     dev = api(port, key, "semantic_query", measures=["e2e_pub"], dimensions=["orders.region"])[1]["result"]["rows"]
     post(port, "/mode", {"mode": "viewer"}, key)
     try:
-        # the page in Viewer holds the published copy's data, so its requests name `<project>_pub`: still answered
-        code, r = post(port, "/api/semantic_query", {"project": f"{P}_pub", "measures": ["e2e_pub"], "dimensions": ["orders.region"]}, key)
-        assert code == 200 and r["result"]["rows"] == dev, r
+        # the page in Viewer holds the published copy's data, so its requests name `<project>_pub`: still answered. 1.2
+        # M3.2: the worker loads a new copy's tables within its minute (Publish no longer reloads every source itself)
+        end = time.monotonic() + 180
+        while "result" not in (r := post(port, "/api/semantic_query", {"project": f"{P}_pub", "measures": ["e2e_pub"],
+                                                                         "dimensions": ["orders.region"]}, key)[1]) and time.monotonic() < end:
+            time.sleep(1)
+        assert r["result"]["rows"] == dev, r
         seen = {m["id"] for m in model(port, key)["measures"]}
         assert "e2e_pub" in seen and "e2e_unpub" not in seen, sorted(seen)
         assert api(port, key, "semantic_query", measures=["e2e_pub"], dimensions=["orders.region"])[1]["result"]["rows"] == dev

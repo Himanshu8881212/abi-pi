@@ -143,8 +143,22 @@ def call(action: str, confirm: str | None = None, **args) -> dict:
     return _open("POST", f"/api/actions/{action}", args, {"X-Abi-Confirm": confirm} if confirm else None)[1]
 
 
-def upload(project: str, table: str, path: Path, csv: dict | None = None, xlsx: dict | None = None) -> dict:
-    """IN-7 resumable upload; the last PATCH runs add_data (with these CSV or Excel options) and returns its result.
+def finished(project: str, out: dict, every: float = 2) -> dict:
+    """1.2 M3.2: a big add_data, set_steps or refresh answers at once with {run, status: queued} and loads in ABI's
+    worker; this waits for it with a short load_runs call every `every` s (never one call as long as the load): the
+    snapshot as the inline answer gives it, or ActionError with the run's error. Any other answer as it is."""
+    while isinstance(out, dict) and out.get("run") and out.get("status") in ("queued", "running"):
+        time.sleep(every)
+        r = call("load_runs", project=project, run=out["run"])["runs"][0]
+        if r["status"] == "failed":
+            raise ActionError(400, {"message": r["error"], "run": r["run"]})
+        out = {**r, "columns": ["snapshot", "rows"], "rows": [[r["snapshot"], r["rows"]]]} if r["status"] == "done" else r
+    return out
+
+
+def upload(project: str, table: str, path: Path, csv: dict | None = None, xlsx: dict | None = None, wait: bool = True) -> dict:
+    """IN-7 resumable upload; the last PATCH runs add_data (with these CSV or Excel options) and returns its result,
+    a big file's once its run is in (`finished`; wait=False: the queued run, for a caller that shows its progress).
     Bytes go to ABI, never to the LLM."""
     size = path.stat().st_size
     if not size:  # ABI's answer to an empty upload is its validation dump
@@ -159,7 +173,7 @@ def upload(project: str, table: str, path: Path, csv: dict | None = None, xlsx: 
             _, out, hdr = _open("PATCH", f"/api/uploads/{started['id']}" + (f"?{q}" if q else ""), raw=chunk,
                                 headers={"Upload-Offset": str(off), "Content-Type": "application/offset+octet-stream"})
             off += len(chunk)
-    return out
+    return finished(project, out) if wait else out
 
 
 def csv_options(path: Path) -> dict | None:
@@ -303,7 +317,7 @@ def add_date(project: str, table: str) -> dict | None:
         # %Y also takes "02" (year 2): yy.dd.mm data parsed as dd.mm.yyyy when every sampled day was <= 12
         if vals and sum(g is not None and 1900 <= int(str(g)[:4]) <= 2100 for g in got) >= 0.99 * len(vals):
             steps = src + [{"type": "add_column", "name": "day", "expression": exprs[i]}]
-            call("set_steps", project=project, table=table, steps=steps)
+            finished(project, call("set_steps", project=project, table=table, steps=steps))
             return {"column": c, "format": f or "ISO", "expression": exprs[i]}
     return None
 

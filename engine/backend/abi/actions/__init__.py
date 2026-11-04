@@ -222,7 +222,7 @@ PRODUCTION_READS = frozenset({
     "diff", "docs",
     "edit_history", "edit_proposals", "explain_change", "export_visual", "flow_runs", "generate_docs", "get_sharing", "history",
     "how_calculated", "inbound_approvals", "inbox", "lineage", "list_agents", "list_embed_keys", "list_flows",
-    "list_reports", "list_secrets", "list_snapshots", "list_share_links", "list_subscriptions", "list_tools", "ml_history", "ml_models", "ml_trials",
+    "list_reports", "list_secrets", "list_snapshots", "list_share_links", "list_subscriptions", "list_tools", "load_runs", "ml_history", "ml_models", "ml_trials",
     "project_locale", "readiness", "remote_branches", "remote_settings", "report_snapshot", "rls_rules", "run_agent",
     "run_tool", "semantic_model", "semantic_query", "sql_query", "visual_data",
 })

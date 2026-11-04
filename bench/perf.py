@@ -412,19 +412,28 @@ def memory(a) -> dict:
 
 
 def add(p: str, table: str, location: str) -> dict:
-    """The engine's own add_data on a server path in its files folder (abi.call's door takes s3:// Parquet only)."""
-    return abi._open("POST", "/api/actions/add_data", {"project": p, "table": table, "location": location}, timeout=6 * 3600)[1]
+    """The engine's own add_data on a server path in its files folder (abi.call's door takes s3:// Parquet only), and its
+    run when it is big (1.2 M3.2: abi.finished)."""
+    return abi.finished(p, abi._open("POST", "/api/actions/add_data", {"project": p, "table": table, "location": location},
+                                     timeout=6 * 3600)[1])
 
 
 def upload(o: App, table: str, f: Path) -> dict:
     """A file into a table through the app's Sources form, as a browser sends it: 24 MB pieces to /upload; the app
-    hands the whole file to the engine (abi.upload), whose last piece runs add_data."""
+    hands the whole file to the engine (abi.upload), whose last piece runs add_data; a big file's run is waited for as the
+    page does, polling load_runs (1.2 M3.2)."""
     uid, size, n = secrets.token_hex(16), f.stat().st_size, 24 << 20
     with f.open("rb") as fh:
         for off in range(0, max(size, 1), n):
             r = o.post("/upload", {"table": table, "name": f.name, "data": base64.b64encode(fh.read(n)).decode(), "id": uid,
                                    "last": off + n >= size})
-    return done(r)
+    out = done(r)["result"]
+    while out.get("status") in ("queued", "running"):
+        time.sleep(2)
+        out = done(o.post("/api/load_runs", {"project": o.project, "run": out["run"]}))["result"]["runs"][0]
+        if out["status"] == "failed":
+            raise abi.ActionError(400, {"message": out["error"]})
+    return out
 
 
 def build(p: str, d: Path, put=None, took: dict | None = None) -> dict:
@@ -552,10 +561,14 @@ def isolation(a) -> dict:
     return rec
 
 
-def press(o: App, v: App, pub: str, marker: str) -> dict:
+def press(o: App, v: App, pub: str, marker: str, tables: tuple = ()) -> dict:
     """Publish as the button does, its confirmation answered as the person's click: seconds until it answers and until
-    the Viewer's page comes from the published copy with `marker` in it; the tables the copy reloaded meanwhile."""
+    the Viewer's page comes from the published copy with `marker` in it; the tables the copy reloaded meanwhile. 1.2
+    (M3.2): the copy's data comes from the worker, which loads what the import changed within its minute; with `tables`,
+    also the seconds until each of them is loaded there (`loaded_s`)."""
     since = snapshot(pub) if abi.folder(pub) else 0
+    loads = lambda: {r[3][8:] for r in abi.call("list_snapshots", project=pub, limit=500)["rows"]  # noqa: E731
+                     if r[0] > since and (r[3] or "").startswith("refresh ")}
     t = time.perf_counter()
     r = o.post("/publish", {})
     if r.get("confirm"):
@@ -566,9 +579,10 @@ def press(o: App, v: App, pub: str, marker: str) -> dict:
         if time.time() > end:
             raise SystemExit(f"A Viewer's page didn't show the published copy within {WAIT} s.")
         time.sleep(0.2)
-    rows = abi.call("list_snapshots", project=pub, limit=500)["rows"]
-    return rec | {"seconds": round(time.perf_counter() - t, 2),
-                  "reloads": sorted(r[3][8:] for r in rows if r[0] > since and (r[3] or "").startswith("refresh "))}
+    rec["seconds"] = round(time.perf_counter() - t, 2)
+    if tables and not until(lambda: set(tables) <= loads()):
+        raise SystemExit(f"The published copy didn't load {', '.join(sorted(set(tables) - loads()))} within {WAIT} s.")
+    return rec | ({"loaded_s": round(time.perf_counter() - t, 2)} if tables else {}) | {"reloads": sorted(loads())}
 
 
 def publish(a) -> dict:
@@ -583,7 +597,7 @@ def publish(a) -> dict:
         v = App(a.url, *accounts(o, ["viewer"], made, stamp)[0], p)  # a Viewer reads the published copy
         msg = f"perf.py {stamp}: a Viewer for the publish check"
         shown(o, o.post("/api/commit", {"project": p, "message": msg}), msg)  # the button sends the last commit only
-        rec = {"project": p, "first": press(o, v, pub, "")}
+        rec = {"project": p, "first": press(o, v, pub, "", tuple(f.stem for f in (abi.folder(p) / "sources").glob("*.json")))}
         note = f"perf.py {stamp}: publish check"
         shown(o, o.post("/api/set_measure", {"project": p, **{k: m[k] for k in ("id", "name", "expression")}, "description": note}), note)
         shown(o, o.post("/api/commit", {"project": p, "message": f"{note}, a description"}), f"{note}, a description")
@@ -629,13 +643,13 @@ def medallion(a) -> dict:
         for t in ("cafes", "products", "orders"):  # bronze: the files as they landed
             took[f"bronze_{t}"] = timed(add, p, f"bronze_{t}", f"{d.relative_to(FILES)}/{t}/*.parquet")
         for t, steps in (("silver_orders", SILVER), ("gold_revenue", SILVER + GOLD)):  # 1.1: gold can't start from silver
-            took[t] = timed(abi.call, "set_steps", project=p, table=t, steps=steps)
+            took[t] = timed(lambda: abi.finished(p, abi.call("set_steps", project=p, table=t, steps=steps)))  # noqa: B023
         abi.call("build_model", project=p)
         abi.call("set_measure", project=p, id="revenue", name="Revenue", expression="SUM(gold_revenue.revenue)")
         size = lambda: {s.name: lake_bytes(f"{p}/{s.name}") for s in (LAKE / p).iterdir()}  # noqa: E731 (raw/, model/, query/)
         rec = {"rows": known["rows"]["orders"], "build_s": took, "copies": copies(p), "lake": size()}
         since, before, t = snapshot(p), size(), time.perf_counter()
-        abi.call("refresh", project=p, table="bronze_orders")  # new orders landed: bronze reloads, then what reads it
+        abi.finished(p, abi.call("refresh", project=p, table="bronze_orders"))  # new orders landed: bronze reloads, then its readers
         rec |= {"rebuild_s": round(time.perf_counter() - t, 2), "rebuild_bytes": {k: v - before.get(k, 0) for k, v in size().items()},
                 "rebuild": [r[3] for r in abi.call("list_snapshots", project=p, limit=100)["rows"] if r[0] > since][::-1],
                 "exact": exact(p, "gold_revenue.region", known)}

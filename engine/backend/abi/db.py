@@ -22,7 +22,7 @@ from psycopg_pool import ConnectionPool, PoolTimeout  # procrastinate's psycopg[
 VERSION = tomllib.loads((Path(__file__).parent.parent / "pyproject.toml").read_text())["project"]["version"]
 # H-03.2: bump with every change to SCHEMA (test_H03_schema_number_bumped pins SCHEMA's sha256 to it), so older code
 # refuses a database newer code has upgraded instead of running on it.
-SCHEMA_NUMBER = 3  # 3: ABI-PI 1.2 (flow_conditions.since)
+SCHEMA_NUMBER = 4  # 3: ABI-PI 1.2 (flow_conditions.since); 4: load_runs (M3.2)
 QUEUE = importlib.metadata.version("procrastinate")
 # The Procrastinate of v0.5.0-alpha, the oldest release we upgrade from (D-133); installs before H-03.2 recorded none.
 QUEUE_BASELINE = "3.10.0"
@@ -636,6 +636,26 @@ CREATE TABLE IF NOT EXISTS backups (
   commit text NOT NULL,
   key_apart boolean NOT NULL  -- the key file was copied to its own destination (false: there was no key file yet)
 );
+-- ABI-PI 1.2 M3.2: a big add_data, set_steps or refresh, run as a heavy job for its caller; `payload` is the action's
+-- input until the run ends, `rows` the rows so far (estimated while it runs), then the table's
+CREATE TABLE IF NOT EXISTS load_runs (
+  id uuid PRIMARY KEY,
+  project text NOT NULL,
+  table_name text NOT NULL,
+  action text NOT NULL,
+  payload jsonb,
+  via text NOT NULL,
+  user_id bigint NOT NULL REFERENCES users ON DELETE CASCADE,
+  status text NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'done', 'failed')),
+  estimate bigint,
+  rows bigint,
+  snapshot bigint,
+  error text,
+  created timestamptz NOT NULL DEFAULT clock_timestamp(),
+  started timestamptz,
+  finished timestamptz
+);
+CREATE INDEX IF NOT EXISTS load_runs_user ON load_runs (project, user_id, created);
 """
 
 

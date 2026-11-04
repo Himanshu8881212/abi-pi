@@ -12,6 +12,7 @@ Licence: Remotion is free for individuals and companies up to 3 people; larger c
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -124,8 +125,33 @@ def render(props: dict, out: Path) -> Path:
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
         json.dump(props, f)
     chrome = [f"--browser-executable={b}"] if (b := os.environ.get("REMOTION_BROWSER")) else []  # the image: the engine's Chrome
-    subprocess.run(["npx", "remotion", "render", "src/index.ts", "Deck", str(out.resolve()), f"--props={f.name}", "--log=error", *chrome],
-                   cwd=HERE / "video", check=True)
+    p = subprocess.Popen(["npx", "remotion", "render", "src/index.ts", "Deck", str(out.resolve()), f"--props={f.name}", "--log=error", *chrome],
+                         cwd=HERE / "video")
+    limit = float(os.environ.get("ABI_VIDEO_TIMEOUT", "900"))  # 1.2 M3.2: s; 1.1 waited for ever
+    try:
+        if p.wait(timeout=limit):
+            raise subprocess.CalledProcessError(p.returncode, p.args)
+    except subprocess.TimeoutExpired:
+        for pid in tree(p.pid):  # npx, node, its Chromium (in a process group of its own) and ffmpeg
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:  # ended meanwhile
+                pass
+        p.wait()
+        raise SystemExit(f"The video took longer than {limit:g} s (ABI_VIDEO_TIMEOUT) and was stopped.") from None
+    return out
+
+
+def tree(pid: int) -> list[int]:
+    """`pid` and every process under it, from the process table (ps)."""
+    kids: dict[int, list[int]] = {}
+    for line in subprocess.run(["ps", "-A", "-o", "pid=", "-o", "ppid="], capture_output=True, text=True).stdout.splitlines():
+        child, parent = map(int, line.split())
+        kids.setdefault(parent, []).append(child)
+    out, todo = [], [pid]
+    while todo:
+        out.append(todo.pop())
+        todo += kids.get(out[-1], [])
     return out
 
 
