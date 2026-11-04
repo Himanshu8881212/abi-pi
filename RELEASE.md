@@ -50,5 +50,7 @@ Checked: offline 80 passed, live agent tests 18 of 18, container check 13 of 13 
 
 ## Known limits
 
-- HTTP only: put it behind an HTTPS reverse proxy for other devices (`X-Forwarded-Proto: https`).
-- Email (invitations, flow emails) needs the engine's mail settings.
+- HTTP only: put it behind an HTTPS reverse proxy for other devices (`X-Forwarded-Proto: https`). (From 1.2: HTTPS in
+  one command, README › Use it from other devices.)
+- Email (invitations, flow emails) needs the engine's mail settings. (From 1.1: invitations and password resets use
+  Govern › Settings › Email; a flow's emails use the project's own mail server, which the agent sets.)

@@ -31,6 +31,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import tomllib
 import traceback
 import time
 import urllib.error
@@ -47,7 +48,8 @@ import render  # noqa: E402
 
 KEY_SLOT = "__ABI_APP_KEY__"
 ME_SLOT = "null/*__ABI_ME__*/"
-READS_ONLY = {"run_flow", "run_agent"}  # not changes to the project, but they act (send, call tools): Developer only
+VERSION = tomllib.loads((abi.ROOT / "pyproject.toml").read_text())["project"]["version"]
+READS_ONLY ={"run_flow", "run_agent"}  # not changes to the project, but they act (send, call tools): Developer only
 WRITES = {"set_measure", "delete_measure", "set_glossary_term", "delete_glossary_term", "save_model", "delete_model", "enable_flow", "train_model", "score_model", "refresh",
           "commit", "undo", "add_data", "delete_source", "delete_table", "set_table", "add_relationship", "remove_relationship",
           "save_dataset", "delete_dataset", "save_report", "delete_report", "save_flow", "delete_flow", "save_ml_model",
@@ -81,6 +83,8 @@ aside button.it:hover{background:var(--hover)}aside button.it.on{background:var(
 aside button.it.on::before{content:"";position:absolute;left:11px;top:50%;width:6px;height:6px;margin-top:-3px;border-radius:50%;background:var(--signal)}
 aside button.it .n{color:var(--mute);font:12px var(--mono);font-variant-numeric:tabular-nums}
 aside button.it.sub{margin-left:24px;width:calc(100% - 24px);padding-left:12px;font-size:13px}
+aside a.src{display:block;margin:20px 12px 0;color:var(--mute);font-size:12px;text-decoration:none}aside a.src:hover{color:var(--ink);text-decoration:underline}
+table.prices{table-layout:fixed}table.prices td,table.prices th{padding:4px;white-space:normal}table.prices th:first-child{width:34%}table.prices input.f{width:100%;padding:4px 6px}
 main{max-width:none;min-width:0;margin:0;align-self:start;width:100%;padding:32px 40px 80px}
 .pg{display:flex;flex-direction:column;gap:24px;max-width:1320px;margin:0 auto}.pg>*{margin:0!important}.pg>section{display:flex;flex-direction:column;gap:16px}
 .pghead{display:flex;justify-content:flex-end;align-items:center;gap:12px;flex-wrap:wrap}.pghead .bar.lead{margin-right:auto!important}body[data-mode=viewer] .pghead:not(:has(.bar>:not(.w))){display:none}
@@ -488,6 +492,8 @@ async function usersPage(box){
 const PRESETS={openai:['OpenAI','openai-responses','https://api.openai.com/v1','gpt-5'],anthropic:['Anthropic','anthropic-messages','https://api.anthropic.com','claude-sonnet-4-5'],
  openrouter:['OpenRouter','openai-completions','https://openrouter.ai/api/v1','anthropic/claude-sonnet-4.5'],ollama:['Ollama (local)','openai-completions','http://host.docker.internal:11434/v1','llama3.1'],
  gemini:['Google Gemini','google-generative-ai','https://generativelanguage.googleapis.com/v1beta','gemini-2.5-pro'],custom:['OpenAI-compatible','openai-completions','https://','model-id']};
+// Pi computes a cost only for a model with prices: the rest is counted in tokens, never shown as $0
+const money=r=>r.cost?(r.cost<0.01?'< $0.01':'$'+r.cost.toFixed(2))+(r.unpriced?' (part tokens only)':''):'tokens only';
 async function settingsPage(box){
  const post=(op,b)=>fetch('/admin/'+op,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json());
  let r=await post('settings');if(r.error){box.append(h('p','bad',r.error));return}let S=r.result;const g=h('div','cards');box.append(g);
@@ -498,10 +504,17 @@ async function settingsPage(box){
   def.append(h('label','l','Model'),ms,h('label','l','Reasoning'),th,h('label','l','If it fails (quota, outage), try in order'),fb);
   const dm=act(def,'Save',async()=>{const x=await post('settings/default',{model:ms.value||null,thinking:th.value,fallbacks:[...fb.querySelectorAll('input:checked')].map(i=>i.value)});if(x.error)throw new Error(x.error);S=x.result;return 'Saved: new chats and specialists use it.'},1);
   def.addEventListener('change',()=>say(dm,'Not saved yet: click Save to use it.',1));g.append(def);
-  const us=card('Usage','the agents\' model work, last 30 days');g.append(us);post('usage').then(x=>{const U=x.result;if(!U||!U.model.length){us.append(h('p','empty','No answers yet.'));return}
+  const us=card('Usage','the agents\' model work, last 30 days');us.classList.add('wide');g.style.gridAutoFlow='dense';g.append(us);post('usage').then(x=>{const U=x.result;if(!U||!U.model.length){us.append(h('p','empty','No answers yet.'));return}
    const n=v=>Number(v).toLocaleString(),tb=(k,t)=>{us.append(h('label','l',t));const tt=h('table');tt.innerHTML='<tr><th></th><th>answers</th><th>failed</th><th>input</th><th>output</th><th>cache</th><th>cost</th></tr>';
-    U[k].forEach(r=>{const tr=h('tr');[r.name,n(r.answers),n(r.failed),n(r.input),n(r.output),n(r.cache),r.cost?r.cost.toFixed(2):'–'].forEach(v=>tr.append(h('td','',v)));tt.append(tr)});us.append(tt)};tb('user','Per person');tb('model','Per model')});
+    U[k].forEach(r=>{const tr=h('tr');[r.name,n(r.answers),n(r.failed),n(r.input),n(r.output),n(r.cache),money(r)].forEach(v=>tr.append(h('td','',v)));tt.append(tr)});us.append(tt)};tb('user','Per person');tb('model','Per model');
+   if(U.model.some(r=>r.unpriced))us.append(h('p','file','Cost needs a model\'s prices (US dollars per million tokens, on its provider\'s card); without them its answers count tokens only.'))});
   S.providers.forEach(p=>{const c=card(p.name,`${p.id} · ${S.apis[p.api]||p.api}`);c.append(h('p','file',p.base_url),h('p','',`Models: ${p.models.join(', ')}`),h('p',p.key_set?'ok':'',p.key_builtin?'Uses the built-in connection\'s key':p.key_set?`API key set, ends in ${p.key_ends}`:'No API key'));
+   // each model's prices, US dollars per million tokens: Pi computes every answer's cost from them; none: tokens only
+   const F=['input','output','cacheRead','cacheWrite'],pt=h('table','prices'),pin=p.models.map(m=>{const tr=pt.insertRow();tr.insertCell().textContent=m;
+    return F.map(k=>{const i=h('input','f');i.type='number';i.min='0';i.step='any';i.value=p.prices?.[m]?.[k]??'';i.setAttribute('aria-label',`${m}: ${k} price`);tr.insertCell().append(i);return i})});
+   pt.createTHead().innerHTML='<tr><th>$ per 1M tokens</th><th>input</th><th>output</th><th>cache read</th><th>cache write</th></tr>';c.append(pt);
+   act(c,'Save prices',async()=>{const prices={};p.models.forEach((m,j)=>{const v=Object.fromEntries(F.map((k,x)=>[k,pin[j][x].value]).filter(([,v])=>v!=='').map(([k,v])=>[k,+v]));if(Object.keys(v).length)prices[m]=v});
+    const x=await post('settings/provider',{provider:{...p,prices}});if(x.error)throw new Error(x.error);S=x.result;return 'Saved: new chats count the cost of these models.'});
    act(c,'Test connection',async()=>{const x=await post('settings/test',{id:p.id});if(x.error)throw new Error(x.error);if(!x.result.ok)throw new Error(x.result.message);return x.result.message});
    act(c,'Remove',async()=>{const x=await post('settings/remove',{id:p.id});S=x.result;draw()});g.append(c)});
   const add=card('Connect a provider','OpenAI, Anthropic, OpenRouter, Ollama, Gemini or any OpenAI-compatible endpoint'),pre=h('select','f'),id=h('input','f'),nm=h('input','f'),api=h('select','f'),base=h('input','f'),key=h('input','f'),mods=h('input','f');
@@ -1112,7 +1125,9 @@ function sidebar(){side.innerHTML='';PAGES={};nav().forEach(([g,items])=>{const 
  items.forEach(([k,label,fn,n])=>{PAGES[k]=[label,fn];const b=h('button','it');b.dataset.k=k;
   b.append(h('span','',label));if(n!==undefined&&n!=='')b.append(h('span','n',String(n)));b.onclick=()=>show(k);list.append(b)});
  sec.append(hd,list);side.append(sec)});D.reports.forEach(r=>PAGES['rep:'+r.id]=[r.name||r.id,b=>report(b,r)]);PAGES['mdl:all']=['Whole model',b=>openModel(b,'')];(D.flows||[]).forEach(f=>PAGES['flw:'+f.id]=[f.name||f.id,b=>flowPage(b,f)]);
- (D.models||[]).forEach(m=>PAGES['mdl:'+m.id]=[m.name,b=>openModel(b,m.id)])}
+ (D.models||[]).forEach(m=>PAGES['mdl:'+m.id]=[m.name,b=>openModel(b,m.id)]);
+ // AGPL-3.0 §13: every page offers the running version's source (ABI_SOURCE_URL for a changed build)
+ if(window.ME?.source){const a=h('a','src',`ABI-PI ${ME.version} · source code (AGPL-3.0)`);a.href=ME.source;a.target='_blank';a.rel='noopener';side.append(a)}}
 let PREV='home';
 function show(k){if(!PAGES[k])k='home';if(k!=='chat'&&CUR!=='chat')PREV=k;else if(k==='chat'&&CUR!=='chat')PREV=CUR;{const cb=$('#chat');if(cb.classList.contains('full')){cb.classList.remove('full');$('#chat .wide-t').textContent='Full page';document.body.append(cb);cb.classList.remove('open');document.body.classList.remove('chat-open')}}CUR=k;setTimeout(ctx);const sk=k.startsWith('rep:')?'reports':k.startsWith('mdl:')?'model':k.startsWith('flw:')?'flows':k;side.querySelectorAll('button.it').forEach(b=>b.classList.toggle('on',b.dataset.k===sk));
  const act=side.querySelector('button.it.on');if(act)act.closest('.sec').classList.remove('folded');
@@ -1606,8 +1621,8 @@ class Hub:
         self.pi.stdin.flush()
 
     def usage(self, model: str, u: dict, error: bool = False, agent: str = "chat") -> None:
-        """One line per model answer in logs/usage.jsonl (tokens and cost as the provider reported them): Settings
-        shows the totals per person and model. No text of the chat goes in."""
+        """One line per model answer in logs/usage.jsonl (the provider's token counts and the cost Pi computed from the
+        model's prices in Settings, 0 without): Settings shows the totals per person and model. No text of the chat goes in."""
         cost = u.get("cost") or 0
         rec = {"t": time.strftime("%Y-%m-%dT%H:%M:%S"), "user": getattr(self, "user", "") or "", "project": getattr(self, "project", ""),
                "chat": getattr(self, "chat_id", None), "agent": agent, "model": model, "error": error,
@@ -1683,7 +1698,8 @@ USAGE_LOCK = threading.Lock()
 
 
 def usage_totals(days: int = 30, f: Path | None = None) -> dict:
-    """logs/usage.jsonl summed per person and per model since `days` ago (answers, tokens, cost, failed answers)."""
+    """logs/usage.jsonl summed per person and per model since `days` ago (answers, tokens, cost, failed answers, and the
+    answers with tokens but no cost: their model has no prices in Settings, so Pi computed none)."""
     since = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(time.time() - days * 86400))
     by: dict = {"user": {}, "model": {}}
     f = f or abi.ROOT / "logs" / "usage.jsonl"
@@ -1695,13 +1711,14 @@ def usage_totals(days: int = 30, f: Path | None = None) -> dict:
         if r.get("t", "") < since:
             continue
         for k in by:
-            row = by[k].setdefault(r.get(k) or "?", {"answers": 0, "failed": 0, "input": 0, "output": 0, "cache": 0, "cost": 0.0})
+            row = by[k].setdefault(r.get(k) or "?", {"answers": 0, "failed": 0, "input": 0, "output": 0, "cache": 0, "cost": 0.0, "unpriced": 0})
             row["answers"] += 1
             row["failed"] += bool(r.get("error"))
             row["input"] += r.get("input", 0)
             row["output"] += r.get("output", 0)
             row["cache"] += r.get("cacheRead", 0) + r.get("cacheWrite", 0)
             row["cost"] = round(row["cost"] + r.get("cost", 0), 6)
+            row["unpriced"] += not r.get("cost") and any(r.get(t) for t in ("input", "output", "cacheRead", "cacheWrite"))
     return {"days": days, **{k: [{"name": n, **v} for n, v in sorted(d.items(), key=lambda x: -x[1]["output"])] for k, d in by.items()}}
 _SNAP: dict[tuple, dict] = {}
 _SNAP_LOCK = threading.Lock()
@@ -1731,13 +1748,18 @@ def changed(project: str) -> None:
     threading.Thread(target=go, daemon=True).start()
 
 
+def source_url() -> str:
+    """AGPL-3.0 §13: where everyone using this app gets its source; a changed build sets ABI_SOURCE_URL to its own."""
+    return os.environ.get("ABI_SOURCE_URL") or "https://github.com/Himanshu8881212/abi-pi"
+
+
 SIGNIN = """<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>Sign in · ABI</title>
 <link rel=stylesheet href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&display=swap"><style>:root{--bg:#f7f7f5;--card:#fff;--ink:#0b0b0b;--mute:#62625e;--line:#e4e4e1;--sig:#ff4f1f;color-scheme:light}@media (prefers-color-scheme:dark){:root{--bg:#0b0b0b;--card:#141414;--ink:#f2f2ef;--mute:#9b9b96;--line:#2a2a28;--sig:#ff6a3d;color-scheme:dark}}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);font:14px/1.5 "Inter Tight",system-ui,sans-serif;-webkit-font-smoothing:antialiased}form{display:flex;flex-direction:column;gap:6px;width:min(360px,calc(100vw - 32px));background:var(--card);border:1px solid var(--line);border-radius:8px;padding:32px}b{display:flex;align-items:center;gap:8px;font:700 20px "Inter Tight",sans-serif;letter-spacing:-.02em;margin-bottom:4px}b::before{content:"";width:12px;height:12px;background:var(--sig);border-radius:2px}label{font-size:12px;font-weight:500;color:var(--mute);margin-top:10px}input,button{font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:4px;background:var(--card);color:var(--ink)}input:focus{outline:none;border-color:var(--ink);box-shadow:0 0 0 3px color-mix(in srgb,var(--sig) 22%,transparent)}button{margin-top:16px;background:var(--ink);border-color:var(--ink);color:var(--card);font-weight:500;cursor:pointer}button.alt{margin-top:8px;width:100%;background:var(--card);color:var(--ink);border-color:var(--line)}#sso{display:contents}a{color:var(--mute);font-size:12px;margin-top:10px}[hidden]{display:none}.m{min-height:1.4em;color:var(--sig);font-size:13px}small{color:var(--mute)}</style>
 <form method=post action=/signin id=in><b>ABI</b><small>Sign in with your ABI account.</small><label for=n>Name or email</label>
 <input id=n name=name value="%NAME%" autocomplete=username autofocus required><label for=p>Password</label>
 <input id=p name=password type=password autocomplete=current-password required><label for=c %CODE%>Authenticator code</label>
 <input id=c name=code inputmode=numeric autocomplete=one-time-code %CODE%><button>Sign in</button><span id=sso></span>
-<a href=# id=fg>Forgot your password?</a><span class=m>%MSG%</span></form>
+<a href=# id=fg>Forgot your password?</a><span class=m>%MSG%</span><a href="%SRC%" target=_blank rel=noopener>ABI-PI %VER% · source code (AGPL-3.0)</a></form>
 <form id=pw hidden><b>ABI</b><small id=pwt>Choose your password.</small><label for=p1>New password (8 characters or more)</label>
 <input id=p1 type=password autocomplete=new-password minlength=8 required><button>Save password</button><span class=m id=pm></span></form>
 <script>
@@ -2022,7 +2044,8 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
             self.guarded(self.post)
 
         def signin_page(self, msg: str = "", name: str = "", code: bool = False) -> None:
-            self.reply(200, SIGNIN.replace("%MSG%", html.escape(msg)).replace("%NAME%", html.escape(name))
+            self.reply(200, SIGNIN.replace("%SRC%", html.escape(source_url())).replace("%VER%", html.escape(VERSION))
+                       .replace("%MSG%", html.escape(msg)).replace("%NAME%", html.escape(name))
                        .replace("%CODE%", "" if code else "hidden").encode(), "text/html; charset=utf-8")
 
         def start(self, name: str, tok: str) -> None:
@@ -2166,7 +2189,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                 return self.reply(200, NO_PROJECT.replace("%NAME%", html.escape(self.sess["name"])).encode(), "text/html; charset=utf-8")
             opening(p)
             me = {"name": self.sess["name"] if self.sess else None, "admin": bool(not self.sess or self.sess["admin"]), "signin": signin,
-                  "role": role_of(self.sess, p), **access(self.sess, p)}
+                  "role": role_of(self.sess, p), **access(self.sess, p), "source": source_url(), "version": VERSION}
             # the page's data as this person (their row-level security, sections and reports); live, never the synced file
             # a person who can't edit reads only the published copy, from the first page on (release run 31 Oct: the first
             # page came from the working project, uncommitted work included, and only later requests went to the copy)

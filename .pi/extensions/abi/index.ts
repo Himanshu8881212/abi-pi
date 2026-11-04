@@ -130,6 +130,7 @@ export default async function abi(pi: ExtensionAPI) {
 		log({ event: "provider_unavailable", error: String(e).slice(0, 200) });
 	}
 	// ---------- the providers an admin connected in the app (Govern › Settings); keys read at call time ----------
+	// a model's prices there (US dollars per million tokens) are its cost here: Pi computes each answer's cost from them
 	try {
 		const SETTINGS = path.join(ROOT, "scripts", "settings.py");
 		const conf = JSON.parse(execFileSync(PY, [SETTINGS, "public"], { encoding: "utf8" }));
@@ -138,7 +139,7 @@ export default async function abi(pi: ExtensionAPI) {
 				name: p.name, baseUrl: p.base_url, api: p.api,
 				apiKey: p.key_set ? `!${PY} ${SETTINGS} key ${p.id}` : "none",
 				models: p.models.map((id: string) => ({ id, name: `${id} (${p.name})`, reasoning: true, input: ["text", "image"],
-					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 200000, maxTokens: 32000 })),
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, ...p.prices?.[id] }, contextWindow: 200000, maxTokens: 32000 })),
 			});
 		}
 	} catch (e) {

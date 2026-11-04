@@ -524,10 +524,14 @@ def test_the_apps_own_settings_have_a_git_history(srv):
     assert subprocess.run(["git", "-C", str(d), "status", "--porcelain"], capture_output=True, text=True).stdout == ""
 
 
-def test_a_model_that_refuses_is_told_not_silent():
-    """A provider out of quota (429) ended the run with no answer: the chat just stopped (REPORT #50)."""
+def test_a_model_that_refuses_is_told_not_silent(tmp_path, monkeypatch):
+    """A provider out of quota (429) ended the run with no answer: the chat just stopped (REPORT #50).
+    Its usage line goes to this test's own log: this test's failed answer, with no provider or model (Pi always names
+    both, pi-agent-core's handleRunFailure too), was every "None/None" row in the owner's Govern › Settings › Usage."""
     import types
-    err = {"role": "assistant", "content": [], "stopReason": "error",
+    monkeypatch.setattr(app.abi, "ROOT", tmp_path)
+    (tmp_path / "logs").mkdir()
+    err = {"role": "assistant", "content": [], "stopReason": "error", "provider": "cliproxy", "model": "gpt-6.1-sol",
            "errorMessage": 'cliproxy API error (429): {"code":"model_cooldown","message":"All credentials are cooling down"}'}
     lines = [json.dumps({"type": "message_end", "message": err}), json.dumps({"type": "agent_settled", "aborted": False})]
     h = app.Hub.__new__(app.Hub)
@@ -537,6 +541,7 @@ def test_a_model_that_refuses_is_told_not_silent():
     answers = [e["text"] for e in out if e["type"] == "answer"]
     assert answers and "429" in answers[0] and "Settings" in answers[0], out
     assert "credentials" not in answers[0], "the provider's own text stays in the log"
+    assert [json.loads(x)["model"] for x in (tmp_path / "logs/usage.jsonl").read_text().splitlines()] == ["cliproxy/gpt-6.1-sol"]
 
 
 def test_a_failing_model_hands_the_question_to_the_next_fallback(tmp_path, monkeypatch):
@@ -564,7 +569,7 @@ def test_a_failing_model_hands_the_question_to_the_next_fallback(tmp_path, monke
     assert [e for e in out if e["type"] == "answer"] == [{"type": "answer", "text": "Fine.", "model": "b"}], out
     assert any(e["type"] == "note" and "asking b" in e["text"] for e in out)
     tot = app.usage_totals(f=tmp_path / "logs" / "usage.jsonl")
-    assert tot["user"][0] | {} == {"name": "ann", "answers": 2, "failed": 1, "input": 20, "output": 10, "cache": 0, "cost": 0.02}, tot
+    assert tot["user"][0] | {} == {"name": "ann", "answers": 2, "failed": 1, "input": 20, "output": 10, "cache": 0, "cost": 0.02, "unpriced": 0}, tot
     assert {r["name"] for r in tot["model"]} == {"proxy/a", "proxy/b"}
     assert "q?" not in (tmp_path / "logs" / "usage.jsonl").read_text(), "no chat text in the usage log"
 
@@ -573,6 +578,8 @@ def test_a_wrong_key_is_not_retried_on_other_models(tmp_path, monkeypatch):
     import types
     import settings
     monkeypatch.setenv("ABI_PI_WORKSPACES", str(tmp_path))
+    monkeypatch.setattr(app.abi, "ROOT", tmp_path)  # its usage line too: never into the owner's logs/usage.jsonl
+    (tmp_path / "logs").mkdir()
     settings.save_provider({"id": "proxy", "api": "openai-completions", "base_url": "http://127.0.0.1:9/v1", "models": ["a", "b"]}, "k-1234")
     settings.set_default("proxy/a", "medium", ["proxy/b"])
     err = {"role": "assistant", "content": [], "stopReason": "error", "provider": "proxy", "model": "a", "errorMessage": "proxy API error (401): bad key"}
@@ -581,6 +588,89 @@ def test_a_wrong_key_is_not_retried_on_other_models(tmp_path, monkeypatch):
     h.pi, h.busy, h.emit, h.chat_note, h.send, h.asked = types.SimpleNamespace(stdout=iter(json.dumps(x) + "\n" for x in [{"type": "message_end", "message": err}, {"type": "agent_settled"}])), True, out.append, lambda *a: None, sent.append, "q?"
     h.read()
     assert not sent and "401" in [e for e in out if e["type"] == "answer"][0]["text"]
+
+
+# .pi/extensions/abi/index.ts loaded as Pi loads it, with a stand-in Pi: the models it registers at start, by provider.
+# Pi's own packages are stubbed (only `Type` runs at load), so this needs node alone, as CI has it.
+EXT = r"""
+import { registerHooks } from "node:module";
+registerHooks({ resolve: (s, c, next) => s.startsWith("@earendil-works/")
+  ? { url: "data:text/javascript,export const Type = new Proxy({}, { get: () => () => ({}) });", shortCircuit: true } : next(s, c) });
+globalThis.__dirname = process.argv[1];  // Pi loads extensions as CommonJS
+const seen = [], pi = new Proxy({}, { get: (_, k) => k === "registerProvider" ? (id, c) => seen.push({ id, ...c }) : () => [] });
+await (await import(process.argv[2])).default(pi);
+console.log(JSON.stringify(seen));
+"""
+
+
+def test_a_models_prices_become_the_cost_pi_reports_and_usage_shows(tmp_path, monkeypatch):
+    """Every model was registered with Pi at cost 0, so Usage could never show a cost (0 of 25 local rows had one): a
+    model's prices in Settings (US dollars per million tokens) go into its registration, Pi computes each answer's cost
+    from them (pi-ai's calculateCost: price / 1M x tokens), the app counts it, and the Usage card shows a cost only where
+    there is one: "tokens only" otherwise, never a misleading $0."""
+    import types
+    import settings
+    monkeypatch.setenv("ABI_PI_WORKSPACES", str(tmp_path))
+    settings.save_provider({"id": "proxy", "api": "openai-completions", "base_url": "http://127.0.0.1:9/v1", "models": ["a", "b"],
+                            "prices": {"a": {"input": 3, "output": 15, "cacheRead": 0.3, "cacheWrite": 3.75}}}, "k-1234")
+    ext = ROOT / ".pi/extensions/abi/index.ts"
+    r = subprocess.run(["node", "--experimental-strip-types", "--input-type=module", "-e", EXT, str(ext.parent), str(ext)], cwd=ROOT,
+                       capture_output=True, text=True, timeout=60, env={**os.environ, "ABI_PI_LLM_BASE": "http://127.0.0.1:9/v1"})
+    assert r.returncode == 0, r.stderr[-2000:]
+    models = {m["id"]: m for p in json.loads(r.stdout.splitlines()[-1]) if p["id"] == "proxy" for m in p["models"]}
+    assert models["a"]["cost"] == {"input": 3, "output": 15, "cacheRead": 0.3, "cacheWrite": 3.75}
+    assert models["b"]["cost"] == {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}
+    use = {"input": 1000, "output": 500, "cacheRead": 2000, "cacheWrite": 0}
+    end = lambda m: {"type": "message_end", "message": {"role": "assistant", "content": [{"type": "text", "text": "Fine."}], "stopReason": "stop",  # noqa: E731
+                                                         "provider": "proxy", "model": m, "usage": {**use, "cost": {  # as Pi reports it
+                                                             "total": sum(models[m]["cost"][k] / 1e6 * n for k, n in use.items())}}}}
+    monkeypatch.setattr(app.abi, "ROOT", tmp_path)
+    (tmp_path / "logs").mkdir()
+    h = app.Hub.__new__(app.Hub)
+    h.pi = types.SimpleNamespace(stdout=iter(json.dumps(x) + "\n" for x in [end("a"), end("b"), {"type": "agent_settled"}]))
+    h.busy, h.emit, h.chat_note, h.user, h.project, h.chat_id = True, lambda e: None, lambda *a: None, "ann", P, "c1"
+    h.read()
+    tot = app.usage_totals(f=tmp_path / "logs/usage.jsonl")
+    by = {r["name"]: r for r in tot["model"]}
+    assert (by["proxy/a"]["cost"], by["proxy/a"]["unpriced"]) == (0.0111, 0), by  # (3 x 1000 + 15 x 500 + 0.3 x 2000) / 1M
+    assert (by["proxy/b"]["cost"], by["proxy/b"]["unpriced"]) == (0, 1), by
+    money = re.search(r"const money=r=>.*?;\n", app.JS).group(0)  # the Usage card's cost cell
+    shown = subprocess.run(["node", "-e", money + "process.stdout.write(JSON.stringify(JSON.parse(process.argv[1]).map(money)))",
+                            json.dumps([by["proxy/a"], by["proxy/b"], tot["user"][0], {"cost": 0.004}])], capture_output=True, text=True, check=True).stdout
+    assert json.loads(shown) == ["$0.01", "tokens only", "$0.01 (part tokens only)", "< $0.01"]
+
+
+def test_the_app_offers_everyone_its_source(srv, monkeypatch, tmp_path):
+    """AGPL-3.0 §13: everyone using the app over a network can get the running version's source. The sign-in page and
+    every page's sidebar link it (this repo, or ABI_SOURCE_URL for a changed build); so does the engine's /api/version,
+    which named another repo; docker compose passes ABI_SOURCE_URL on."""
+    port, _, page = srv
+    me = json.loads(re.search(r"window\.ME=(\{.*?\});window\.APP=", page).group(1))
+    assert (me["source"], me["version"]) == ("https://github.com/Himanshu8881212/abi-pi", app.VERSION)
+    out = _chromium("""
+import json, sys
+from playwright.sync_api import sync_playwright
+with sync_playwright() as p:
+    b = p.chromium.launch(); pg = b.new_page(); pg.goto(sys.argv[1]); pg.wait_for_selector("aside a.src")
+    print(json.dumps(pg.eval_on_selector("aside a.src", "a => [a.href, a.textContent, a.target]"))); b.close()
+""", f"http://127.0.0.1:{port}/")
+    assert out == ["https://github.com/Himanshu8881212/abi-pi", f"ABI-PI {app.VERSION} · source code (AGPL-3.0)", "_blank"], out
+    s = app.serve(P, 0, open_browser=False, signin=True)
+    try:
+        url = f"http://127.0.0.1:{s.server_address[1]}/"
+        assert '<a href="https://github.com/Himanshu8881212/abi-pi" target=_blank' in urllib.request.urlopen(url).read().decode()
+        monkeypatch.setenv("ABI_SOURCE_URL", "https://git.example.com/our-abi?v=1&x=2")
+        assert '<a href="https://git.example.com/our-abi?v=1&amp;x=2" target=_blank' in urllib.request.urlopen(url).read().decode()
+    finally:
+        s.shutdown()
+    engine = lambda: subprocess.run([str(ROOT / "engine/backend/.venv/bin/python"), "-c", "from abi.app import version; print(version()['source'])"],  # noqa: E731
+                                    capture_output=True, text=True, check=True, env={**os.environ, "PYTHONPATH": str(ROOT / "engine/backend")}).stdout.strip()
+    assert engine() == "https://git.example.com/our-abi?v=1&x=2"
+    monkeypatch.setenv("ABI_SOURCE_URL", "")  # what compose passes when .env has none
+    assert engine() == "https://github.com/Himanshu8881212/abi-pi" and app.source_url() == "https://github.com/Himanshu8881212/abi-pi"
+    from test_https import compose
+    assert compose(tmp_path, "")["abi"]["environment"]["ABI_SOURCE_URL"] == ""
+    assert compose(tmp_path, "ABI_SOURCE_URL=https://git.example.com/our-abi\n")["abi"]["environment"]["ABI_SOURCE_URL"] == "https://git.example.com/our-abi"
 
 
 def test_chat_answers_draw_markdown_tables_safely():

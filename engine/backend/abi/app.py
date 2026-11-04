@@ -150,7 +150,7 @@ def health() -> dict:
 # a modified deployment sets ABI_SOURCE_URL to where its own changed source is published.
 @app.get("/api/version")
 def version() -> dict:
-    source = os.environ.get("ABI_SOURCE_URL", "https://github.com/Himanshu8881212/abi")
+    source = os.environ.get("ABI_SOURCE_URL") or "https://github.com/Himanshu8881212/abi-pi"  # compose passes it empty when unset
     return {"version": db.VERSION, "source": source}
 
 

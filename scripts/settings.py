@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """The agent's model settings an admin changes in the app (Govern › Settings): the providers (API type, base URL, API
-key, models), the default model and its reasoning level. Kept in workspaces/_settings/ (the container's volume).
+key, models and their optional prices), the default model and its reasoning level. Kept in workspaces/_settings/ (the
+container's volume).
 
 API keys are encrypted at rest (Fernet) with $ABI_PI_SECRET_KEY, or with a key file made there on first use (0600),
 as n8n does with its encryption key. The page only ever sees "set, ends in 1234"; Pi reads a key at call time through
@@ -11,6 +12,7 @@ as n8n does with its encryption key. The page only ever sees "set, ends in 1234"
     settings.py engine            give ABI's engine the agent's model (its custom agents use it)
 """
 import json
+import math
 import os
 import re
 import sys
@@ -21,6 +23,7 @@ from pathlib import Path
 APIS = {"openai-responses": "OpenAI Responses (OpenAI)", "openai-completions": "OpenAI-compatible (OpenRouter, Ollama, LM Studio, vLLM, proxies)",
         "anthropic-messages": "Anthropic", "google-generative-ai": "Google Gemini"}
 LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
+PRICES = ("input", "output", "cacheRead", "cacheWrite")  # Pi's model cost: US dollars per million tokens of each kind
 PID = re.compile(r"^[a-z][a-z0-9-]{0,40}$")
 MID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,120}$")
 
@@ -91,7 +94,7 @@ def safe_url(base: str) -> bool:
 
 
 def save_provider(p: dict, key: str | None = None) -> dict:
-    """Add or change a provider; a key given replaces the stored one, none keeps it."""
+    """Add or change a provider; a key given replaces the stored one, none keeps it, and so do prices."""
     pid, api, base = str(p.get("id", "")), p.get("api"), str(p.get("base_url", "")).rstrip("/")
     models = [m for m in (p.get("models") or []) if isinstance(m, str) and m.strip()]
     if not PID.match(pid) or api not in APIS or not re.match(r"^https?://[^\s]+$", base) or not models or not all(MID.match(m) for m in models):
@@ -101,12 +104,30 @@ def save_provider(p: dict, key: str | None = None) -> dict:
     s = load()
     old = next((x for x in s["providers"] if x["id"] == pid), {})
     rec = {"id": pid, "name": str(p.get("name") or pid)[:80], "api": api, "base_url": base, "models": models[:40],
+           "prices": _prices(p["prices"] if "prices" in p else old.get("prices") or {}, models[:40]),
            "key": old.get("key"), "ends": old.get("ends", "")}
     if key:
         rec["key"], rec["ends"] = _fernet().encrypt(key.encode()).decode(), key[-4:]
     s["providers"] = [x for x in s["providers"] if x["id"] != pid] + [rec]
     _save(s)
     return public()
+
+
+def _prices(prices, models: list) -> dict:
+    """A model's optional prices, US dollars per million tokens (Pi's model cost; one left out is 0). The harness gives
+    them to Pi, which computes each answer's cost from them; a model without any counts tokens only."""
+    if not isinstance(prices, dict):
+        raise ValueError("Prices go per model: {model: {input, output, cacheRead, cacheWrite}}.")
+    out = {}
+    for m, x in prices.items():
+        if m not in models:
+            continue  # a model no longer offered takes its prices along
+        if not isinstance(x, dict) or set(x) - set(PRICES) or not all(
+                isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0 for v in x.values()):
+            raise ValueError("A price is US dollars per million tokens, 0 or more, for input, output, cacheRead or cacheWrite.")
+        if x:
+            out[m] = {k: float(x.get(k, 0)) for k in PRICES}
+    return out
 
 
 def remove_provider(pid: str) -> dict:
@@ -254,8 +275,16 @@ def demo(tmp: Path) -> None:
     assert load()["fallbacks"] == ["openrouter/m3"], "the default is never its own fallback"
     assert next_model("429", ["openrouter/m2"]) == "openrouter/m3" and next_model("503", ["openrouter/m3"]) is None
     assert next_model("401", []) is None, "a wrong key is not fixed by another model"
+    o = {"id": "openrouter", "api": "openai-completions", "base_url": "https://openrouter.ai/api/v1"}
+    save_provider({**o, "models": ["m2", "m3"], "prices": {"m2": {"input": 3, "output": 15}, "gone": {"input": 1}}})
+    save_provider({**o, "models": ["m2", "m3"]})  # the provider form, which sends no prices
+    assert public()["providers"][0]["prices"] == {"m2": {"input": 3.0, "output": 15.0, "cacheRead": 0.0, "cacheWrite": 0.0}}
+    save_provider({**o, "models": ["m3"]})
+    assert load()["providers"][0]["prices"] == {}, "a model's prices go with it"
     for bad in ({"id": "X!", "api": "openai-completions", "base_url": "https://x", "models": ["m"]},
-                {"id": "x", "api": "nope", "base_url": "https://x", "models": ["m"]}, {"id": "x", "api": "openai-completions", "base_url": "ftp://x", "models": ["m"]}):
+                {"id": "x", "api": "nope", "base_url": "https://x", "models": ["m"]}, {"id": "x", "api": "openai-completions", "base_url": "ftp://x", "models": ["m"]},
+                *({"id": "x", "api": "openai-completions", "base_url": "http://127.0.0.1:9/v1", "models": ["m"], "prices": {"m": x}}
+                  for x in ({"input": -1}, {"output": float("nan")}, {"input": "3"}, {"input": True}, {"tax": 1}, [3]))):
         try:
             save_provider(bad)
             raise AssertionError(bad)

@@ -22,6 +22,7 @@ services:
       ABI_PI_SECRET_KEY: ${ABI_SECRET_KEY:-${ABI_PI_SECRET_KEY:-}}  # encrypts the API keys admins save; empty: a key file in the volume
       # the address people open (emailed links, single sign-on): with HTTPS, https://ABI_DOMAIN unless .env says otherwise
       ABI_PUBLIC_URL: ${ABI_PUBLIC_URL:-${ABI_DOMAIN:+https://${ABI_DOMAIN:-}${ABI_HTTPS_PORT:+:${ABI_HTTPS_PORT:-}}}}
+      ABI_SOURCE_URL: ${ABI_SOURCE_URL:-}  # AGPL §13: where a changed build's source is published; empty: this repo
     volumes:
       - abi-data:/data                           # everything: the engine's database and lake, projects, chats, packs
     extra_hosts: ["host.docker.internal:host-gateway"]   # a model on this machine (Ollama) on Linux too

@@ -50,7 +50,7 @@ One app, in the order the work happens:
 |---|---|
 | **Data** | CSV, Excel, JSON and Parquet files (upload, or an S3 folder of them), Delta and Iceberg tables, Postgres and MySQL tables, into medallion layers: bronze sources, silver cleaned tables, gold facts and dimensions. Sources refresh on change or on a schedule, incrementally where the source allows. |
 | **Data model** | Measures, a glossary, saved queries, joins and a calendar, row-level and column security, a model canvas. |
-| **Write-back** | Edit rows, or change a total and let ABI spread it over the rows below; every edit waits for approval, undoes in one step and can sync back to a Postgres or MySQL source. |
+| **Write-back** | Edit rows in the app, or have the agent change a total and let ABI spread it over the rows below; the agent's edits wait for your approval, and every edit undoes in one step. For a table loaded straight from a Postgres or MySQL table (its source added with `"sync": true`, its key the source's primary key), an Owner can have the agent write the edits back to it, after a preview of every change they confirm. |
 | **Visualize** | Reports with cross-filtering, drag-and-resize layouts, Explore with saved analyses, Monitor checks (a measure against a target or its last period, freshness, failed flows), a Home page of pinned widgets. |
 | **Export** | Board packs and one-pagers as PDF, PPTX and PNG, data extracts (Excel, CSV), and short explainer videos (MP4) of a report. |
 | **Automate** | Flows on a schedule, ML forecasts, tools, and custom agents with their own evaluation sets, each from a form, from a sentence to the agent, or as JSON. |
@@ -123,7 +123,8 @@ again.
 and Gemini, or any OpenAI-compatible URL), paste its key and pick the model. Keys are stored encrypted and never shown
 again. Ollama on the same machine is `http://host.docker.internal:11434/v1` (the preset); on Linux, start Ollama with `OLLAMA_HOST=0.0.0.0`.
 Tick one or more **fallback** models: when the model is out of quota or down, the chat asks the next one and says so.
-**Usage** on the same page shows the tokens (and cost, where the provider reports it) per person and model.
+**Usage** on the same page shows the tokens per person and model, and the cost of models you give prices (US dollars
+per million tokens, on the provider's card); a model without prices counts tokens only.
 
 **6. Bring data.** **Data › Sources › Add source**: upload a CSV, TSV, Excel (.xlsx: name the sheet, or the first is
 read), JSON/NDJSON, Parquet or Avro file (any size; it goes up in pieces), or give an S3 location like
@@ -162,6 +163,7 @@ their name. Both need `ABI_PUBLIC_URL`, the address people open, so the links co
 | `ABI_LLM_BASE`, `ABI_LLM_KEY`, `ABI_LLM_MODEL` | no | One OpenAI-compatible model endpoint, its key and the model's id there (e.g. `https://api.openai.com/v1`, `gpt-5`), instead of Settings. |
 | `ABI_LLM_API` | no | `openai-completions` (the default with a model) or `openai-responses`. |
 | `ABI_PUBLIC_URL` | no | The address people open, e.g. `https://abi.example.com`: emailed links and single sign-on return there. With HTTPS on (below), `https://ABI_DOMAIN` by itself. |
+| `ABI_SOURCE_URL` | no | You changed ABI and run it for others: where its source is published. The sign-in page and every page link it (AGPL-3.0 §13). Default: this repository. |
 | `COMPOSE_PROFILES`, `ABI_DOMAIN`, `ABI_TLS`, `ABI_TLS_CERT`, `ABI_TLS_KEY`, `ABI_HTTP_PORT`, `ABI_HTTPS_PORT` | no | HTTPS in front of ABI (below). |
 | `ABI_VOLUME` | no | The data volume's name. Default `abi_abi-data`; an install from 1.0 keeps `abi-pi_abi-pi-data` (`scripts/upgrade.sh` sets it). |
 | `ABI_IMAGE` | no | The image to run. Default `ghcr.io/himanshu8881212/abi:latest` (pulled with `docker compose pull`, else built here). |
@@ -230,7 +232,7 @@ ABI keeps serving during a backup. To restore into a new, empty volume:
 docker compose down
 docker volume rm abi_abi-data          # deletes the current data: only with a checked backup in hand
 docker run --rm -i -v abi_abi-data:/data -v "$PWD/abi-keys.tar:/keys.tar:ro" \
-  --entrypoint scripts/backup.sh abi:latest restore /keys.tar < abi-backup.tar
+  --entrypoint scripts/backup.sh ghcr.io/himanshu8881212/abi:latest restore /keys.tar < abi-backup.tar   # or your ABI_IMAGE
 docker compose up -d
 ```
 
@@ -255,8 +257,9 @@ requests, and its revenue by region matched an independent DuckDB sum to the cen
 
 - HTTPS (above) gets a public certificate only for a name the internet reaches on port 80 or 443 (no DNS
   challenge); anywhere else the certificate is Caddy's own or yours.
-- Email (invitations, password resets, flow emails) needs a mail server; until then add people with a password, set
-  forgotten ones in Users & access, and flows deliver to the app's inbox.
+- Email needs a mail server: invitations and password resets use the one in **Settings › Email**, a flow's emails the
+  project's own (the agent sets it). Until then add people with a password, set forgotten ones in Users & access, and
+  have flows post to the project's inbox instead: the agent reads it to you, as the app has no inbox screen yet.
 - A database source copies one whole table (no custom query) and appends the rows past its increasing column each
   day: rows changed or deleted in place at the source stay as loaded until a **Reload** on its card. No Snowflake,
   BigQuery, SQL Server or Oracle yet, and no `gs://` or `az://` locations.
@@ -317,7 +320,8 @@ For Enterprise, [open an enquiry](https://github.com/Himanshu8881212/abi-pi/issu
 ## License
 
 ABI is free software under the [GNU Affero General Public License v3.0](LICENSE). You can use, change and share it;
-if you run a changed version as a service for others, you must offer them its source.
+if you run a changed version as a service for others, you must offer them its source: set `ABI_SOURCE_URL` to where
+it is published, and the app's source link (on the sign-in page and every page) points there.
 
 Third-party components keep their own licenses: see [engine/THIRD_PARTY_NOTICES](engine/THIRD_PARTY_NOTICES). The
 agent runs on the open-source [Pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent). Video
