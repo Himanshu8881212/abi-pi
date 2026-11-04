@@ -295,7 +295,7 @@ ABI is early, and that's the best time to shape it. Bug reports, ideas and pull 
    ```sh
    uv sync && (cd engine/backend && uv sync --frozen --no-dev)
    (cd engine/frontend && npm ci && npx vite build --outDir ../backend/static --emptyOutDir)
-   scripts/engine.sh start                                 # Postgres 17 (brew install postgresql@17), engine, worker
+   scripts/engine.sh start                                 # Postgres 17 (brew install postgresql@17), engine, workers
    scripts/accounts.py                                     # first run: accounts, passwords in data/accounts.txt
    .venv/bin/python scripts/app.py main 8790 --single      # one person, this machine only
    ```

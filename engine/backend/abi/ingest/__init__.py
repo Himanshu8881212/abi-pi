@@ -257,8 +257,8 @@ def set_steps(conn, user: User, args: TableSteps) -> dict:
         imports.write(args.project, {f"tables/{t}.json": {"$schema": SCHEMA + "table.json", **old, "id": t, "columns": columns,
                                                           "steps": [s.model_dump(mode="json") for s in steps]}})
 
-    # ponytail: the load and downstream refresh run inside git.change's global repo lock, so a long load blocks other
-    # definition actions; refresh after the change (and roll back the file on failure) if that starts to hurt
+    # ponytail: the load and downstream refresh run inside git.change's repo lock, so a long load blocks the project's
+    # other definition actions; refresh after the change (and roll back the file on failure) if that starts to hurt
     _lock(conn, args.project, t)  # as add_data
     write(old.get("columns", []))  # _load builds model.<t> from the file's steps
     snap = _load(conn, src, user.name, declared=declared)

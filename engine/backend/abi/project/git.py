@@ -20,7 +20,6 @@ import json
 import os
 import re
 import shutil
-import threading
 import time
 import zoneinfo
 from contextlib import contextmanager
@@ -41,7 +40,6 @@ UNDO_REF = "refs/abi/undo"
 REV = r"^(HEAD|[0-9a-f]{4,40})$"  # a version: HEAD or a (short) commit id
 ID = storage.PROJECT  # project IDs are directory names (no path traversal) and the lake's schema and folder name
 BRANCH = r"^[a-z0-9][a-z0-9_-]{0,62}$"  # branch = environments/<branch>.json file name
-_lock = threading.Lock()  # ponytail: one lock for all repos, per-process; per-project locks if actions queue up
 
 
 def _root() -> Path:
@@ -85,12 +83,13 @@ def repo(project: str) -> pygit2.Repository:
 
 @contextmanager
 def locked(project: str, p: Path | None = None):
-    """Hold the project repo for a write: threads by `_lock`, processes (app, worker, scripts) by a flock on a file in
-    its git dir (DEMO-1.11-fix-1: libgit2 fails "the index is locked" instead of waiting). Not reentrant."""
+    """Hold the project repo for a write: threads by its project's lock (M3.1: other projects' actions go on),
+    processes (app, worker, scripts) by a flock on a file in its git dir (DEMO-1.11-fix-1: libgit2 fails "the index is
+    locked" instead of waiting). Not reentrant."""
     p = p or path(project)
     if not (p / ".git").is_dir():
         raise ActionFailed(404, f"Project '{project}' does not exist.")
-    with _lock, open(p / ".git" / "abi.lock", "w") as f:
+    with storage.project_lock("git", project), open(p / ".git" / "abi.lock", "w") as f:
         fcntl.flock(f, fcntl.LOCK_EX)  # released when the file closes, also when the process dies
         yield
 

@@ -319,7 +319,8 @@ def rss(app: int) -> dict:
     tree = lambda pid: [pid, *(x for k in kids[pid] for x in tree(k))]  # noqa: E731
     pid = lambda f: int((D / f).read_text().split()[0])  # noqa: E731 (engine.sh's pid files, Postgres's own)
     chats = pis(app, procs)
-    parts = {"app": [app], "engine": tree(pid("run/app.pid")), "worker": tree(pid("run/worker.pid")),
+    workers = [x for f in ("run/worker.pid", "run/worker_heavy.pid") if (D / f).exists() for x in tree(pid(f))]  # 1.2: a worker per queue
+    parts = {"app": [app], "engine": tree(pid("run/app.pid")), "worker": workers,
              "postgres": tree(pid("pg/postmaster.pid")), "pi": [x for c in chats for x in tree(c)]}
     out = {k: {"mb": round(sum(procs[x][1] for x in v if x in procs) / 1024, 1), "n": sum(x in procs for x in v)} for k, v in parts.items()}
     out["pi"]["chats"] = len(chats)

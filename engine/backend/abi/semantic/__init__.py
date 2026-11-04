@@ -48,13 +48,13 @@ _cache_lock = threading.Lock()
 
 
 _eff: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # lake connection -> (snapshot, tables with edits)
-_eff_lock = threading.Lock()
 
 
 def _edited(con, snap: int) -> frozenset[str]:
     """WB-4: the tables with active edits. Once per snapshot it rebuilds memory.effective (the lake connection's
-    in-memory database): one view per such table, its effective table (writeback.effective_sql)."""
-    with _eff_lock:
+    in-memory database): one view per such table, its effective table (writeback.effective_sql). One rebuild at a time
+    per project (two would race DROP/CREATE SCHEMA); other projects' reads go on (M3.1)."""
+    with storage.project_lock("effective", storage._project.get(con)):
         if (built := _eff.get(con)) and built[0] >= snap:
             return built[1]
         cur = con.cursor()

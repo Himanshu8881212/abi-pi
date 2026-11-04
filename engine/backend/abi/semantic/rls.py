@@ -11,7 +11,6 @@ import hashlib
 import json
 import math
 import re
-import threading
 import weakref
 from itertools import pairwise
 from typing import Annotated
@@ -35,7 +34,6 @@ from abi.semantic import planner
 RLS = git.RLS
 HIDDEN = "not shown: row-level security rules apply to this project"  # in place of figures or text read from every row
 MARK = "[hidden by row-level security]"  # D-47: in place of data-derived text in a restricted Viewer's inbox copy
-_lock = threading.Lock()
 _built: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # lake connection -> {schema names built}
 _ctx: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # lake connection -> {(user, snap, rules sha): ctx}
 
@@ -291,7 +289,7 @@ def context(project: str, user_id: int, con, snap: int, edited: frozenset, model
     key = (user_id, snap, hashlib.sha256(b"\0".join(f.read_bytes() for f in files if f.exists())).hexdigest())
     lv = live.columns(project)
     fresh = any(r["to"]["table"] in lv for r in model._read(project, "model.json").get("relationships", []))
-    with _lock:
+    with storage.project_lock("rls", project):  # M3.1: one project's view build never stalls another's reads
         hit = None if fresh else _ctx.setdefault(con, {}).get(key)
     if hit:
         return hit
@@ -311,7 +309,7 @@ def context(project: str, user_id: int, con, snap: int, edited: frozenset, model
                         f" {'memory.effective' if t in edited else 'lake.model'}.{storage._q(t)}" + (f" WHERE {where}" if where else ""))
     schema = "rls_" + hashlib.sha256(json.dumps(views, sort_keys=True).encode()).hexdigest()[:16]
     out = schema, {t: drop(t, cols) for t, cols in lv.items() if t in conds or t in hid}
-    with _lock:
+    with storage.project_lock("rls", project):
         if schema not in _built.setdefault(con, set()):
             cur = con.cursor()
             cur.begin()

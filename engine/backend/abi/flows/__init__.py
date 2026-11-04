@@ -213,12 +213,27 @@ def start(project: str, flow: str, key: str, trigger: dict | None = None, by: Us
     return run_id
 
 
+HEAVY = {"refresh", "add_data", "set_steps", "train_model", "score_model", "report_snapshot"}  # loads, ML, renders
+
+
+def _queue(run_id: str) -> str:
+    """M3.1: a run of a flow that loads, trains, scores or renders goes to the heavy queue; the others (sends, agents,
+    checks, alerts) to the default one, where no load or training holds them up."""
+    project, flow, _ = run_id.split("/", 2)
+    try:
+        steps = _load(project, flow)["steps"]
+    except (ActionFailed, OSError, ValueError):  # the flow is gone or unreadable: its run fails at once on either
+        return "default"
+    return "heavy" if any((s.get("action") if s["type"] == "action" else STEPS.get(s["type"])) in HEAVY for s in steps) else "default"
+
+
 def _defer(run_id: str, name: str = "run_flow") -> None:
     # not at top: the worker imports every action module, this one included.
     from abi import worker
 
     # queueing_lock names the run's jobs for `requeue`
-    worker.defer(getattr(worker, name).configure(queueing_lock=run_id if name == "run_flow" else f"{name}-{run_id}"), run_id=run_id)
+    worker.defer(getattr(worker, name).configure(queueing_lock=run_id if name == "run_flow" else f"{name}-{run_id}",
+                                                 queue=_queue(run_id) if name == "run_flow" else None), run_id=run_id)
 
 
 def requeue() -> None:

@@ -7,7 +7,7 @@ ABI-PI runs on this copy alone; no other ABI install is needed or touched. Licen
 
     (cd backend && uv sync --frozen --no-dev)                                         once
     (cd frontend && npm ci && npx vite build --outDir ../backend/static --emptyOutDir)   once, and after UI changes
-    ../scripts/engine.sh start | stop | status                                        Postgres + engine + worker
+    ../scripts/engine.sh start | stop | status                                        Postgres + engine + workers (default and heavy queue)
     ../scripts/accounts.py                                                            first run: the accounts
 
 To take a newer ABI: `git -C <ABI> archive HEAD backend/abi backend/pyproject.toml backend/uv.lock schemas frontend

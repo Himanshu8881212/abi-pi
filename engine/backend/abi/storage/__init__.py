@@ -4,7 +4,7 @@ One lake per project (glossary "Snapshot": a version of the project's data), so 
 restores never cross projects. One DuckDB connection per project per process (`lake(project)`);
 readers take `con.cursor()` each (they run in
 parallel, see test_ST_cursor_reads_overlap); writes go through `_commit`, which serializes them
-per process and retries DuckLake commit conflicts with the other process (app vs worker, V-01).
+per project per process and retries DuckLake commit conflicts with the other process (app vs worker, V-01).
 Every committed write is exactly one DuckLake snapshot; its id is the data version (ST-3).
 """
 
@@ -35,8 +35,18 @@ COLUMN = r"^[^.\s][^.]*\.[^.]+$"  # table.column
 Value = str | int | float | bool  # a cell value
 _META = "__ducklake_metadata_lake"  # DuckLake attaches its catalog under this name
 _project: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # connection -> its project
-_write_lock = threading.Lock()  # ponytail: the per-process serialized write queue (§9); one writer at a time
+# ponytail: never shrinks (a lock per project ID and kind this process saw, ~100 B each); prune if IDs churn by millions
+_locks: dict[tuple[str, str | None], threading.Lock] = {}
+_locks_lock = threading.Lock()  # held only to look a lock up in `_locks`: never during I/O, an ATTACH or a query
 RETRIES = 5
+
+
+def project_lock(kind: str, project: str | None) -> threading.Lock:
+    """This process's lock `kind` of one project (M3.1; 1.1 had one per kind for all projects): "write" (§9 the
+    serialized write queue: one writer per lake), "lake" (its attach), "git" (its repo), "effective"/"rls" (its
+    in-memory views). A step on two projects takes theirs in sorted order. Never reentrant."""
+    with _locks_lock:
+        return _locks.setdefault((kind, project), threading.Lock())
 
 
 def connect(project: str, catalog: str | None = None, data_path: str | None = None) -> duckdb.DuckDBPyConnection:
@@ -99,22 +109,22 @@ def _schema_oid(pg, project: str) -> int | None:
     return r and r[0]
 
 
-_lakes: dict[str, duckdb.DuckDBPyConnection] = {}
-_lakes_lock = threading.Lock()
+_lakes: dict[str, duckdb.DuckDBPyConnection] = {}  # a project's entry changes only under its "lake" lock
 _oid: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # Postgres-catalog connection -> its schema's OID
 _checked: dict[str, float] = {}  # project -> monotonic time its cached lake was last matched against the catalog
 RECHECK_S = 1.0
 
 
 def lake(project: str) -> duckdb.DuckDBPyConnection:
-    """The process-wide connection to a project's lake, created once under a lock (other processes: `connect`).
+    """The process-wide connection to a project's lake, created once under its project's lock (other processes:
+    `connect`), so one project's attach or catalog check never stalls another project's reads (M3.1).
     DEMO-BRIEF-fix-2: another process may delete or rename the project and a new lake take its name; DuckLake then
     reads the new catalog by name but answers from the old lake's cached catalog for the same snapshot IDs (missing
     tables and columns), so a cached lake whose catalog schema is no longer the one it attached is attached again."""
     # ponytail: one DuckDB instance per project; attach several lakes to one instance if projects get many
     # ponytail: matched at most once per RECHECK_S, so a lake recreated under the name is missed for up to that long;
     # LISTEN/NOTIFY from delete/rename_project if that window matters
-    with _lakes_lock:
+    with project_lock("lake", project):
         con, now = _lakes.get(project), time.monotonic()
         if con in _oid and now - _checked.get(project, 0) > RECHECK_S:
             _checked[project] = now
@@ -131,10 +141,10 @@ def _close_lakes() -> None:
     """Close (not just forget) every lake: a cursor left holding an unfinished result keeps its Postgres catalog
     connection idle in transaction, and that blocks DROP/ALTER SCHEMA on the catalog (R-8.1). Closing the parent closes
     its cursors."""
-    with _lakes_lock:
-        for con in _lakes.values():
-            con.close()
-        _lakes.clear()
+    for project in list(_lakes):
+        with project_lock("lake", project):
+            if con := _lakes.pop(project, None):
+                con.close()
 
 
 lake.cache_clear = _close_lakes
@@ -250,7 +260,8 @@ def move_lake(conn, old: str, new: str) -> list[tuple[str, str]]:
         return []  # X-04-fix-4: a folder with an invalid ID never got a lake (connect refuses it)
     if os.environ.get("ABI_LAKE_CATALOG", "postgres:") != "postgres:":  # only then the catalog is in `conn`'s database
         raise ActionFailed(409, "Moving a project's data needs the Postgres lake catalog (ABI_LAKE_CATALOG=postgres:).")
-    with _write_lock, _lakes_lock:
+    a, b = sorted((old, new))  # M3.1: both projects' locks in name order, as every step on two projects takes them
+    with project_lock("write", a), project_lock("write", b), project_lock("lake", a), project_lock("lake", b):
         _lakes.pop(old, None)  # the SE-7 cache is keyed weakly by this connection, so it goes too
         if not conn.execute("SELECT 1 FROM pg_namespace WHERE nspname = %s", [old]).fetchone():
             return []
@@ -332,8 +343,9 @@ def restore_snapshot(conn, user: User, args: Restore) -> dict:
 
 
 def _commit(con, run: Callable, author: str, message: str) -> int:
-    """Run `run(cursor)` as one transaction = one snapshot; retry DuckLake commit conflicts with backoff."""
-    with _write_lock:
+    """Run `run(cursor)` as one transaction = one snapshot; retry DuckLake commit conflicts with backoff. One writer per
+    project at a time in this process; other projects' writes run alongside (M3.1)."""
+    with project_lock("write", _project.get(con)):
         for attempt in range(RETRIES):
             cur = con.cursor()
             cur.begin()

@@ -24,12 +24,12 @@ alive() { [ -f "$D/run/$1.pid" ] && kill -0 "$(cat "$D/run/$1.pid")" 2>/dev/null
 case "${1:-start}" in
 env) env_; exit 0 ;;
 status)
-  for p in app worker; do alive $p && echo "$p running" || echo "$p stopped"; done
+  for p in app worker worker_heavy; do alive $p && echo "$p running" || echo "$p stopped"; done
   "$PGBIN/pg_ctl" -D "$D/pg" status >/dev/null 2>&1 && echo "postgres running" || echo "postgres stopped"
   exit 0 ;;
 stop)
-  for p in app worker; do if alive $p; then kill "$(cat "$D/run/$p.pid")"; fi; done
-  for p in app worker; do while alive $p; do sleep 0.2; done; rm -f "$D/run/$p.pid"; done
+  for p in app worker worker_heavy; do if alive $p; then kill "$(cat "$D/run/$p.pid")"; fi; done
+  for p in app worker worker_heavy; do while alive $p; do sleep 0.2; done; rm -f "$D/run/$p.pid"; done
   "$PGBIN/pg_ctl" -D "$D/pg" -m fast stop >/dev/null 2>&1 || true
   echo "engine stopped"
   exit 0 ;;
@@ -40,6 +40,8 @@ esac
 [ -x "$BIN/python" ] || { echo "Run once: (cd engine/backend && uv sync --frozen --no-dev)" >&2; exit 1; }
 [ -f "$ROOT/engine/backend/static/index.html" ] || {
   echo "Build the engine's UI once: (cd engine/frontend && npm ci && npx vite build --outDir ../backend/static --emptyOutDir)" >&2; exit 1; }
+HEAVY=${ABI_HEAVY_CONCURRENCY:-1}  # loads, query copies and ML trainings at a time: each may take DuckDB's memory limit
+case $HEAVY in 1|2) ;; *) echo "ABI_HEAVY_CONCURRENCY is 1 or 2 (heavy jobs at a time), not '$HEAVY'." >&2; exit 1 ;; esac
 umask 077
 mkdir -p "$D/run" "$D/logs" "$D/lake" "$D/files" "$D/projects" "$D/artifacts"
 eval "$(env_)"
@@ -52,8 +54,14 @@ fi
 "$PGBIN/psql" -d postgres -Atqc "SELECT 1 FROM pg_database WHERE datname = 'abi'" | grep -q 1 || "$PGBIN/createdb" abi
 cd "$ROOT/engine/backend"
 HOME=${ENGINE_HOME:-$HOME} "$BIN/python" -c "import abi.ops, abi.db; abi.ops.setup(); abi.db.init(queue=True)"
+# a worker per queue (abi/worker.py): ticks, answers and light flow runs 4 at a time; heavy jobs never hold them up
 if ! alive worker; then
-  HOME=${ENGINE_HOME:-$HOME} nohup "$BIN/procrastinate" --app=abi.worker.app worker > "$D/logs/worker.log" 2>&1 & echo $! > "$D/run/worker.pid"
+  HOME=${ENGINE_HOME:-$HOME} nohup "$BIN/procrastinate" --app=abi.worker.app worker --queues=default --concurrency=4 \
+    > "$D/logs/worker.log" 2>&1 & echo $! > "$D/run/worker.pid"
+fi
+if ! alive worker_heavy; then
+  HOME=${ENGINE_HOME:-$HOME} nohup "$BIN/procrastinate" --app=abi.worker.app worker --queues=heavy --concurrency="$HEAVY" \
+    > "$D/logs/worker_heavy.log" 2>&1 & echo $! > "$D/run/worker_heavy.pid"
 fi
 if ! alive app; then
   HOME=${ENGINE_HOME:-$HOME} nohup "$BIN/uvicorn" abi.app:app --host 127.0.0.1 --port "$PORT" --log-config abi/logging.json > "$D/logs/engine.log" 2>&1 &

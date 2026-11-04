@@ -30,7 +30,7 @@ from abi.project.bundle import dumps
 from abi.security import Role, User, credentials, role_in
 
 URL = r"https://([A-Za-z0-9.-]+(?::[0-9]{1,5})?)/[A-Za-z0-9._~/-]*"  # schemas/v1/project.json settings.remote.url
-# libgit2 waits forever by default, and remote calls hold git._lock (every project's): bound connect and reads (ms).
+# libgit2 waits forever by default, and remote calls hold the project's repo lock: bound connect and reads (ms).
 pygit2.settings.server_connect_timeout = 10_000
 pygit2.settings.server_timeout = 10_000
 

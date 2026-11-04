@@ -28,9 +28,11 @@ umask 077
 
 case "${1:-}" in
 backup)
-  # the worker's nightly maintenance deletes old lake files: paused so the dump and the files agree
-  W_PID=$(cat "$D/run/worker.pid" 2>/dev/null || true)
-  [ -n "$W_PID" ] && kill "$W_PID" 2>/dev/null && while kill -0 "$W_PID" 2>/dev/null; do sleep 0.2; done
+  # the workers' nightly maintenance deletes old lake files: paused (both queues' workers) so the dump and the files agree
+  for w in worker worker_heavy; do
+    W_PID=$(cat "$D/run/$w.pid" 2>/dev/null || true)
+    [ -n "$W_PID" ] && kill "$W_PID" 2>/dev/null && while kill -0 "$W_PID" 2>/dev/null; do sleep 0.2; done
+  done
   "$PGBIN/pg_dump" -Fc -f "$T/abi.dump" abi
   # the workspaces live in the data folder in the container, next to it on a machine: both go in as workspaces/
   tar -cf "$T/data.tar" -C "$D" --exclude=./pg --exclude=./run --exclude=./logs --exclude=./secret.key \
