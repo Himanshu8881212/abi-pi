@@ -31,6 +31,10 @@ in_c abi-pi-test 'export ABI_TOKEN=$(python3 scripts/creds.py abi-token) && pi -
 grep -q "North" "$S/agent" && grep -q "2" "$S/agent" && ok "agent answers inside" || bad "agent: $(tail -3 "$S/agent")"
 docker kill -s KILL abi-pi-test >/dev/null; docker start abi-pi-test >/dev/null; up 8796 && in_c abi-pi-test 'python3 -c "import sys; sys.path.insert(0, \"scripts\"); import abi; print(abi.call(\"semantic_query\", project=\"pi_app_test\", measures=[\"orders_rows\"], dimensions=[\"orders.region\"])[\"rows\"])"' > "$S/after" 2>&1
 cmp -s "$S/after" "$(printf '%s' "$S/rows")" 2>/dev/null; [ "$(tail -1 "$S/after")" = "$(tail -1 "$S/rows")" ] && ok "hard kill keeps data" || bad "after kill: $(tail -1 "$S/after")"
+W=$(docker exec abi-pi-test cat /data/run/worker.pid); docker exec abi-pi-test sh -c 'kill -9 $(cat /data/run/app.pid /data/run/worker.pid)'; n=0
+until docker exec abi-pi-test sh -c "scripts/engine.sh health http://127.0.0.1:8790/ && [ \$(cat /data/run/worker.pid) != $W ]" >/dev/null 2>&1; do
+  n=$((n + 1)); [ $n -lt 60 ] || break; sleep 1; done
+[ $n -lt 60 ] && ok "kill -9 of the engine and the worker: both serve again within $n s" || bad "kill -9 of the engine and the worker: not serving after 60 s"
 docker exec abi-pi-test scripts/backup.sh backup > "$S/b.tar" 2>/dev/null && docker exec abi-pi-test scripts/backup.sh keys > "$S/k.tar" && ok "backup $(du -h "$S/b.tar" | cut -f1)" || bad "backup"
 docker volume create abi-pi-restore >/dev/null
 docker run --rm -i -v abi-pi-restore:/data -v "$S/k.tar:/k.tar:ro" --entrypoint scripts/backup.sh abi:latest restore /k.tar < "$S/b.tar" >/dev/null 2>&1 || bad "restore"
@@ -41,6 +45,9 @@ LEAK=0; for s in "$ABI_PASSWORD" "$ABI_PI_LLM_KEY"; do
   n=$((n + $(docker history --no-trunc abi:latest | grep -cF "$s" || true))); n=$((n + $(tar -xOf "$S/b.tar" 2>/dev/null | grep -caF "$s" || true)))
   [ "$n" = 0 ] || { LEAK=1; bad "a secret appears in logs, files, layers or the backup ($n)"; }
 done; [ "$LEAK" = 0 ] && ok "no secret in logs, the volume, the image or the backup"
+P=$(docker exec abi-pi-test grep -c "not properly shut down" /data/logs/pg.log || true); t=$(date +%s); docker stop abi-pi-test >/dev/null; t=$(( $(date +%s) - t ))
+docker start abi-pi-test >/dev/null; up 8796 && [ $t -lt 10 ] && [ "$(docker exec abi-pi-test grep -c "not properly shut down" /data/logs/pg.log || true)" = "$P" ] \
+  && ok "docker stop in $t s: the app, the engine, its workers and Postgres shut down cleanly" || bad "docker stop took $t s, or Postgres recovered on the next start"
 docker run --rm -e ABI_USER=a -e ABI_PASSWORD=short abi:latest 2>&1 | grep -q "8 characters" && ok "short password: clear message" || bad "short password message"
 docker run --rm abi:latest 2>&1 | grep -q "Set ABI_USER" && ok "missing env: clear message" || bad "missing env message"
 sleep 35; [ "$(docker inspect abi-pi-test --format '{{.State.Health.Status}}')" = healthy ] && ok "healthy" || bad "health"

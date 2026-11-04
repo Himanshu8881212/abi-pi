@@ -173,6 +173,8 @@ people open, so the links come back to ABI.
 | `ABI_VOLUME` | no | The data volume's name. Default `abi_abi-data`; an install from 1.0 keeps `abi-pi_abi-pi-data` (`scripts/upgrade.sh` sets it). |
 | `ABI_IMAGE` | no | The image to run. Default `ghcr.io/himanshu8881212/abi:latest` (pulled with `docker compose pull`, else built here). |
 | `ABI_SECRET_KEY` | no | A Fernet key that encrypts the API keys admins save. Default: a key file in the volume. Make one with `python3 -c "import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())"`. |
+| `ABI_DUCKDB_MEMORY_LIMIT` | no | The memory DuckDB may use for one project's queries and loads in each engine process (the engine and each worker); above it, it spills to disk. Default `1500MB`. |
+| `ABI_QUERY_CACHE_MB` | no | Query results kept for reuse, in megabytes per project in each engine process. Default `256`. |
 
 ### Use it from other devices (HTTPS)
 
@@ -221,7 +223,7 @@ moves over too: it keeps its volume and its `.env`. The volume remembers its ver
 | `port is already allocated` | Set `ABI_PORT` in `.env` (with HTTPS on, also `ABI_HTTP_PORT` and `ABI_HTTPS_PORT`). |
 | The chat says nothing for two minutes | The model isn't reachable: check Govern › Settings (the key, the model id, the URL). |
 | A file is refused | The message under the form says why; CSV, TSV, Excel, JSON, Parquet and Avro files load (step 6). |
-| `ABI isn't answering right now` | The engine is still starting or restarting: wait a minute, or check `docker compose logs`. |
+| `ABI isn't answering right now` | The engine is starting, or starting again after it stopped (it does so by itself within seconds): wait a minute. `docker exec abi scripts/engine.sh health` says what isn't serving; `docker exec abi cat /data/logs/supervisor.log` lists every restart. |
 
 ## Back up and restore
 
@@ -233,7 +235,8 @@ docker exec abi scripts/backup.sh backup > abi-backup.tar   # database dump + al
 docker exec abi scripts/backup.sh keys   > abi-keys.tar     # the two key files: store them somewhere else
 ```
 
-ABI keeps serving during a backup. To restore into a new, empty volume:
+ABI keeps serving during a backup; queued jobs (scheduled flows, refreshes, trainings) wait until it's done. To
+restore into a new, empty volume:
 
 ```sh
 docker compose down
@@ -260,7 +263,8 @@ Every release runs three suites, and their results go into [RELEASE.md](RELEASE.
 - **Live agent tests** (`ABI_PI_LIVE=1 .venv/bin/python -m pytest -q -m live tests`): the agent driven like a person
   through real scenarios, from a raw file to a model, a report, a flow and a custom agent.
 - **Container check** (`tests/container_check.sh`): a fresh volume, loading and querying, PDF, PPTX and video export,
-  the agent, a hard kill, backup and restore, no secrets in the image or logs, non-root user, health check.
+  the agent, a hard kill, a killed engine and worker, a clean `docker stop`, backup and restore, no secrets in the
+  image or logs, non-root user, health check.
 
 For 1.0 the whole thing was also run on 7.4 million orders from S3: the agent built the project from eight plain
 requests, and its revenue by region matched an independent DuckDB sum to the cent.

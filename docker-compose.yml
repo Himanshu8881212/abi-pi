@@ -26,6 +26,8 @@ services:
       ABI_PUBLIC_URL: ${ABI_PUBLIC_URL:-${ABI_DOMAIN:+https://${ABI_DOMAIN:-}${ABI_HTTPS_PORT:+:${ABI_HTTPS_PORT:-}}}}
       ABI_SOURCE_URL: ${ABI_SOURCE_URL:-}  # AGPL §13: where a changed build's source is published; empty: this repo
       ABI_HEAVY_CONCURRENCY: ${ABI_HEAVY_CONCURRENCY:-1}  # loads, query copies and ML trainings at a time: 1 or 2
+      ABI_DUCKDB_MEMORY_LIMIT: ${ABI_DUCKDB_MEMORY_LIMIT:-1500MB}  # DuckDB's memory per project in each engine process; it spills to disk above it
+      ABI_QUERY_CACHE_MB: ${ABI_QUERY_CACHE_MB:-256}  # query results kept for reuse, megabytes per project in each engine process
     volumes:
       - abi-data:/data                           # everything: the engine's database and lake, projects, chats, packs
     extra_hosts: ["host.docker.internal:host-gateway"]   # a model on this machine (Ollama) on Linux too

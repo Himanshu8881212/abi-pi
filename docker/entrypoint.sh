@@ -42,4 +42,9 @@ if ! python3 -c "import sys; sys.path.insert(0, 'scripts'); import abi; sys.exit
   python3 scripts/abi.py project "$WS" "$P" > /dev/null
 fi
 echo "$V" > /data/VERSION
-exec python3 scripts/app.py "$P" 8790 --open
+# the app; a stop (docker's SIGTERM, which tini passes on) ends it, then the engine, its workers and Postgres in turn
+python3 scripts/app.py "$P" 8790 --open &
+APP=$!
+trap 'kill "$APP" 2>/dev/null || true' TERM INT
+wait "$APP" || wait "$APP" || true
+exec scripts/engine.sh stop

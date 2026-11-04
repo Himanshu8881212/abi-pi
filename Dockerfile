@@ -58,6 +58,7 @@ RUN mkdir -p /home/abi/.pi/agent && echo '{"/app": true}' > /home/abi/.pi/agent/
 ENV ABI_PI_DATA=/data ABI_PI_WORKSPACES=/data/workspaces ABI_PROJECTS_PATH=/data/projects PYTHONUNBUFFERED=1
 VOLUME ["/data"]
 EXPOSE 8790
-HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 CMD curl -fsS -o /dev/null http://127.0.0.1:8790/ || exit 1
+# healthy: the app answers, the engine is ready and its workers beat (scripts/engine.sh restarts what dies)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 CMD ["/app/scripts/engine.sh", "health", "http://127.0.0.1:8790/"]
 # tini as PID 1 reaps the engine's exited children (else a stopped worker stays a zombie that looks alive)
 ENTRYPOINT ["tini", "--", "docker/entrypoint.sh"]
