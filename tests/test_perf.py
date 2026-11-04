@@ -106,6 +106,11 @@ def test_pages_and_memory_through_an_app_here(capsys, monkeypatch, tmp_path):
         assert r["door"] == "app" and r["ready"] and r["exact"] and 30_000 < r["rows"] < 45_000 and r["tables_s"]["orders"] > 0, r
         assert projects() == before and set(perf.FILES.iterdir()) == files
         assert not [*abi.WORKSPACES.glob("*/perf_*_load"), *abi.WORKSPACES.glob("*/_*/perf_*_load")], "its copy and folders are gone"
+        r = run(capsys, "isolation", "--rows", "37000", "--queries", "3", "--door", "app", "--url", url)  # queries while a person's load runs
+        assert r["door"] == "app" and r["load"]["ready"] and r["load"]["exact"] and r["load"]["tables_s"]["orders"] > 0, r
+        assert r["during_load"]["n"] >= 1 and "load_error" not in r and r["load_s"] >= r["load"]["ready_s"], r
+        assert projects() == before and set(perf.FILES.iterdir()) == files
+        assert not [*abi.WORKSPACES.glob("*/perf_*_a"), *abi.WORKSPACES.glob("*/_*/perf_*_a")], "its copy and folders are gone"
         # a chat's memory with a stand-in for Pi (no model: it takes the message and never answers), so no tokens
         (tmp_path / "bin").mkdir()
         (tmp_path / "bin/pi").write_text("#!/usr/bin/env python3\nimport sys\nfor _ in sys.stdin:\n    pass\n")

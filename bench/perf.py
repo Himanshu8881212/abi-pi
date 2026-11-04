@@ -6,7 +6,7 @@ machine's engine and app, or inside a docker install). Each run prints one JSON 
     .venv/bin/python bench/perf.py pages --project P --sessions 50 [--people N] [--rls TABLE.COLUMN] [--url http://127.0.0.1:8790]
     .venv/bin/python bench/perf.py memory --project P --chats 4 [--hold S] [--url ...] [--app-pid PID]
     .venv/bin/python bench/perf.py load --rows 1000000 [--door path|app] [--url ...]
-    .venv/bin/python bench/perf.py isolation --rows 2000000 [--queries 30]
+    .venv/bin/python bench/perf.py isolation --rows 2000000 [--queries 30] [--door path|app] [--url ...]
     .venv/bin/python bench/perf.py publish --project P [--url ...]
     .venv/bin/python bench/perf.py medallion --rows 1000000
     .venv/bin/python bench/perf.py kill --part engine|worker --project P [--wait 300] [--url ...]
@@ -33,7 +33,9 @@ machine's engine and app, or inside a docker install). Each run prints one JSON 
              neither the app nor the agent has; --door app: each table one file through the app's upload, as a person's
              browser sends it (signed in as the owner, as pages is). A load the app drops or gives up on, or the
              engine refuses, is a result: "error", the seconds until it came, the tables loaded by then.
-  isolation  uncached semantic_query latency in a small project, idle and while N orders load into another.
+  isolation  uncached semantic_query latency in a small project, idle and while N orders load into another: on a
+             server path (--door path, default: the orders only), or as load --door app loads them (four tables
+             through the app's upload, the model, Ready: under "load", revenue by region checked after the queries).
   publish    the owner presses Publish twice, as the button does (its confirmation answered as their click): the bench
              project's first Publish, then one that sends only a measure's new description. Each: seconds until Publish
              answers and until a Viewer's page shows the published copy with the change, and the tables the copy
@@ -485,16 +487,32 @@ def brew(rows: int, d: Path) -> dict:
     return brewline.generate(d, rows / brewline.ORDERS)
 
 
+def door(a, p: str, d: Path) -> tuple:
+    """--door app, a person's door: the orders' months in one file, the app opens the new project p (its copy, as abi.load
+    makes one), and each table goes as one file through its upload: (the owner's App, put). Else (None, None): build's
+    own door, the engine's add_data on a server path."""
+    if a.door != "app":
+        return None, None
+    duckdb.sql(f"COPY (SELECT * FROM read_parquet('{brewline.q(d)}/orders/*.parquet')) TO '{brewline.q(d)}/orders.parquet' (FORMAT parquet)")
+    abi.new_project("demo", p)
+    o = owner(a, p)
+    return o, lambda t: upload(o, t, d / ("orders.parquet" if t == "orders" else f"{t}/{t}.parquet"))
+
+
+def gone(p: str) -> None:
+    """Project p deleted, with the app's copy and folders of it (the app's door makes them)."""
+    if any(x["project"] == p for x in abi.call("list_projects")["projects"]):
+        sure("delete_project", project=p)
+    for f in [*abi.WORKSPACES.glob(f"*/{p}"), *abi.WORKSPACES.glob(f"*/_*/{p}")]:
+        shutil.rmtree(f, ignore_errors=True)
+
+
 def load(a) -> dict:
     p = f"perf_{time.strftime('%m%d%H%M%S')}_load"
-    d, o, put = FILES / p, None, None
+    d, o = FILES / p, None
     try:
         known = brew(a.rows, d)
-        if a.door == "app":  # a person's door: the app opens the project (its copy, as abi.load makes one), one file a table
-            duckdb.sql(f"COPY (SELECT * FROM read_parquet('{brewline.q(d)}/orders/*.parquet')) TO '{brewline.q(d)}/orders.parquet' (FORMAT parquet)")
-            abi.new_project("demo", p)
-            o = owner(a, p)
-            put = lambda t: upload(o, t, d / ("orders.parquet" if t == "orders" else f"{t}/{t}.parquet"))  # noqa: E731
+        o, put = door(a, p, d)
         rec, t, took = {"rows": known["rows"]["orders"], "door": a.door}, time.perf_counter(), {}
         try:
             rec |= build(p, d, put, took)
@@ -505,10 +523,7 @@ def load(a) -> dict:
         rec["rows_per_s"] = round(rec["rows"] / rec["seconds"])
     finally:
         signed_out([o] if o else [])
-        if any(x["project"] == p for x in abi.call("list_projects")["projects"]):
-            sure("delete_project", project=p)
-        for f in [*abi.WORKSPACES.glob(f"*/{p}"), *abi.WORKSPACES.glob(f"*/_*/{p}")]:  # the copy and the app's folders
-            shutil.rmtree(f, ignore_errors=True)
+        gone(p)
         shutil.rmtree(d, ignore_errors=True)
     return rec
 
@@ -527,35 +542,42 @@ def asked(p: str, i: int) -> float:
 def isolation(a) -> dict:
     stamp = time.strftime("%m%d%H%M%S")
     (pa, da), (pb, db) = ((f"perf_{stamp}_{x}", FILES / f"perf_{stamp}_{x}") for x in "ab")
+    o = None
     try:
         known = brew(a.rows, da)
         brew(37_000, db)  # the smallest Brewline: a project people are reading
         build(pb, db)
-        rec = {"rows": known["rows"]["orders"], "copies": copies(pb)}
-        abi.call("create_project", project=pa, name=f"perf {pa}")
+        rec = {"rows": known["rows"]["orders"], "door": a.door, "copies": copies(pb)}
+        o, put = door(a, pa, da)
+        if not put:
+            abi.call("create_project", project=pa, name=f"perf {pa}")
         asked(pb, 0)  # the lake attached
         idle, during, box = [asked(pb, i) for i in range(1, a.queries + 1)], [], {}
 
         def big():
             t = time.perf_counter()
             try:
-                add(pa, "orders", f"{da.relative_to(FILES)}/orders/*.parquet")
-            except abi.ActionError as e:
-                box["error"] = (e.body or {}).get("message")
+                if put:  # the whole load, as load --door app measures it: four tables through the app, the model, Ready
+                    box["load"] = build(pa, da, put)
+                else:
+                    add(pa, "orders", f"{da.relative_to(FILES)}/orders/*.parquet")
+            except (OSError, http.client.HTTPException, SystemExit, abi.ActionError) as e:
+                box["error"] = f"{type(e).__name__}: {e}"
             box["s"] = round(time.perf_counter() - t, 2)
         th = threading.Thread(target=big)
         th.start()
         while not during or th.is_alive():  # at least one query sent while the load runs
             during.append(asked(pb, a.queries + 1 + len(during)))
         th.join()
-        rec |= {"load_s": box["s"], **({"load_error": box["error"]} if "error" in box else {}),
+        if "load" in box:
+            box["load"]["exact"] = exact(pa, "cafes.region", known)
+        rec |= {"load_s": box["s"], **{("load_error" if k == "error" else k): box[k] for k in ("load", "error") if k in box},
                 **{k: {"n": len(v), "p50": pct(v, 50), "p95": pct(v, 95)} for k, v in (("idle", idle), ("during_load", during))}}
         rec |= {f"x_{q}": round(rec["during_load"][q] / rec["idle"][q], 2) for q in ("p50", "p95")}
     finally:
-        listed = {x["project"] for x in abi.call("list_projects")["projects"]}
+        signed_out([o] if o else [])
         for p in (pa, pb):
-            if p in listed:
-                sure("delete_project", project=p)
+            gone(p)
         for d in (da, db):
             shutil.rmtree(d, ignore_errors=True)
     return rec
@@ -720,11 +742,12 @@ def main(argv=None) -> dict:
     x.add_argument("--chats", type=int, default=4)
     x.add_argument("--app-pid", type=int, help="the app's process (default: the scripts/app.py serving --url)")
     x.add_argument("--hold", type=float, default=0, help="seconds to keep the chats open, then measure them again")
-    x = sub.add_parser("load", parents=[common])
+    via = argparse.ArgumentParser(add_help=False)
+    via.add_argument("--door", choices=("path", "app"), default="path", help="the engine's add_data on a server path, or the app's upload")
+    via.add_argument("--url", default=os.environ.get("ABI_PERF_URL", "http://127.0.0.1:8790"), help="the app, for --door app")
+    x = sub.add_parser("load", parents=[common, via])
     x.add_argument("--rows", type=int, default=1_000_000)
-    x.add_argument("--door", choices=("path", "app"), default="path", help="the engine's add_data on a server path, or the app's upload")
-    x.add_argument("--url", default=os.environ.get("ABI_PERF_URL", "http://127.0.0.1:8790"), help="the app, for --door app")
-    x = sub.add_parser("isolation", parents=[common])
+    x = sub.add_parser("isolation", parents=[common, via])
     x.add_argument("--rows", type=int, default=2_000_000, help="orders loaded into the other project")
     x.add_argument("--queries", type=int, default=30, help="idle queries")
     sub.add_parser("publish", parents=[common, web])

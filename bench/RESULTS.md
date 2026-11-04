@@ -284,6 +284,129 @@ with them after the load), and perf.py now counts `pi` too.
 The volume held 13 GB at the end: 9.6 GB of lake (perf_brewline and 11 deleted projects' lakes, kept for their
 retention) and 2.8 GB of uploads that no project reads any more (M3.5).
 
+## 1.2 M3 round 1 (pve1)
+
+4 Nov 2026, 17:01-18:22 UTC: M3 (M3.1-M3.5, release-1.2 at ac999af) measured on pve1 as part 2 measured 1.1.0.
+`git archive ac999af` built on LXC 100 (`docker compose build`, every layer before the repo's own files from the
+build cache of earlier builds: image abi-m3:ac999af, 2,843,792,690 bytes by the size method above) ran as a throwaway
+compose install beside the live one: project, container and volume abi-m3, port 8796 on the LXC's loopback, the
+owner's password in a root-only file. It was removed afterwards, and the live container's start time, restart count
+and image were the same before and after. This branch's docker-compose.yml defaults (a DuckDB limit of 1500MB per
+project in each engine process, ABI_INLINE_ROWS 4,400,000, ABI_HEAVY_CONCURRENCY 1, ABI_PG_POOL 20, ABI_MAX_AGENTS 8,
+ABI_QUERY_TIMEOUT 60), no model. bench/perf.py of this commit ran inside the container (`docker cp bench`,
+`docker exec`) with part 2's subcommands; isolation gained `--door app` for this round, so the other project's load is
+load --door app's (four tables through the app's upload, the model, Ready). One timed run at a time, each started at
+an LXC 1-minute load average of 0.30-1.47 with no docker build, no other bench and no container but abi and lake
+beside it; [a-b] below is the 1-minute load average's range, sampled every 2 s during the run. Container MB is the
+cgroup's memory.current, sampled every 2 s. Pages, the 0.01 Publish and the kills ran on perf_brewline: Brewline 0.01
+(73,941 orders) made by `perf.py project`, its Overview report, a 261 KB page (part 2's was 296 KB: docs left the
+page data in M3.3).
+
+| M3 target (PLAN.md) | 1.1.0 (part 2) | 1.2 M3 round 1 | |
+|---|---|---|---|
+| 50 sessions right after a commit: page p95 <= 2 s | 87.6 s | 1.40 s | met |
+| the same with `--rls cafes.cafe_id` (50 Viewers, a café each): 3x better, <= 50.9 s | 152.7 s | 25.8 s (5.9x) | met |
+| 100M orders through the app's upload: no client timeout, Ready with a model, exact | orders in, then build_model out of memory: no model | Ready at 526.3 s, exact to the cent | met |
+| another project's uncached queries during that load: <= 1.5x idle | x2.26 p50, x2.92 p95 (part 1: 50M, server path) | x2.38 p50, x2.98 p95 | missed |
+| measure-only Publish on Brewline 1 (7.4M orders): <= 15 s, no source reloaded | 39.83 s, 4 reloaded | 1.96 s, none | met |
+| kill -9 of the engine, then a worker: /api/ready and a page again <= 60 s | never (300 s watched each) | 7.1 s; 1.0 s | met |
+| 8 chats + 50M orders through the app inside mem_limit 4g, no swap: no OOM kill, exact | no kill, exact, peak 4,259,540,992 bytes | no kill, exact, peak 4,145,115,136 bytes | met |
+
+| pages: 50 sessions, 50 people | p50 s | p95 s | p99 s | max s | errors | dropped |
+|---|---|---|---|---|---|---|
+| first: Viewers and Developers, no rule | 1.6 | 1.7 | 1.7 | 1.7 | 0 | 0 |
+| right after a commit | 1.3 | 1.4 | 1.4 | 1.4 | 0 | 0 |
+| first: `--rls cafes.cafe_id`, 50 Viewers with a café each | 15.4 | 27.2 | 27.5 | 27.5 | 0 | 0 |
+| right after a commit | 14.8 | 25.8 | 26.2 | 26.2 | 0 | 0 |
+
+Started at load 0.47 [0.47-1.99] and 1.24 [1.20-5.08]. The worker's query copies were written before the first round,
+and the lake snapshot was the same at the start and end of every round. Without a rule, 50 people of two roles need
+two page computations (M3.3 keys page data by role and rule), where 1.1.0 made 50 in turn under one lock. With the
+rule, every Viewer's report rows are their own computation, four at a time (scripts/app.py's _PAGES), with the rest of
+the page computed once for all of them: 25.8 s meets M3's target and is 5.9x 1.1.0's, but it is 5x M3.6's 5 s.
+
+| load through the app's upload, one file a table | orders | orders s | rows/s | Ready s | lake bytes | revenue by region | container peak MB |
+|---|---|---|---|---|---|---|---|
+| 100M | 99,999,922 | 468.17 | 213,597 | 526.33 | 2,303,588,044 | exact to the cent | 3,793 |
+| 100M, isolation's (queries beside it all the time) | 99,999,922 | 522.53 | 191,376 | 599.94 | 2,873,616,405 | exact to the cent | 4,734 |
+
+Started at load 1.39 [1.28-9.16] and 1.17 [1.15-13.05]. The upload's last piece now answers at once with a run (the
+file is past ABI_INLINE_ROWS) and the heavy worker loads it; perf.py waits as the page does, asking load_runs every
+2 s, so "orders s" is again from the first piece until the table is in, as in part 2 (1.1.0: 466.94 s). In the second
+run the heavy worker's job took 496.8 s of it (queued 0.02 s), the pieces the rest. build_model at 100M orders now
+fits the 1500MB (M3.2): Ready 57 and 76 s after the orders (1.1.0: out of memory, twice). The first run's lake bytes
+equal 1.1.0's to the byte; the second run's holds 570 MB more, the worker's query copies of it being written within
+its minute as build() measured (that project's archived lake holds 934,605,230 bytes in query/). The container peak
+is ABI's part, from the first piece on, as part 2 counted it (1.1.0 at 100M: 3,233 / 3,361 MB): at the end, during
+build_model and its checks. Before that, perf.py's own generator and its one-file copy of the months peaked at 4,221
+and 4,878 MB (part 2: 4,067 / 4,071).
+
+| isolation: project B (Brewline 0.005) uncached semantic_query | queries | p50 ms | p95 ms |
+|---|---|---|---|
+| idle | 30 | 79.9 | 95.0 |
+| while project A loads 100M orders through the app, to Ready (599.95 s) | 3,393 | 189.9 (x2.38) | 283.0 (x2.98) |
+| diagnostic: the same again, the heavy worker's threads at nice 10 (idle 30: 77.3 / 83.1) | 3,941 | 160.2 (x2.07) | 230.0 (x2.77) |
+
+Missed. 1.1.0's part 1 (50M orders on a server path, loaded inside the engine) was x2.26 and x2.92: the load has left
+the engine for the heavy worker (M3.1, M3.2), so B's queries no longer wait on its process, but both processes still
+share the LXC's 6 cores, and each process's DuckDB runs 8 threads (`threads` is never set, and DuckDB counts the
+host's 8 CPUs: os.cpu_count() 8, sched_getaffinity 6 inside the container). The load average sat at 10-11 while the
+orders loaded. The diagnostic (not a setting) ran the same isolation again, last, in the container recreated without
+the limit, with each of the heavy worker's 59 threads reniced to 10 (checked every 30 s): x2.07 and x2.77, so CPU
+priority alone doesn't bring it to 1.5x, and the load's write pipeline is already one thread (storage._ordered).
+What else B's queries wait for meanwhile is not found yet: the disk (the lake's 2.3 GB written, the upload's file),
+memory bandwidth and Postgres are the candidates, and a CPU and I/O sample during the load would tell them apart.
+
+| Publish, as the button (the owner) | orders | Publish answers s | a Viewer's page shows it s | the copy's tables in s | tables reloaded |
+|---|---|---|---|---|---|
+| first | 73,941 | 0.72 | 1.08 | 24.68 | 4: cafes, customers, orders, products |
+| measure-only: one measure's description | 73,941 | 0.41 | 0.89 | | none |
+| first | 7,400,054 | 0.87 | 1.22 | 65.42 | 4: the same |
+| measure-only: one measure's description | 7,400,054 | 1.96 | 3.08 | | none |
+
+Started at load 1.47 [1.25-1.51] and 1.17 [1.17-4.88]. Publish no longer reloads (M3.2): the import marks the tables it
+changed and the heavy worker loads exactly those within its minute. So a measure-only Publish reloads nothing, and a
+first Publish answers at once while the copy's tables arrive later: 24.68 and 65.42 s (1.1.0 answered after reloading
+them, in 4.35 and 36.13 s). Until then the Viewer's page comes from a copy without its data (not measured: what it
+shows meanwhile).
+
+| kill -9 inside the container | the engine's /api/ready | the owner's page | the process back | serving again | health, every 2 s |
+|---|---|---|---|---|---|
+| the engine (uvicorn) | from 7.1 s | 503 until 7.1 s, then 200 | a new pid at 1.1 s | 7.1 s | Docker: healthy throughout; `engine.sh health`: "The engine isn't ready" for 3 samples (about 6 s), then healthy |
+| the worker (procrastinate, default queue) | throughout | 200 throughout | a new pid at 1.0 s | 1.0 s | healthy throughout, both; its next minute's jobs ran at 17:14:00 |
+
+Started at load 1.22 and 0.53. The supervisor (M3.4) logged each: "the engine (pid 62) ended with status 137 after
+603 s; it starts again in 0 s". `perf.py kill` watched from the kill until serving again; the health was sampled from
+10 s before until 90 s after, with Docker's own check (every 30 s) passing at each of its probes; none fell in the 6 s
+the engine was away. 1.1.0 brought back neither within 300 s, until `docker restart`.
+
+| inside 4 GiB, no swap | chats with a Pi | orders s | Ready s | revenue by region | peak from the chats on | OOM kills | restarts |
+|---|---|---|---|---|---|---|---|
+| 8 idle chats + 50M orders through the app | 8 at the start, 8 after the load | 241.75 | 271.67 | exact to the cent | 4,145,115,136 bytes | 0 | 0 |
+
+Started at load 1.47 [0.65-7.85]. Part 2's method: the container recreated with `mem_limit: 4g` and `memswap_limit: 4g`
+(memory.max 4 GiB, swap.max 0), `perf.py load --rows 50000000 --door app`, and once its first piece reached the app,
+`perf.py memory --chats 8 --hold 420` (no model: each chat's Pi up and idle), the cgroup's memory.peak reset then. The
+peak is 96.5% of the limit, 143 MiB short (1.1.0: 34 MiB), during the load's end steps; the 2 s samples show 3,891 MB
+there, 3,783 MB of it anonymous. memory.events counted no oom, oom_kill or max, Docker's OOMKilled stayed false, the
+container never restarted and the supervisor logged no part ending. The parts by perf.py's RSS sums, idle and with the
+chats started: engine 316.5 / 341.4 MB, the two workers 600.9 / 616.6 MB (1.1.0's one: 303.7 / 310.7), Postgres
+576.0 MB in 36 processes / 715.7 MB in 44 (1.1.0: 265.0 in 17 / 251.3 in 16; three engine processes now, each with
+M3.3's pool), the chats' Pi 1,215.3 MB at the start and 875.0 MB after the load (1.1.0: 809.1 and 668.0), 165.8 MB a
+chat at the start (1.1.0: 109.6).
+
+Seen on the way, for round 2:
+- The heavy worker died once, with status 139 (SIGSEGV; the kernel: "procrastinate[...]: segfault at 0 ip
+  0000000000000000"), at 17:49:41, inside the minute's build_copies job, which had started at 17:49:01: the isolation
+  run had deleted its 100M project at 17:49:28 (delete_project moves the lake), and that project's archived lake
+  holds the copies' 934,605,230 bytes. The supervisor started a new worker in 0 s and the next minute's jobs ran.
+  Not reproduced. A heavy job running beside it (a load, with ABI_HEAVY_CONCURRENCY 2) would die with it, and a
+  load's run then stays "running" (M3.2's open risk).
+- A load's "rows so far" (DuckDB's query_progress of the read times the estimate) reached 98% two minutes into the
+  isolation run's 8.3-minute job and stayed there for the rest (the model table, the snapshot, the checks).
+- The volume held 13,991,192,971 bytes at the end (apparent size): 9.76 GB of lake (perf_brewline, perf_brew1 and 8
+  deleted projects' lakes, kept for their retention) and 4.14 GB of uploads, which M3.5 purges with them after 30 days.
+
 ## 1.2 M2 round 1 (MacBook Air, 8 cores, 24 GB; model proxy/claude-sonnet-5-5)
 
 4 Nov 2026 08:57-09:13, release-1.2 at 7e68c71: M2.3's change measures (2c55e2d), M2.1's expressions (377a868), M2.2's
