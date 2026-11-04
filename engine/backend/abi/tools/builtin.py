@@ -266,6 +266,8 @@ def link(snapshot: str | None) -> str | None:
 
 RENDERS = threading.BoundedSemaphore(2)  # M3.2: Chromium renders at once in a process (each takes hundreds of MB)
 RENDER_TIMEOUT = float(os.environ.get("ABI_RENDER_TIMEOUT", "120"))  # s: a render still drawing then loses its Chromium
+DRAWING: set[int] = set()  # the people with a render under way or waiting (one each)
+_drawing = threading.Lock()
 
 
 def render_snapshot(user: User, project: str, report: str, pages: list[str], visual: str | None, filters: list[dict],
@@ -274,9 +276,22 @@ def render_snapshot(user: User, project: str, report: str, pages: list[str], vis
     or one visual with `filters` as PNG, PDF or PPTX (MULTI-EXPORT.2: a slide per page) in one headless Chromium, signed in as `user` (FL-6: a flow's owner)
     through a session that exists only for this render. The page reads data only through visual_data (principle 4). Returns `artifact:<project>/<uuid>.<ext>`.
     M3.2: two renders at a time; a third waits for a free one (its session is made after), and one past
-    ABI_RENDER_TIMEOUT has its Chromium killed (504)."""
-    with RENDERS:
-        return _render(user, project, report, pages, visual, filters, fmt)
+    ABI_RENDER_TIMEOUT has its Chromium killed (504). M3 review: a person has one render under way or waiting, and a
+    wait ends at ABI_RENDER_TIMEOUT (503, which a flow retries), so no one fills the engine's threads with waits."""
+    with _drawing:
+        if user.id in DRAWING:
+            raise ActionFailed(503, "Your previous export is still being drawn; try again once it is done.")
+        DRAWING.add(user.id)
+    try:
+        if not RENDERS.acquire(timeout=RENDER_TIMEOUT):
+            raise ActionFailed(503, "Two exports are being drawn; try again shortly.")
+        try:
+            return _render(user, project, report, pages, visual, filters, fmt)
+        finally:
+            RENDERS.release()
+    finally:
+        with _drawing:
+            DRAWING.discard(user.id)
 
 
 def _deadline(mark: str, late: list) -> threading.Timer:

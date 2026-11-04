@@ -334,9 +334,8 @@ for line in sys.stdin:
 """
 
 
-def test_the_ninth_chat_waits_and_starts_when_one_ends(tmp_path, monkeypatch):
-    """ABI_MAX_AGENTS (8): eight chats' agents run; the ninth question waits with a note in its chat and starts when an
-    answer ends, in the slot of the agent idle longest; Stop takes a waiting question back."""
+def standins(tmp_path, monkeypatch) -> None:
+    """Chats whose agent is STANDIN, eight at most at once."""
     (tmp_path / "bin").mkdir()
     (tmp_path / "bin/pi").write_text(STANDIN)
     (tmp_path / "bin/pi").chmod(0o755)
@@ -350,17 +349,30 @@ def test_the_ninth_chat_waits_and_starts_when_one_ends(tmp_path, monkeypatch):
     monkeypatch.setattr(app, "HUBS", {})
     monkeypatch.setattr(app, "WAITING", [])
     monkeypatch.setattr(app, "MAX_AGENTS", 8)
-    hubs = [app.Hub("proj", "http://127.0.0.1:9", "k", f"c{i}", user="ann", token="t") for i in range(10)]
-    notes = {h.hid: [] for h in hubs}
+
+
+def hubs_of(users: list[str], notes: dict) -> list:
+    hubs = [app.Hub("proj", "http://127.0.0.1:9", "k", f"c{i}", user=u, token="t") for i, u in enumerate(users)]
     for h in hubs:
         app.HUBS[h.hid] = h
+        notes[h.hid] = []
         h.emit = lambda e, here=True, h=h: notes[h.hid].append(e)
+    return hubs
 
-    def until(cond, what):
-        end = time.time() + 20
-        while not cond():
-            assert time.time() < end, what
-            time.sleep(0.05)
+
+def until(cond, what):
+    end = time.time() + 20
+    while not cond():
+        assert time.time() < end, what
+        time.sleep(0.05)
+
+
+def test_the_ninth_chat_waits_and_starts_when_one_ends(tmp_path, monkeypatch):
+    """ABI_MAX_AGENTS (8): eight chats' agents run; the ninth question waits with a note in its chat and starts when an
+    answer ends, in the slot of the agent idle longest; Stop takes a waiting question back."""
+    standins(tmp_path, monkeypatch)
+    notes: dict = {}
+    hubs = hubs_of([f"user{i}" for i in range(10)], notes)
     running = lambda: [h for h in hubs if h.pi and h.pi.poll() is None]  # noqa: E731
     asked = lambda h: (tmp_path / f"{h.hid.replace('/', '_')}.asked")  # noqa: E731
     try:
@@ -379,3 +391,39 @@ def test_the_ninth_chat_waits_and_starts_when_one_ends(tmp_path, monkeypatch):
         for h in hubs:
             if h.pi:
                 h.pi.kill()
+
+
+def test_one_person_runs_half_the_agents_however_many_tabs_they_open(tmp_path, monkeypatch):
+    """M3 review: a hub is a person and a browser's own ID, so one person with 8 tabs held all 8 agents and everyone
+    else waited. A person runs at most half (4 of 8): their fifth question waits though slots are free, someone else's
+    starts at once, and when one of theirs answers, their waiting question takes that agent's slot."""
+    standins(tmp_path, monkeypatch)
+    notes: dict = {}
+    hubs = hubs_of(["ann"] * 5 + ["bob"], notes)
+    asked = lambda h: (tmp_path / f"{h.hid.replace('/', '_')}.asked")  # noqa: E731
+    try:
+        for i, h in enumerate(hubs[:5]):
+            h.chat(f"question {i}", "home")
+        until(lambda: all(asked(h).exists() for h in hubs[:4]), "four of ann's agents got their questions")
+        assert hubs[4].pi is None and [w[0] for w in app.WAITING] == [hubs[4]]
+        hubs[5].chat("bob's question", "home")
+        until(lambda: asked(hubs[5]).exists(), "bob's starts at once")
+        (tmp_path / f"{hubs[1].hid.replace('/', '_')}.done").touch()  # one of ann's answers ends
+        until(lambda: asked(hubs[4]).exists(), "ann's fifth starts in her own agent's slot")
+        assert hubs[1].pi is None and not app.WAITING
+    finally:
+        for h in hubs:
+            if h.pi:
+                h.pi.kill()
+
+
+def test_a_page_has_no_raw_security_rules(tmp_path, monkeypatch):
+    """M3 review: every person's page data had sections.Security, the raw security/rls.json naming every person's values
+    (a restricted Viewer saw who else sees what), shared by all restricted people. The Security page draws ABI's
+    rls_rules, answered as the person, and nothing else."""
+    (tmp_path / "security").mkdir()
+    (tmp_path / "security/rls.json").write_text(json.dumps({"rules": [{"table": "cafes", "column": "region",
+                                                                        "users": {"7": ["North"], "9": ["South"]}}]}))
+    monkeypatch.setattr(app.abi, "folder", lambda p: tmp_path / "ws" / p)
+    out = app._snapshot(tmp_path, "proj", None, lambda a: None, None)
+    assert "Security" not in out["sections"] and "South" not in json.dumps(out), out["sections"].keys()

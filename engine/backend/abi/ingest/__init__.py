@@ -503,6 +503,7 @@ def queue(conn, user: User, name: str, args: storage.ProjectRef, rows: int) -> d
         worker.defer(worker.load, run=run)
     except Exception:
         conn.execute("DELETE FROM load_runs WHERE id = %s", [run])
+        conn.commit()  # the action rolls back on the error: without this the run stays queued with no job
         raise
     return {"run": run, "table": args.table, "status": "queued", "columns": ["run", "table", "status"],
             "rows": [[run, args.table, "queued"]], "message": f"Loading '{args.table}' in the background: load_runs with"
@@ -543,6 +544,21 @@ def job(run: str) -> None:
     with db.connect() as conn:  # the definition (it may name secrets) isn't kept past the run
         conn.execute("UPDATE load_runs SET status = %s, error = %s, snapshot = %s, rows = coalesce(%s, rows),"
                      " finished = now(), payload = NULL WHERE id = %s", ["failed" if error else "done", error, snap, rows, run])
+
+
+INTERRUPTED = "The load was interrupted (ABI restarted or its worker stopped); load it again."
+
+
+def interrupted(run: str) -> None:
+    """M3 review: a load job whose heavy worker died (kill -9, out of memory, a restart's KILL) ends failed, as its own
+    failure would (worker.retry_stalled_runs, once its worker's heartbeat is 30 s old); 1.2 before kept it running."""
+    with db.connect() as conn:
+        r = conn.execute("UPDATE load_runs SET status = 'failed', error = %s, finished = now(), payload = NULL WHERE id = %s"
+                         " AND status IN ('queued', 'running') RETURNING action, (SELECT payload FROM load_runs WHERE id = %s) AS payload",
+                         [INTERRUPTED, run, run]).fetchone()
+    with contextlib.suppress(OSError, TypeError, KeyError):
+        if r and r["action"] == "add_data":
+            _settled(r["payload"]["location"], False)
 
 
 PROGRESS_S = 2  # how often a load job writes its rows so far
@@ -745,6 +761,8 @@ def _load(conn, src: Source, author: str, unless: str | None = None, used: dict 
             con.execute(f"DETACH DATABASE IF EXISTS {name}")
         if opts:
             con.execute(f"DROP SECRET IF EXISTS {name}")
+    if not (git._root() / src.project / ".git").is_dir():  # deleted while it loaded (the worker's IN-6): no row brings it back
+        raise ActionFailed(404, f"Project '{src.project}' does not exist.")
     conn.execute(
         "INSERT INTO sources (project, table_name, fingerprint) VALUES (%s, %s, %s) ON CONFLICT (project, table_name)"
         " DO UPDATE SET fingerprint = excluded.fingerprint",
@@ -931,6 +949,8 @@ def refresh_changed() -> None:
     with db.connect() as conn:
         projects = {r["project"] for r in conn.execute("SELECT DISTINCT project FROM sources")}
         for p in sorted(projects | {g.parent.name for g in git._root().glob("*/.git")}):  # D-9: files never loaded yet too
+            if not (git._root() / p / ".git").is_dir():  # deleted since the list was read: a load would bring it back
+                continue
             error = None
             try:
                 _migrate(conn, p, transform.tables(p))

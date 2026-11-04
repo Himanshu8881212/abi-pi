@@ -25,7 +25,10 @@ EOF
 }
 alive() { [ -f "$D/run/$1.pid" ] && kill -0 "$(cat "$D/run/$1.pid")" 2>/dev/null; }
 running() { for p in app $WORKERS; do ! alive $p || return 0; done; return 1; }
-paused() { alive pause; }  # run/pause.pid names a backup that runs (scripts/backup.sh): no worker meanwhile
+started() { echo $(ps -o lstart= -p "$1" 2>/dev/null); }  # a process's start time: a PID reused later has another
+paused() {  # run/pause.pid names a backup that runs (scripts/backup.sh) and when it started: no worker meanwhile
+  [ -f "$D/run/pause.pid" ] && read -r pause_pid pause_at < "$D/run/pause.pid" && [ -n "$pause_at" ] && [ "$(started "$pause_pid")" = "$pause_at" ]
+}
 log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$D/logs/supervisor.log"; }
 up() {  # up NAME: the engine (app) or a worker in the background, its output added to its log, its pid in run/NAME.pid
   case $1 in
@@ -84,7 +87,7 @@ case "${1:-start}" in
 env) env_; exit 0 ;;
 status)
   for p in supervisor app $WORKERS; do alive $p && echo "$p running" || echo "$p stopped"; done
-  ! paused || echo "workers paused while process $(cat "$D/run/pause.pid") runs (a backup)"
+  ! paused || echo "workers paused while process $pause_pid runs (a backup)"
   "$PGBIN/pg_ctl" -D "$D/pg" status >/dev/null 2>&1 && echo "postgres running" || echo "postgres stopped"
   exit 0 ;;
 stop)
@@ -109,7 +112,7 @@ health)
   echo healthy
   exit 0 ;;
 pause)  # pause PID: the workers stop (once their running jobs end) and none starts while process PID runs
-  echo "${2:?the pid of the process that holds the pause}" > "$D/run/pause.pid"
+  echo "${2:?the pid of the process that holds the pause} $(started "$2")" > "$D/run/pause.pid"
   log "the workers pause while process $2 runs"
   for p in $WORKERS; do ! alive $p || kill "$(cat "$D/run/$p.pid")" || true; done
   for p in $WORKERS; do while alive $p; do sleep 0.2; done; done
@@ -123,6 +126,7 @@ esac
 [ -f "$ROOT/engine/backend/static/index.html" ] || {
   echo "Build the engine's UI once: (cd engine/frontend && npm ci && npx vite build --outDir ../backend/static --emptyOutDir)" >&2; exit 1; }
 case $HEAVY in 1|2) ;; *) echo "ABI_HEAVY_CONCURRENCY is 1 or 2 (heavy jobs at a time), not '$HEAVY'." >&2; exit 1 ;; esac
+case ${ABI_DUCKDB_THREADS:-1} in *[!0-9]*) echo "ABI_DUCKDB_THREADS is a number of threads (or empty: half the CPUs), not '$ABI_DUCKDB_THREADS'." >&2; exit 1 ;; esac
 umask 077
 mkdir -p "$D/run" "$D/logs" "$D/lake" "$D/files" "$D/projects" "$D/artifacts"
 eval "$(env_)"

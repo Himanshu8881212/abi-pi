@@ -174,13 +174,14 @@ people open, so the links come back to ABI.
 | `ABI_IMAGE` | no | The image to run. Default `ghcr.io/himanshu8881212/abi:latest` (pulled with `docker compose pull`, else built here). |
 | `ABI_SECRET_KEY` | no | A Fernet key that encrypts the API keys admins save. Default: a key file in the volume. Make one with `python3 -c "import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())"`. |
 | `ABI_DUCKDB_MEMORY_LIMIT` | no | The memory DuckDB may use for one project's queries and loads in each engine process (the engine and each worker); above it, it spills to disk. Default `1500MB`. |
-| `ABI_DUCKDB_THREADS` | no | DuckDB threads for one project's queries and loads in each engine process. Fewer keep other projects' questions quick while one project loads or builds its model; more make one big load or query faster. Default: half the CPUs ABI may use. |
+| `ABI_DUCKDB_THREADS` | no | DuckDB threads for one project's queries and loads in each engine process. Fewer keep other projects' questions quick while one project loads or builds its model; more make one big load or query faster. Default: half the CPUs ABI's process may use (a Docker `--cpus` quota isn't counted: set it then). |
+| `ABI_HEAVY_CONCURRENCY` | no | Big loads, query copies and ML trainings run at a time in the heavy worker: `1` or `2` (any other value stops ABI from starting); `2` needs memory for both. Default `1`. |
 | `ABI_QUERY_CACHE_MB` | no | Query results kept for reuse, in megabytes per project in each engine process. Default `256`. |
-| `ABI_MAX_AGENTS` | no | Chats whose agent runs at once (each a Node process of about 100 MB). One more stops the agent idle longest; with every one busy, the next question waits its turn with a note in its chat. Default `8`. |
+| `ABI_MAX_AGENTS` | no | Chats whose agent runs at once (each a Node process of about 100 MB). One more stops the agent idle longest; with every one busy, the next question waits its turn with a note in its chat. One person runs at most half of them, however many tabs they open. Default `8`. |
 | `ABI_QUERY_TIMEOUT` | no | Seconds a question's or a page visual's read may run before it is stopped with a plain error. Default `60`. |
 | `ABI_PG_POOL` | no | Postgres connections each engine process keeps open for reuse (`0`: a new one each time). Default `20`. |
-| `ABI_INLINE_ROWS` | no | A load (add a source, set a table's steps, reload) of more rows than this answers at once and loads in the background; the Sources page and the chat show its progress. Default `4400000` (about 20 s of loading). |
-| `ABI_RENDER_TIMEOUT` | no | Seconds a PDF, PNG or PowerPoint export may take before its browser is stopped. Two render at a time; the next waits its turn. Default `120`. |
+| `ABI_INLINE_ROWS` | no | A load (add a source, set a table's steps, reload) of more rows than this answers at once and loads in the background; the Sources page and the chat show its progress. One cut short by a restart fails within about a minute with a note to load it again. Default `4400000` (about 20 s of loading). |
+| `ABI_RENDER_TIMEOUT` | no | Seconds a PDF, PNG or PowerPoint export may take before its browser is stopped. Two render at a time; the next waits its turn for this long at most, and a person's second export is refused while their first is drawn. Default `120`. |
 | `ABI_VIDEO_TIMEOUT` | no | Seconds a video export may take before it is stopped. Default `900`. |
 
 ### Use it from other devices (HTTPS)

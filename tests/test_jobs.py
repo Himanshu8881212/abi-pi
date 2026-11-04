@@ -3,6 +3,7 @@ and refresh past ABI_INLINE_ROWS answer at once with a run (status queued) once 
 the job lands as the inline call does (one Git change, one snapshot) and load_runs shows its caller, and only them, how
 far it got. Publish loads only what its import changed (in the worker), build_model fits a small DuckDB memory limit,
 and exports and videos have their time limits."""
+import fcntl
 import json
 import os
 import re
@@ -10,8 +11,10 @@ import secrets
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
+import uuid
 from pathlib import Path
 
 import duckdb
@@ -178,6 +181,84 @@ def test_no_one_else_sees_a_run(big):
         sure("delete_user", name=name)
 
 
+def test_changes_history_and_diff_read_while_a_big_load_holds_the_repo(big):
+    """M3 review: a queued load runs its action inside git.change, which holds the project's repo lock for the whole
+    load (730 s at 100M rows on pve1). changes, history and diff took that lock too, so the project's pages (they read
+    changes and history) and every page computation waiting on them stalled until the load ended. They are reads now."""
+    got = {}
+    with open(abi.ABI_PROJECTS / P / ".git/abi.lock", "w") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)  # as the heavy worker's load holds it
+        t = threading.Thread(target=lambda: got.update({a: abi.call(a, project=P) for a in ("changes", "history", "diff")}),
+                             daemon=True)
+        t.start()
+        t.join(30)
+        assert not t.is_alive(), "a read waited for the repo lock"
+    assert got["history"]["commits"] and "files" in got["changes"] and "files" in got["diff"], got
+
+
+def test_a_project_with_a_load_queued_is_neither_deleted_nor_renamed(big):
+    """M3 review: delete_project and rename_project waited only for flow and ML runs. A load queued meanwhile then ran
+    against a project gone (its upload's file deleted with it) or renamed (its payload still named the old ID)."""
+    run = str(uuid.uuid4())
+    add = engine(f"""from abi import db
+with db.connect() as c:
+    c.execute("INSERT INTO load_runs (id, project, table_name, action, via, user_id, estimate)"
+              " SELECT %s, %s, 'orders', 'refresh', 'rest', min(id), 1 FROM users", ['{run}', '{P}'])""")
+    assert add.returncode == 0, add.stderr
+    try:
+        for name, args in (("delete_project", {}), ("rename_project", {"new": f"{P}_moved"})):
+            with pytest.raises(abi.ActionError) as e:
+                abi.call(name, project=P, **args)
+            assert e.value.status == 409 and "1 flow, ML or load run(s) queued or running" in e.value.body["message"], e.value.body
+    finally:
+        engine(f"from abi import db\nwith db.connect() as c:\n    c.execute('DELETE FROM load_runs WHERE id = %s', ['{run}'])")
+    assert P in projects()
+
+
+def test_a_load_whose_worker_died_fails_and_a_lost_job_leaves_no_run():
+    """M3 review: a load job cut short (kill -9, out of memory, a restart's KILL 5 s after TERM) stayed running for good:
+    every waiter (the agent, abi.finished, the Sources card) waited for ever and its upload was kept. Once its worker's
+    heartbeat is 30 s old the minute tick fails it, and its upload is settled as a failed load's. A queued run whose job
+    couldn't be queued used to stay queued (its DELETE rolled back with the action); now it goes."""
+    r = engine("""
+import asyncio, json, types, uuid
+from psycopg.types.json import Jsonb
+from abi import db, ingest, worker
+from abi.security import User
+run, p = str(uuid.uuid4()), 'pi_jobs_gone'
+with db.connect() as c:
+    uid = c.execute('SELECT id FROM users ORDER BY id LIMIT 1').fetchone()['id']
+    c.execute("INSERT INTO load_runs (id, project, table_name, action, payload, via, user_id, status, estimate) VALUES"
+              " (%s, %s, 't', 'refresh', '{}', 'rest', %s, 'running', 1)", [run, p, uid])
+    job = c.execute("INSERT INTO procrastinate_jobs (queue_name, task_name, args, status) VALUES ('heavy', %s, %s, 'doing')"
+                    " RETURNING id", [worker.load.name, Jsonb({'run': run})]).fetchone()['id']  # its worker gone: no worker_id
+
+async def tick():
+    async with worker.app.open_async():
+        await worker.retry_stalled_runs(0)
+asyncio.run(tick())
+
+def boom(*args, **kwargs):
+    raise RuntimeError('no queue')
+worker.defer, lost = boom, None
+with db.connect() as c:
+    try:
+        ingest.queue(c, User(uid, 'x', True), 'refresh', types.SimpleNamespace(project=p, table='t', model_dump=lambda mode: {}), 1)
+    except RuntimeError:
+        c.rollback()  # as actions.run does
+with db.connect() as c:
+    out = c.execute('SELECT status, error, payload FROM load_runs WHERE id = %s', [run]).fetchone()
+    out['job'] = c.execute('SELECT status FROM procrastinate_jobs WHERE id = %s', [job]).fetchone()['status']
+    out['left'] = c.execute('SELECT count(*) AS n FROM load_runs WHERE project = %s AND id <> %s', [p, run]).fetchone()['n']
+    c.execute('DELETE FROM load_runs WHERE project = %s', [p])
+    c.execute('DELETE FROM procrastinate_jobs WHERE id = %s', [job])
+print(json.dumps(out))
+""", timeout=120)
+    out = json.loads(r.stdout.strip().splitlines()[-1]) if r.returncode == 0 else r.stderr[-3000:]
+    assert out == {"status": "failed", "error": "The load was interrupted (ABI restarted or its worker stopped); load it"
+                   " again.", "payload": None, "job": "failed", "left": 0}, out
+
+
 def test_publish_loads_only_what_its_import_changed(tmp_path):
     """1.1's Publish reloaded every source into the published copy, even for a measure (40 s at 7.4M orders). The import
     forgets the fingerprint of what it changed, so the worker loads that within its minute: a measure-only Publish calls
@@ -335,7 +416,8 @@ print(json.dumps(seen))
 def test_a_third_export_waits_and_a_late_one_loses_its_chromium():
     """1.1 started a Chromium for every PDF, PPTX or PNG at once, with no limit but the page's 60 s. Now two draw at a
     time and a third waits its turn (no error), and one still drawing at ABI_RENDER_TIMEOUT has its Chromium killed
-    and answers 504."""
+    and answers 504. A wait ends at ABI_RENDER_TIMEOUT too, and a person's second render while their first is under way
+    is refused (503), so one Viewer can't hold the engine's threads and connections in waits."""
     r = engine("""
 import json, os, socket, subprocess, threading, time
 os.environ['ABI_RENDER_TIMEOUT'] = '3'
@@ -351,12 +433,29 @@ def stand_in(*args):  # a render of a second
     spans.append((t, time.monotonic()))
     return 'artifact:p/x.png'
 builtin._render = stand_in
-ts = [threading.Thread(target=builtin.render_snapshot, args=(None, 'p', 'r', ['pg'], None, [])) for _ in range(3)]
+who = [User(i, f'u{i}', False) for i in (1, 2, 3)]
+ts = [threading.Thread(target=builtin.render_snapshot, args=(u, 'p', 'r', ['pg'], None, [])) for u in who]
 for t in ts:
     t.start()
 for t in ts:
     t.join()
-builtin._render = real
+refused = []
+def ask(u):
+    try:
+        builtin.render_snapshot(u, 'p', 'r', ['pg'], None, [])
+    except ActionFailed as e:
+        refused.append([u.id, e.status, str(e)])
+builtin._render = lambda *a: time.sleep(2) or 'artifact:p/x.png'
+builtin.RENDER_TIMEOUT = 1  # two draw for 2 s: u3 waits 1 s and gives up; u1's second while its first draws is refused
+ts = [threading.Thread(target=ask, args=(u,)) for u in (who[0], who[1])]
+for t in ts:
+    t.start()
+time.sleep(0.3)
+ask(who[0])
+ask(who[2])
+for t in ts:
+    t.join()
+builtin._render, builtin.RENDER_TIMEOUT = real, 3
 srv = socket.socket()  # a page that never answers
 srv.bind(('127.0.0.1', 0))
 srv.listen(8)
@@ -372,11 +471,13 @@ except ActionFailed as e:
     error = [e.status, str(e)]
 took = time.monotonic() - t0
 left = marks and subprocess.run(['pgrep', '-f', '--', marks[0]], capture_output=True, text=True).stdout.split()
-print(json.dumps({'spans': sorted(spans), 'error': error, 'took': took, 'left': left}))
+print(json.dumps({'spans': sorted(spans), 'refused': refused, 'error': error, 'took': took, 'left': left}))
 """, timeout=120)
     out = json.loads(r.stdout.strip().splitlines()[-1]) if r.returncode == 0 else r.stderr[-3000:]
     a, b, c = out["spans"]
     assert b[0] < a[1] and c[0] >= min(a[1], b[1]) - 0.01, out  # two at once, the third once one was done
+    assert out["refused"] == [[1, 503, "Your previous export is still being drawn; try again once it is done."],
+                              [3, 503, "Two exports are being drawn; try again shortly."]], out  # M3 review: no endless wait
     if "Executable doesn't exist" in out["error"][1]:  # as test_app's Chromium tests (CI installs it, and fails on a skip)
         pytest.skip("Playwright's Chromium isn't installed here")
     assert out["error"][0] == 504 and "ABI_RENDER_TIMEOUT" in out["error"][1] and 3 <= out["took"] < 30, out

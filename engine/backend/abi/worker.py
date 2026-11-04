@@ -7,6 +7,7 @@ training or load never holds up a schedule or an answer. 1.1 queued everything o
 Run: procrastinate --app=abi.worker.app worker --queues=default --concurrency=4 (and --queues=heavy)
 """
 
+import asyncio
 import functools
 import logging
 import threading
@@ -14,6 +15,7 @@ from datetime import UTC, datetime
 
 from procrastinate import App, JobContext, PsycopgConnector, RetryStrategy
 from procrastinate.exceptions import AppNotOpen
+from procrastinate.jobs import Status
 
 import abi.app  # noqa: F401  registers every action a flow step may run
 from abi import db, flows, ingest, ml, semantic, storage, tools
@@ -139,6 +141,9 @@ async def retry_stalled_runs(timestamp: int) -> None:
     their live heartbeat and are never picked."""
     for job in await app.job_manager.get_stalled_jobs(task_name=run_flow.name):
         await app.job_manager.retry_job(job)
+    for job in await app.job_manager.get_stalled_jobs(task_name=load.name):  # a load isn't resumed: its run fails
+        await asyncio.to_thread(ingest.interrupted, job.task_kwargs["run"])
+        await app.job_manager.finish_job(job, Status.FAILED, delete_job=False)
 
 
 @app.periodic(cron="* * * * *")

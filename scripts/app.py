@@ -1119,8 +1119,7 @@ function security(box){const g=h('div','cards');box.append(g);const r=D.rls||{},
  (r.rules||[]).forEach(x=>{const k=h('div','kv');k.style.marginBottom='12px';k.append(h('b','','rule'),h('span','',x.id),h('b','','rows of'),h('span','',`${x.table}.${x.column}`));
   (Array.isArray(x.users)?x.users.map(u=>[u.name||who[u.id]||u.id,u.values]):Object.entries(x.users||{}).map(([u,v])=>[who[u]||u,v])).forEach(([u,v])=>k.append(h('b','',u),h('span','',(v||[]).join(', ')||'no rows')));c.append(k)});g.append(c);
  const cr=card('Hidden columns','hidden from Viewers');const cols=r.columns||[];if(!cols.length)cr.append(h('p','empty','None.'));cols.forEach(x=>cr.append(h('span','chip',typeof x==='string'?x:`${x.table}: ${(x.columns||[]).join(', ')}`)));g.append(cr);
- const ro=card('Roles','set in ABI\'s app (a person\'s click)');const k=h('div','kv');(r.accounts||[]).forEach(a=>k.append(h('b','',a.name),h('span','',a.role||'no role')));ro.append(k);g.append(ro);
- box.insertAdjacentHTML('beforeend',D.sections.Security.includes('None yet')?'':D.sections.Security)}
+ const ro=card('Roles','set in ABI\'s app (a person\'s click)');const k=h('div','kv');(r.accounts||[]).forEach(a=>k.append(h('b','',a.name),h('span','',a.role||'no role')));ro.append(k);g.append(ro)}
 
 // ---------- Knowledge: the vault ----------
 async function vpost(op,body){const r=await fetch('/vault/'+op,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(body||{})}).then(r=>r.json());
@@ -1433,6 +1432,7 @@ def _snapshot(dest: Path, project: str, pending: dict | None, ask, ex: Reads | N
     sources = {f.stem: j(f, {}) for f in sorted((dest / "sources").glob("*.json"))}
     model = {"relationships": sm.get("relationships") or [], "tables": sm.get("tables") or {}, "date_table": sm.get("date_table")}
     sections = render.sections(dest)
+    sections.pop("Security")  # the raw rules name every person's values (SE-6): the page draws ABI's rls_rules, as the person
     kinds = {t: (v or {}).get("kind") for t, v in model["tables"].items()}
     sections["Model"] = f"<div class=card>{render.diagram(model, kinds)}</div>"
     out = {"project": project, "measures": measures, "reports": reports, "dims": dims, "flows": live("list_flows", "flows", "flows"),
@@ -1808,9 +1808,11 @@ def room(hub: Hub) -> bool:
     """A slot for hub's agent (AGENTS held): fewer than MAX_AGENTS run, or the one idle longest stops for it (its chat
     starts again from its own session the next time, as after the idle sweep)."""
     running = [h for h in list(HUBS.values()) if h is not hub and h.pi and h.pi.poll() is None]
-    if len(running) < MAX_AGENTS:
+    mine = [h for h in running if hub.user and h.user == hub.user]  # one person (any tabs) runs at most half (M3 review)
+    if len(mine) < max(1, MAX_AGENTS // 2) and len(running) < MAX_AGENTS:
         return True
-    if quiet := min((h for h in running if not h.busy), key=lambda h: h.last, default=None):
+    if quiet := min((h for h in (mine if len(mine) >= max(1, MAX_AGENTS // 2) else running) if not h.busy),
+                    key=lambda h: h.last, default=None):
         quiet.pi.terminate()
         quiet.pi = None
     return quiet is not None
@@ -1820,11 +1822,13 @@ def admit() -> None:
     """An answer ended or an agent stopped: waiting questions start in the slots now free, first asked first (one asked
     in a chat the person has since left goes)."""
     with AGENTS:
-        while WAITING:
-            hub, cid, message, page = WAITING[0]
+        i = 0
+        while i < len(WAITING):
+            hub, cid, message, page = WAITING[i]
             if hub.chat_id == cid and not (hub.pi and hub.pi.poll() is None) and not room(hub):
-                return
-            WAITING.pop(0)
+                i += 1  # its person runs their share (room): the next one's turn
+                continue
+            WAITING.pop(i)
             if hub.chat_id == cid:
                 try:
                     hub.ask(message, page)

@@ -25,3 +25,4 @@ def test_a_lake_runs_half_the_cpus_this_process_may_use_or_the_threads_it_is_giv
     assert have == max(1, cpus // 2), (have, cpus)
     assert threads(ABI_DUCKDB_THREADS="3")[0] == 3
     assert threads(ABI_DUCKDB_THREADS="")[0] == have  # compose's empty default
+    assert threads(ABI_DUCKDB_THREADS="0")[0] == 1  # DuckDB refuses 0 threads: every lake failed to attach

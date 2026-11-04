@@ -310,7 +310,7 @@ page data in M3.3).
 | another project's uncached queries during that load: <= 1.5x idle | x2.26 p50, x2.92 p95 (part 1: 50M, server path) | x2.38 p50, x2.98 p95 | missed |
 | measure-only Publish on Brewline 1 (7.4M orders): <= 15 s, no source reloaded | 39.83 s, 4 reloaded | 1.96 s, none | met |
 | kill -9 of the engine, then a worker: /api/ready and a page again <= 60 s | never (300 s watched each) | 7.1 s; 1.0 s | met |
-| 8 chats + 50M orders through the app inside mem_limit 4g, no swap: no OOM kill, exact | no kill, exact, peak 4,259,540,992 bytes | no kill, exact, peak 4,145,115,136 bytes | met |
+| 8 chats + 50M orders through the app inside mem_limit 4g, no swap: no OOM kill, exact | no kill, exact, peak 4,259,540,992 bytes | no kill, exact, peak 4,145,115,136 bytes (on ac999af; 28e5153 in round 3: 3,912,454,144) | met |
 
 | pages: 50 sessions, 50 people | p50 s | p95 s | p99 s | max s | errors | dropped |
 |---|---|---|---|---|---|---|
@@ -368,7 +368,8 @@ Started at load 1.47 [1.25-1.51] and 1.17 [1.17-4.88]. Publish no longer reloads
 changed and the heavy worker loads exactly those within its minute. So a measure-only Publish reloads nothing, and a
 first Publish answers at once while the copy's tables arrive later: 24.68 and 65.42 s (1.1.0 answered after reloading
 them, in 4.35 and 36.13 s). Until then the Viewer's page comes from a copy without its data (not measured: what it
-shows meanwhile).
+shows meanwhile). Round 3 saw 46.83 and 83.21 s. This is a 1.1 to 1.2 behaviour change for the upgrade notes: after a
+first Publish, or one that changes a source, Viewers see the copy's data a minute or so later.
 
 | kill -9 inside the container | the engine's /api/ready | the owner's page | the process back | serving again | health, every 2 s |
 |---|---|---|---|---|---|
@@ -445,12 +446,33 @@ time, D-04-fix-2).
 | every lake 3 (diag) | 725.58 | 824.85 | 78.1 / 86.8 | 92.5 / 118.7 | 1.18 | 1.37 |
 | every lake 3, this commit's image | 729.83 | 824.88 | 77.0 / 153.5 | 91.1 / 119.3 | 1.18 | (0.78) |
 
-Met. In the last run, one idle query in 30 took 153 ms, so its x p95 is meaningless. Its during-load p95 (119.3 ms)
-against the other runs' idle p95 (81.4-86.8 ms) is x1.37-1.47. Every load was exact to the cent. The cost: a 100M
+Borderline, not met as first written here. In the last run one idle query in 30 took 153 ms, so its own x p95 is 0.78;
+scored against the other runs' idle p95 (81.4-86.8 ms) its during-load p95 (119.3 ms) is x1.37-1.47, but that swaps
+the denominator, which 1.1.0's and round 1's scores never did. Scored each against its own idle, only the diag run met
+1.5x (x1.37), and round 3 below (this commit's image, built clean) gave x1.52. A 30-query idle sample's p95 is about
+its second-highest query, so the next round needs a larger idle sample (for example 200). The 1.1.0 row is part 1's
+50M on a server path, not 100M through the app's upload: not like for like as a ratio. Every load was exact to the cent. The cost: a 100M
 load alone takes 38 % longer (orders in 730 s, Ready at 825 s against 522 and 600), and build_model 96 s against
 66 s. A small query alone is no slower (idle p50 77 ms against 80). One big query of one project gets half the
 CPUs. ABI_DUCKDB_THREADS set to the CPU count gives back round 1's speed and round 1's isolation. Container peak
 4,540 MB with no memory limit.
+
+## 1.2 M3 round 3 (pve1): 28e5153 built clean
+
+4 Nov 2026, 20:50-21:34 UTC: `git archive 28e5153` built on LXC 100 as a throwaway compose install (abi-m3, port 8796,
+its own volume; the live abi and lake containers untouched), perf.py inside it as in round 1, one run at a time at an
+LXC load average of 0.9-1.5 at each start. Recorded here after the review (the run's own report wasn't written down
+before the Mac's disk filled); the numbers are the install's logs (/opt/abi-m3/logs on LXC 100).
+
+| run | result |
+|---|---|
+| isolation: B's uncached queries while A loads 100M orders through the app, to Ready | idle (30) p50 76.0 / p95 83.5 ms, during (8,459) 93.1 / 127.3 ms: x1.22 p50, x1.52 p95. Orders in 739.0 s, Ready 842.89 s, exact |
+| Publish, first: the copy's tables in | 46.83 s (Brewline 0.01), 83.21 s (Brewline 1, 7.4M orders); measure-only reloads none (0.92 s, 2.41 s) |
+| inside 4 GiB, no swap: 8 idle chats + 50M orders through the app | orders 326.31 s, Ready 364.65 s, exact; memory.peak from the chats on 3,912,454,144 bytes; memory.events oom 0, oom_kill 0, max 0; OOMKilled false, 0 restarts |
+
+Isolation, scored against its own idle as 1.1.0 and round 1 were: x1.52 p95 misses 1.5x by 0.02; with the diag run's
+x1.37 it is borderline (round 2). The 4 GiB target holds on the final code, with 233 MiB to spare (round 1 on ac999af:
+143 MiB). The no-limit isolation run's container memory.peak was 4,940,763,136 bytes.
 
 ## 1.2 M2 round 1 (MacBook Air, 8 cores, 24 GB; model proxy/claude-sonnet-5-5)
 

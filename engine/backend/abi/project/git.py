@@ -102,12 +102,14 @@ def _sig(user: User) -> pygit2.Signature:
     return pygit2.Signature(user.name, f"user-{user.id}@abi.local")
 
 
-def _worktree(r: pygit2.Repository) -> pygit2.Oid:
-    """Stage the whole working tree (adds, edits, deletions) and return its tree id."""
+def _worktree(r: pygit2.Repository, write: bool = True) -> pygit2.Oid:
+    """Stage the whole working tree (adds, edits, deletions) and return its tree id. Without `write` the index file
+    stays as it is (a read: no repo lock needed; tree objects go to the object store, whose writes are atomic)."""
     idx = r.index
     idx.clear()
     idx.add_all()
-    idx.write()
+    if write:
+        idx.write()
     return idx.write_tree()
 
 
@@ -289,10 +291,12 @@ def _gate(conn, project: str, p: Path, why: str, extra: dict) -> None:
     """Refuse while runs whose jobs carry the project ID are queued or running, then the §5 #3 confirmation with the
     project's contents signed in its preview (D-04.1)."""
     busy = conn.execute("SELECT (SELECT count(*) FROM flow_runs WHERE project = %(p)s AND status IN ('queued', 'running'))"
-                        " + (SELECT count(*) FROM ml_runs WHERE project = %(p)s AND status IN ('queued', 'running')) AS n",
+                        " + (SELECT count(*) FROM ml_runs WHERE project = %(p)s AND status IN ('queued', 'running'))"
+                        " + (SELECT count(*) FROM load_runs WHERE project = %(p)s AND status IN ('queued', 'running')) AS n",
                         {"p": project}).fetchone()["n"]
     if busy:
-        raise ActionFailed(409, f"Project '{project}' has {busy} flow or ML run(s) queued or running; try again once they finish.")
+        raise ActionFailed(409, f"Project '{project}' has {busy} flow, ML or load run(s) queued or running; try again once"
+                                " they finish.")
     stems = lambda d: sorted(f.stem for f in (p / d).glob("*.json"))
     tables = {r["table_name"] for r in conn.execute("SELECT table_name FROM sources WHERE project = %s", [project])}
     roles = conn.execute("SELECT u.name, r.role FROM project_roles r JOIN users u ON u.id = r.user_id"
@@ -436,11 +440,10 @@ class AutoCommit(BaseModel):
 @action(Role.viewer)
 def changes(conn, user: User, args: Changes) -> dict:
     """Shows the project's uncommitted changes as a diff, a proposed commit message, and whether undo is possible."""
-    with locked(args.project):
-        r = repo(args.project)
-        top = _top(r)
-        return {"files": _diff(r, r.head.peel(pygit2.Commit).tree_id, _worktree(r), _hidden(conn, user, args.project)),
-                "proposed_message": _proposal(r), "can_undo": bool(top and top.parents)}
+    r = repo(args.project)  # no repo lock (M3 review): a big load holds it for its whole run, and pages read this
+    top = _top(r)
+    return {"files": _diff(r, r.head.peel(pygit2.Commit).tree_id, _worktree(r, False), _hidden(conn, user, args.project)),
+            "proposed_message": _proposal(r), "can_undo": bool(top and top.parents)}
 
 
 @action(Role.editor)
@@ -456,12 +459,11 @@ def commit(conn, user: User, args: Commit) -> dict:
 @action(Role.viewer)
 def history(conn, user: User, args: ProjectRef) -> dict:
     """Lists the project's commits, newest first, with author (user or Main Agent) and time."""
-    with locked(args.project):
-        r = repo(args.project)
-        # ponytail: the whole history in one response; page it when projects reach thousands of commits
-        cs = [{"id": str(c.id), "message": c.message, "author": c.author.name,
-               "by": "agent" if c.author.email.startswith("agent-") else "user", "time": c.author.time}
-              for c in r.walk(r.head.target, SortMode.TOPOLOGICAL | SortMode.TIME)]
+    r = repo(args.project)  # no repo lock, as changes
+    # ponytail: the whole history in one response; page it when projects reach thousands of commits
+    cs = [{"id": str(c.id), "message": c.message, "author": c.author.name,
+           "by": "agent" if c.author.email.startswith("agent-") else "user", "time": c.author.time}
+          for c in r.walk(r.head.target, SortMode.TOPOLOGICAL | SortMode.TIME)]
     # D-22 (GATE-9-fix-8.7): each commit's ID and UTC time as quotable rows; messages are author-written (D-114)
     return {"commits": cs, "columns": ["commit", "time"],
             "rows": [[c["id"], str(datetime.datetime.fromtimestamp(c["time"], datetime.UTC))] for c in cs]}
@@ -470,10 +472,9 @@ def history(conn, user: User, args: ProjectRef) -> dict:
 @action(Role.viewer)
 def diff(conn, user: User, args: Diff) -> dict:
     """Diff between two versions of the project (commit ids or HEAD); without `to`, against the uncommitted files."""
-    with locked(args.project):
-        r = repo(args.project)
-        to = _version(r, args.to).tree_id if args.to else _worktree(r)
-        return {"files": _diff(r, _version(r, args.base).tree_id, to, _hidden(conn, user, args.project))}
+    r = repo(args.project)  # no repo lock, as changes
+    to = _version(r, args.to).tree_id if args.to else _worktree(r, False)
+    return {"files": _diff(r, _version(r, args.base).tree_id, to, _hidden(conn, user, args.project))}
 
 
 @action(Role.editor, definition=True)
