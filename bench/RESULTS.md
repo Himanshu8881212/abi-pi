@@ -361,3 +361,75 @@ first token: 21.0 s (run 6, 25.1 s in all) and 7.2 s (run 4, 11.9 s). No questio
 why runs called only semantic_query (182 times), abi_vault (27), data_quality (16), abi_show (1) and the missing tool
 (3), and the bench found each passing run's project as it was. The runs' records: logs/bench-1104085745.jsonl (north)
 and logs/bench-1104090801.jsonl (retail), on this Mac only.
+
+## 1.2 M2 round 2 (MacBook Air, 8 cores, 24 GB; model proxy/claude-sonnet-5-5)
+
+4 Nov 2026 10:00-10:09, release-1.2 at 8c5bdc1: round 1's code plus M2.4's explain_change. Method as round 1's:
+bench/bench.py at scale 0.01, --model proxy/claude-sonnet-5-5 --fallback proxy/claude-opus-5-5, through the same
+scratch wrapper (every run's RPC lines and transcript kept); why 10 times on each planted dataset (north, retail),
+ask 10 and report 5 on north, both datasets in one hold of the bench lock. Sonnet answered all 35 runs, no model call
+failed and no run was asked again. Load average 1.5-3.1, nothing else building. The engine was the one started at
+09:41 on M2.4's code; HEAD, the engine's two processes and the sha256 of the 40 files the harness and the bench read
+(index.ts, ground.py, SYSTEM.md, mcp.json, the skills and agents, abi.py, pi_driver.py, bench.py, brewline.py, the
+engine's semantic modules) were the same at the start, between the datasets and at the end.
+
+| task | data | pass | runs masked | median s | turns | tools | tool errors | masked | input tok | cached tok | output tok |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| ask | north | 10/10 | 0 | 6.8 | 2 | 2 | 0 | 0 | 4 | 50512 | 436.5 |
+| why | north | 9/10 | 1 | 15.8 | 3 | 1 | 0 | 0 | 1881 | 78076.5 | 1373 |
+| why | retail | 7/10 | 3 | 14.2 | 3 | 1 | 0 | 0 | 1885.5 | 85448 | 1376.5 |
+| why | both | 16/20 | 4 | 15.1 | 3 | 1 | 0 | 0 | 1883 | 84865.5 | 1376.5 |
+| report | north | 0/5 | 0 | 23.2 | 6 | 8 | 0 | 0 | 52518 | 172255 | 1780 |
+
+Against round 1 (why 18/20 with 1 run masked, 34.1 s, 6.5 turns, 10.5 tool calls; ask 10/10, 6.2 s; report 0/5 with 3
+masked, 20.6 s) and the 1.1.0 quiet-Mac baseline (ask 1/10, 9.4 s, 3 turns; why 9/10, 33.9 s, 6.5 turns; report
+20.5 s, 6 turns): why takes under half the time, turns and tokens (15.1 s in 3 turns and one tool call) but passes 16 of
+20 with 4 runs masked; ask is as in round 1; report fails all 5 again, now with none masked.
+
+M2's gate is not met. Met: why's median 15.1 s (30 s or less) and 3 turns (4 or fewer), ask 10 of 10 with no run
+masked, ask's median 6.8 s against the baseline's 9.4. Not met: why passes 16 of 20 (18 or more) with 4 runs masked
+(none allowed), and report's median, 23.2 s, is 13% over the baseline's 20.5 s (10% allowed), in the same 6 turns and
+8 tool calls: its 5 runs (11.1, 14.2, 23.2, 26.1 and 27.3 s) waited 15.6 s a run for the model's first tokens, round 1's
+11.8 s.
+
+Where the time goes, from the RPC lines' arrival times (both datasets): a why run is 14.8 s at the median, 94% of it
+the model's turns (6.2 s of them waiting for first tokens), 0.5 s the harness's grounding check and 0.4 s the tool calls
+(explain_change answered in 171-233 ms). Every why run called explain_change once with its defaults (measure revenue,
+nothing else) and 3 also called abi_vault; none needed semantic_query, data_quality or semantic_model, none met the
+planner's "add calendar.year", and none called a tool that doesn't exist (round 1: 10.5 calls, 2-5 breakdowns, 12
+"add calendar.year", a missing tool in 3 runs). Turn 1 asks (2.9 s), turn 2 answers (5.7 s). In 18 of 20 runs the
+grounding check flagged that answer and the hidden retry took a third turn (5.3 s, 4.4-7.5). What it named: a count of
+members in 17 ("three" cities, formats or payment methods, "two" retail products: counts never ground, D-22), a range's
+lower bound written without its % sign in 3 ("Each fell 44–61%", "each down about 54–55%": the rows hold -0.4395 and
+-0.6058, and a bare 44 is no row value), and "Within" opening the text after a bold label in 2 ("**Cities:** Within
+North, ...", "**City:** Within the cities listed ..."). 14 of the 18 rewrites were clean.
+
+Every run that failed or was masked:
+- why north 6 (17.0 s, 3 turns, 1 masked): the first answer's "Each fell 44–61%" was flagged; the rewrite dropped it and
+  wrote "All three formats declined", a count of the three formats the rows list, masked in the final answer ("All [not
+  verified] formats declined"). The rest is right: both months, North where the drop sits with 3,271.28 and 1,586.08.
+- why retail 6 (13.3 s, 3 turns, 1 masked): the first answer's "mostly two retail products ... each down about 54–55%"
+  was flagged ("two", "54"); the rewrite wrote "all three methods fell" of the payment methods, masked. Otherwise right:
+  both months, Retail from 4,719.60 to 2,145.70, 93% of the change.
+- why retail 8 (19.9 s, 3 turns, 1 masked): the first answer said "Card holds the largest share of the drop, 72%, but
+  all three fell"; the retry named "three", and the rewrite kept the count ("**Payment method:** all three fell."),
+  masked.
+- why retail 9 (13.1 s, 3 turns, 1 masked; also fails the driver check): the first answer's "The two Retail products"
+  was flagged; the rewrite opened "**Where the drop sits:** Almost all of it is in Retail." scripts/ground.py reads a
+  capitalized word after a label's colon as a name unless FUNCTION or STATUS lists it (_caps), and "Almost" isn't
+  listed, so it was masked as a name no row holds: a false mask, the same rule that flagged "Within" above. It was the
+  answer's one driver phrase, so bench.why_ok's driver check fails too ("That is 93% of the total change" has no driver
+  word).
+- report 0-4 (all fail, none masked): every run saved the build-report playbook's example as it stands (kpi-revenue,
+  rev-region and rev-month on page "main", named "Overview"), its line on calendar.month alone: 12 points adding 2023,
+  2024 and 2025 together, where bench.report_ok wants 36. The KPI (425,548.61) and the bar by region were right to the
+  cent in the 4 runs that read their visuals back (run 2 read none; its queries were the same). 4 first answers were
+  flagged for "three" (the visuals) or "Overview", as in round 1, and all 4 rewrites were clean (round 1: 3 stayed
+  masked).
+
+So the why gate now turns on counting: 3 of the 4 masked runs are a rewrite counting the members explain_change listed,
+after a retry that says "name members instead of counting them", and the fourth is ground.py's closed word list. ask:
+all 10 clean, each region's 2025 figure after its name, in 2 turns (semantic_query and abi_vault, then the answer). No
+question changed the project: the 30 ask and why runs called only semantic_query (10 times), explain_change (20) and
+abi_vault (13), and the bench found each passing run's project as it was. The runs' records:
+logs/bench-1104100043.jsonl (north) and logs/bench-1104100635.jsonl (retail), on this Mac only.
