@@ -317,14 +317,18 @@ def _move(conn, moves: list[tuple]) -> None:
 
 @action(Role.owner, confirms=True)
 def delete_project(conn, user: User, args: ProjectRef) -> dict:
-    """Deletes the project for good: its files and Git history, roles, runs and other records (the audit log stays); its data is archived for 30 days. Asks for a confirmation listing its tables, reports, flows and roles."""
+    """Deletes the project for good: its files and Git history, roles, runs and other records (the audit log stays); its data and uploaded files are archived for 30 days. Asks for a confirmation listing its tables, reports, flows and roles."""
+    from abi import ingest  # not at top: it imports this module
+
     p = _existing(args.project)
     with locked(args.project, p):
         _gate(conn, args.project, p, f"Deleting project '{args.project}' removes its files, Git history, roles and runs"
-              " for good; its data is archived for 30 days.", {"delete": f"project:{args.project}"})
+              " for good; its data and uploaded files are archived for 30 days.", {"delete": f"project:{args.project}"})
         for t in _keyed(conn):
             conn.execute(f'DELETE FROM "{t}" WHERE project = %s', [args.project])
-        _move(conn, storage.move_lake(conn, args.project, f"{storage.DELETED}{int(time.time())}_{args.project}"[:63]))
+        gone = f"{storage.DELETED}{int(time.time())}_{args.project}"[:63]
+        ingest.retain(p, gone)  # M3.5: before its history goes
+        _move(conn, storage.move_lake(conn, args.project, gone))
         shutil.rmtree(p)
     return {"deleted": args.project}
 
@@ -554,6 +558,25 @@ def _sizes(tree: pygit2.Tree, prefix: str = "") -> dict:
     for e in tree:
         out |= _sizes(e, f"{prefix}{e.name}/") if isinstance(e, pygit2.Tree) else {prefix + e.name: e.size}
     return out
+
+
+def texts(p: Path):
+    """M3.5: every file of the project folder `p` as text, as it is now and in each version of its history (every ref:
+    the undo chain and a remote's too, which undo, revert or pull bring back), each distinct one once."""
+    for f in p.rglob("*"):
+        if f.is_file() and ".git" not in f.relative_to(p).parts:
+            yield f.read_text(errors="replace")
+    r = pygit2.Repository(p)
+    trees = list({c.tree_id: c.tree for ref in r.references for c in r.walk(r.references[ref].peel(pygit2.Commit).id)}.values())
+    seen = set()
+    while trees:
+        for e in trees.pop():
+            if e.id not in seen:
+                seen.add(e.id)
+                if isinstance(e, pygit2.Tree):
+                    trees.append(e)
+                else:
+                    yield e.data.decode(errors="replace")
 
 
 def _confirm(conn, project: str, old: dict, files: dict, gone, what: str, why: list[str] = (),

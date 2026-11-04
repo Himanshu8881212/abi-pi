@@ -927,6 +927,69 @@ async def upload_chunk(
     return result
 
 
+NAMED = re.compile(r"uploads/([0-9a-f]{32})(?![0-9a-f])")  # M3.5: an upload a file names (a location, a pattern's start)
+PATTERN = re.compile(r'"location"\s*:\s*"([^"]*[*?[][^"]*)"')  # a location with a wildcard, read through DuckDB's glob
+
+
+def _uploads(texts) -> set[str]:
+    """M3.5: the uploads these project files or load payloads name, also through a server-path glob."""
+    out, patterns = set(), set()
+    for t in texts:
+        out.update(NAMED.findall(t))
+        patterns.update(p for p in PATTERN.findall(t) if "://" not in p)
+    up = files_root() / "uploads"
+    with duckdb.connect() as con:
+        for p in patterns:
+            with contextlib.suppress(duckdb.Error):  # a pattern DuckDB can't expand loads nothing
+                for (f,) in con.execute("SELECT file FROM glob(?)", [str(files_root() / p)]).fetchall():
+                    if (f := FsPath(f).resolve()).is_relative_to(up) and f != up:
+                        out.add(f.relative_to(up).parts[0])
+    return out
+
+
+def retain(folder: FsPath, gone: str) -> None:
+    """M3.5, as delete_project removes a project and its Git history: the uploads it named, now or in any version (what
+    a restore loads), wait for its lake `gone` to be purged, listed in uploads/<gone>.json."""
+    root = files_root() / "uploads"
+    try:
+        ids = _uploads(git.texts(folder))
+    except Exception as e:  # noqa: BLE001 - a repo it can't read still deletes; with no list, its lake holds back every unlisted upload
+        logging.getLogger(__name__).error("Listing the uploads of %s failed: %s", folder.name, e)
+        return
+    root.mkdir(parents=True, exist_ok=True)
+    (root / f".{gone}").write_text(json.dumps(sorted(ids)))
+    os.replace(root / f".{gone}", root / f"{gone}.json")  # whole: purge_uploads may be reading it
+
+
+def purge_uploads(conn, now: float | None = None) -> None:
+    """M3.5, daily after storage.purge_deleted: delete each upload no live project reads once every deleted project that
+    named it is past its lake's retention (30 days after its deletion). Never one that a live project's files name,
+    now or in their history (another project, a published copy), a queued or running load reads, an upload in progress
+    holds, or that changed in the last day. 1.1 kept no record of an upload's project: the files decide, not the record."""
+    now, root = now or time.time(), files_root() / "uploads"
+    if not root.is_dir():
+        return
+    cutoff = now - storage.ARCHIVE_DAYS * 86400
+    # live projects first: one deleted meanwhile wrote its list before its folder went
+    keep = _uploads(t for g in git._root().glob("*/.git") for t in git.texts(g.parent))
+    if conn.execute("SELECT to_regclass('load_runs') AS t").fetchone()["t"]:  # M3.2's background loads, when in
+        keep |= _uploads(r["p"] for r in conn.execute("SELECT payload::text AS p FROM load_runs WHERE payload IS NOT NULL"
+                                                      " AND status IN ('queued', 'running')"))
+    lists = {f: (int(f.name.split("_")[2]), json.loads(f.read_text())) for f in root.glob(f"{storage.DELETED}*.json")}
+    keep |= {u for t, ids in lists.values() if t >= cutoff for u in ids}
+    listed = {u for _, ids in lists.values() for u in ids}
+    # a project deleted before 1.2 left no list: while its lake is kept, an upload no list names may be one of its
+    unknown = any(int(r["nspname"].split("_")[2]) >= cutoff and not (root / f"{r['nspname']}.json").exists() for r in
+                  conn.execute("SELECT nspname FROM pg_namespace WHERE starts_with(nspname, %s)", [storage.DELETED]))
+    for d in root.iterdir():
+        if re.fullmatch(r"[0-9a-f]{32}", d.name) and d.name not in keep and (d.name in listed or not unknown) \
+                and not (d / ".upload.json").exists() and now - d.stat().st_mtime > STALE:
+            shutil.rmtree(d, ignore_errors=True)
+    for f, (t, _) in lists.items():
+        if t < cutoff:
+            f.unlink()
+
+
 def _host(kind: str, loc: str, opts: dict) -> str | None:
     """The host a load's requests go to (D-2), from the resolved location; None for a server path or an unclear URL.
 

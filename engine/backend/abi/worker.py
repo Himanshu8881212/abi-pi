@@ -208,3 +208,5 @@ def purge_archive(timestamp: int) -> None:
     for p in git.projects():
         storage.purge_archive(storage.lake(p), author="worker")
         storage.expire_snapshots(storage.lake(p), author="worker")
+    with db.connect() as conn:  # last: a project it can't read stops only this
+        ingest.purge_uploads(conn)  # M3.5: and the uploads only deleted projects read
