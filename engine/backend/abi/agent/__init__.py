@@ -164,7 +164,7 @@ def tools(project: str | None = None) -> list[dict]:
 # D-71: each Main Agent call describes the core reads plus the §5 capability areas the chat is about; `more_tools`
 # adds the other areas on demand, and `_call` runs any action named, so every action stays available (§5 #1).
 # ponytail: keyword routing; Responses `tool_search` + `defer_loading` if only gpt-5.4+ Responses providers remain.
-CORE = {"list_projects", "semantic_model", "semantic_query", "how_calculated", "lineage", "docs", "readiness",
+CORE = {"list_projects", "semantic_model", "semantic_query", "explain_change", "how_calculated", "lineage", "docs", "readiness",
         "detect_model", "data_quality", "list_reports", "list_tools", "list_agents", "list_flows", "ml_models",
         "remember", "changes"}
 AREAS = {  # area: (what it holds, action module or module.action prefixes (longest wins), question keyword stems)

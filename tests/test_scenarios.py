@@ -85,7 +85,7 @@ def yt():
 def test_scenario2_why_views_dropped_and_report(yt):
     a = ask("In project yt: which categories (category_id) lost the most views from one month to the next in the last"
             " two months of data? Use total views by month and category.")
-    assert a.called("semantic_query"), "answers through the semantic engine"
+    assert a.called("semantic_query") or a.called("explain_change"), "answers through the semantic engine"
     assert "[not verified]" not in a.answer, f"a masked figure fails the answer: {a.answer}"
     b = ask("In project yt build a one-page report with id category_views named 'Views by category': a bar chart of total"
             " views by category_id and a line chart of total views by day. Then sync the folder.")

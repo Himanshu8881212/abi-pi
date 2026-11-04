@@ -87,7 +87,8 @@ def pi(prompt: str) -> Run:
     else:
         abi.load("demo", p, [re.search(r"file (\S+)", prompt)[1]])
         answer = "; ".join(f"{n}: {v:,.2f}" for n, v in figures(p, "brewline.region"))
-    return Run(prompt, answer=answer, tools=[("mcp__abi__semantic_query", {}, False, 5, "")], model="test/stand-in")
+    read = "mcp__abi__explain_change" if kind == "why" else "mcp__abi__semantic_query"  # M2.4: why's one call
+    return Run(prompt, answer=answer, tools=[(read, {}, False, 5, "")], model="test/stand-in")
 
 
 def test_every_task_passes_on_the_right_work_and_fails_on_the_wrong(tmp_path, monkeypatch):

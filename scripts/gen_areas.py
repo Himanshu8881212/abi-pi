@@ -13,8 +13,8 @@ SRC = Path(sys.argv[1] if len(sys.argv) > 1 else Path(__file__).resolve().parent
 OUT = Path(__file__).resolve().parent.parent / "harness" / "areas.json"
 
 # copied from abi/agent/__init__.py (CORE, AREAS: description and module prefixes)
-CORE = ["list_projects", "semantic_model", "semantic_query", "how_calculated", "lineage", "docs", "readiness",
-        "detect_model", "data_quality", "list_reports", "list_tools", "list_agents", "list_flows", "ml_models",
+CORE = ["list_projects", "semantic_model", "semantic_query", "explain_change", "how_calculated", "lineage", "docs",
+        "readiness", "detect_model", "data_quality", "list_reports", "list_tools", "list_agents", "list_flows", "ml_models",
         "remember", "changes"]
 AREAS = {
     "data": ("load, connect, transform, refresh and delete sources and tables",

@@ -220,7 +220,7 @@ def by_share(project, user: User) -> bool:
 PRODUCTION_READS = frozenset({
     "agent_runs", "changes", "check_condition", "data_quality", "dataset_data", "delivery_channels", "delivery_settings",
     "diff", "docs",
-    "edit_history", "edit_proposals", "export_visual", "flow_runs", "generate_docs", "get_sharing", "history",
+    "edit_history", "edit_proposals", "explain_change", "export_visual", "flow_runs", "generate_docs", "get_sharing", "history",
     "how_calculated", "inbound_approvals", "inbox", "lineage", "list_agents", "list_embed_keys", "list_flows",
     "list_reports", "list_secrets", "list_snapshots", "list_share_links", "list_subscriptions", "list_tools", "ml_history", "ml_models", "ml_trials",
     "project_locale", "readiness", "remote_branches", "remote_settings", "report_snapshot", "rls_rules", "run_agent",

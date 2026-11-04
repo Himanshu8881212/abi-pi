@@ -48,6 +48,7 @@ from abi.security import (
     usage,
 )
 from abi.semantic import (  # noqa: F401  registers their actions
+    explain,
     lineage,
     model,
     rls,

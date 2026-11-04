@@ -10,8 +10,9 @@ description: How a senior analyst works in ABI - frame the question, use the bus
 - **The right comparison.** Month over month for trend, year over year for seasonality (Q4 lifts ad rates), a share of
   total for mix. State both values the rows give; let ABI compute changes with a change measure, not you.
 - **Segment before you conclude.** A total moved: break it down by the dimensions that can explain it (format,
-  country, channel, traffic source, device) and find where the change sits. Check mix effects (more Shorts can lower
-  RPM with no channel getting worse).
+  country, channel, traffic source, device) and find where the change sits; `explain_change` does it in one call
+  (both periods, each dimension's top members, their change and share of it). Check mix effects (more Shorts can
+  lower RPM with no channel getting worse).
 - **Grain discipline.** Ratios (RPM, CPM, engagement) are measures, never averages of daily ratios; don't add numbers
   across facts at different grains.
 - **Show it.** Answer first in one sentence, then the two or three rows that prove it, then `abi_show` the report or a

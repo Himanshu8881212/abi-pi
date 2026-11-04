@@ -3,6 +3,7 @@
     "list_projects",
     "semantic_model",
     "semantic_query",
+    "explain_change",
     "how_calculated",
     "lineage",
     "docs",

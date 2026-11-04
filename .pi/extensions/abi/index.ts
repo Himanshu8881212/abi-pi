@@ -246,7 +246,7 @@ export default async function abi(pi: ExtensionAPI) {
 		} catch { apps.delete(project); return false; }
 	}
 	// Viewer mode (the person's switch in the app; ABI_PI_MODE in a terminal): the agent is a read-only analyst
-	const READS = new Set(["list_projects", "semantic_model", "semantic_query", "how_calculated", "lineage", "docs", "readiness", "detect_model",
+	const READS = new Set(["list_projects", "semantic_model", "semantic_query", "explain_change", "how_calculated", "lineage", "docs", "readiness", "detect_model",
 		"data_quality", "list_reports", "list_tools", "list_agents", "list_flows", "ml_models", "changes", "visual_data", "dataset_data", "rls_rules",
 		"list_snapshots", "preview_steps", "edit_history", "edit_proposals", "flow_runs", "agent_runs", "history", "diff", "ml_history", "get_sharing",
 		"list_share_links", "shared_with_me", "test_tool", "run_tool", "test_agent", "sql_query", "project_locale", "remote_settings", "check_condition"]);

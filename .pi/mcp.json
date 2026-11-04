@@ -12,6 +12,7 @@
         "list_projects": "direct",
         "semantic_model": "direct",
         "semantic_query": "direct",
+        "explain_change": "direct",
         "how_calculated": "direct",
         "lineage": "direct",
         "docs": "direct",

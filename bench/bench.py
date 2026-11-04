@@ -127,7 +127,8 @@ def t_ask(c: dict, i: int):
 def t_why(c: dict, i: int):
     before = state(c["project"])
     r = ask(f"In project {c['project']}: why did revenue change in the latest complete month of data compared with the month before?")
-    return r, bool(r.called("semantic_query")) and clean(r.answer) and why_ok(r.answer, c["known"]) and state(c["project"]) == before
+    read = r.called("semantic_query") or r.called("explain_change")  # the engine's reads
+    return r, bool(read) and clean(r.answer) and why_ok(r.answer, c["known"]) and state(c["project"]) == before
 
 
 def t_report(c: dict, i: int):
