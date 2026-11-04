@@ -383,7 +383,7 @@ class SaveReport(storage.ProjectRef):
 
 @action(Role.editor, definition=True)
 def save_report(conn, user: User, args: SaveReport) -> dict:
-    """Creates or replaces a report (reports/<id>.json). It is checked like an import (schema, measure IDs, model tables) and rejected with file, JSON path and fix if invalid."""
+    """Creates or replaces a report (reports/<id>.json). It is checked like an import (schema, measure IDs, model tables) and rejected with file, JSON path and fix if invalid. Returns its ID and, as saved, its pages (ID, name) with their visuals' IDs."""
     rel = f"reports/{imports.object_id(args.report, 'A report')}.json"
     # SH-1: the creator owns it; owner and sharing stay as stored (sharing changes only through set_sharing or a gated import)
     files = bundle(git.path(args.project))
@@ -393,7 +393,9 @@ def save_report(conn, user: User, args: SaveReport) -> dict:
     new = {rel: r}
     imports.check(conn, args.project, files | new)
     imports.write(args.project, new)
-    return {"id": r["id"]}
+    # ABI-PI 1.2 M2: the names it saved, so an answer may say them (round 2 flagged "one page, Overview" in 4 of 5)
+    return {"id": r["id"], "pages": [{"id": p["id"], "name": p["name"], "visuals": [v["id"] for v in p["visuals"]]}
+                                     for p in r["pages"]]}
 
 
 @action(Role.editor, destructive=True, definition=True)

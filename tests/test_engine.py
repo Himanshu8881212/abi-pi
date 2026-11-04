@@ -123,3 +123,19 @@ def test_the_engines_grounding_takes_the_harness_rules_of_m2_2():
                " c('| Café | Revenue |\\n|---|---|\\n| Bremen Süd | 76.00 |', rows), c('**What I can’t tell:** Why North fell to 76.00.', rows, pct)]))")
     assert json.loads(r.stdout.strip().splitlines()[-1]) == [["Bremen Sud"], ["52%", "2%"], [], [], [], [], [], [], ["Atlantis"],
                                                             ["Weekly Atlantis"], [], [], []], r.stderr[-500:]
+
+
+@pytest.mark.skipif(not PY.exists(), reason="no engine venv")
+def test_the_engines_grounding_takes_the_harness_rules_of_m2_round_2():
+    """M2 round 2's false masks, fixed in both copies: a range's first figure takes its last one's percent sign ("each
+    fell 44–61%" from % changes of -0.4395 and -0.6058; a plain 11 of a period label no longer backs "11–61%"), and a
+    preposition or degree word opening a label's value is no name ("**Where it sits:** Almost all of it"), nor a "No",
+    "Up" or "Down" opening a phrase ("**Segment:** No segment stands out"); the rest of the phrase, or one alone, is checked."""
+    r = engine("import json\nfrom abi.agents import grounding as g\n"
+               "x = {'columns': ['dimension', 'member', 'period_a', 'change_pct'], 'measures': {}, 'filters': [], 'rows':"
+               " [['cafes.city', 'Hanover', '2025-11', -0.439543694918046], ['cafes.city', 'Bremen', '2025-11', -0.605793190498471]]}\n"
+               "c = lambda a: (lambda o: o['numbers'] + o['names'])(g.check(a, [x]))\n"
+               "print(json.dumps([c('Each fell 44–61%.'), c('Each fell 11–61%.'), c('**Where it sits:** Almost all, in Bremen: -61%.'),"
+               " c('- **Cities:** Within Atlantis, -44%.'), c('- **Segment:** No segment stands out: -44%.'), c('- **Member:** No, -44%.'),"
+               " c('- **Hanover:** Down 44%.'), c('| Down | -44% |')]))")
+    assert json.loads(r.stdout.strip().splitlines()[-1]) == [[], ["11"], [], ["Atlantis"], [], ["No"], [], ["Down"]], r.stderr[-500:]

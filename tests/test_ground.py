@@ -80,6 +80,12 @@ def test_a_status_word_opening_a_label_value_is_no_name():
         assert ground.check(f"- **Status:** {w} **disabled**; no email sent.", [])["names"] == [], w
     assert ground.check("- **Top region:** Narnia, by revenue.", [])["names"] == ["Narnia"], "a data name after a label is still checked"
     assert ground.check("- **Tier:** Platinum", [])["names"] == ["Platinum"], "data-like values stay checked"
+    # M2 round 3: "**Segment:** No segment stands out" masked "No" (and every "no" with it), "**Coffee:** Down 8.6%" "Down";
+    # alone they are a yes/no or status value
+    assert ground.check("- **Segment:** No segment stands out; no region either.\n- **Bakery:** Up 6.8%.\n- **Tea:** Down a"
+                        " little.", [])["names"] == []
+    assert ground.check("- **Loyalty member:** No", [])["names"] == ["No"] == ground.check("| No | 12 |", [])["names"]
+    assert ground.check("- **Server:** Down", [])["names"] == ["Down"]
 
 
 def test_a_figure_in_a_definitions_title_grounds_as_written():
@@ -108,6 +114,16 @@ DEC = [{"column": "calendar.year", "op": "=", "value": 2025}, {"column": "calend
 NORTH = [{"column": "cafes.region", "op": "=", "value": "North"}]
 CHANGES = {"revenue": "Revenue", "revenue_prev": "Revenue, previous period", "revenue_change": "Revenue change",
            "revenue_change_pct": "Revenue % change"}
+
+
+def ex(rows):
+    """An explain_change result (M2.4) as ABI returns it: the total first, then each dimension's top members."""
+    return q(["dimension", "member", "period_a", "period_b", "a", "b", "change", "change_pct", "share_pct"],
+             [[d, m, "2025-11", "2025-12", *v] for d, m, *v in rows], measures={
+                 "a": "Revenue, 2025-11", "b": "Revenue, 2025-12", "change": "Revenue change", "change_pct": "Revenue % change",
+                 "share_pct": "share of the total change"})
+
+
 BREW = {
     "ask": q(["cafes.region", "grouping_id", "revenue"], [["East", 0, "40774.45"], ["North", 0, "36360.52"], ["South", 0, "39285.46"],
              ["West", 0, "41718.55"], [None, 1, "158138.98"]],
@@ -158,6 +174,20 @@ BREW = {
          " IGNORE([revenue], cafes.region) - PREVIOUS_PERIOD(IGNORE([revenue], cafes.region)))"}),
     "products": q(["orders.product_id", "revenue"], [["P02", "2391.85"], ["P05", "1065.40"]], DEC),
     "cafe_ids": q(["orders.cafe_id", "revenue"], [["CF009", "51.90"]], DEC),
+    # explain_change (M2.4) as round 2's why runs had it, on the default data and on --plant retail
+    "explain": ex([
+        ["total", None, "14095.04", "12043.64", "-2051.40", -0.145540558948396, 1.0],
+        ["cafes.region", "North", "3271.28", "1586.08", "-1685.20", -0.5151500330146, 0.821487764453544],
+        ["cafes.region", "West", "3607.51", "3423.73", "-183.78", -0.050943725727718, 0.089587598713074],
+        ["cafes.city", "Hamburg", "1138.17", "543.35", "-594.82", -0.522610857780472, 0.289958077410549],
+        ["cafes.city", "Bremen", "919.01", "362.28", "-556.73", -0.605793190498471, 0.271390270059472],
+        ["cafes.city", "Hanover", "1214.10", "680.45", "-533.65", -0.439543694918046, 0.260139416983523],
+        ["cafes.format", "mall", "3424.79", "2640.21", "-784.58", -0.229088498856864, 0.382460758506386]]),
+    "explain_retail": ex([
+        ["total", None, "14059.04", "11303.05", "-2755.99", -0.196029743140357, 1.0],
+        ["products.category", "Retail", "4719.60", "2145.70", "-2573.90", -0.545364013899483, 0.933929368393935],
+        ["products.product_name", "Reusable Cup", "2415.00", "1080.80", "-1334.20", -0.552463768115942, 0.484109158596366],
+        ["products.product_name", "House Beans 250g", "2304.60", "1064.90", "-1239.70", -0.537924151696607, 0.449820209797568]]),
 }
 MODEL = {  # semantic_model of the bench's project, as the harness's digest reads it
     "tables": {"cafes": {"kind": "dimension", "key": ["cafe_id"]}, "calendar": {"kind": "dimension", "key": ["day"]},
@@ -293,6 +323,16 @@ GOOD = [  # (answer, the results it rests on): written as the bench's answers ar
     ("In November North took 3,271.28 and in December 1,586.08.", ["regions"]),  # a month opening a member's name
     ("| Café | December revenue |\n|---|---:|\n| Bremen Süd | 76.00 |\n| Bremen Ost | 53.32 |", ["cafes"]),  # cafes.cafe_name
     ("December took 12,043.64; 2025-12-31 was the last day, after the Christmas and New Year closures.", ["months", "days"]),
+    # M2 round 2's false masks on explain_change's rows: a range's first figure is a percentage too, and a preposition or
+    # degree word opens a label's value
+    ("- **Cities:** Hamburg (−594.82), Bremen (−556.73) and Hanover (−533.65) fell by similar amounts. Each fell 44–61%.",
+     ["explain"]),
+    ("The decline sits in Reusable Cup and House Beans 250g, each down about 54–55%.", ["explain_retail"]),
+    ("Hanover and Bremen fell 44 to 61 percent.", ["explain"]),
+    ("Revenue fell to 12,043.64 in December 2025 – 14.6% below November's 14,095.04.", ["explain"]),  # an aside, no range
+    ("**Where the drop sits:** Almost all of it is in Retail, from 4,719.60 to 2,145.70 (93% of the total change).",
+     ["explain_retail"]),
+    ("- **City:** Within North, Hamburg fell from 1,138.17 to 543.35 and Bremen from 919.01 to 362.28.", ["explain"]),
 ]
 
 
@@ -335,6 +375,11 @@ INVENTED = [  # (answer, the figure or name no row backs, the results it was wri
     ("North fell to 1,586.08 and the Atlantis-by-sea cafés to 9.70.", "Atlantis-by-sea", ["regions", "cafes"]),
     ("- **Timing:** Weekly Atlantis revenue was 1,586.08.", "Weekly Atlantis", ["regions"]),
     ("In November Atlantis took 3,271.28.", "November Atlantis", ["regions"]),
+    ("Each city fell 11–61%.", "11", ["explain"]),  # a percentage now: no ratio backs it (a plain 11 is in "2025-11")
+    ("Each city fell 35–61%.", "35", ["explain"]),
+    ("All three formats declined: mall fell from 3,424.79 to 2,640.21.", "three", ["explain"]),  # a count no row holds
+    ("The two Retail products fell most: Reusable Cup to 1,080.80.", "two", ["explain_retail"]),
+    ("- **Driver:** Within Atlantis, revenue fell to 1,586.08.", "Atlantis", ["explain"]),  # the opening word only
 ]
 
 
@@ -424,6 +469,8 @@ def test_the_retry_names_what_failed_and_lists_the_rows_to_rewrite_from(monkeypa
     assert out["numbers"] == ["14.6%"] and out["names"] == ["Atlantis"]
     r = out["retry"]
     assert "14.6%, Atlantis" in r and "Rewrite the answer" in r and "[not verified]" in r
+    # round 2: 3 of 4 masked why runs were a rewrite that counted what the rows listed ("all three fell")
+    assert 'Write no number in words (no "two", "three", ...) and count nothing the rows list' in r
     assert '["cafes.region", "calendar.month", "revenue", "orders_rows"]' in r and '["North", 12, "1586.08", 280]' in r
     assert r.index("cafes.region") < r.index('"quantity"')  # the newest result first
     assert out["final"] == ground.mask(out["masked"], {"spans": []}) and "14.6%" not in out["final"]

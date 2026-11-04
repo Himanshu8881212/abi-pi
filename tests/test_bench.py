@@ -43,6 +43,14 @@ def test_answers_that_look_right_and_arent_fail():
     assert bench.masked("from 2025-01-01 to [not verified]" + footer) == 2 and bench.masked("[not verified] and [not verified]") == 2
 
 
+def test_the_report_playbooks_example_draws_one_point_per_month_of_every_year():
+    """M2 rounds 1-2: every report run saved the build-report playbook's example as it stands, its line on calendar.month
+    alone: 12 points adding three years together, where report_ok wants one per month of every year."""
+    spec = json.loads(re.search(r"```json\n(.*?)```", (ROOT / ".pi/skills/build-report/SKILL.md").read_text(), re.S)[1])
+    lines = [v["query"] for p in spec["pages"] for v in p["visuals"] if v["type"] == "line"]
+    assert [q["dimensions"] for q in lines] == [["calendar.year", "calendar.month"]], lines
+
+
 def figures(p: str, dim: str, **q) -> list:
     return abi.call("semantic_query", project=p, measures=["revenue"], dimensions=[dim], **q)["rows"]
 

@@ -40,7 +40,7 @@ def test_measure_glossary_query_report_round_trip(srv):  # noqa: F811
         {"id": "v1", "type": "bar", "title": "<b>total</b> & <script>", "query": {"measures": ["e2e_total"], "dimensions": ["orders.region"]},
          "layout": {"x": 0, "y": 0, "w": 6, "h": 4}}]}]}
     code, r = api(port, key, "save_report", report=rep)
-    assert code == 200 and "result" in r, r
+    assert code == 200 and r["result"] == {"id": "e2e_rep", "pages": [{"id": "p1", "name": "One", "visuals": ["v1"]}]}, r  # names to quote
     code, r = api(port, key, "visual_data", report="e2e_rep", page="p1", visual="v1")
     assert code == 200 and r["result"]["rows"], r
     # undo it all, newest first; anything that asks ABI's confirmation is left for a person

@@ -269,7 +269,9 @@ export default async function abi(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "abi_show",
 		label: "Show in the app",
-		description: "Shows the person something in their open ABI app: a page of its sidebar, a report with filters, a chart of measures by a dimension in Explore (page 'explore' with query), or one item (a measure, flow, ML model, tool, agent, term) highlighted. Starts the app if it isn't open. Use it when the person asks to see something, after you built or changed something they should look at, and to point at the rows behind an answer (a report with the filters you used). Filters: [{column: 'table.column', op: '=', '<>', '<', '<=', '>', '>=' or 'in', value}].",
+		// M2 round 3: a terminal Pi has no app to show anything in (see `apps`); a why run that called this there lost its answer
+		description: (apps.size ? "" : "No app is attached to this session (a terminal), so this shows nothing: answer in words, and tell the person `python scripts/app.py <project>` opens the app. ") +
+			"Shows the person something in their open ABI app: a page of its sidebar, a report with filters, a chart of measures by a dimension in Explore (page 'explore' with query), or one item (a measure, flow, ML model, tool, agent, term) highlighted. Use it when the person asks to see something, after you built or changed something they should look at, and to point at the rows behind an answer (a report with the filters you used). Filters: [{column: 'table.column', op: '=', '<>', '<', '<=', '>', '>=' or 'in', value}].",
 		parameters: Type.Object({
 			project: Type.String({ pattern: "^[a-z][a-z0-9_]{0,62}$" }),
 			page: Type.String({ enum: PAGES }),
@@ -284,7 +286,7 @@ export default async function abi(pi: ExtensionAPI) {
 			if (p.page === "report" && !p.report) return text("Name the report (report ID) to show.");
 			const ok = await appPost(p.project, "/agent/show", p, true);
 			const a = await appFor(p.project);
-			return text(ok && a ? `Shown in the person's app: ${a.url}/#${p.page === "report" ? `rep:${p.report}` : p.page}` : "The app isn't running; the person starts it with `python scripts/app.py " + p.project + "`.");
+			return text(ok && a ? `Shown in the person's app: ${a.url}/#${p.page === "report" ? `rep:${p.report}` : p.page}` : "Nothing was shown: the app isn't running (the person starts it with `python scripts/app.py " + p.project + "`). They see only your reply, never your thinking: put your whole answer there.");
 		},
 	});
 	// ---------- the app's own Monitor checks and Explore analyses (files of the app, not ABI actions) ----------

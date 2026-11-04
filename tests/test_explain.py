@@ -95,6 +95,7 @@ def test_the_latest_months_change_by_dimension_is_the_files_to_the_cent_within_3
         want = hand(brew["out"], dim, a, b)
         top = max(want, key=lambda k: abs(want[k][1] - want[k][0]))
         assert 1 <= len(got) <= 3 and got[0][1] == top, (dim, got[0], top)
+        assert (dim in r["partial"]) == (len(want) > 3), dim  # round 2: "all three formats" of the four, top 3 shown
         x, y = want[top]
         assert [cents(v) for v in got[0][4:7]] == [cents(x), cents(y), cents(y - x)], dim
         assert round(got[0][8], 9) == round((y - x) / (tb - ta), 9) and round(got[0][7], 9) == round((y - x) / x, 9)
@@ -110,7 +111,7 @@ def test_members_add_up_and_named_periods_and_dimensions_are_the_files_too(brew)
     """Every member of a dimension (a café's NULL customer segment too) adds up to the total change, so the shares to 1;
     December 2025 against December 2024, by the dimensions asked, in their order."""
     r = abi.call("explain_change", project=P, measure="revenue", dimensions=["customers.segment", "cafes.region"], top=20)
-    assert r["dimensions"] == ["customers.segment", "cafes.region"] and r["also_checked"] == []
+    assert r["dimensions"] == ["customers.segment", "cafes.region"] and r["also_checked"] == [] == r["partial"]
     for dim in r["dimensions"]:
         got = [row for row in r["rows"] if row[0] == dim]
         assert round(sum(row[6] for row in got), 2) == cents(r["rows"][0][6]) and round(sum(row[8] for row in got), 9) == 1

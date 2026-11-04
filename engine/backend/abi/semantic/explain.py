@@ -103,7 +103,7 @@ class Explain(storage.ProjectRef):
 
 @action(Role.viewer)
 def explain_change(conn, user: User, args: Explain) -> dict:
-    """Explains why a measure changed between two periods, in one call: its total in each and, broken down by dimensions, the members whose change is largest. Read as you (row-level security applies), computed now, never saved. Periods: by default the latest complete `period` (a month; complete when the data reaches its last day) against the one before; `a` and `b` name others (2025-11, 2025-Q4, 2025-W48, 2025-11-30, 2025). Dimensions: by default the model's text dimensions, those where the change sits most first (one member moved far from the total's rate), the rest named in `also_checked`. Rows: the total first, then each dimension's top members: dimension, member, period_a, period_b, a and b (the measure in each period), change (b - a), change_pct (a fraction of a: -0.25 is -25%) and share_pct (the member's share of the total change, a fraction: 0.8 is 80%). These rows hold the figures a "why" needs: quote them."""
+    """Explains why a measure changed between two periods, in one call: its total in each and, broken down by dimensions, the members whose change is largest. Read as you (row-level security applies), computed now, never saved. Periods: by default the latest complete `period` (a month; complete when the data reaches its last day) against the one before; `a` and `b` name others (2025-11, 2025-Q4, 2025-W48, 2025-11-30, 2025). Dimensions: by default the model's text dimensions, those where the change sits most first (one member moved far from the total's rate), the rest named in `also_checked`. Rows: the total first, then each dimension's top members: dimension, member, period_a, period_b, a and b (the measure in each period), change (b - a), change_pct (a fraction of a: -0.25 is -25%) and share_pct (the member's share of the total change, a fraction: 0.8 is 80%). `partial` names the dimensions with more members than their top rows (the others aren't shown). These rows hold the figures a "why" needs: quote them, and name members, never count them (no row holds a count)."""
     from abi.semantic import model  # not at top: model imports this package
 
     p, m, grain = args.project, args.measure, args.period
@@ -170,7 +170,8 @@ def explain_change(conn, user: User, args: Explain) -> dict:
             not isinstance(r[1], str) or len(r[1]) <= LABEL and "\n" not in r[1] for r in x[1])), key=lambda x: -x[2])[:SHOWN]
     name = next((x.get("name") or m for x in ms if x["id"] == m), m)
     shown = [d for d, _, _ in blocks]
-    return {"measure": m, "dimensions": shown, "also_checked": [d for d in dims if d not in shown], "columns": COLUMNS,
+    return {"measure": m, "dimensions": shown, "partial": [d for d, out, _ in blocks if len(out) > args.top],
+            "also_checked": [d for d in dims if d not in shown], "columns": COLUMNS,
             "rows": [total] + [r for _, out, _ in blocks for r in out[:args.top]],
             "measures": {"a": f"{name}, {la}", "b": f"{name}, {lb}", "change": f"{name} change", "change_pct": f"{name} % change",
                          "share_pct": "share of the total change"},

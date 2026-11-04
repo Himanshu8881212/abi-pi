@@ -643,6 +643,26 @@ def test_a_models_prices_become_the_cost_pi_reports_and_usage_shows(tmp_path, mo
     assert json.loads(shown) == ["$0.01", "tokens only", "$0.01 (part tokens only)", "< $0.01"]
 
 
+def test_abi_show_with_no_app_open_says_nothing_was_shown():
+    """M2 round 3: a why run's reply was only abi_show's "The app isn't running; the person starts it with ...": the
+    answer stayed in the model's thinking. abi_show said it starts the app, which it doesn't: in a terminal (no app
+    attached) its description now says it shows nothing there, and a call says nothing was shown and that the person
+    sees only the reply, never the thinking."""
+    show = EXT.split("const seen")[0] + (  # the same stand-in Pi, keeping the tools it registers
+        'const tools = {}, pi = new Proxy({}, { get: (_, k) => k === "registerTool" ? (t) => (tools[t.name] = t) : () => [] });\n'
+        "await (await import(process.argv[2])).default(pi);\n"
+        'const t = tools.abi_show, r = await t.execute("t1", { project: "brew", page: "explore" });\n'
+        "console.log(JSON.stringify([t.description, r.content[0].text]));")
+    ext = ROOT / ".pi/extensions/abi/index.ts"
+    env = {k: v for k, v in os.environ.items() if not k.startswith("ABI_APP_")}
+    r = subprocess.run(["node", "--experimental-strip-types", "--input-type=module", "-e", show, str(ext.parent), str(ext)], cwd=ROOT,
+                       capture_output=True, text=True, timeout=60, env={**env, "ABI_PI_LLM_BASE": "http://127.0.0.1:9/v1"})
+    assert r.returncode == 0, r.stderr[-2000:]
+    description, said = json.loads(r.stdout.splitlines()[-1])
+    assert "Starts the app" not in description and description.startswith("No app is attached to this session (a terminal)")
+    assert said.startswith("Nothing was shown") and "never your thinking: put your whole answer there" in said
+
+
 def test_the_app_offers_everyone_its_source(srv, monkeypatch, tmp_path):
     """AGPL-3.0 §13: everyone using the app over a network can get the running version's source. The sign-in page and
     every page's sidebar link it (this repo, or ABI_SOURCE_URL for a changed build); so does the engine's /api/version,

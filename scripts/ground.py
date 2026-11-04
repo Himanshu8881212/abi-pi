@@ -33,6 +33,9 @@ NUM = re.compile(
     r"(?:(?:(?<![\w.])(?P<neg>[-−]))?[$€£¥]?(?<![\d.])(?P<n>\d{1,3}(?:,\d{3})+(?!\d)|\d+)(?P<dec>\.\d+)?"
     r"|(?<![\w-])(?P<w>(?i:(?:" + _W + r")(?:[- ](?:and[- ])?(?:" + _W + r"|hundred|thousand|million|billion))*))(?![\w-]))"
     r"(?P<mult>\s?(?i:thousand|million|billion)\b|(?:k|K|M|bn)\b)?(?P<pct>\s?%|\s(?i:percent|per cent)\b)?")
+# 1.2 M2: a range's first figure shares its last one's percent sign ("each fell 44–61%" is 44% to 61%; a spaced
+# dash is an aside: "December 2025 – 14.6% down")
+UPTO = re.compile(r"(?:[–—-]|\sto\s)[-−]?\d[\d,]*(?:\.\d+)?(?:\s?%|\s(?i:percent|per cent)\b)")
 # LLM-2-fix-11, D-75: English contractions (I’ll, Don’t, Here’s) from a closed list of stems are words, never names;
 # any other stem (Atlantis’ll, Bob’s) is still checked as a name
 _CON = (r"(?!(?:(?:I|You|We|They|He|She|It|That|There|Here|What|Where|Who|How|Let)['’](?:ll|m|ve|d|re|s)"
@@ -67,7 +70,14 @@ FUNCTION = {"A", "An", "The", "This", "These", "That", "Those", "It", "Its", "Th
             "She", "I", "Our", "Your", "Their", "And", "But", "Or", "So", "If", "When", "Each", "All", "Both",
             "None", "Nothing", "Every",  # GATE-9-fix-2: also opening a table cell ("| None |")
             "Several", "Most", "Many", "Some", "Few", "Only",  # M2.2: "**North cafés:** Several fell sharply",
-            "Why", "Whether", "What", "Which", "How", "Where", "Who"}  # "**What I can't tell:** Why North fell"
+            "Why", "Whether", "What", "Which", "How", "Where", "Who",  # "**What I can't tell:** Why North fell"
+            # 1.2 M2: prepositions, degree words ("**Where it sits:** Almost all of it", "**Cities:** Within North")
+            "Almost", "Nearly", "About", "Around", "Roughly", "Mostly", "Mainly", "Largely", "Partly", "Just", "Even",
+            "Also", "Within", "Across", "Among", "Between", "In", "At", "By", "For", "From", "With", "Without", "After",
+            "Before", "During", "Since", "Over", "Under", "Unlike", "Despite", "Except", "Apart", "Outside", "Beyond"}
+# 1.2 M2: words opening a phrase after a label ("**Segment:** No segment stands out", "**Bakery:** Up 6.8%"), checked when
+# they stand alone: a yes/no or status value ("**Loyalty member:** No", "| Down |")
+LEADS = {"No", "Up", "Down"}
 # the agent's words for the state of its own work, opening a value after a label ("**Status:** Saved **disabled**");
 # never data members, so not names. Data-like values (Active, Yes, No) stay checked.
 STATUS = {"Saved", "Created", "Updated", "Added", "Removed", "Deleted", "Enabled", "Disabled", "Scheduled", "Unscheduled",
@@ -169,7 +179,8 @@ def _numbers(text: str, ids: set[str], lists: bool = False) -> list[tuple[tuple[
         if mult := (m["mult"] or "").strip().lower():
             f = SCALES.get(mult) or {"k": 1e3, "m": 1e6, "bn": 1e9}[mult]
             v, tol = v * f, tol * f
-        out.append((m.span(), (m[0].strip(), -v if m["neg"] else v, tol + 1e-9, bool(m["pct"]), bool(m["neg"]))))
+        pct = bool(m["pct"] or m["n"] and not m["mult"] and UPTO.match(text, m.end()))
+        out.append((m.span(), (m[0].strip(), -v if m["neg"] else v, tol + 1e-9, pct, bool(m["neg"]))))
     return out
 
 
@@ -231,7 +242,8 @@ def _caps(text: str, quoted: bool = False) -> list[tuple[int, str]]:
             phrase = phrase.partition(" ")[2]
         elif not pre and " " not in phrase:  # LLM-2-fix-4: "Total revenue is 10,863.9" → no "Total"
             phrase = ""
-        elif pre and pre[-1] in ":;(|" and phrase.partition(" ")[0] in FUNCTION | STATUS:  # LLM-2-fix-15: "Note: This sums"
+        elif pre and pre[-1] in ":;(|" and (phrase.partition(" ")[0] in FUNCTION | STATUS  # LLM-2-fix-15: "Note: This sums"
+                                            or phrase in LEADS and re.match(r" [a-z0-9+−-]", text[m.end():])):
             phrase = phrase.partition(" ")[2]
         at = m.end() - len(phrase.lstrip())
         phrase = re.sub(r"(['’]s?|-)$", "", phrase.strip())
@@ -650,11 +662,12 @@ def retry(bad: dict, results: list) -> str:
     rows = rows if len(rows) <= ROWS else rows[:ROWS].rpartition("\n")[0] + "\n…"
     return (f"Your answer above has {MARK} where it stated what no tool row backs: {', '.join(bad['numbers'] + bad['names'])}."
             " Rewrite the answer to the person's question from the rows below: every figure a value of these rows, as"
-            " it is or rounded for display, never a sum, difference, share, percentage, count (\"three cities\"), bound"
-            " (\"less than 200\") or range you work out yourself, and every name one the rows hold. For a change or a"
-            " share, quote a change measure's or an expression's rows (call semantic_query), or state the two values the"
-            " rows give; name members instead of counting them; leave out what the rows can't back. Don't mention this"
-            " check, an earlier answer or a correction.\n\n"
+            " it is or rounded for display, never a sum, difference, share, percentage, bound (\"less than 200\") or"
+            " range you work out yourself, and every name one the rows hold. Write no number in words (no \"two\","
+            " \"three\", ...) and count nothing the rows list: name them, or say \"both\", \"each\", \"they\" or"
+            " \"these\". For a change or a share, quote a change"
+            " measure's or an expression's rows (call semantic_query), or state both values the rows give; leave out"
+            " what the rows can't back. Don't mention this check, an earlier answer or a correction.\n\n"
             + (f"Rows you may quote (each result's columns, then its rows):\n{rows}" if rows else "No tool rows back this answer yet."))
 
 
