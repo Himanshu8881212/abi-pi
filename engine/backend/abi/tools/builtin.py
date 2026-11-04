@@ -65,6 +65,7 @@ from abi.agents import grounding
 from abi.project import bundle, git, imports, sharing
 from abi.security import Role, User, credentials, tenants, usage
 from abi.semantic import Filter, SemanticQuery, rls
+from abi.semantic.subscriptions import Check, evaluate
 from abi.storage import ProjectRef
 
 EMAIL = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
@@ -113,10 +114,14 @@ def deliver_email(conn, project: str, to: list[str], subject: str, body: str, da
                   thread: tuple[str, str] | None = None, docs: dict[str, str] | None = None) -> None:
     """Send one email over the project's SMTP settings, the result rows as a text table and as data.csv. `thread`
     (Message-ID, References) of the mail it answers puts the reply in that thread (RFC 5322 §3.6.4). `docs`
-    (Markdown files by path, DC-6) goes as docs.zip."""
-    smtp = _delivery(project).get("smtp")
+    (Markdown files by path, DC-6) goes as docs.zip. ABI-PI: a project without its own mail server sends through the
+    workspace's (set_account_mail, the app's Settings › Email), with platform secrets only."""
+    smtp, scope = _delivery(project).get("smtp"), project
+    if not smtp and (row := conn.execute("SELECT smtp FROM account_mail").fetchone()):
+        smtp, scope = row["smtp"], None
     if not smtp:
-        raise ActionFailed(400, f"Project '{project}' has no email settings: add settings.delivery.smtp to project.json.")
+        raise ActionFailed(400, f"Project '{project}' has no email settings: set the workspace's mail server (the app's"
+                                " Settings › Email), or add settings.delivery.smtp to project.json.")
     msg = EmailMessage()
     brand = tenants.branding(conn, project=project)  # SC-9: a tenant project's mail carries its tenant's branding
     sender = formataddr((brand["name"], smtp["from"])) if brand else smtp["from"]  # the schema keeps names out of smtp.from
@@ -143,7 +148,7 @@ def deliver_email(conn, project: str, to: list[str], subject: str, body: str, da
             for path, text in docs.items():
                 f.writestr(path, text)
         msg.add_attachment(z.getvalue(), maintype="application", subtype="zip", filename="docs.zip")
-    send_smtp(conn, smtp, project, msg, to)
+    send_smtp(conn, smtp, scope, msg, to)
     usage.record(None, "send", project)  # SC-11: one successful delivery (own connection: the send happened)
 
 
@@ -414,16 +419,18 @@ class Snapshot(BaseModel):
         return self
 
 
-DATA = Field(None, description="a published tool call {tool, inputs} or a semantic query; its result goes with the"
+DATA = Field(None, description="a published tool call {tool, inputs}, a semantic query, or a condition {query, measure,"
+             " op, value, ...} as check_condition takes it (its rows, e.g. a % change, are computed by ABI); its result goes with the"
              " message, and when you (the agent) send, every number in your text must be one of its values")
 
 
-def _data(conn, user: User, project: str, data: ToolCall | SemanticQuery | None) -> dict | None:
+def _data(conn, user: User, project: str, data: ToolCall | SemanticQuery | Check | None) -> dict | None:
     """The attached result, run as the caller (FL-6: owner's permissions), numbers only from tools (principle 7)."""
     if isinstance(data, ToolCall):
         out = tools.run_tool(conn, user, tools.RunTool(project=project, tool=data.tool, inputs=data.inputs))
     elif data:
-        out = semantic.query(project, data.model_dump(mode="json"), user.id)
+        q = data.model_dump(mode="json")
+        out = evaluate(project, q, user.id) if isinstance(data, Check) else semantic.query(project, q, user.id)
         out["rows"] = [dict(zip(out["columns"], map(semantic.norm, r))) for r in out["rows"]]
     else:
         return None
@@ -459,7 +466,7 @@ class SendEmail(storage.ProjectRef):
     to: list[Annotated[str, Field(pattern=EMAIL, max_length=254)]] = Field(min_length=1, max_length=50)
     subject: str = Field(min_length=1, max_length=300, pattern=r"^[^\r\n]*$")
     body: str = Field(max_length=20_000)
-    data: ToolCall | SemanticQuery | None = DATA
+    data: ToolCall | SemanticQuery | Check | None = DATA
     report: Snapshot | None = Field(None, description="attach a report page or visual snapshot")
     docs: bool = Field(False, description="attach the project's generated documentation (Markdown) as docs.zip")
 
@@ -487,7 +494,7 @@ def send_email(conn, user: User, args: SendEmail) -> dict:
 class PostMessage(storage.ProjectRef):
     channel: str = Field(min_length=1, max_length=200, description="a channel named in the project's delivery settings, or `inbox` for its in-app inbox")
     text: str = Field(min_length=1, max_length=20_000)
-    data: ToolCall | SemanticQuery | None = DATA
+    data: ToolCall | SemanticQuery | Check | None = DATA
     report: Snapshot | None = Field(None, description="attach a report page or visual snapshot (sent as a link)")
 
 

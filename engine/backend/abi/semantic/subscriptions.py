@@ -1,7 +1,9 @@
 """Conditions and subscriptions. PRD SE-8, FL-1 (condition), AT-2, DECISIONS D-31.
 
 A condition is `{query, measure, op, value}`: it holds when any result row's measure value satisfies `op value` (NULL
-never). Code compares tool results (principle 7). A subscription is a user's semantic query that the worker re-runs
+never). Code compares tool results (principle 7). ABI-PI (Monitor's checks): `other` compares with another measure of
+the row (a target), `period` reads only the latest period with data, and `change` the % change from the period before,
+all computed here, so an alert's figures are these rows. A subscription is a user's semantic query that the worker re-runs
 every minute as that user; a changed result goes to the subscriber's private inbox (SE-8). Subscriptions are
 runtime state in Postgres, not Git (§6.6).
 """
@@ -12,7 +14,7 @@ import operator
 from typing import Literal
 
 from psycopg.types.json import Jsonb
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from abi import db, semantic, storage
 from abi.actions import ActionFailed, action
@@ -20,27 +22,74 @@ from abi.security import Role, User, role_in
 from abi.semantic import SemanticQuery
 
 OPS = {">": operator.gt, ">=": operator.ge, "<": operator.lt, "<=": operator.le, "=": operator.eq, "!=": operator.ne}
+YEAR = {"month": "year", "quarter": "year", "week": "week_year"}  # a period's year column: month 1 follows month 12
 
 
-class Condition(storage.ProjectRef):
+class Check(BaseModel):
     query: SemanticQuery
     measure: str = Field(description="a measure ID in query.measures")
     op: Literal[">", ">=", "<", "<=", "=", "!="]
     value: float
+    other: str | None = Field(None, description="another measure ID in query.measures: holds where measure op other + value (a target; value 0)")
+    period: str | None = Field(None, pattern=storage.COLUMN, description="a date-table column (day, week, month, quarter, year): only the latest period with data counts")
+    skip_latest: bool = Field(False, description="with period: the period before the latest one (which may still be filling)")
+    change: bool = Field(False, description="with period: `op value` compares the % change of measure from the period before (the total: no other, no dimensions)")
+
+
+class Condition(Check, storage.ProjectRef):
+    pass
+
+
+def problem(c: dict) -> str | None:
+    """Why a condition can't be checked (the import check and `evaluate` say the same), else None."""
+    ms = c["query"]["measures"]
+    if bad := next((x for x in (c["measure"], c.get("other")) if x and x not in ms), None):
+        return f"Measure '{bad}' is not in the condition's query measures {ms}."
+    if c.get("change") and not c.get("period"):
+        return "A change compares periods: give `period`, a date-table column such as calendar.month."
+    if c.get("change") and (c.get("other") or c["query"].get("dimensions")):
+        return "A change compares the total of one measure: leave out `other` and the query's dimensions."
+    return None
+
+
+def periods(c: dict) -> tuple[dict, list[str]]:
+    """The condition's query with its period first (its year column before a month, quarter or week), and those keys."""
+    if not (p := c.get("period")):
+        return c["query"], []
+    t, col = p.split(".", 1)
+    keys = [f"{t}.{YEAR[col]}", p] if col in YEAR else [p]
+    return c["query"] | {"dimensions": keys + [d for d in c["query"].get("dimensions", []) if d not in keys]}, keys
 
 
 def evaluate(project: str, c: dict, user_id: int | None) -> dict:
-    """{holds, rows}: the condition over `semantic.query` rows read as `user_id`."""
-    if c["measure"] not in c["query"]["measures"]:
-        raise ActionFailed(400, f"Measure '{c['measure']}' is not in the condition's query measures {c['query']['measures']}.")
-    r = semantic.query(project, c["query"], user_id)
-    i = r["columns"].index(c["measure"])
-    return {"holds": any(row[i] is not None and OPS[c["op"]](float(row[i]), c["value"]) for row in r["rows"]), "rows": r["rows"]}
+    """{holds, columns, rows}: the condition over `semantic.query` rows read as `user_id`. With `period`, the rows of the
+    latest period (`skip_latest`: the one before); with `change`, one row: that period, the measure, the period before,
+    its value and the % change (`change_pct`), which `op value` compares."""
+    if err := problem(c):
+        raise ActionFailed(400, err)
+    q, keys = periods(c)
+    r = semantic.query(project, q, user_id)
+    cols, rows, m, n = r["columns"], r["rows"], c["measure"], len(keys)
+    if keys:
+        seen = sorted({tuple(row[:n]) for row in rows if None not in row[:n]}, reverse=True)[int(bool(c.get("skip_latest"))):]
+        now, before = (seen + [None, None])[:2]
+        if c.get("change"):
+            v = {tuple(row[:n]): row[cols.index(m)] for row in rows}
+            a, b = v.get(now), v.get(before)
+            pct = round((a - b) / abs(b) * 100, 4) if a is not None and b else None
+            cols = [*keys, m, *(f"previous_{k.split('.', 1)[1]}" for k in keys), f"previous_{m}", "change_pct"]
+            rows, m = ([[*now, a, *before, b, pct]] if before else []), "change_pct"
+        else:
+            rows = [row for row in rows if tuple(row[:n]) == now]
+    i, j = cols.index(m), cols.index(c["other"]) if c.get("other") else None
+    to = lambda row: (0 if j is None else float(row[j])) + c["value"]  # noqa: E731
+    return {"holds": any(row[i] is not None and (j is None or row[j] is not None) and OPS[c["op"]](float(row[i]), to(row)) for row in rows),
+            "columns": cols, "rows": rows, "measures": r["measures"], "filters": r["filters"]}
 
 
 @action(Role.viewer)
 def check_condition(conn, user: User, args: Condition) -> dict:
-    """Checks a condition: runs the semantic query as you and says whether any result row's `measure` value satisfies `op value` (NULL never does). Returns {holds, rows}."""
+    """Checks a condition: runs the semantic query as you and says whether any result row's `measure` value satisfies `op value` (NULL never does); with `other`, measure op other + value; with `period`, only the latest period counts (`skip_latest`: the one before); with `change`, the % change from the period before. Returns {holds, columns, rows}."""
     return evaluate(args.project, args.model_dump(mode="json"), user.id)
 
 

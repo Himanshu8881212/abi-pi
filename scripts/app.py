@@ -54,7 +54,7 @@ WRITES = {"set_measure", "delete_measure", "set_glossary_term", "delete_glossary
           "commit", "undo", "add_data", "delete_source", "delete_table", "set_table", "add_relationship", "remove_relationship",
           "save_dataset", "delete_dataset", "save_report", "delete_report", "save_flow", "delete_flow", "save_ml_model",
           "delete_ml_model", "save_tool", "publish_tool", "delete_tool", "save_agent", "publish_agent", "delete_agent", "set_steps", "edit_cells", "approve_edit", "reject_edit", "undo_edits", "create_input_table"}
-READS = {"changes", "data_quality", "dataset_data", "docs", "edit_history", "edit_proposals", "export_visual",
+READS = {"changes", "check_condition", "data_quality", "dataset_data", "docs", "edit_history", "edit_proposals", "export_visual",
          "flow_runs", "history", "how_calculated", "list_agents", "list_flows", "list_reports", "list_tools",
          "ml_models", "preview_steps", "readiness", "report_snapshot", "rls_rules", "run_tool", "semantic_model",
          "semantic_query", "test_agent", "test_tool", "visual_data"}
@@ -262,7 +262,7 @@ function card(title,sub){const c=h('div','card'),t=h('h3');t.append(h('span','',
 function fld(label,el,note){const d=h('div','fld');d.append(h('label','l',label),el);if(note)d.append(h('div','file',note));return d}
 function rowcard(c,...fields){c.classList.add('rowcard');c.append(...fields);c.oninput=()=>c.classList.add('dirty');return c}
 function rowhead(...cols){const r=h('div','rowhead');cols.forEach(t=>r.append(h('span','',t)));return r}
-const W=/^(Save|Create|Delete|Edit report|New report|Reload |Run now|Enable|Disable|Train|Score|New |Ask$|Add |Remove|Edit|Publish|Save steps|Upload)/;
+const W=/^(Save|Create|Delete|Edit report|New report|Reload |Run now|Enable|Disable|Train|Score|New |Ask$|Add |Remove|Edit|Publish|Save steps|Upload|Email this|Alert with)/;
 function btn(label,fn,pri){const b=h('button','btn'+(pri?' pri':'')+(W.test(label)?' w':''),label);b.onclick=async()=>{b.disabled=true;try{await fn()}finally{b.disabled=false}};return b}
 const cell=v=>v!==null&&typeof v==='object'?JSON.stringify(v):typeof v==='string'&&/^\d{4}-\d\d-\d\dT\d\d:\d\d/.test(v)?new Date(v).toLocaleString():v;
 function rows(box,d){box.innerHTML='';box.classList.add('out');if(!(d&&d.columns&&Array.isArray(d.rows))){box.append(h('pre','',JSON.stringify(d,null,1)));return}
@@ -354,7 +354,8 @@ function report(box,rep){let flt=PENDING.filters||[];PENDING.filters=null;
  {const tb=h('div','row bar top');let ed=null;tb.append(btn('Edit report',()=>{if(ed){ed.remove();ed=null;return}ed=editor('report',rep.spec||{id:rep.id,name:rep.name},false);box.querySelector('.pghead').after(ed)}),
   btn('New report',()=>{const c=editor('report',KIND.report.tpl,true);box.querySelector('.pghead').after(c)}),
   btn('Delete report',async()=>{try{await KIND.report.del({id:rep.id});toast('Deleted.')}catch(e){toast(e.message)}}));box.append(tb)}
- {const tb=box.querySelector(':scope>.bar.top');let ex=null;const eb=h('button','btn pri','Export');eb.onclick=()=>{if(ex){ex.remove();ex=null;return}ex=exportCard(rep,()=>flt,()=>cur);box.querySelector('.pghead').after(ex)};tb.prepend(eb)}const top=h('div','row bar lead'),col=h('select','f');col.append(new Option('filter by…',''));D.dims.forEach(c=>col.append(new Option(c,c)));
+ {const tb=box.querySelector(':scope>.bar.top');let ex=null;const eb=h('button','btn pri','Export');eb.onclick=()=>{if(ex){ex.remove();ex=null;return}ex=exportCard(rep,()=>flt,()=>cur);box.querySelector('.pghead').after(ex)};tb.prepend(eb)
+  let mc=null;tb.append(btn('Email this report',()=>{if(mc){mc.remove();mc=null;return}mc=mailCard(rep);box.querySelector('.pghead').after(mc)}))}const top=h('div','row bar lead'),col=h('select','f');col.append(new Option('filter by…',''));D.dims.forEach(c=>col.append(new Option(c,c)));
  const val=h('select','f');val.multiple=true;val.hidden=true;const add=h('button','btn','add filter');add.hidden=true;const chips=h('span');
  top.append(col,val,add,chips);const tabs=h('nav','tabs'),grid=h('div','grid'),msg=h('div','msg');box.append(top,msg,tabs,grid);
  col.onchange=async()=>{val.innerHTML='';if(!col.value){val.hidden=add.hidden=true;return}
@@ -574,6 +575,18 @@ function exportCard(rep,filters,curPage){const c=card('Export',`rendered by ABI 
   catch(e){if(one||fm.value==='pptx')throw e;for(const p of pages)save(await get({...body,pages:undefined,page:p}),`${rep.id}-${p}.${fm.value}`);
    return `This ABI makes one file per page: downloaded ${pages.length}.`}},1);
  c.classList.add('editor');return c}
+// Email this report (Developer): ABI's flow email_<report>, a schedule and send_email with every page as one PDF, through
+// Settings › Email; saving it asks ABI's confirmation (it runs unattended; a recipient domain new to the project, once)
+function mailCard(rep){const f=(D.flows||[]).find(x=>x.id===('email_'+rep.id).slice(0,63)),cr=(f?.trigger?.cron||'0 8 * * 1').split(' '),was=f?.steps?.[0]?.input||{};
+ const at=`${cr[1].padStart(2,'0')}:${cr[0].padStart(2,'0')}`,c=card('Email this report',f?`${f.enabled?'on':'off'} · ${at} ${f.trigger.timezone}`:'every page as one PDF, on the days you pick');
+ const to=inpt('name@company.com, …',(was.to||[]).join(', ')),days=h('div','checks'),tm=inpt('',at,'time'),tz=inpt('time zone, e.g. Europe/Berlin',f?.trigger?.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'),on=new Set((cr[4]||'').split(',').map(Number));
+ [[1,'Mon'],[2,'Tue'],[3,'Wed'],[4,'Thu'],[5,'Fri'],[6,'Sat'],[0,'Sun']].forEach(([v,l])=>{const x=h('label','chk'),i=h('input');i.type='checkbox';i.value=v;i.checked=on.has(v);x.append(i,h('span','',l));days.append(x)});
+ c.append(lab('To'),to,lab('Days'),days,lab('At'),tm,lab('Time zone'),tz,h('p','file','ABI renders it when it sends, as you (your access to the data), and mails it from Settings › Email.'));
+ const post=b=>fetch('/report/email',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({report:rep.id,...b})}).then(r=>r.json());
+ act(c,'Save schedule',async()=>{const x=await confirmed(await post({to:to.value.split(',').map(s=>s.trim()).filter(Boolean),days:[...days.querySelectorAll('input:checked')].map(i=>+i.value),time:tm.value,timezone:tz.value.trim()}));
+  return x?'Saved in ABI: it emails on those days. Commit to keep it.':'Not saved.'},1);
+ if(f)act(c,'Stop emailing',async()=>(await confirmed(await post({off:true})))?'Stopped.':'Still on.');
+ c.classList.add('editor');return c}
 function reportsPage(box){const bar=h('div','row bar top');bar.append(btn('New report',()=>{const c=editor('report',KIND.report.tpl,true);g.prepend(c)},1));box.append(bar);
  const g=h('div','cards stack');box.append(g);if(!D.reports.length){box.append(h('p','empty','No reports yet. Ask the agent to build one.'));return}
  D.reports.forEach(r=>{const c=card(r.name||r.id,`reports/${r.id}.json`),n=r.pages.reduce((a,p)=>a+p.visuals.length,0);
@@ -584,19 +597,17 @@ function reportsPage(box){const bar=h('div','row bar top');bar.append(btn('New r
 const CMP={'<':(a,b)=>a<b,'<=':(a,b)=>a<=b,'>':(a,b)=>a>b,'>=':(a,b)=>a>=b,'=':(a,b)=>a==b,'!=':(a,b)=>a!=b};
 const OPS=[['<','is below'],['<=','is at most'],['>','is above'],['>=','is at least'],['=','equals'],['!=','is not']],opw=o=>(OPS.find(x=>x[0]===o)||[o,o])[1],mname=id=>D.measures.find(m=>m.id===id)?.name||id;
 // a measure check compares the measure with a value, with another measure (a target), or with its previous period (% change);
-// optionally filtered, and optionally for each member of a dimension (alerts when any member matches)
-async function monEval(c){if(c.kind==='measure'){const f=c.filters||[],vs=c.against||'value';
-  const sk=c.skip_latest?1:0;  // completed periods only: the latest (still filling) is left out
-  if(vs==='prev'){const r=await api('semantic_query',{measures:[c.measure],dimensions:[c.period],filters:f,order_by:[{field:c.period,desc:true}],limit:2+sk}),[a,b]=(r.rows||[]).slice(sk);
-   if(!a||!b||typeof a[1]!=='number'||typeof b[1]!=='number'||!b[1])return {ok:true,text:`${mname(c.measure)}: not enough periods to compare yet`};
-   const pct=(a[1]-b[1])/Math.abs(b[1])*100;return {ok:!CMP[c.op](pct,Number(c.value)),text:`${mname(c.measure)}: ${fmt(a[1])} in ${cell(a[0])}, ${pct>=0?'+':''}${pct.toFixed(1)}% on ${cell(b[0])} · alerts when the change ${opw(c.op)} ${fmt(Number(c.value))}%`}}
-  let fl=f,at='';if(c.period){const l=await api('semantic_query',{measures:[c.measure],dimensions:[c.period],filters:f,order_by:[{field:c.period,desc:true}],limit:1+sk}),pv=(l.rows||[])[sk]?.[0];
-   if(pv==null)return {ok:true,text:`${mname(c.measure)}: no ${c.period.split('.').pop()} with data yet`};fl=[...f,{column:c.period,op:'=',value:pv}];at=` in ${cell(pv)}`}  // the latest (completed) period
-  const r=await api('semantic_query',{measures:vs==='measure'?[c.measure,c.other]:[c.measure],dimensions:c.by?[c.by]:[],filters:fl,limit:500}),n=c.by?1:0;
-  const bad=(r.rows||[]).filter(x=>typeof x[n]==='number'&&CMP[c.op](x[n],vs==='measure'?x[n+1]:Number(c.value)));
-  const what=vs==='measure'?mname(c.other):fmt(Number(c.value)),where=(f.length?` (${f.map(x=>`${x.column} = ${x.value}`).join(', ')})`:'')+at;
-  if(c.by)return {ok:!bad.length,text:bad.length?`${bad.length} of ${(r.rows||[]).length} ${c.by.split('.').pop()} ${opw(c.op)} ${what}: ${bad.slice(0,5).map(x=>x[0]).join(', ')}${bad.length>5?'…':''}${where}`:`No ${c.by.split('.').pop()} ${opw(c.op)} ${what}${where}`};
-  const x=(r.rows||[])[0]||[];return {ok:typeof x[0]==='number'&&!bad.length,text:`${mname(c.measure)}: ${fmt(x[0])}${vs==='measure'?` vs ${what} ${fmt(x[1])}`:''}${where} · alerts when it ${opw(c.op)} ${what}`}}
+// optionally filtered, and optionally for each member of a dimension (alerts when any member matches). ABI evaluates it
+// (check_condition, the condition its flow checks every minute on the server): the verdict and every figure are its rows
+async function monEval(c){if(c.kind==='measure'){const k=c.condition;if(!k)return {ok:false,text:`${c.name}: this check is incomplete; edit it`};
+  const r=await api('check_condition',k),rs=r.rows||[],ix=x=>r.columns.indexOf(x),nk=k.period?ix(k.period)+1:0,per=(k.period||'').split('.').pop();
+  const lbl=v=>v.length>1?`${per} ${v[1]} of ${v[0]}`:cell(v[0]),f=c.filters||[],where=f.length?` (${f.map(x=>`${x.column} = ${x.value}`).join(', ')})`:'',i=ix(c.measure);
+  if(k.change){const x=rs[0];if(!x)return {ok:true,text:`${mname(c.measure)}: not enough ${per}s to compare yet${where}`};const p=x[ix('change_pct')];  // the latest (completed) period and the one before
+   return {ok:!r.holds,text:`${mname(c.measure)}: ${fmt(x[i])} in ${lbl(x.slice(0,nk))}, ${p>=0?'+':''}${fmt(p)}% on ${lbl(x.slice(i+1,i+1+nk))} (${fmt(x[ix('previous_'+c.measure)])})${where} · alerts when the change ${opw(c.op)} ${fmt(k.value)}%`}}
+  const j=k.other?ix(k.other):-1,what=k.other?mname(k.other):fmt(k.value),at=nk&&rs[0]?` in ${lbl(rs[0].slice(0,nk))}`:'';
+  if(c.by){const b=ix(c.by),bad=rs.filter(x=>typeof x[i]==='number'&&CMP[c.op](x[i],j>=0?x[j]:k.value));
+   return {ok:!r.holds,text:bad.length?`${bad.length} of ${rs.length} ${c.by.split('.').pop()} ${opw(c.op)} ${what}: ${bad.slice(0,5).map(x=>x[b]).join(', ')}${bad.length>5?'…':''}${where}${at}`:`No ${c.by.split('.').pop()} ${opw(c.op)} ${what}${where}${at}`}}
+  const x=rs[0]||[];return {ok:!r.holds,text:`${mname(c.measure)}: ${fmt(x[i])}${j>=0?` vs ${what} ${fmt(x[j])}`:''}${where}${at} · alerts when it ${opw(c.op)} ${what}`}}
  if(c.kind==='fresh'){const q=D.quality||{},ix=k=>(q.columns||[]).indexOf(k),row=(q.rows||[]).find(x=>x[0]===c.table),t=row&&row[ix('last_load')];
   const hrs=t?(Date.now()-Date.parse(t))/3600e3:Infinity;return {ok:hrs<=c.hours,text:`${c.table}: last load ${t?Math.round(hrs)+' h ago':'never'} · alerts after ${c.hours} h`}}
  const x=await api('flow_runs',{flow:c.flow}).catch(()=>({}));const one=x.runs?.[0]||x;return {ok:one.status!=='failed',text:`${c.flow}: last run ${one.status||'never'} · alerts when a run fails`}}
@@ -613,14 +624,20 @@ function newMonitor(box,ck){box.querySelector('.monform')?.remove();ck=ck||{};co
     return {measure:m.value,against:a,op:op.value,...(a==='measure'?{other:other.value}:{value:Number(v.value)}),...(a==='prev'?{period:per.value}:by.value?{by:by.value}:{}),...(fc.value?{filters:[{column:fc.value,op:'=',value:fv.value}]}:{})}}}
   else if(kind.value==='fresh'){const t=s((D.tables||[]).map(x=>[x,x]),ck.table),hr=h('input','f');hr.type='number';hr.value=ck.hours??36;f.append(L('Table'),t,L('Alert after (hours without a load)'),hr);f.get=()=>({table:t.value,hours:Number(hr.value)})}
   else{const fl=s((D.flows||[]).map(x=>[x.id,x.name||x.id]),ck.flow);f.append(L('Flow'),fl);f.get=()=>({flow:fl.value})}};kind.onchange=draw;draw();
- c.append(L('Name'),nm,L('Watch'),kind,f);
+ const em=h('input','f');em.type='email';em.placeholder='name@company.com (optional)';em.value=ck.id?monMail(ck)||'':/@/.test(window.ME?.name||'')?ME.name:'';
+ c.append(L('Name'),nm,L('Watch'),kind,f,L('Also email the alert to'),em,h('p','file','A measure check becomes a flow in ABI: it checks it every minute, also with this page closed, and posts to the Inbox when it starts to hold.'));
  act(c,ck.id?'Save':'Create',async()=>{if(!nm.value.trim())throw new Error('Give it a name.');const nc={id:ck.id||nm.value.trim().toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')||'check',name:nm.value.trim(),kind:kind.value,...f.get()};
-  const all=[...(D.app.monitor.checks||[]).filter(x=>x.id!==nc.id),nc];const r=await fetch('/monitor',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({checks:all})}).then(x=>x.json());
-  if(r.error)throw new Error(r.error);D.app.monitor.checks=all;show('monitor')},1);act(c,'Cancel',()=>c.remove());(box.querySelector('.pghead')||box).after(c)}
+  if(await monPost({action:'save',check:nc,email:em.value.trim()}))show('monitor')},1);act(c,'Cancel',()=>c.remove());(box.querySelector('.pghead')||box).after(c)}
+// a check and its flow in ABI (/monitor asks ABI's confirmation for the flow, then keeps the check); null: they said no
+const monFlow=ck=>(D.flows||[]).find(x=>x.id===('monitor_'+ck.id).slice(0,63)),monMail=ck=>monFlow(ck||{})?.steps?.find(s=>s.action==='send_email')?.input?.to?.[0];
+async function monPost(b){const r=await confirmed(await fetch('/monitor',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b)}).then(x=>x.json()));
+ if(r&&Array.isArray(r.result))D.app.monitor.checks=r.result;return r}
 function monitorPage(box){const bar=h('div','row bar top');bar.append(btn('New monitor',()=>newMonitor(box),1));box.append(bar);
  const mine=h('div','cards');box.append(mine);(D.app?.monitor?.checks||[]).forEach(ck=>{const c=card(ck.name);c.querySelector('h3').append(pinBtn({kind:'monitor',ref:ck.id,title:ck.name}));const st=h('p','file','checking…');c.append(st);mine.append(c);
   monEval(ck).then(x=>{st.className=x.ok?'ok':'bad';st.textContent=(x.ok?'OK · ':'Alert · ')+x.text}).catch(e=>{st.className='bad';st.textContent=e.message});
-  if(MODE==='developer')act(c,'Edit',()=>newMonitor(box,ck));if(MODE==='developer')act(c,'Delete',async()=>{const all=D.app.monitor.checks.filter(x=>x.id!==ck.id);await fetch('/monitor',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({checks:all})});D.app.monitor.checks=all;show('monitor')})});
+  const fl=monFlow(ck);if(MODE==='developer'&&ck.condition)c.append(h('p','file',fl?`With this page closed: ${fl.enabled?'on':'off'}, alerts go to the Inbox${monMail(ck)?' and '+monMail(ck):''}`:'Checked only while this page is open.'));
+  if(MODE==='developer'&&ck.condition&&!fl)act(c,'Alert with the page closed',async()=>{if(await monPost({action:'save',check:ck,email:''}))show('monitor')});
+  if(MODE==='developer')act(c,'Edit',()=>newMonitor(box,ck));if(MODE==='developer')act(c,'Delete',async()=>{if(await monPost({action:'delete',id:ck.id}))show('monitor')})});
  const g=h('div','cards');box.append(g);const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),rs=q.rows||[],when=t=>t?String(t).slice(0,16).replace('T',' '):'—';
  const M=D.app?.monitor||{watch:[],fresh_within_hours:36},watch=t=>M.watch?.length?M.watch.includes(t):/stream/.test(t),old=r=>watch(r[0])&&(!r[ix('last_load')]||Date.now()-Date.parse(r[ix('last_load')])>M.fresh_within_hours*3600e3);
  const fr=card('Data freshness',`ABI data quality; watched tables must load within ${M.fresh_within_hours} h (monitor.json)`),bad=rs.filter(r=>(r[ix('problems')]||[]).length||r[ix('missing_periods')]||old(r));
@@ -636,6 +653,23 @@ function monitorPage(box){const bar=h('div','row bar top');bar.append(btn('New m
  D.flows.forEach(f=>{const l=h('p','file','last run: …');fl.append(h('h4','',f.name||f.id),h('p',f.enabled?'ok':'',f.enabled?'on':'off'),l);
   api('flow_runs',{flow:f.id}).then(x=>{const r=(x.runs||[])[0];l.textContent=r?`last run: ${r.status} · ${when(r.finished||r.started||r.created)}`:'last run: never'}).catch(e=>l.textContent='last run: '+e.message)});
  g.append(fr,mo,ml,fl);fr.style.gridColumn='1/-1'}
+// Inbox: what flows posted to this project (Monitor alerts, scheduled posts), your subscriptions' new results and your test
+// runs, and its alerts (a failed flow, a data problem), as ABI shows them to you: under row-level security a Viewer gets
+// their own copy of each post, with their rows. Alerts are read or not as ABI keeps it per person; messages: this browser
+const SEEN='abi-inbox-'+D.project,seen=()=>{try{return +localStorage.getItem(SEEN)||0}catch(e){return 0}};let INBOXN='';
+const ipost=b=>fetch('/inbox',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json());
+async function inboxCount(){const r=await ipost().catch(()=>({}));if(!r.result)return;const s=seen(),b=side.querySelector("button.it[data-k='inbox']");
+ INBOXN=r.result.messages.filter(m=>m.id>s).length+r.result.alerts.filter(a=>!a.read).length||'';if(b){b.querySelector('.n')?.remove();if(INBOXN)b.append(h('span','n',String(INBOXN)))}}
+async function inboxPage(box){const r=await ipost();if(r.error){box.append(h('p','bad',r.error));return}const {messages:M,alerts:A}=r.result,s=seen(),g=h('div','cards');box.append(g);
+ const mc=card('Messages','posted by flows and Monitor, your subscriptions and your test runs');mc.classList.add('wide');
+ if(!M.length)mc.append(h('p','empty','No messages yet. A Monitor check posts here when it starts to hold; flows can post here too.'));
+ M.forEach(m=>{const d=h('div','hit');d.append(h('div','file',`${cell(m.at)} · ${m.sender}${m.id>s?' · new':''}`),h('div','',m.text));
+  if(m.data?.columns){const t=h('div'),y=m.data.columns.filter(c=>/(^|[._])year$/.test(c));  // a year reads 2026, not 2,026
+   rows(t,{...m.data,rows:m.data.rows.map(r=>({...r,...Object.fromEntries(y.map(c=>[c,r[c]==null?r[c]:String(r[c])]))}))});d.append(t)}if(m.snapshot){const a=h('a','',`Open the ${m.snapshot.split('.').pop().toUpperCase()}`);a.href=m.snapshot;a.target='_blank';d.append(a)}mc.append(d)});
+ const ac=card('Alerts','failed flows and data problems, as ABI reported them'),un=A.filter(a=>!a.read);if(!A.length)ac.append(h('p','empty','No alerts.'));
+ A.forEach(a=>{const d=h('div','hit');d.append(h('div','file',`${cell(a.at)}${a.read?'':' · new'}`),h('div','',a.message));ac.append(d)});
+ if(un.length||M.some(m=>m.id>s))act(ac,'Mark all read',async()=>{if(un.length)await ipost({read:un.map(a=>a.id)});try{localStorage.setItem(SEEN,String(Math.max(0,...M.map(m=>m.id))))}catch(e){}await inboxCount();show('inbox')});
+ g.append(mc,ac)}
 // Explore: anyone's own analysis on the governed model (reads only, so Viewer can use it); kept analyses stay in this browser
 let MINE=D.app?.analyses||[];if(!MINE.length)try{MINE=JSON.parse(localStorage.getItem('abi-explore')||'[]');if(MINE.length)setTimeout(saveMine,0)}catch(e){}
 function saveMine(){MINE=MINE.slice(0,100);fetch('/analyses',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({analyses:MINE})}).catch(()=>{})}
@@ -1102,7 +1136,7 @@ function vaultPage(box){
 const PENDING={filters:null,explore:null};
 const LEDE={vault:'Your business documents: definitions, finance rules, KPI specs. The agents search them before they define or check a measure.',home:'Start here: ask anything, see what needs attention, and every part of the project at a glance.',datasets:'Saved questions to the model (measures by dimensions, with filters). Each run returns a fresh table; nothing is stored. Reports, flows and ML reuse them. Preview their rows.',
  measures:'The business numbers. Edit a formula and ABI checks it before it saves; Test shows the total.',model:'Your data models: the whole model and each named model. Open one to see its tables and how they join.',
- chat:'Talk to the agent: ask a question, ask where something is, or ask for a change. When it shows you a page, the chat moves to the side and goes on.',boardpack:'Board packs: the documents, data and explainer video a review needs, made from ABI by the board-pack agent and checked before they leave. Nothing is sent from here.',documents:'A report, some of its pages or one view, as ABI renders it: PDF, PNG or PowerPoint.',onepager:'One page for the board: a report page with the headline numbers, two charts and the caveats. The agent builds it in ABI; export it here.',dataexport:'The rows behind any view, as CSV or Excel, or a query\'s rows as CSV.',video:'A silent explainer of report views: the numbers from ABI, animated, with a caption per slide, in the app\'s theme.',settings:'The agent\'s model and how hard it thinks, and the providers it may use. API keys are stored encrypted and never shown again.',people:'Who may sign in to this project, as what (Viewer, Editor, Owner), and which sections and reports each person sees.',transfer:'The whole project as one zip, so it can be kept, reviewed, moved or rebuilt. Import goes through ABI, which checks it and makes it one undoable commit.',edits:'Write-back: people correct or add rows of the gold tables. Edits apply on top of the table by row key (the loaded data is never changed), survive refreshes, can be undone, and every query sees the edited table.',reports:'The saved reports of this project. Open one to filter it and click through.',monitor:'Is anything wrong right now: data freshness, model readiness, ML runs and flows. Reports show the business; this shows the system.',explore:'Your own analysis: pick measures, a dimension and a filter; the numbers come from the model, so they match the reports. Keep the ones you want: they are saved with the app, the project itself doesn\'t change.',glossary:'What the business words mean and which measures implement them.',sources:'Bronze: the data as it landed, one source per file or bucket folder. Reload, add or delete a source.',
+ chat:'Talk to the agent: ask a question, ask where something is, or ask for a change. When it shows you a page, the chat moves to the side and goes on.',boardpack:'Board packs: the documents, data and explainer video a review needs, made from ABI by the board-pack agent and checked before they leave. Nothing is sent from here.',documents:'A report, some of its pages or one view, as ABI renders it: PDF, PNG or PowerPoint.',onepager:'One page for the board: a report page with the headline numbers, two charts and the caveats. The agent builds it in ABI; export it here.',dataexport:'The rows behind any view, as CSV or Excel, or a query\'s rows as CSV.',video:'A silent explainer of report views: the numbers from ABI, animated, with a caption per slide, in the app\'s theme.',settings:'The agent\'s model and how hard it thinks, and the providers it may use. API keys are stored encrypted and never shown again.',people:'Who may sign in to this project, as what (Viewer, Editor, Owner), and which sections and reports each person sees.',transfer:'The whole project as one zip, so it can be kept, reviewed, moved or rebuilt. Import goes through ABI, which checks it and makes it one undoable commit.',edits:'Write-back: people correct or add rows of the gold tables. Edits apply on top of the table by row key (the loaded data is never changed), survive refreshes, can be undone, and every query sees the edited table.',reports:'The saved reports of this project. Open one to filter it and click through.',monitor:'Is anything wrong right now: data freshness, model readiness, ML runs and flows. Reports show the business; this shows the system.',inbox:'What reached you here: Monitor alerts and flows\' posts with their figures, your subscriptions and test runs, and the project\'s alerts (a failed flow, a data problem).',explore:'Your own analysis: pick measures, a dimension and a filter; the numbers come from the model, so they match the reports. Keep the ones you want: they are saved with the app, the project itself doesn\'t change.',glossary:'What the business words mean and which measures implement them.',sources:'Bronze: the data as it landed, one source per file or bucket folder. Reload, add or delete a source.',
  staged:'Silver: the cleaned and combined tables between the sources and the final tables. Hidden from the model; edit their steps here.',tables:'Gold: the final business tables the model and measures are built on. Edit kind, key, description and steps.',flows:'Automations. Run one now and follow its steps, or switch it on or off.',
  ml:'Forecasts, segments and anomaly models. Train, score and read the latest run.',tools:'Calculations your agents can call. Run one with inputs or run its tests.',
  agents:'Custom agents for this project. Ask one a question or run its evaluation set.',docs:'The project documentation ABI writes from its definitions.',
@@ -1112,7 +1146,7 @@ function navAll(){return [['Start',[['home','Home',home],['chat','Chat',chatPage
  ['Data',[['sources','Sources',sources,D.sources.length],['staged','Staged',stagedPage,(D.layers||[]).filter(t=>t.layer==='silver').length],['tables','Tables',tablesPage,(D.model?Object.keys(D.model.tables||{}).length:D.tables.length)],['edits','Edits',editsPage]]],
  ['Data Model',[['model','Data models',modelsPage,(D.models||[]).length+1],['measures','Measures',measures,D.measures.length],
  ['glossary','Glossary',glossary,D.glossary.length],['datasets','Queries',datasets,D.datasets.length]]],
- ['Visualizations',[['reports','Reports',reportsPage,D.reports.length],['monitor','Monitor',monitorPage],['explore','Explore',explore,MINE.length||'']]],
+ ['Visualizations',[['reports','Reports',reportsPage,D.reports.length],['monitor','Monitor',monitorPage],['inbox','Inbox',inboxPage,INBOXN],['explore','Explore',explore,MINE.length||'']]],
  ['Export',[['boardpack','Board pack',boardPage,(D.app?.packs||[]).length],['documents','Documents',documentsPage],['onepager','One-pager',onePagerPage],['dataexport','Data',dataExportPage],['video','Video',videoPage],['transfer','Project',transferPage]]],
  ['Automate',[['flows','Flows',flows,D.flows.length],['ml','ML models',ml,D.ml.length],['tools','Tools',tools,D.tools.length],['agents','Agents',agents,D.agents.length]]],
  ['Knowledge',[['vault','Vault',vaultPage,(VAULT||[]).length],['docs','Docs',docs]]],
@@ -1209,7 +1243,7 @@ function pwDialog(){const d=h('dialog'),c=h('div','card'),cur=h('input','f'),nw=
 if(window.ME?.signin){const w=h('button','btn who',ME.name);w.title='Change your password';w.onclick=pwDialog;const f=h('form');f.method='post';f.action='/signout';f.append(h('button','btn','Sign out'));const r0=$('header .right');r0.prepend(w,f)}
 if(window.ME&&!['editor','owner'].includes(ME.role))$('.modes').hidden=true;/* Viewer access only: no switch at all */$('#m-dev').onclick=()=>pickMode('developer');$('#m-view').onclick=()=>pickMode('viewer');
 let first=decodeURIComponent(location.hash.slice(1));if(!first)try{first=localStorage.getItem('abi-app-'+D.project)}catch(e){}setTimeout(()=>show(first||'home'));  // after the whole script: the chat page's parts are declared further down
-boot.then(()=>{sidebar();show(CUR)});setMode('developer');vc();
+boot.then(()=>{sidebar();show(CUR);inboxCount()});setMode('developer');vc();
 window.addEventListener('hashchange',()=>{const k=decodeURIComponent(location.hash.slice(1));if(k&&k!==CUR)show(k)});
 
 // ---------- the agent: it steers this page, the page follows its changes, and the person talks to it here ----------
@@ -1378,7 +1412,9 @@ def _snapshot(dest: Path, project: str, pending: dict | None) -> dict:
     out["summary"] = {k: len(out[k]) for k in ("sources", "tables", "measures", "reports", "datasets", "flows", "ml", "tools", "agents")}
     base = project.removesuffix("_pub")
     import pack  # noqa: PLC0415 (sibling script)
-    out["app"] = {"analyses": j(app_dir(base) / "analyses.json", []) or [], "monitor": MONITOR | (j(app_dir(base) / "monitor.json", {}) or {}),
+    mon = MONITOR | (j(app_dir(base) / "monitor.json", {}) or {})  # a measure check's condition: what the page and its flow ask ABI
+    mon["checks"] = [c | {"condition": monitor_condition(c)} for c in mon.get("checks") or [] if isinstance(c, dict)]
+    out["app"] = {"analyses": j(app_dir(base) / "analyses.json", []) or [], "monitor": mon,
                   "packs": pack.listing(base), "layouts": j(app_dir(base) / "layouts.json", {}) or {}}
     return out
 
@@ -1393,6 +1429,8 @@ def publish_bundle(project: str) -> tuple[str, dict, str]:
         rel = f.relative_to(dest).as_posix()
         if f.is_file() and ".git" not in f.relative_to(dest).parts and f.name not in (".gitkeep", "app.html"):
             bundle[rel] = json.loads(f.read_text()) if rel.endswith(".json") else f.read_text()
+            if rel.startswith("flows/") and isinstance(bundle[rel], dict):  # flows run once, in the project: switched off here,
+                bundle[rel]["enabled"] = False  # or each schedule would email twice and each Monitor alert post twice
     pub = pub_id(project)
     if not abi.folder(pub):
         abi.new_project(dest.parent.name, pub, f"{(bundle.get('project.json') or {}).get('name', project)} (published)")
@@ -1785,7 +1823,8 @@ NO_PROJECT = """<!doctype html><meta charset=utf-8><meta name=viewport content='
 
 SECTIONS = ["Data", "Data Model", "Visualizations", "Export", "Automate", "Knowledge", "Govern"]  # Start is everyone's
 ROUTE_SECTION = {"/edits/rows": "Data", "/upload": "Data", "/report/export": "Export", "/data/export": "Export", "/video/export": "Export",
-                 "/packs/file": "Export", "/transfer/": "Export", "/vault/": "Knowledge", "/analyses": "Visualizations", "/monitor": "Visualizations", "/docs/pdf": "Knowledge"}
+                 "/packs/file": "Export", "/transfer/": "Export", "/vault/": "Knowledge", "/analyses": "Visualizations", "/monitor": "Visualizations", "/docs/pdf": "Knowledge",
+                 "/report/email": "Export", "/inbox": "Visualizations"}
 REPORT_ACTIONS = {"visual_data", "report_snapshot", "export_visual", "save_report", "delete_report"}
 _SEC = {"Data": "add_data delete_source delete_table set_steps preview_steps refresh edit_cells approve_edit reject_edit undo_edits create_input_table",
         "Data Model": "add_relationship remove_relationship set_measure delete_measure set_glossary_term delete_glossary_term save_dataset delete_dataset save_model delete_model",
@@ -1846,33 +1885,99 @@ def team_view(t: dict, acc: dict) -> dict:
 OPS = ("<", "<=", ">", ">=", "=", "!=")
 
 
-def agent_monitor(project: str, body: dict, by: str) -> list:
-    """abi_monitor: list, save or delete one of Monitor's checks (monitor.json "checks", what the page evaluates).
+def monitor_check(c: dict) -> dict:
+    """One of Monitor's checks as monitor.json keeps it (its id, else one from its name), or ValueError.
     measure: {measure, op, against: value|measure|prev, value | other | period (calendar column), by?, filters?};
     fresh: {table, hours}; flow: {flow}."""
+    cid = str(c.get("id") or "")
+    if not re.fullmatch(r"[a-z0-9_]{1,60}", cid):
+        cid = re.sub(r"[^a-z0-9]+", "_", str(c.get("name") or cid).lower()).strip("_")[:60]
+    if not cid:
+        raise ValueError("Give the check a name.")
+    kind, ag = c.get("kind"), c.get("against", "value")
+    need = {"measure": ["measure", "op"] + {"value": ["value"], "measure": ["other"], "prev": ["value", "period"]}.get(ag, ["?"]),
+            "fresh": ["table", "hours"], "flow": ["flow"]}.get(kind)
+    if need is None or any(c.get(k) in (None, "") for k in need) or (kind == "measure" and c["op"] not in OPS):
+        raise ValueError(f"A {kind or '?'} check needs {', '.join(need or ['kind: measure, fresh or flow'])}"
+                         + (f"; op is one of {' '.join(OPS)}" if kind == "measure" else "") + ".")
+    keep = ("measure", "op", "against", "value", "other", "period", "skip_latest", "by", "filters", "table", "hours", "flow")
+    return {"id": cid, "name": str(c.get("name") or cid)[:120], "kind": kind} | {k: c[k] for k in keep if c.get(k) not in (None, "")}
+
+
+def agent_monitor(project: str, body: dict, by: str) -> list:
+    """abi_monitor: list, save or delete one of Monitor's checks (monitor.json "checks", what the page evaluates)."""
     mon = render.j(app_dir(project) / "monitor.json", {}) or {}
     checks = mon.get("checks") or []
     if body.get("action") == "delete":
         checks = [c for c in checks if c.get("id") != body.get("id")]
     elif body.get("action") == "save":
-        c = body.get("check") or {}
-        cid = re.sub(r"[^a-z0-9]+", "_", str(c.get("name") or c.get("id") or "").lower()).strip("_")[:60]
-        if not cid:
-            raise ValueError("Give the check a name.")
-        kind, ag = c.get("kind"), c.get("against", "value")
-        need = {"measure": ["measure", "op"] + {"value": ["value"], "measure": ["other"], "prev": ["value", "period"]}.get(ag, ["?"]),
-                "fresh": ["table", "hours"], "flow": ["flow"]}.get(kind)
-        if need is None or any(c.get(k) in (None, "") for k in need) or (kind == "measure" and c["op"] not in OPS):
-            raise ValueError(f"A {kind or '?'} check needs {', '.join(need or ['kind: measure, fresh or flow'])}"
-                             + (f"; op is one of {' '.join(OPS)}" if kind == "measure" else "") + ".")
-        keep = ("measure", "op", "against", "value", "other", "period", "skip_latest", "by", "filters", "table", "hours", "flow")
-        c = {"id": cid, "name": str(c.get("name") or cid)[:120], "kind": kind} | {k: c[k] for k in keep if c.get(k) not in (None, "")}
-        checks = [x for x in checks if x.get("id") != cid] + [c]
+        c = monitor_check(body.get("check") or {})
+        checks = [x for x in checks if x.get("id") != c["id"]] + [c]
         if len(checks) > 50:
             raise ValueError("At most 50 checks.")
     if body.get("action") in ("save", "delete"):
         app_save(project, "monitor.json", mon | {"checks": checks}, by)
     return checks
+
+
+OPW = {"<": "is below", "<=": "is at most", ">": "is above", ">=": "is at least", "=": "equals", "!=": "is not"}
+FLOW_SCHEMA = "https://schema.abi.invalid/v1/flow.json"
+
+
+def monitor_condition(c: dict) -> dict | None:
+    """A measure check as the condition ABI evaluates (check_condition, a flow's data_condition trigger): the engine
+    computes it, a previous-period change too, so the page's verdict and an alert's figures are its rows. None for a
+    fresh or flow check (the page evaluates those) or a broken one."""
+    if c.get("kind") != "measure" or not c.get("measure") or c.get("op") not in OPS:
+        return None
+    ag, other = c.get("against", "value"), c.get("other") if c.get("against") == "measure" else None
+    try:
+        return ({"query": {"measures": [c["measure"], *([other] if other else [])], "filters": c.get("filters") or [],
+                           "dimensions": [c["by"]] if c.get("by") and ag != "prev" else []},
+                 "measure": c["measure"], "op": c["op"], "value": 0.0 if other else float(c.get("value"))}
+                | ({"other": other} if other else {}) | ({"change": True} if ag == "prev" else {})
+                | ({"period": c["period"], "skip_latest": bool(c.get("skip_latest"))} if c.get("period") else {}))
+    except (TypeError, ValueError):
+        return None
+
+
+def monitor_flow(c: dict, names: dict, email: str | None = None) -> dict | None:
+    """A measure check's flow: when its condition starts to hold (the engine checks it every minute, no browser open),
+    a message in the project's inbox and, if asked, an email, both carrying the check's rows; the text is the check's
+    own words (its name and rule). `names`: measure ID -> display name."""
+    if not (cond := monitor_condition(c)):
+        return None
+    n = lambda m: names.get(m) or m  # noqa: E731
+    per = (c.get("period") or "").split(".")[-1]
+    rule = (f"the change of {n(c['measure'])} from one {per} to the next {OPW[c['op']]} {cond['value']:g}%" if cond.get("change")
+            else f"{n(c['measure'])}{' for any ' + c['by'].split('.')[-1] if c.get('by') else ''} {OPW[c['op']]} "
+            + (n(cond["other"]) if cond.get("other") else f"{cond['value']:g}") + (f" in the latest {per}" if per else ""))
+    rule += (" (completed periods)" if c.get("skip_latest") and per else "") + "".join(
+        f", where {f['column']} = {f['value']}" for f in cond["query"]["filters"])
+    text = f"Monitor: {c['name']}. It alerts when {rule}."
+    steps = [{"id": "inbox", "type": "action", "action": "post_message", "input": {"channel": "inbox", "text": text, "data": cond}}]
+    if email:
+        steps.append({"id": "email", "type": "action", "action": "send_email", "input": {
+            "to": [email], "subject": f"Monitor: {c['name']}"[:300], "body": text + " Its figures are below and attached.", "data": cond}})
+    return {"$schema": FLOW_SCHEMA, "id": ("monitor_" + c["id"])[:63], "name": f"Monitor: {c['name']}", "enabled": True,
+            "description": "Made by Monitor: ABI checks it every minute and posts to the inbox when it starts to hold.",
+            "trigger": {"type": "data_condition", **cond}, "steps": steps}
+
+
+def report_mail_flow(rep: dict, to: list, days: list, at: str, tz: str) -> dict:
+    """Email this report: a schedule (days 0-6 from Sunday, at HH:MM in time zone `tz`) and ABI's send_email with every
+    page as one PDF, rendered when it sends as the flow's owner (their row-level security), from the account mail."""
+    if not to or len(to) > 50 or not all(isinstance(a, str) and re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", a) for a in to):
+        raise ValueError("Give up to 50 email addresses.")
+    if not days or not all(type(d) is int and 0 <= d <= 6 for d in days) or not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", at):
+        raise ValueError("Pick at least one day and a time (HH:MM).")
+    name = rep.get("name") or rep["id"]
+    return {"$schema": FLOW_SCHEMA, "id": ("email_" + rep["id"])[:63], "name": f"Email {name}", "enabled": True,
+            "description": f"Emails the {name} report as a PDF on a schedule; set on the report's page.",
+            "trigger": {"type": "schedule", "cron": f"{int(at[3:])} {int(at[:2])} * * {','.join(map(str, sorted(set(days))))}", "timezone": tz},
+            "steps": [{"id": "email", "type": "action", "action": "send_email", "input": {
+                "to": to, "subject": name[:300], "body": f"The {name} report is attached as a PDF, as ABI rendered it when this email was sent.",
+                "report": {"report": rep["id"], "pages": "all", "format": "pdf"}}}]}
 
 
 def agent_analysis(project: str, body: dict, by: str) -> list:
@@ -2268,6 +2373,11 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                         return self.reply(403, b'{"error":"Viewer mode is read-only: monitors are made in Developer."}')
                     by = next((h.user for h in targets if h.user), "")
                     try:
+                        if self.path == "/agent/monitor" and body.get("action") in ("save", "delete"):  # its flow would go stale
+                            cid = monitor_check(body.get("check") or {})["id"] if body["action"] == "save" else str(body.get("id") or "")
+                            if any(x.get("id") == ("monitor_" + cid)[:63] for x in (read("list_flows", p) or {}).get("flows") or []):
+                                raise ValueError(f"Check '{cid}' alerts with the page closed (flow monitor_{cid}): the person changes or"
+                                                 " deletes it on the Monitor page, which keeps its flow in step.")
                         out = agent_monitor(p, body, by) if self.path == "/agent/monitor" else agent_analysis(p, body, by)
                     except ValueError as e:
                         return self.reply(400, json.dumps({"error": str(e)}).encode())
@@ -2448,15 +2558,52 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                 app_save(project, "layouts.json", allp | {"draft": draft}, hub.user)
                 changed(project)
                 return self.reply(200, json.dumps({"result": draft}).encode())
-            if self.path == "/monitor":  # Monitor's own checks (monitor.json): what a person wants watched
+            if self.path == "/monitor":  # one of Monitor's checks (monitor.json) and, for a measure check, its flow in ABI: the
+                # engine checks it every minute and posts to the inbox (and emails, if asked) with no browser open
                 if hub.mode == "viewer":
                     return self.reply(403, b'{"error":"Make monitors in Developer mode."}')
-                checks = body.get("checks")
-                if not isinstance(checks, list) or len(checks) > 50 or len(raw) > 100_000 or not all(isinstance(c, dict) and c.get("kind") in ("measure", "fresh", "flow") for c in checks):
-                    return self.reply(400, b'{"error":"at most 50 checks, each a measure, fresh or flow check"}')
-                app_save(project, "monitor.json", (render.j(app_dir(project) / "monitor.json", {}) or {}) | {"checks": checks}, hub.user)
+                try:
+                    c = monitor_check(body.get("check") or {}) if body.get("action") == "save" else None
+                except ValueError as e:
+                    return self.reply(400, json.dumps({"error": str(e)}).encode())
+                cid = c["id"] if c else str(body.get("id") or "")
+
+                def save() -> list:  # the checks as the page holds them
+                    out = agent_monitor(project, {"action": "save", "check": c} if c else {"action": "delete", "id": cid}, hub.user)
+                    return [x | {"condition": monitor_condition(x)} for x in out]
+                names = {m["id"]: m.get("name") for m in (read("semantic_model", project) or {}).get("measures") or [] if isinstance(m, dict)}
+                if c and (f := monitor_flow(c, names, str(body.get("email") or "").strip() or None)):  # with its flow, after ABI's yes
+                    return self.reply(200, json.dumps(run("save_flow", {"project": project, "flow": f}, None, save), default=str).encode())
+                if any(x.get("id") == ("monitor_" + cid)[:63] for x in (read("list_flows", project) or {}).get("flows") or []):
+                    return self.reply(200, json.dumps(run("delete_flow", {"project": project, "flow": ("monitor_" + cid)[:63]}, None, save), default=str).encode())
+                out = save()
                 changed(project)
-                return self.reply(200, b'{"result":"saved"}')
+                return self.reply(200, json.dumps({"result": out}).encode())
+            if self.path == "/report/email":  # Email this report: a flow in ABI, a schedule and send_email with the report's PDF
+                if hub.mode == "viewer":
+                    return self.reply(403, b'{"error":"Set report emails in Developer mode."}')
+                rep = next((r for r in (read("list_reports", project) or {}).get("reports") or [] if r.get("id") == body.get("report")), None)
+                if not rep:
+                    return self.reply(404, b'{"error":"No such report."}')
+                if body.get("off"):
+                    return self.reply(200, json.dumps(run("delete_flow", {"project": project, "flow": ("email_" + rep["id"])[:63]}, None, lambda: "off"), default=str).encode())
+                try:
+                    f = report_mail_flow(rep, body.get("to") or [], body.get("days") or [], str(body.get("time") or ""), str(body.get("timezone") or "UTC"))
+                except ValueError as e:
+                    return self.reply(400, json.dumps({"error": str(e)}).encode())
+                return self.reply(200, json.dumps(run("save_flow", {"project": project, "flow": f}, None, lambda: "saved"), default=str).encode())
+            if self.path == "/inbox":  # the project's inbox (flow posts, Monitor alerts, your subscriptions and test runs) and its
+                # alerts feed (failed flows, data problems), as this person: ABI applies their row-level security. Flows post
+                # in the project itself, so Viewer reads them there (everyone here has a role in it)
+                try:
+                    if ids := [int(x) for x in body.get("read") or []][:500]:  # never [] here: ABI reads that as "all"
+                        abi.call("mark_notifications_read", ids=ids)
+                    # ponytail: ABI's newest 100 across the person's projects, this one's kept; a project filter there if that's short
+                    feed = [n for n in abi._open("GET", "/api/notifications")[1] if n.get("project") == project]
+                    out = {"result": {"messages": abi.call("inbox", project=project)["messages"], "alerts": feed}}
+                except abi.ActionError as e:
+                    out = {"error": (e.body or {}).get("message") if isinstance(e.body, dict) else str(e.body)}
+                return self.reply(200, json.dumps(out, default=str).encode())
             if self.path.startswith("/transfer/"):  # the whole project as one zip, and back (Developer only)
                 import base64  # noqa: PLC0415
                 import transfer  # noqa: PLC0415 (sibling script)

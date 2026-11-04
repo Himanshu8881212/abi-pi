@@ -51,9 +51,9 @@ One app, in the order the work happens:
 | **Data** | CSV, Excel, JSON and Parquet files (upload, or an S3 folder of them), Delta and Iceberg tables, Postgres and MySQL tables, into medallion layers: bronze sources, silver cleaned tables, gold facts and dimensions. Sources refresh on change or on a schedule, incrementally where the source allows. |
 | **Data model** | Measures, a glossary, saved queries, joins and a calendar, row-level and column security, a model canvas. |
 | **Write-back** | Edit rows in the app, or have the agent change a total and let ABI spread it over the rows below; the agent's edits wait for your approval, and every edit undoes in one step. For a table loaded straight from a Postgres or MySQL table (its source added with `"sync": true`, its key the source's primary key), an Owner can have the agent write the edits back to it, after a preview of every change they confirm. |
-| **Visualize** | Reports with cross-filtering, drag-and-resize layouts, Explore with saved analyses, Monitor checks (a measure against a target or its last period, freshness, failed flows), a Home page of pinned widgets. |
+| **Visualize** | Reports with cross-filtering, drag-and-resize layouts, Explore with saved analyses, Monitor checks (a measure against a value, a target or its last period, freshness, failed flows; measure checks alert in the Inbox, and by email if you like, with no browser open), an Inbox of alerts, flow posts and subscriptions, a Home page of pinned widgets. |
 | **Export** | Board packs and one-pagers as PDF, PPTX and PNG, data extracts (Excel, CSV), and short explainer videos (MP4) of a report. |
-| **Automate** | Flows on a schedule, ML forecasts, tools, and custom agents with their own evaluation sets, each from a form, from a sentence to the agent, or as JSON. |
+| **Automate** | Flows on a schedule, a report emailed as a PDF on the days you pick (**Email this report** on its page), ML forecasts, tools, and custom agents with their own evaluation sets, each from a form, from a sentence to the agent, or as JSON. |
 | **Knowledge** | A vault for your business definitions; the agent cites it before it defines or judges a measure. |
 | **Govern** | Row-level security and hidden columns, roles, Developer and Viewer modes, commits and history, Publish to a read-only copy, model settings. |
 
@@ -145,8 +145,9 @@ region."
 change it by clicking their name at the top. Then give them a role (Viewer reads, Editor builds) and, if you like,
 limit the sections and reports they see. Someone forgot their password? Set a new one for them on the same page.
 
-With a mail server (**Govern › Settings › Email**) you can also invite people by email, and "Forgot your password?" on
-the sign-in page sends a reset link. With **Settings › Single sign-on** people sign in with your company account
+With a mail server (**Govern › Settings › Email**) you can also invite people by email, "Forgot your password?" on
+the sign-in page sends a reset link, and reports and Monitor alerts go out by email (the first send to a domain asks
+you once). With **Settings › Single sign-on** people sign in with your company account
 (Google, Microsoft Entra, Okta, Keycloak: any OpenID Connect provider); each person links theirs once by clicking
 their name. Both need `ABI_PUBLIC_URL`, the address people open, so the links come back to ABI.
 
@@ -257,9 +258,12 @@ requests, and its revenue by region matched an independent DuckDB sum to the cen
 
 - HTTPS (above) gets a public certificate only for a name the internet reaches on port 80 or 443 (no DNS
   challenge); anywhere else the certificate is Caddy's own or yours.
-- Email needs a mail server: invitations and password resets use the one in **Settings › Email**, a flow's emails the
-  project's own (the agent sets it). Until then add people with a password, set forgotten ones in Users & access, and
-  have flows post to the project's inbox instead: the agent reads it to you, as the app has no inbox screen yet.
+- Email needs a mail server: invitations, password resets, scheduled reports and alerts use the one in
+  **Settings › Email** (a project with its own, which the agent sets, uses that). Until then add people with a
+  password, set forgotten ones in Users & access, and read alerts and flow posts in the **Inbox**.
+- Monitor's measure checks alert with no browser open (ABI checks them every minute, at most once a day each); its
+  freshness and failed-flow checks are evaluated while the page is open, though failed flows and data problems also
+  reach the Inbox's alerts. Viewer's published copy keeps the flows switched off: they run once, in the project.
 - A database source copies one whole table (no custom query) and appends the rows past its increasing column each
   day: rows changed or deleted in place at the source stay as loaded until a **Reload** on its card. No Snowflake,
   BigQuery, SQL Server or Oracle yet, and no `gs://` or `az://` locations.

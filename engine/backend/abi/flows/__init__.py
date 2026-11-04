@@ -41,7 +41,7 @@ from abi.project import ID, SCHEMA, git, imports
 from abi.project.bundle import bundle
 from abi.security import Role, User, credentials, role_in
 from abi.semantic import SemanticQuery, mel, planner, rls
-from abi.semantic.subscriptions import evaluate, fingerprint
+from abi.semantic.subscriptions import evaluate, fingerprint, periods, problem
 
 # Step type -> action. `action` steps name their action.
 STEPS = {"refresh": "refresh", "tool": "run_tool", "agent": "run_agent", "snapshot": "report_snapshot",
@@ -54,14 +54,13 @@ DATA = re.compile(r"\{\{\s*data\.([a-z][a-z0-9_]*)((?:\.[A-Za-z0-9_-]+)*)\s*\}\}
 
 
 def _condition_errs(rel: str, at: str, c: dict, files: dict) -> list[dict]:
-    """A condition (step or data-condition trigger) compares a measure of its query, and the query plans against the
-    bundle's measures and model (planner.plan is pure)."""
-    if c["measure"] not in c["query"]["measures"]:
-        return [imports._err(rel, f"{at}.measure", f"Measure '{c['measure']}' is not in the condition's query.",
-                             "Add it to query.measures, or compare a measure the query reads.")]
+    """A condition (step or data-condition trigger) compares a measure of its query, and the query (with its period)
+    plans against the bundle's measures and model (planner.plan is pure)."""
+    if err := problem(c):
+        return [imports._err(rel, at, err, "Compare measures the query reads; a change needs a period and no other dimensions.")]
     ms = {m["id"]: m["expression"] for m in (files.get(imports.MEASURES) or {}).get("measures", [])}
     try:
-        planner.plan(SemanticQuery.model_validate(c["query"]).model_dump(mode="json"), ms, files.get("model/model.json") or {})
+        planner.plan(SemanticQuery.model_validate(periods(c)[0]).model_dump(mode="json"), ms, files.get("model/model.json") or {})
     except (planner.PlanError, mel.MelError) as e:
         return [imports._err(rel, f"{at}.query", str(e), "Use measure IDs, tables and columns of this project's model.")]
     return []
@@ -637,7 +636,8 @@ class SaveFlow(storage.ProjectRef):
     flow: dict = Field(description=(
         "The whole flow (schemas/v1/flow.json): {id, name, description?, enabled, trigger: {type: manual} |"
         " {type: schedule, cron, timezone} | {type: after_refresh, tables} | {type: data_condition, query, measure, op, value,"
-        " cooldown_minutes?} (runs when it starts to hold) | {type: writeback, tables} (runs after an edit batch) | {type: webhook}"
+        " other? (measure op other + value), period? (a date-table column: its latest period only), skip_latest?, change? (with"
+        " period: the % change from the period before), cooldown_minutes?} (runs when it starts to hold) | {type: writeback, tables} (runs after an edit batch) | {type: webhook}"
         " (runs per signed POST /api/hooks/<project>/<flow>; its JSON body is {{ data.trigger.body }}; a person gets the token"
         " with rotate_webhook_token) | {type: message, channel: email, address} or {type: message, channel: slack|teams, channel_id}"
         " (runs per inbound message there from a linked sender, as that sender; its text is {{ data.trigger.text }}) |"
@@ -673,10 +673,12 @@ def _save(conn, user: User, project: str, f: dict) -> dict:
     if f["enabled"] and not (old.get(rel) or {}).get("enabled"):
         why.append(enabling(f))
         enabled_now(conn, project, f["id"])
-    target = "notify" in f and "channel:" + f["notify"]["channel"]
-    if target and not conn.execute("SELECT 1 FROM send_targets WHERE project = %s AND target = %s", [project, target]).fetchone():
-        why.append(f"First send from project '{project}' to {target}.")  # FL-6, as post_message's
-        conn.execute("INSERT INTO send_targets VALUES (%s, %s)", [project, target])
+    # FL-6, as an import's: a run can't confirm, so its literal first sends (notify channel, send_email `to` domains,
+    # post_message channels) are confirmed here, by the person saving it, once per project
+    if targets := imports.sends(conn, project, old, {rel: f}):
+        why.append(f"First send from project '{project}' to {', '.join(targets)}.")
+        for t in targets:
+            conn.execute("INSERT INTO send_targets VALUES (%s, %s) ON CONFLICT DO NOTHING", [project, t])
     if why:
         require_confirmation(" ".join(why))  # one token for every reason
     imports.write(project, {rel: f})

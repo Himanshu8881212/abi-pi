@@ -1,4 +1,4 @@
-"""A local SMTP sink for tests: accepts every message on 127.0.0.1:2525 and appends it to the file given."""
+"""A local SMTP sink for tests: accepts every message on 127.0.0.1:2525 (or the port given) and appends it to the file given."""
 import socketserver
 import sys
 
@@ -35,4 +35,4 @@ class H(socketserver.StreamRequestHandler):
 
 
 socketserver.ThreadingTCPServer.allow_reuse_address = True
-socketserver.ThreadingTCPServer(("127.0.0.1", 2525), H).serve_forever()
+socketserver.ThreadingTCPServer(("127.0.0.1", int(sys.argv[2]) if len(sys.argv) > 2 else 2525), H).serve_forever()
