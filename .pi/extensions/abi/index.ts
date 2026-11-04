@@ -7,8 +7,9 @@
  *  - confirm     MCP never hands out a confirm token ("do it in the app"); the harness asks the person here, then
  *                repeats the call over REST with the token. The model never sees or holds it
  *  - guard       file tools only inside this folder and never on data files; no shell; ABI is the only door to data
- *  - grounding   every final answer is checked by scripts/ground.py (ABI's AG-2 rules) against this session's tool
- *                rows; one retry, then the unbacked figures are masked
+ *  - grounding   every final answer is checked by scripts/ground.py (ABI's AG-2 rules) against the tool rows of this
+ *                exchange and the one before; one retry that names what failed and lists those rows, then the
+ *                unbacked figures are masked
  *  - context     project memory (ABI) + the person's preferences (Pi-side, private) + today's date, last in the prompt
  *  - harness     abi_project / abi_load / abi_sync / abi_health / abi_cli wrap scripts/abi.py (deterministic steps)
  */
@@ -54,8 +55,6 @@ const PERSON_CLICK = new Set(["set_role", "set_tenant_admin", "set_user_tenant",
 const DATA_FILE = /\.(csv|tsv|parquet|xlsx?|avro|arrow|feather|jsonl|ndjson|db|duckdb|sqlite|ducklake)$/i;
 const PREFS = path.join(os.homedir(), ".abi-pi", `prefs-${process.env.ABI_USER ?? "himanshu"}.json`);
 const LOG = path.join(ROOT, "logs", `harness-${new Date().toISOString().slice(0, 10)}.jsonl`);
-const RETRY =
-	"Your answer above has [not verified] where it stated a number or name that no tool result backs. Answer the person's question again from the start, stating only numbers and names that tool results show (call a tool if you need one) and leaving out what you can't back. Percentages, shares, differences and ratios you worked out yourself are the usual cause: quote a change measure's rows, state the two values the rows give, or drop the figure. Don't mention this check, an earlier answer or a correction.";
 const WITHHELD = "I couldn't back the numbers and names in my answer with a tool result, so I won't state it.";
 
 function log(entry: Record<string, unknown>) {
@@ -148,11 +147,15 @@ export default async function abi(pi: ExtensionAPI) {
 
 	const allowed = process.env.ABI_PI_ALLOWED ? new Set(process.env.ABI_PI_ALLOWED.split(",").filter(Boolean)) : null;
 	const sub = !!process.env.ABI_PI_AGENT;
+	// M2.2: the grounding sources of one exchange (the person's message and everything up to the next one); an answer is
+	// checked against this exchange's and the previous one's, never older ones
+	type Sources = { results: unknown[]; notes: unknown[]; pending: unknown[] };
+	const fresh = (): Sources => ({ results: [], notes: [], pending: [] });
 	const state = {
 		project: undefined as string | undefined,
-		results: [] as unknown[],
-		notes: [] as unknown[],
-		pending: [] as unknown[],
+		ex: [fresh()] as Sources[],
+		model: undefined as { project: string; sm: any } | undefined,  // the digest's semantic_model: ground.py's reads
+		retry: "",
 		asked: "",
 		retried: false,
 		needRetry: false,
@@ -163,6 +166,9 @@ export default async function abi(pi: ExtensionAPI) {
 		delegated: new Map<string, { project: string; tasks: string[] }>(),
 		projects: [] as string[],
 	};
+	const now = () => state.ex[state.ex.length - 1];
+	// a new person's message: the previous exchange stays; the model is read again (digest) for the project then
+	const exchange = () => { state.ex = [now(), fresh()]; state.model = undefined; };
 
 	const status = (ctx: ExtensionContext) => {
 		const n = pi.getActiveTools().filter((t) => t.startsWith(MCP)).length;
@@ -506,11 +512,11 @@ export default async function abi(pi: ExtensionAPI) {
 		let out: any;
 		try { out = JSON.parse(raw); } catch { out = undefined; }
 		if (name.startsWith(MCP)) {
-			if (out && "result" in out) state.results.push(out.result);
-			else if (out) state.notes.push(out);
+			if (out && "result" in out) now().results.push(out.result);
+			else if (out) now().notes.push(out);
 		} else if ((name.startsWith("abi_") && out) || (name === "subagent" && !isError)) {
 			// harness output (figures written by ABI or the scripts); a subagent's answer passed its own check
-			state.results.push({ rows: [[raw]] }); // ponytail: subagent text grounds as a whole; pass its rows up if it matters
+			now().results.push({ rows: [[raw]] }); // ponytail: subagent text grounds as a whole; pass its rows up if it matters
 		}
 	}
 
@@ -525,7 +531,7 @@ export default async function abi(pi: ExtensionAPI) {
 		const tok: string = first.body.confirm_token; // stays in this closure: never in content, logs or the transcript
 		const message: string = first.body.message;
 		const preview = first.body.preview ? JSON.stringify(first.body.preview, null, 1).slice(0, 4000) : "";
-		state.pending.push({ message, input });
+		now().pending.push({ message, input });
 		if (!ctx.hasUI) {
 			log({ event: "confirm", tool, decision: "no-ui" });
 			return { status: "Needs the person's confirmation, which only the Lead can get. Nothing changed. Don't retry: list it in your handoff's pending_confirmations ({action, args, why}) and go on.", message, action: tool, args: input };
@@ -551,6 +557,7 @@ export default async function abi(pi: ExtensionAPI) {
 			}
 		}
 		if (event.messageType === "user") {
+			exchange();
 			state.asked += "\n" + event.prompt;
 			state.retried = false;
 			state.needRetry = false;
@@ -592,10 +599,12 @@ export default async function abi(pi: ExtensionAPI) {
 		const r = await rest("semantic_model", { project: p }).catch(() => ({ status: 0, body: null }));
 		const sm = r.status === 200 ? r.body : null;
 		if (!sm?.tables) return null;
-		state.notes.push(sm); // its words (IDs, names) ground names, never figures
+		now().notes.push(sm); // its words (IDs, names) ground names, never figures
+		state.model = { project: p, sm };  // ground.py reads the members, filter values and code labels it names
 		const tables = Object.entries<any>(sm.tables).map(([t, v]) => `${t} (${v.kind ?? "?"}${v.key ? `, key ${v.key.join("+")}` : ""})`);
+		// the calendar's year, quarter, month and week columns too (1.1 tested the table's name: only calendar.day showed)
 		const dims = Object.entries<any>(sm.columns ?? {}).filter(([t]) => sm.tables[t]).flatMap(([t, cols]) =>
-			Object.entries<any>(cols).filter(([, ty]) => /VARCHAR|DATE|TIMESTAMP|BOOLEAN/.test(ty) || /^(year|month|quarter|week)/.test(t)).map(([c]) => `${t}.${c}`));
+			Object.entries<any>(cols).filter(([c, ty]) => /VARCHAR|DATE|TIMESTAMP|BOOLEAN/.test(ty) || /^(year|month|quarter|week)/.test(c)).map(([c]) => `${t}.${c}`));
 		const ms = (sm.measures ?? []).map((m: any) => `${m.id} (${m.name})`);
 		const rels = (sm.relationships ?? []).map((x: any) => `${x.from?.table ?? x.from}->${x.to?.table ?? x.to}`);
 		return `Model of ${p} (semantic_model digest; call semantic_model for expressions and descriptions):\n` +
@@ -625,7 +634,7 @@ export default async function abi(pi: ExtensionAPI) {
 		if (m.role !== "assistant" || m.content.some((c: any) => c.type === "toolCall")) return;
 		const answer = m.content.filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n");
 		if (!answer.trim()) return;
-		const bad = ground(answer);
+		const bad = await ground(answer);
 		if (!bad) return;
 		state.flags++;
 		log({ event: "grounding", numbers: bad.numbers.length, names: bad.names.length, retry: !state.retried,
@@ -634,11 +643,10 @@ export default async function abi(pi: ExtensionAPI) {
 		let shown: string;
 		if (!state.retried) {
 			state.retried = state.needRetry = true;
-			shown = bad.masked; // the retry sees its draft masked, never the flagged values
-		} else {
-			let t = bad.masked, again: any = ground(t);
-			for (let i = 0; again && i < 3; i++) { t = again.masked; again = ground(t); }
-			shown = again ? WITHHELD : `${t}\n\n_Grounding: ${bad.numbers.length + bad.names.length} figure(s) or name(s) no tool result backs were masked._`;
+			state.retry = bad.retry;  // M2.2: the hidden retry names what failed and lists the rows it may quote
+			shown = bad.masked; // the draft the retry rewrites shows [not verified] where the flagged values were
+		} else {  // ground.py masked it until it passed the same check (final), or it can't: withheld
+			shown = bad.final === null ? WITHHELD : `${bad.final}\n\n_Grounding: ${bad.numbers.length + bad.names.length} figure(s) or name(s) no tool result backs were masked._`;
 		}
 		status(ctx);
 		const content = [...m.content.filter((c: any) => c.type !== "text"), { type: "text", text: shown }];
@@ -652,19 +660,37 @@ export default async function abi(pi: ExtensionAPI) {
 		}
 		if (!state.needRetry) return;
 		state.needRetry = false;
-		return { entries: [{ type: "custom_message", customType: "abi-grounding", content: RETRY, display: false }], continue: true };
+		return { entries: [{ type: "custom_message", customType: "abi-grounding", content: state.retry, display: false }], continue: true };
 	});
 
-	function ground(answer: string): { numbers: string[]; names: string[]; masked: string } | null {
-		const req = { answer, results: state.results, notes: state.notes, pending: state.pending, asked: state.asked,
-			vocab: [...AREAS.core, ...Object.values(AREAS.areas).flatMap((a) => a.tools), "ABI", "Pi", "GPT"], today: new Date().toISOString().slice(0, 10) };
-		try {
-			const out = JSON.parse(execFileSync(PY, [path.join(ROOT, "scripts", "ground.py")], { input: JSON.stringify(req, null, 0), encoding: "utf8", maxBuffer: 64 << 20 }));
-			return out.numbers.length || out.names.length ? out : null;
-		} catch (e) {
-			log({ event: "grounding_error", error: String(e).slice(0, 200) });
-			return null;
-		}
+	// the app's own words the agent offers (abi_show's pages, the sidebar's sections and labels, the modes): never data
+	const APP = [...PAGES, "My analyses", "Start", "Data", "Data Model", "Diagram", "Queries", "Visualizations", "Automate", "Knowledge",
+		"Govern", "Settings", "Usage", "Developer", "Viewer", "Alert with the page closed", "Email this report"];
+	type Grounded = { numbers: string[]; names: string[]; masked: string; final: string | null; retry: string };
+	/** scripts/ground.py on an answer: the sources of this exchange and the previous one, and the project's model for the
+	 *  reads it makes through ABI as the person (filter values, members, code labels); null when nothing is flagged. */
+	function ground(answer: string): Promise<Grounded | null> {
+		const all = (k: keyof Sources) => state.ex.flatMap((e) => e[k]);
+		const req = { answer, results: all("results"), notes: all("notes"), pending: all("pending"), asked: state.asked,
+			vocab: [...AREAS.core, ...Object.values(AREAS.areas).flatMap((a) => a.tools), "ABI", "Pi", "GPT", ...APP],
+			today: new Date().toISOString().slice(0, 10), project: state.model?.project, model: state.model?.sm };
+		return new Promise((resolve) => {
+			const p = spawn(PY, [path.join(ROOT, "scripts", "ground.py")], { cwd: ROOT });  // its reads use this process's ABI_TOKEN
+			let out = "", err = "";
+			p.stdout.on("data", (d: Buffer) => (out += d));
+			p.stderr.on("data", (d: Buffer) => (err += d));
+			p.on("error", (e) => { log({ event: "grounding_error", error: String(e).slice(0, 200) }); resolve(null); });
+			p.on("close", () => {
+				try {
+					const r = JSON.parse(out);
+					resolve(r.numbers.length || r.names.length ? r : null);
+				} catch (e) {
+					log({ event: "grounding_error", error: (err.trim() || String(e)).slice(-200) });
+					resolve(null);
+				}
+			});
+			p.stdin.end(JSON.stringify(req));
+		});
 	}
 
 	// ---------- provider payload: OpenAI rejects regex lookarounds in tool schemas (ABI's edit_total has two) ----------
@@ -687,7 +713,7 @@ export default async function abi(pi: ExtensionAPI) {
 		for (const e of ctx.sessionManager.getBranch() as any[]) {
 			const m = e.type === "message" ? e.message : undefined;
 			const t = (m?.content ?? []).map((c: any) => (c.type === "text" ? c.text : "")).join("");
-			if (m?.role === "user") state.asked += "\n" + t;
+			if (m?.role === "user") { exchange(); state.asked += "\n" + t; }
 			else if (m?.role === "assistant") {
 				for (const c of m.content ?? []) if (c.type === "toolCall" && typeof c.arguments?.project === "string") state.project = c.arguments.project;
 			} else if (m?.role === "toolResult") ingest(m.toolName, t, !!m.isError);

@@ -100,3 +100,26 @@ def test_a_custom_agent_may_say_the_period_its_query_was_filtered_on():
                " g.check('In December 2025 it was €5.66.', [q, d])['numbers'],"
                " g.check('In 2025 it was €6.10.', [q, y])['numbers']]))")
     assert json.loads(r.stdout.strip().splitlines()[-1]) == [["2025"], [], [], ["€6.10"]], r.stderr[-500:]
+
+
+@pytest.mark.skipif(not PY.exists(), reason="no engine venv")
+def test_the_engines_grounding_takes_the_harness_rules_of_m2_2():
+    """scripts/ground.py's rules are ABI's grounding.py's: M2.2 changed both. A name with letters beyond ASCII is checked
+    whole ("Bremen S" was), a percentage grounds from a ratio only (1.1: "52%" through a revenue of 51.90) and without a
+    minus from a falling one ("fell 51.5%"), a possessive ends a name ("North's December"), and a hyphenated phrase by its
+    capitalized parts, a name after ordinary words ("Weekly North"), the plural of a backed name, an accented word of an ID
+    ("Café" for cafes.cafe_name), and "Total", "Several" or "Why" after a bold label ground."""
+    r = engine("import json\nfrom abi.agents import grounding as g\n"
+               "rows = {'columns': ['cafes.cafe_name', 'calendar.month', 'revenue', 'orders_rows'], 'measures': {}, 'filters': [],"
+               " 'rows': [['Bremen Süd', 12, '76.00', 11], ['Bremen Mitte', 12, '51.90', 2]]}\n"
+               "pct = {'columns': ['cafes.region', 'revenue_change_pct'], 'measures': {'revenue_change_pct': 'Revenue % change'},"
+               " 'filters': [], 'rows': [['North', -0.51515]]}\n"
+               "c = lambda a, *r: (lambda o: o['numbers'] + o['names'])(g.check(a, list(r)))\n"
+               "print(json.dumps([c('In December, Bremen Süd took 76.00 and Bremen Sud 11.', rows), c('North fell 52%, by 2%.', rows),"
+               " c('North fell 51.5%.', pct), c('The North-region cafés took 76.00.', rows, pct), c('Like other Decembers, 76.00.', rows),"
+               " c('- **Volume:** Total orders were 11.', rows), c('Check North’s December orders: 76.00.', rows, pct),"
+               " c('A North-by-café report: 76.00.', rows, pct), c('In December, North’s Atlantis took 76.00.', rows, pct),"
+               " c('- **Timing:** Weekly North took 76.00; Weekly Atlantis 11.', rows, pct), c('- **Cafés:** Several fell, to 76.00.', rows),"
+               " c('| Café | Revenue |\\n|---|---|\\n| Bremen Süd | 76.00 |', rows), c('**What I can’t tell:** Why North fell to 76.00.', rows, pct)]))")
+    assert json.loads(r.stdout.strip().splitlines()[-1]) == [["Bremen Sud"], ["52%", "2%"], [], [], [], [], [], [], ["Atlantis"],
+                                                            ["Weekly Atlantis"], [], [], []], r.stderr[-500:]

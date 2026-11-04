@@ -18,6 +18,7 @@ import functools
 import itertools
 import json
 import re
+import unicodedata
 from datetime import date, datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo, available_timezones
@@ -38,10 +39,12 @@ NUM = re.compile(
 # any other stem (Atlantis’ll, Bob’s) is still checked as a name
 _CON = (r"(?!(?:(?:I|You|We|They|He|She|It|That|There|Here|What|Where|Who|How|Let)['’](?:ll|m|ve|d|re|s)"
         r"|(?:Don|Doesn|Didn|Can|Couldn|Won|Wouldn|Shouldn|Isn|Aren|Wasn|Weren|Haven|Hasn|Hadn)['’]t)(?![\w'’]))")
-CAP = re.compile(rf"(?<![\w'’]){_CON}[A-Z][A-Za-z&'’-]*(?: +{_CON}[A-Z][A-Za-z&'’-]*)*")
+# ABI-PI M2.2: letters beyond ASCII too ("Bremen Süd" was checked as "Bremen S"); digits still end a name
+CAP = re.compile(rf"(?<![\w'’]){_CON}[A-ZÀ-ÖØ-Þ](?:[^\W\d_]|[&'’-])*(?: +{_CON}[A-ZÀ-ÖØ-Þ](?:[^\W\d_]|[&'’-])*)*")
 SEP = re.compile(r"\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)*\|?\s*")  # markdown table separator row
 MONTHS, DAYS = list(calendar.month_name)[1:], list(calendar.day_name)  # English: the app never calls setlocale
 ABBR = list(calendar.month_abbr)[1:]  # GATE-9-fix-2: "Jan".."Dec" ground like the full month names
+PCT = re.compile(r"%|pct|percent", re.IGNORECASE)  # reports.PCT: a column shown as a percent of its ratio
 # D-75: generic table header labels, never entity names; any other header word must ground like a name
 HEADERS = {"metric", "measure", "value", "values", "total", "count", "month", "year", "quarter", "week", "day", "date",
            "region", "country", "category", "name", "table", "column", "type", "key", "rows", "min", "max", "earliest",
@@ -64,7 +67,9 @@ ID_AFTER = re.compile(r"(?:$|[\s)\]`'\"!?]|[.,;:](?!\d))")
 # LLM-2-fix-15, D-75: function words opening a clause after ":", ";" or "(" ("Note: This sums ..."), never names
 FUNCTION = {"A", "An", "The", "This", "These", "That", "Those", "It", "Its", "There", "Here", "We", "You", "They", "He",
             "She", "I", "Our", "Your", "Their", "And", "But", "Or", "So", "If", "When", "Each", "All", "Both",
-            "None", "Nothing", "Every"}  # GATE-9-fix-2: also opening a table cell ("| None |")
+            "None", "Nothing", "Every",  # GATE-9-fix-2: also opening a table cell ("| None |")
+            "Several", "Most", "Many", "Some", "Few", "Only",  # ABI-PI M2.2: "**North cafés:** Several fell sharply",
+            "Why", "Whether", "What", "Which", "How", "Where", "Who"}  # "**What I can't tell:** Why North fell"
 # GATE-9-fix-2, D-75: the product's own words (role names, MEL; the MEL function names and conditions and the action
 # names spelled out are added in `check`). GATE-9-fix-10 (a): its technical words, from the code's own vocabulary
 PRODUCT = {"Viewer", "Viewers", "Editor", "Editors", "Owner", "Owners", "MEL",
@@ -83,7 +88,8 @@ PRODUCT = {"Viewer", "Viewers", "Editor", "Editors", "Owner", "Owners", "MEL",
 COMMON = {"monthly", "daily", "weekly", "yearly", "tell", "load", "ask", "training", "today", "so", "its", "grand",
           "any", "done", "not", "on", "chosen", "time", "average", "main", "then", "also",
           "active", "proposed", "undone", "rejected", "synced", "queued", "running", "ok", "failed", "stopped",
-          "waiting", "approved", "pending", "published", "draft"}
+          "waiting", "approved", "pending", "published", "draft",
+          "total", "overall", "christmas", "easter", "new", "year"}  # ABI-PI M2.2: "**Volume:** Total orders", "New Year closures"
 # AGENT-CONTEXT-fix-9: English month and weekday names, full and three-letter, are calendar words, never entity names;
 # the figures next to them ("March 2026") are still checked
 COMMON |= {w.lower() for w in [*MONTHS, *ABBR, *DAYS, *calendar.day_abbr]}
@@ -184,6 +190,26 @@ def _walk(x, nums: list[float], texts: list[str]) -> None:
             nums.extend(v for _, v, _, _, _ in numbers(s))
 
 
+def _pcts(results: list) -> list[float]:
+    """ABI-PI M2.2: the row values of percent columns (an ID or display name with %, pct or percent, as reports show
+    them): a percentage grounds from these x 100 (or as they are, from 1 up), else only from a ratio (a row value between
+    -1 and 1)."""
+    out: list[float] = []
+    for r in results:
+        if isinstance(r, dict) and isinstance(r.get("columns"), list) and isinstance(r.get("rows"), list):
+            names = r["measures"] if isinstance(r.get("measures"), dict) else {}
+            on = {str(c) for c in r["columns"] if PCT.search(str(c)) or PCT.search(str(names.get(c, "")))}
+            for row in r["rows"]:
+                pairs = row.items() if isinstance(row, dict) else zip(r["columns"], row) if isinstance(row, (list, tuple)) else []
+                _walk([v for c, v in pairs if str(c) in on], out, [])
+    return out
+
+
+def _fold(s: str) -> str:
+    """ABI-PI M2.2: accented letters as ASCII ("Café" for the word part cafe of cafes.cafe_name: IDs are ASCII)."""
+    return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
+
+
 def _find(name: str, text: str, case: bool = False) -> list[tuple[int, int]]:
     return [m.span() for m in re.finditer(r"(?<!\w)" + re.escape(name) + r"(?!\w)", text, 0 if case else re.IGNORECASE)]
 
@@ -208,8 +234,10 @@ def _caps(text: str, quoted: bool = False) -> list[tuple[int, str]]:
             phrase = phrase.partition(" ")[2]
         at = m.end() - len(phrase.lstrip())
         phrase = re.sub(r"(['’]s?|-)$", "", phrase.strip())
-        if len(phrase) > 1:
-            out.append((at, phrase))
+        for piece in re.split(r"(['’]s +)", phrase):  # ABI-PI M2.2: a possessive ends a name ("North's December")
+            if len(piece) > 1 and not re.fullmatch(r"['’]s +", piece):
+                out.append((at, piece))
+            at += len(piece)
     return out
 
 
@@ -441,8 +469,16 @@ def check(answer: str, results: list, vocab: set[str] = frozenset(), members: se
     # D-114 (verifier round 1): a hex ID too, plus git's own commit IDs wherever a result names them
     ids = {h for t in [*cells, asked, *_commits(results)] for h in HEX.findall(t)}
     shown = HEX.sub(lambda m: " " * len(m[0]) if any(i.startswith(m[0]) for i in ids) else m[0], shown)
+    # ABI-PI M2.2: a percentage grounds only from a ratio x 100 (a row value between -1 and 1, or a percent column's),
+    # from a percent column's value as it is, or from the person's words, never from a revenue of 51.90 for "52%";
+    # without a minus its sign is free ("fell 51.5%" for -0.515), as for any figure
+    pcts = _pcts(results)
+    ratios = [*pcts, *(h for h in have if 0 < abs(h) < 1)]  # x 100
+    whole = [h for h in pcts if abs(h) >= 1]  # a percent column's value as it is (12.5 for 12.5%), never a fraction's
+    sign = lambda h, neg: h if neg else abs(h)  # noqa: E731
     bad_nums = [(at, tok) for at, (tok, v, tol, pct, neg) in _numbers(shown, ids)
-                if not any(abs((h if neg else abs(h)) - v) <= tol or (pct and abs(h * 100 - v) <= tol) for h in have)
+                if not (any(abs(sign(h, neg) - v) <= tol for h in (whole if pct else have))
+                        or pct and any(abs(sign(h, neg) * 100 - v) <= tol for h in ratios))
                 and v not in typed]
     from abi.semantic import mel  # not at top: abi.semantic imports the agent package
 
@@ -464,10 +500,18 @@ def check(answer: str, results: list, vocab: set[str] = frozenset(), members: se
         at := sorted({s for x in {m, m[:1].upper() + m[1:], m.upper()} for s in _find(x, answer, case=True)}))]
     # GATE-9-fix-10 (e): a name the person typed in this chat grounds exactly as typed (custom runs pass no `asked`,
     # D-114); (b, c): a phrase of COMMON or PRODUCT words only; (b) "Order" for an `orders` table
-    bad_names = [(at, n) for n, vocab_ok, at in cands if not _has(n, found) and not _has(n, asked, case=True) and not (
-        vocab_ok and (_typed(n, asked, asks) or _has(n, words) or " ".join(n.lower().split()) in spelled or n.lower() in parts
-                      or n.endswith("s") and n.lower()[:-1] in parts or n.lower() + "s" in parts
-                      or all(w.lower() in COMMON or _has(w, "\n".join(PRODUCT)) for w in n.split())))]
+    # ABI-PI M2.2: the plural of a name the results back grounds too ("other Decembers" for a December row)
+    ok = lambda n, vocab_ok: _has(n, found) or n.endswith("s") and _has(n[:-1], found) or _has(n, asked, case=True) or (  # noqa: E731
+        vocab_ok and (_typed(n, asked, asks) or _has(n, words) or _fold(" ".join(n.lower().split())) in spelled
+                      or (f := _fold(n.lower())) in parts or n.endswith("s") and f[:-1] in parts or f + "s" in parts
+                      or all(w.lower() in COMMON or _has(w, "\n".join(PRODUCT)) for w in n.split())))
+    # ABI-PI M2.2: a hyphenated phrase grounds when each capitalized part does ("North-region", "North-by-café": North)
+    # ABI-PI M2.2: ordinary words opening a phrase name nothing ("Weekly North", "Total East": North, East)
+    core = lambda n: " ".join(ws[next((i for i, w in enumerate(ws) if w.lower() not in COMMON), len(ws) - 1):]) if (  # noqa: E731
+        ws := n.split()) else n
+    bad_names = [(at, n) for n, vocab_ok, at in cands if not ok(n, vocab_ok)
+                 and not (vocab_ok and core(n) != n and ok(core(n), True))
+                 and not ("-" in n and all(ok(p, vocab_ok) for p in n.split("-") if p[:1].isupper()))]
     out = {"numbers": list(dict.fromkeys(t for _, t in bad_nums)), "names": list(dict.fromkeys(n for _, n in bad_names))}
     if not spans:
         return out
