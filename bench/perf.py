@@ -4,9 +4,12 @@ machine's engine and app, or inside a docker install). Each run prints one JSON 
 
     .venv/bin/python bench/perf.py project perf_brewline [--scale 0.01]
     .venv/bin/python bench/perf.py pages --project P --sessions 50 [--people N] [--rls TABLE.COLUMN] [--url http://127.0.0.1:8790]
-    .venv/bin/python bench/perf.py memory --project P --chats 4 [--url ...] [--app-pid PID]
+    .venv/bin/python bench/perf.py memory --project P --chats 4 [--hold S] [--url ...] [--app-pid PID]
     .venv/bin/python bench/perf.py load --rows 1000000 [--door path|app] [--url ...]
     .venv/bin/python bench/perf.py isolation --rows 2000000 [--queries 30]
+    .venv/bin/python bench/perf.py publish --project P [--url ...]
+    .venv/bin/python bench/perf.py medallion --rows 1000000
+    .venv/bin/python bench/perf.py kill --part engine|worker --project P [--wait 300] [--url ...]
 
   project    a bench project for pages and memory, made as the baselines' was: Brewline (bench/brewline.py, the
              orders' months in one file) loaded with abi.load: tables, model, starter measures, its Overview report.
@@ -22,22 +25,37 @@ machine's engine and app, or inside a docker install). Each run prints one JSON 
   memory     RSS of the app, the engine, the worker, Postgres and the chats' Pi processes (each `pi --mode rpc` the app
              started, with its children; "chats" counts them): idle, then K chats. A chat's Pi starts with its first
              message, so K chats are measured once each has its Pi and, when a model answers, its answer: "answered"
-             then, else "started". per_chat_mb only when K Pi processes were measured.
+             then, else "started". per_chat_mb only when K Pi processes were measured. --hold keeps them S seconds more
+             (another bench beside them) and measures again: "held".
   load       N generated Brewline orders (bench/brewline.py) into a new project: seconds, rows/s, the project's lake
              bytes, seconds until the model is Ready, and whether revenue by region equals the generator's known answers
              to the cent. --door path (default): the engine's add_data on a server path in its files folder, a door
              neither the app nor the agent has; --door app: each table one file through the app's upload, as a person's
-             browser sends it (signed in as the owner, as pages is).
+             browser sends it (signed in as the owner, as pages is). A load the app drops or gives up on, or the
+             engine refuses, is a result: "error", the seconds until it came, the tables loaded by then.
   isolation  uncached semantic_query latency in a small project, idle and while N orders load into another.
+  publish    the owner presses Publish twice, as the button does (its confirmation answered as their click): the bench
+             project's first Publish, then one that sends only a measure's new description. Each: seconds until Publish
+             answers and until a Viewer's page shows the published copy with the change, and the tables the copy
+             reloaded meanwhile (its "refresh <table>" snapshots). The project may have no published copy; the copy, the
+             Viewer and the description go at the end.
+  medallion  bronze, silver and gold as 1.1's steps can build them from N generated orders (a table's steps start from
+             a loaded source, so gold repeats silver's steps): silver is the orders cleaned and joined with cafés and
+             products, gold revenue by region and month. Then one rebuild, the orders source reloaded with everything
+             that reads it: its seconds, the lake bytes it wrote by schema (raw/ and model/ its loads', query/ the
+             worker's query copies, on its own minute), its snapshots, and revenue by region from gold exact.
+  kill       kill -9 the engine or the worker (their pid files), then every second until --wait: does the engine's
+             /api/ready answer, does the owner's page load, does the pid file name a running process again. Each change
+             of those, and the seconds until all three hold (serving_s, null: not within --wait).
 
-pages and memory sign in to the app (--url or ABI_PERF_URL) as the workspace owner, ABI_USER (default himanshu), with
-ABI_PASSWORD (a docker install has both) or the password in data/accounts.txt (scripts/accounts.py): never on the
-command line. They run on a bench project (bench_… or perf_…; --force for another): each commits to it and adds and
-removes accounts, so it may have no uncommitted work, and the run commits only its own changes back (the probe's and
-the accounts' removal: security/roles.json then lists none of them); anything else changed meanwhile stays
-uncommitted and is named in the result. The engine is ABI_URL (abi.py), its data folder ABI_PI_DATA. The accounts,
-chats, rules, projects and files a run makes are removed at the end. A docker install keeps the engine and the
-processes inside the container, so the bench runs there:
+pages, memory, publish and kill sign in to the app (--url or ABI_PERF_URL) as the workspace owner, ABI_USER (default
+himanshu), with ABI_PASSWORD (a docker install has both) or the password in data/accounts.txt (scripts/accounts.py):
+never on the command line. They run on a bench project (bench_… or perf_…; --force for another): pages, memory and
+publish commit to it and add and remove accounts, so it may have no uncommitted work, and the run commits only its own
+changes back (the probe's and the accounts' removal: security/roles.json then lists none of them); anything else
+changed meanwhile stays uncommitted and is named in the result. The engine is ABI_URL (abi.py), its data folder
+ABI_PI_DATA. The accounts, chats, rules, projects and files a run makes are removed at the end. A docker install keeps
+the engine and the processes inside the container, so the bench runs there:
 
     docker cp bench abi-bench:/app/ && docker exec abi-bench python3 bench/perf.py pages --project perf_brewline --sessions 50
 """
@@ -52,12 +70,14 @@ import os
 import re
 import secrets
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import threading
 import time
 import urllib.parse
+import urllib.request
 from collections import defaultdict
 from pathlib import Path
 
@@ -91,8 +111,8 @@ class App:
         if st != 303 or not self.cookie.startswith("abi_u="):
             raise SystemExit(f"{name} can't sign in to the app at {url}.")
 
-    def http(self, method: str, path: str, body=None, headers: dict | None = None):
-        c = http.client.HTTPConnection(self.host, self.port, timeout=TIMEOUT)
+    def http(self, method: str, path: str, body=None, headers: dict | None = None, timeout: float = TIMEOUT):
+        c = http.client.HTTPConnection(self.host, self.port, timeout=timeout)
         try:
             c.request(method, path, body, {"Cookie": self.cookie, **(headers or {})})
             r = c.getresponse()
@@ -286,8 +306,8 @@ def app_pid(url: str) -> int:
 
 
 def pis(app: int, procs: dict | None = None) -> list:
-    """The chats' Pi processes: the app's children running `pi --mode rpc`."""
-    return [pid for pid, (parent, _, args) in (procs or ps()).items() if parent == app and "--mode rpc" in args]
+    """The chats' Pi processes: the app's children running `pi --mode rpc`, which on Linux soon renames itself `pi`."""
+    return [pid for pid, (parent, _, args) in (procs or ps()).items() if parent == app and ("--mode rpc" in args or args.split() == ["pi"])]
 
 
 def rss(app: int) -> dict:
@@ -368,6 +388,9 @@ def memory(a) -> dict:
             until(answered)
         rec["answered_by"] = [ev.answer for _, _, ev in chats]  # "": the app's note that no model answered
         rec["answered" if all(rec["answered_by"]) else "started"] = settled(app)  # no model, quota, key: Pi up only
+        if a.hold:
+            time.sleep(a.hold)
+            rec["held"] = rss(app)
     finally:
         with contextlib.suppress(OSError, http.client.HTTPException, ValueError):  # the app may be gone (its Pis with it)
             for cid, chat, ev in chats:
@@ -403,14 +426,14 @@ def upload(o: App, table: str, f: Path) -> dict:
     return done(r)
 
 
-def build(p: str, d: Path, put=None) -> dict:
+def build(p: str, d: Path, put=None, took: dict | None = None) -> dict:
     """Generated Brewline tables into the new project p, each by `put(table)` (default: a new project and the engine's
     add_data on a server path), then a model as a first load makes it (keys, relationships, calendar, descriptions, a
-    revenue measure): seconds per table, seconds until Ready, the project's lake bytes."""
+    revenue measure): seconds per table (into `took` as they come), seconds until Ready, the project's lake bytes."""
     if not put:
         abi.call("create_project", project=p, name=f"perf {p}")
         put = lambda t: add(p, t, f"{d.relative_to(FILES)}/{t}/*.parquet")  # noqa: E731
-    t0, took = time.perf_counter(), {}
+    t0, took = time.perf_counter(), {} if took is None else took
     for t in ("cafes", "customers", "products", "orders"):
         t1 = time.perf_counter()
         put(t)
@@ -422,8 +445,17 @@ def build(p: str, d: Path, put=None) -> dict:
     abi.call("set_measure", project=p, id="revenue", name="Revenue", expression="SUM(orders.revenue)")
     ready = abi.call("readiness", project=p)
     return {"seconds": took["orders"], "tables_s": took, "ready_s": round(time.perf_counter() - t0, 2), "ready": ready["ready"],
-            **({} if ready["ready"] else {"missing": ready["missing"]}),
-            "lake_bytes": sum(f.stat().st_size for f in (LAKE / p).rglob("*") if f.is_file())}
+            **({} if ready["ready"] else {"missing": ready["missing"]}), "lake_bytes": lake_bytes(p)}
+
+
+def lake_bytes(p: str) -> int:
+    return sum(f.stat().st_size for f in (LAKE / p).rglob("*") if f.is_file())
+
+
+def exact(p: str, dim: str, known: dict) -> bool:
+    """Revenue by region from ABI equals the generator's known answers to the cent."""
+    got = abi.call("semantic_query", project=p, measures=["revenue"], dimensions=[dim])["rows"]
+    return {k: round(v, 2) for k, v in got} == {r: round(sum(y.values()), 2) for r, y in known["revenue_by_region_year"].items()}
 
 
 def project(a) -> dict:
@@ -453,9 +485,13 @@ def load(a) -> dict:
             abi.new_project("demo", p)
             o = owner(a, p)
             put = lambda t: upload(o, t, d / ("orders.parquet" if t == "orders" else f"{t}/{t}.parquet"))  # noqa: E731
-        rec = {"rows": known["rows"]["orders"], "door": a.door, **build(p, d, put)}
-        got = abi.call("semantic_query", project=p, measures=["revenue"], dimensions=["cafes.region"])["rows"]
-        rec["exact"] = {k: round(v, 2) for k, v in got} == {r: round(sum(y.values()), 2) for r, y in known["revenue_by_region_year"].items()}
+        rec, t, took = {"rows": known["rows"]["orders"], "door": a.door}, time.perf_counter(), {}
+        try:
+            rec |= build(p, d, put, took)
+        except (OSError, http.client.HTTPException, SystemExit, abi.ActionError) as e:  # dropped, timed out, refused: a result
+            return rec | {"tables_s": took, "error": f"{type(e).__name__}: {e}", "error_s": round(time.perf_counter() - t, 2),
+                          "lake_bytes": lake_bytes(p)}
+        rec["exact"] = exact(p, "cafes.region", known)
         rec["rows_per_s"] = round(rec["rows"] / rec["seconds"])
     finally:
         signed_out([o] if o else [])
@@ -515,6 +551,140 @@ def isolation(a) -> dict:
     return rec
 
 
+def press(o: App, v: App, pub: str, marker: str) -> dict:
+    """Publish as the button does, its confirmation answered as the person's click: seconds until it answers and until
+    the Viewer's page comes from the published copy with `marker` in it; the tables the copy reloaded meanwhile."""
+    since = snapshot(pub) if abi.folder(pub) else 0
+    t = time.perf_counter()
+    r = o.post("/publish", {})
+    if r.get("confirm"):
+        r = o.post(f"/confirm/{r['confirm']['id']}", {})
+    rec = {"answered_s": round(time.perf_counter() - t, 2), "commit": done(r)["result"]["commit"]}
+    end = time.time() + WAIT
+    while re.search(rb'window\.APP=\{"project": "(\w+)"', b := v.page())[1].decode() != pub or marker.encode() not in b:
+        if time.time() > end:
+            raise SystemExit(f"A Viewer's page didn't show the published copy within {WAIT} s.")
+        time.sleep(0.2)
+    rows = abi.call("list_snapshots", project=pub, limit=500)["rows"]
+    return rec | {"seconds": round(time.perf_counter() - t, 2),
+                  "reloads": sorted(r[3][8:] for r in rows if r[0] > since and (r[3] or "").startswith("refresh "))}
+
+
+def publish(a) -> dict:
+    o, made, stamp, v, m, left = owner(a), [], time.strftime("%m%d%H%M%S"), None, None, []
+    p, pub = o.project, f"{o.project}_pub"[:63]  # app.py's pub_id
+    if abi.folder(pub):
+        o.out()
+        raise SystemExit(f"{p} has a published copy: use one never published (perf.py project makes one).")
+    try:
+        pending(o)
+        m = abi.call("semantic_model", project=p, all=True)["measures"][0]
+        v = App(a.url, *accounts(o, ["viewer"], made, stamp)[0], p)  # a Viewer reads the published copy
+        msg = f"perf.py {stamp}: a Viewer for the publish check"
+        shown(o, o.post("/api/commit", {"project": p, "message": msg}), msg)  # the button sends the last commit only
+        rec = {"project": p, "first": press(o, v, pub, "")}
+        note = f"perf.py {stamp}: publish check"
+        shown(o, o.post("/api/set_measure", {"project": p, **{k: m[k] for k in ("id", "name", "expression")}, "description": note}), note)
+        shown(o, o.post("/api/commit", {"project": p, "message": f"{note}, a description"}), f"{note}, a description")
+        rec["measure_only"] = press(o, v, pub, note)
+    finally:
+        signed_out([v, o] if v else [o])
+        if m and any(x["id"] == m["id"] and x.get("description") != m.get("description")
+                     for x in abi.call("semantic_model", project=p, all=True)["measures"]):
+            abi.call("set_measure", project=p, **{k: m[k] for k in ("id", "name", "expression", "description") if m.get(k)})
+        for n in made:
+            sure("delete_user", name=n)
+        if any(x["project"] == pub for x in abi.call("list_projects")["projects"]):
+            sure("delete_project", project=pub)
+        for f in [*abi.WORKSPACES.glob(f"*/{pub}"), *abi.WORKSPACES.glob(f"*/_*/{pub}")]:  # its copy and the app's folders
+            shutil.rmtree(f, ignore_errors=True)
+        (abi.folder(p).parent / "_views" / p / "published.json").unlink(missing_ok=True)  # the app's: never published
+        if made:
+            left = tidy(p, f"perf.py {stamp}: the description and the Viewer back")
+    return rec | ({"uncommitted": left} if left else {})
+
+
+SILVER = [{"type": "source", "source": "bronze_orders"},  # orders cleaned, with their café and product
+          {"type": "fill_nulls", "columns": {"customer_id": "guest"}}, {"type": "filter", "condition": "quantity > 0"},
+          {"type": "merge", "table": "bronze_cafes", "on": {"cafe_id": "cafe_id"}, "columns": ["cafe_name", "city", "region"]},
+          {"type": "merge", "table": "bronze_products", "on": {"product_id": "product_id"}, "columns": ["product_name", "category"]}]
+GOLD = [{"type": "add_column", "name": "month", "expression": "date_trunc('month', order_date)"},  # revenue by region and month
+        {"type": "group", "by": ["region", "month"], "aggregations": [{"name": "revenue", "function": "sum", "column": "revenue"},
+                                                                     {"name": "orders", "function": "count"}]}]
+
+
+def timed(f, *args, **kw) -> float:
+    t = time.perf_counter()
+    f(*args, **kw)
+    return round(time.perf_counter() - t, 2)
+
+
+def medallion(a) -> dict:
+    p = f"perf_{time.strftime('%m%d%H%M%S')}_medallion"
+    d, took = FILES / p, {}
+    try:
+        known = brew(a.rows, d)
+        abi.call("create_project", project=p, name=f"perf {p}")
+        for t in ("cafes", "products", "orders"):  # bronze: the files as they landed
+            took[f"bronze_{t}"] = timed(add, p, f"bronze_{t}", f"{d.relative_to(FILES)}/{t}/*.parquet")
+        for t, steps in (("silver_orders", SILVER), ("gold_revenue", SILVER + GOLD)):  # 1.1: gold can't start from silver
+            took[t] = timed(abi.call, "set_steps", project=p, table=t, steps=steps)
+        abi.call("build_model", project=p)
+        abi.call("set_measure", project=p, id="revenue", name="Revenue", expression="SUM(gold_revenue.revenue)")
+        size = lambda: {s.name: lake_bytes(f"{p}/{s.name}") for s in (LAKE / p).iterdir()}  # noqa: E731 (raw/, model/, query/)
+        rec = {"rows": known["rows"]["orders"], "build_s": took, "copies": copies(p), "lake": size()}
+        since, before, t = snapshot(p), size(), time.perf_counter()
+        abi.call("refresh", project=p, table="bronze_orders")  # new orders landed: bronze reloads, then what reads it
+        rec |= {"rebuild_s": round(time.perf_counter() - t, 2), "rebuild_bytes": {k: v - before.get(k, 0) for k, v in size().items()},
+                "rebuild": [r[3] for r in abi.call("list_snapshots", project=p, limit=100)["rows"] if r[0] > since][::-1],
+                "exact": exact(p, "gold_revenue.region", known)}
+    finally:
+        if any(x["project"] == p for x in abi.call("list_projects")["projects"]):
+            sure("delete_project", project=p)
+        shutil.rmtree(d, ignore_errors=True)
+    return rec
+
+
+def kill(a) -> dict:
+    o, f = owner(a), D / f"run/{'app' if a.part == 'engine' else 'worker'}.pid"
+    pid = int(f.read_text().split()[0])
+
+    def probe() -> tuple:
+        try:
+            with urllib.request.urlopen(abi.URL + "/api/ready", timeout=5) as r:
+                ready = r.status == 200
+        except OSError:  # refused, 503, timed out
+            ready = False
+        try:
+            st, b, _ = o.http("GET", f"/?p={o.project}", timeout=30)
+            page = st if st != 200 or b"window.APP=" in b else "no data"
+        except (OSError, http.client.HTTPException):
+            page = "dropped"
+        try:
+            now = int(f.read_text().split()[0])
+            os.kill(now, 0)
+            running = now != pid
+        except (OSError, ValueError):
+            running = False
+        return ready, page, running
+
+    rec, last = {"part": a.part, "timeline": [], "serving_s": None}, None  # [s, ready, page, running] at each change
+    os.kill(pid, signal.SIGKILL)
+    t = time.perf_counter()
+    try:
+        while (s := round(time.perf_counter() - t, 1)) < a.wait:
+            if (now := probe()) != last:
+                rec["timeline"].append([s, *now])
+                last = now
+            if now == (True, 200, True):
+                rec["serving_s"] = s
+                break
+            time.sleep(1)
+    finally:
+        signed_out([o])
+    return rec
+
+
 def main(argv=None) -> dict:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--results", help="also append the JSON line to this file")
@@ -534,6 +704,7 @@ def main(argv=None) -> dict:
     x = sub.add_parser("memory", parents=[common, web])
     x.add_argument("--chats", type=int, default=4)
     x.add_argument("--app-pid", type=int, help="the app's process (default: the scripts/app.py serving --url)")
+    x.add_argument("--hold", type=float, default=0, help="seconds to keep the chats open, then measure them again")
     x = sub.add_parser("load", parents=[common])
     x.add_argument("--rows", type=int, default=1_000_000)
     x.add_argument("--door", choices=("path", "app"), default="path", help="the engine's add_data on a server path, or the app's upload")
@@ -541,9 +712,16 @@ def main(argv=None) -> dict:
     x = sub.add_parser("isolation", parents=[common])
     x.add_argument("--rows", type=int, default=2_000_000, help="orders loaded into the other project")
     x.add_argument("--queries", type=int, default=30, help="idle queries")
+    sub.add_parser("publish", parents=[common, web])
+    x = sub.add_parser("medallion", parents=[common])
+    x.add_argument("--rows", type=int, default=1_000_000)
+    x = sub.add_parser("kill", parents=[common, web])
+    x.add_argument("--part", choices=("engine", "worker"), required=True)
+    x.add_argument("--wait", type=float, default=300, help="seconds to watch for it serving again")
     a = ap.parse_args(argv)
     rec = {"bench": a.bench, "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-           **{"project": project, "pages": pages, "memory": memory, "load": load, "isolation": isolation}[a.bench](a)}
+           **{"project": project, "pages": pages, "memory": memory, "load": load, "isolation": isolation, "publish": publish,
+              "medallion": medallion, "kill": kill}[a.bench](a)}
     line = json.dumps(rec)
     print(line, flush=True)
     if a.results:
