@@ -22,7 +22,7 @@ jobs:
           sudo apt-get install -y postgresql-common
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get install -y postgresql-17
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.3  # exact: the action publishes no major tag since v8
         with:
           version: "0.11.x"  # the Dockerfile's uv
           python-version: "3.13"
