@@ -3,11 +3,13 @@
 at the terminal would (tests/pi_driver.py) and checked against the generator's known answers.
 
     .venv/bin/python bench/bench.py [--runs 2 | --runs ask=10,why=20,report=5,load=3] [--tasks ask,why,report,load]
-                                    [--model provider/model] [--fallback p/m,...]
+                                    [--model provider/model] [--fallback p/m,...] [--plant north|retail]
 
   ask     revenue by region in 2025: every region's figure stated after its own name
-  why     why revenue changed in the latest complete month: both months' revenue, the planted region named as where
-          the change sits (the region nearest a word like "most" or "drove") and its two months' revenue after its name
+  why     why revenue changed in the latest complete month: both months' revenue, the planted member named as where
+          the change sits (the member of its dimension nearest a word like "most" or "drove") and its two months'
+          revenue after its name; --plant picks the data's planted change (bench/brewline.py: North among the
+          regions, the default, or Retail among the product categories)
   report  a small managers' report: a KPI, a bar by region and a line by month; the KPI and the bar right to the cent,
           the line one point per month of every year adding up to the total
   load    a raw Parquet export to a Ready model in a new project, revenue by region right (the wall time is the load's)
@@ -95,8 +97,9 @@ def ask_ok(answer: str, known: dict) -> bool:
 
 def why_ok(answer: str, known: dict) -> bool:
     """known_answers.json's why: the total revenue of both months, the member that moved most named as the driver,
-    and its two months' revenue after its name (the planted dimension is the region: brewline.PLANT)."""
-    w, members = known["why"], list(known["revenue_by_region_year"])
+    and its two months' revenue after its name (among the members of the planted dimension: brewline.PLANTS)."""
+    w = known["why"]
+    members = brewline.MEMBERS[w["dimension"]]
     return (all(says(answer, v) for v in w["revenue"].values()) and driver(answer, w["member"], members)
             and stated(answer, {w["member"]: list(w["member_revenue"].values())}, members))
 
@@ -173,10 +176,10 @@ def loaded(p: str, want: dict) -> bool:
 TASKS = {"ask": t_ask, "why": t_why, "report": t_report, "load": t_load}
 
 
-def data(out: Path) -> dict:
-    """Brewline at SCALE: one Parquet file per table for the shared project (the orders' months in one), and every
-    order with its café and product in one file, the raw export the load task starts from."""
-    known = brewline.generate(out, SCALE)
+def data(out: Path, plant: str = "north") -> dict:
+    """Brewline at SCALE with that planted change: one Parquet file per table for the shared project (the orders'
+    months in one), and every order with its café and product in one file, the raw export the load task starts from."""
+    known = brewline.generate(out, SCALE, plant=plant)
     orders, cafes, products = (f"read_parquet('{brewline.q(out)}/{t}/*.parquet')" for t in ("orders", "cafes", "products"))
     duckdb.sql(f"COPY (SELECT * FROM {orders}) TO '{brewline.q(out)}/orders.parquet' (FORMAT parquet)")
     duckdb.sql(f"COPY (SELECT o.order_id, o.order_date, o.cafe_id, city, region, o.customer_id, o.product_id, product_name, category,"
@@ -196,6 +199,7 @@ def main(argv=None) -> None:
     ap.add_argument("--tasks", default=",".join(TASKS))
     ap.add_argument("--model", default=os.environ.get("ABI_PI_LIVE_MODEL"), help="provider/model (default ABI_PI_LIVE_MODEL, else Pi's)")
     ap.add_argument("--fallback", default=os.environ.get("ABI_PI_LIVE_FALLBACK"), help="provider/model,... asked in order when the model fails")
+    ap.add_argument("--plant", default="north", choices=brewline.PLANTS, help="the data's planted change for why (bench/brewline.py)")
     a = ap.parse_args(argv)
     try:
         n = {t: int(k) for t, k in (x.split("=") for x in a.runs.split(","))} if "=" in a.runs else dict.fromkeys(a.tasks.split(","), int(a.runs))
@@ -209,14 +213,14 @@ def main(argv=None) -> None:
     c, out, runs = {"project": f"bench_{stamp}"}, ROOT / "scratch" / f"bench_{stamp}", []
     RUNS.mkdir(exist_ok=True)
     try:
-        c |= data(out)
+        c |= data(out, a.plant)
         if set(tasks) - {"load"} and not (made := abi.load("demo", c["project"], c["files"])).get("readiness", {}).get("ready"):
             raise SystemExit(f"The bench project isn't Ready, so no run would be fair: {made.get('failed') or made.get('readiness')}")
         for task in tasks:
             for i in range(n[task]):
                 load = os.getloadavg()[0]
                 r, ok = TASKS[task](c, i)
-                rec = {"task": task, "run": i, "ok": ok, "seconds": r.seconds, "turns": r.usage["turns"], "tools": len(r.tools),
+                rec = {"task": task, "plant": a.plant, "run": i, "ok": ok, "seconds": r.seconds, "turns": r.usage["turns"], "tools": len(r.tools),
                        "tool_errors": sum(1 for t in r.tools if t[2]), "masked": masked(r.answer), "withheld": WITHHELD in r.answer,
                        "input": r.usage["input"], "cached": r.usage["cacheRead"], "output": r.usage["output"], "model": r.model,
                        "load": [round(load, 1), round(os.getloadavg()[0], 1)], "tool_names": [t[0] for t in r.tools], "answer": r.answer}
@@ -231,7 +235,7 @@ def main(argv=None) -> None:
     load = [x for r in runs for x in r["load"]] or [0]
     lines = [f"\n## {time.strftime('%Y-%m-%d %H:%M')}: {a.model or 'Pi default model'}"
              f"{f', fallback {a.fallback}' if a.fallback else ''} (runs: {', '.join(f'{t} {k}' for t, k in n.items())};"
-             f" answered by {by}; load average {num(min(load))}-{num(max(load))})\n",
+             f" answered by {by}; load average {num(min(load))}-{num(max(load))}; plant {a.plant})\n",
              "| task | pass | runs masked | median s | turns | tools | tool errors | masked | input tok | cached tok | output tok |",
              "|---|---|---|---|---|---|---|---|---|---|---|"]
     for task in tasks:

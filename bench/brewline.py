@@ -7,11 +7,14 @@ The same seed and scale give byte-identical files with the same DuckDB: every ra
 field) and every file is written in a fixed order by one thread.
 
 Planted for the "why" bench: in December 2025, the latest complete month, the North region's orders halve while the
-rest of the chain dips a little for Christmas. known_answers.json beside the data (revenue by region per year to the
-cent, the latest complete month, the member that moved most and its share of the change) comes from a fresh DuckDB
-query over the written files, not from the generator's own tables.
+rest of the chain dips a little for Christmas. --plant retail plants another change instead: every café's Retail
+orders (beans and cups) halve that month, so every region falls, none with most of the change: it sits in a product
+category.
+known_answers.json beside the data (revenue by region per year to the cent, the latest complete month, the member
+that moved most and its share of the change) comes from a fresh DuckDB query over the written files, not from the
+generator's own tables.
 
-    .venv/bin/python bench/brewline.py OUT [--scale 0.01] [--seed 42] [--csv]
+    .venv/bin/python bench/brewline.py OUT [--scale 0.01] [--seed 42] [--csv] [--plant north|retail]
 
     OUT/cafes/cafes.parquet, customers/customers.parquet, products/products.parquet, orders/orders_2023_01.parquet ...
     OUT/known_answers.json
@@ -44,14 +47,18 @@ PRODUCTS = [  # id, name, category, list price, unit cost, note
     ("P11", "House Beans 250g", "Retail", 11.50, 5.20, 'Whole beans, "Brewline House" blend;\nground on request.'),
     ("P12", "Reusable Cup", "Retail", 14.00, 4.50, None),
 ]
-PLANT = ("region", "North", "2025-12", 0.5)  # the "why": North's orders halve in December 2025
+PLANTS = {  # the "why": (dimension, member, month, factor) the member's orders that month are multiplied by
+    "north": ("region", "North", "2025-12", 0.5),  # the default: North's orders halve in December 2025
+    "retail": ("category", "Retail", "2025-12", 0.5),  # every café's Retail orders halve in December 2025
+}
+MEMBERS = {"region": sorted({r for _, r in CITIES}), "category": sorted({p[2] for p in PRODUCTS})}  # a plant's dimension
 
 
 def q(path) -> str:
     return str(path).replace("'", "''")
 
 
-def generate(out, scale: float = 0.01, seed: int = 42, csv: bool = False) -> dict:
+def generate(out, scale: float = 0.01, seed: int = 42, csv: bool = False, plant: str = "north") -> dict:
     if not scale >= 0.005:
         raise SystemExit("--scale must be 0.005 (about 37,000 orders) or more for the planted change to stand out")
     out = Path(out)
@@ -75,9 +82,12 @@ def generate(out, scale: float = 0.01, seed: int = 42, csv: bool = False) -> dic
      (['Germany','Germany','Germany','Austria','Netherlands','France','USA'])[1 + floor(u(2, i, 2, 0) * 7)::INT] AS home_country,
      DATE '2019-01-01' + floor(u(2, i, 3, 0) * 2500)::INT AS signup_date, u(2, i, 4, 0) < 0.25 AS loyalty_member
      FROM range(1, 60001) r(i) ORDER BY i""")
-    # orders per café and day: size x weekday x season x holidays x growth x the café's day x the plant, scaled to
-    # ORDERS * scale in all; rounding up with a hash's probability keeps the expected count exact at any scale
-    dim, member, month, factor = PLANT
+    # orders per café and day: size x weekday x season x holidays x growth x the café's day x a café's plant, scaled
+    # to ORDERS * scale in all; rounding up with a hash's probability keeps the expected count exact at any scale
+    dim, member, month, factor = PLANTS[plant]
+    cafe = dim != "category"  # a café's plant scales its café-days; a product's keeps each of its orders by chance
+    plant_w = f"CASE WHEN c.{dim} = '{member}' AND strftime(d.day, '%Y-%m') = '{month}' THEN {factor} ELSE 1 END" if cafe else "1"
+    keep = "" if cafe else f" WHERE {dim} != '{member}' OR u(12, cafe_id, order_date, j) < {factor}"
     db.execute(f"""CREATE TABLE plan AS
      WITH d AS (SELECT CAST(t AS DATE) AS day, date_diff('day', DATE '2023-01-01', CAST(t AS DATE)) AS n
                 FROM range(DATE '2023-01-01', DATE '2026-01-01', INTERVAL 1 DAY) r(t)),
@@ -89,7 +99,7 @@ def generate(out, scale: float = 0.01, seed: int = 42, csv: bool = False) -> dic
           WHEN '01-01' THEN 0 ELSE 1 END)
        * (1 + 0.2 * d.n / 1095)
        * (0.85 + 0.3 * u(3, c.i, d.n, 0))
-       * (CASE WHEN c.{dim} = '{member}' AND strftime(d.day, '%Y-%m') = '{month}' THEN {factor} ELSE 1 END) AS w
+       * ({plant_w}) AS w
        FROM cafes c JOIN d ON d.day >= c.opened_on)
      SELECT i, cafe_id, day, n, floor({ORDERS * float(scale)} * w / sum(w) OVER () + u(4, i, n, 0))::INT AS k FROM w""")
     db.execute(f"COPY (SELECT * EXCLUDE (i) FROM cafes) TO '{q(out)}/cafes/cafes.parquet' (FORMAT parquet)")
@@ -108,7 +118,7 @@ def generate(out, scale: float = 0.01, seed: int = 42, csv: bool = False) -> dic
            (CASE WHEN u(10, i, n, j) < 0.1 THEN 0.10 ELSE 0 END)::DECIMAL(3,2) AS discount,
            (['card','card','card','mobile','cash'])[1 + floor(u(11, i, n, j) * 5)::INT] AS payment
            FROM plan, range(k) r(j) WHERE strftime(day, '%Y-%m') = '{ym}')
-         JOIN products USING (product_id)
+         JOIN products USING (product_id){keep if ym == month else ''}
          ORDER BY ordered_at, cafe_id, j
         ) TO '{q(out)}/orders/orders_{ym.replace('-', '_')}.parquet' (FORMAT parquet)""")
     if csv:
@@ -117,19 +127,19 @@ def generate(out, scale: float = 0.01, seed: int = 42, csv: bool = False) -> dic
           FROM read_parquet('{q(out)}/orders/*.parquet') o JOIN cafes c USING (cafe_id) JOIN products p USING (product_id)
           ORDER BY o.order_id) TO '{q(out)}/brewline.csv' (HEADER)""")
     db.close()
-    known = {"seed": int(seed), "scale": float(scale), **answers(out)}
+    known = {"seed": int(seed), "scale": float(scale), **answers(out, dim)}
     if (known["latest_complete_month"], known["why"]["member"]) != (month, member):
         raise SystemExit(f"the planted change did not show at seed {seed}, scale {scale}")
     (out / "known_answers.json").write_text(json.dumps(known, indent=1) + "\n")
     return known
 
 
-def answers(out) -> dict:
+def answers(out, dim: str) -> dict:
     """What the written files say, from a fresh DuckDB (never the generator's tables): rows, revenue by region per year
     to the cent, the latest complete month and, against the month before, the planted dimension's member that moved
     most with its share of the change."""
     db = duckdb.connect()
-    o, c = f"read_parquet('{q(out)}/orders/*.parquet')", f"read_parquet('{q(out)}/cafes/*.parquet')"
+    o, c, p = (f"read_parquet('{q(out)}/{t}/*.parquet')" for t in ("orders", "cafes", "products"))
     rows = {t: db.execute(f"SELECT count(*) FROM read_parquet('{q(out)}/{t}/*.parquet')").fetchone()[0]
             for t in ("cafes", "customers", "products", "orders")}
     by = {}
@@ -138,10 +148,9 @@ def answers(out) -> dict:
         by.setdefault(region, {})[str(year)] = float(revenue)
     month, prev = db.execute(f"""SELECT strftime(m, '%Y-%m'), strftime(m - INTERVAL 1 MONTH, '%Y-%m')
      FROM (SELECT date_trunc('month', max(order_date) + 1) - INTERVAL 1 MONTH AS m FROM {o})""").fetchone()
-    dim = PLANT[0]
     ch = db.execute(f"""SELECT {dim}, sum(revenue) FILTER (strftime(order_date, '%Y-%m') = '{prev}') AS a,
        sum(revenue) FILTER (strftime(order_date, '%Y-%m') = '{month}') AS b
-     FROM {o} JOIN {c} USING (cafe_id) WHERE strftime(order_date, '%Y-%m') IN ('{prev}', '{month}')
+     FROM {o} JOIN {c} USING (cafe_id) JOIN {p} USING (product_id) WHERE strftime(order_date, '%Y-%m') IN ('{prev}', '{month}')
      GROUP BY ALL ORDER BY abs(b - a) DESC, {dim}""").fetchall()
     a, b = sum(r[1] for r in ch), sum(r[2] for r in ch)
     member, ma, mb = ch[0]
@@ -158,9 +167,10 @@ if __name__ == "__main__":
     ap.add_argument("--scale", type=float, default=0.01, help="1 is about 7.4M orders (default 0.01, at least 0.005)")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--csv", action="store_true", help="also write brewline.csv")
+    ap.add_argument("--plant", choices=PLANTS, default="north", help="the why's planted change (default north)")
     a = ap.parse_args()
     t0 = time.time()
-    k = generate(a.out, a.scale, a.seed, a.csv)
+    k = generate(a.out, a.scale, a.seed, a.csv, a.plant)
     w = k["why"]
     print(f"{k['rows']['orders']:,} orders in {time.time() - t0:.1f} s; {w['month']} revenue {w['change_pct']:+}% on "
           f"{w['previous_month']}, {w['member']} {w['share_of_change']:.0%} of the change")

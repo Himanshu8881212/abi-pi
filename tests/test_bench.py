@@ -13,8 +13,10 @@ import bench  # noqa: E402
 
 KNOWN = {"revenue_by_region_year": {"East": {"2025": 40774.45}, "North": {"2025": 36360.52}, "South": {"2025": 39285.46},
                                     "West": {"2025": 41718.55}},  # seed 42, scale 0.01 (bench/brewline.py)
-         "why": {"revenue": {"2025-11": 14095.04, "2025-12": 12043.64}, "member": "North",
+         "why": {"revenue": {"2025-11": 14095.04, "2025-12": 12043.64}, "dimension": "region", "member": "North",
                  "member_revenue": {"2025-11": 3271.28, "2025-12": 1586.08}}}
+RETAIL = {**KNOWN, "why": {"revenue": {"2025-11": 14059.04, "2025-12": 11303.05}, "dimension": "category", "member": "Retail",
+                           "member_revenue": {"2025-11": 4719.6, "2025-12": 2145.7}}}  # brewline.py --plant retail
 
 
 def test_answers_that_look_right_and_arent_fail():
@@ -31,6 +33,12 @@ def test_answers_that_look_right_and_arent_fail():
     assert not bench.why_ok("Revenue rose from October to November 2025, driven by the East region. North was flat (3,271.28)."
                             " Region | Nov: East 3,673.46, North 3,271.28, South 3,542.79, West 3,607.51", KNOWN)
     assert not bench.clean(bench.WITHHELD) and not bench.clean("Revenue was [not verified].") and bench.clean(why)
+    # --plant retail: the driver is a product category, so a region (any region) named as the driver fails
+    retail = ("Revenue fell from 14,059.04 in November 2025 to 11,303.05 in December. Most of the fall is in Retail: it went"
+              " from 4,719.60 to 2,145.70, across every region, while Coffee, Bakery, Food and Tea dipped slightly.")
+    assert bench.why_ok(retail, RETAIL) and not bench.why_ok(retail, KNOWN)
+    assert not bench.why_ok(retail.replace("in Retail:", "in the North region. Retail"), RETAIL), "a region as the driver"
+    assert not bench.why_ok(retail.replace("in Retail:", "in Coffee. Retail"), RETAIL), "the wrong category"
     footer = "\n\n_Grounding: 2 figure(s) or name(s) no tool result backs were masked._"
     assert bench.masked("from 2025-01-01 to [not verified]" + footer) == 2 and bench.masked("[not verified] and [not verified]") == 2
 

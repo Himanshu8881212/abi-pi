@@ -82,3 +82,29 @@ def test_known_answers_are_what_a_fresh_query_over_the_files_says(runs):
                           FROM {csv}""").fetchone() == (k["rows"]["orders"], True)
     assert {(r, str(y)): s for r, y, s in db.execute(f"SELECT region, year(order_date), sum(revenue) FROM {csv} GROUP BY 1, 2").fetchall()} == {
         (r, y): v for r, ys in by.items() for y, v in ys.items()}
+
+
+def test_the_retail_plant_moves_a_product_category_and_the_default_data_stays(runs, tmp_path):
+    """--plant retail (the second "why" dataset): every café's Retail orders halve in December 2025, so every region
+    falls, none with most of the change, and known_answers.json, from a fresh query, names Retail among the categories;
+    the default's data is the baselines' (North's two months as the 1.1.0 and M2 bench runs had them)."""
+    out, db = tmp_path / "retail", duckdb.connect()
+    brewline(out, "--plant", "retail")
+    k = json.loads((out / "known_answers.json").read_text(), parse_float=Decimal)
+    o = f"read_parquet('{out}/orders/*.parquet') o JOIN read_parquet('{out}/products/*.parquet') p ON p.product_id = o.product_id"
+    m = {cat: (nov, dec, n_nov, n_dec) for cat, nov, dec, n_nov, n_dec in db.execute(f"""SELECT category,
+       sum(revenue) FILTER (order_date < DATE '2025-12-01'), sum(revenue) FILTER (order_date >= DATE '2025-12-01'),
+       count(*) FILTER (order_date < DATE '2025-12-01'), count(*) FILTER (order_date >= DATE '2025-12-01')
+     FROM {o} WHERE order_date >= DATE '2025-11-01' GROUP BY 1""").fetchall()}
+    w = k["why"]
+    assert (w["month"], w["dimension"], w["member"]) == ("2025-12", "category", "Retail") and sorted(m) == ["Bakery", "Coffee", "Food", "Retail", "Tea"]
+    assert w["member_revenue"] == {"2025-11": m["Retail"][0], "2025-12": m["Retail"][1]} and max(m, key=lambda c: abs(m[c][1] - m[c][0])) == "Retail"
+    assert abs(m["Retail"][3] / m["Retail"][2] - 0.5) < 0.1 and all(v[3] / v[2] > 0.8 for c, v in m.items() if c != "Retail")  # only Retail halves
+    assert w["share_of_change"] > Decimal("0.6") and w["change_pct"] < -8
+    cafes = f"read_parquet('{out}/orders/*.parquet') o JOIN read_parquet('{out}/cafes/*.parquet') c ON c.cafe_id = o.cafe_id"
+    fall = dict(db.execute(f"""SELECT region, sum(revenue) FILTER (order_date >= DATE '2025-12-01') - sum(revenue) FILTER (order_date < DATE '2025-12-01')
+     FROM {cafes} WHERE order_date >= DATE '2025-11-01' GROUP BY 1""").fetchall())
+    assert sorted(fall) == ["East", "North", "South", "West"] and all(0 < d / w["change"] < Decimal("0.4") for d in fall.values())  # no region drives it
+    default = json.loads((runs["out"] / "known_answers.json").read_text())["why"]
+    assert (default["member"], default["member_revenue"], default["revenue"]) == (
+        "North", {"2025-11": 3271.28, "2025-12": 1586.08}, {"2025-11": 14095.04, "2025-12": 12043.64})
