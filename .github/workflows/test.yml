@@ -16,18 +16,18 @@ jobs:
     env:
       PGBIN: /usr/lib/postgresql/17/bin  # scripts/engine.sh's Postgres, as in the Dockerfile
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Postgres 17 (PGDG)
         run: |
           sudo apt-get install -y postgresql-common
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get install -y postgresql-17
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v10
         with:
           version: "0.11.x"  # the Dockerfile's uv
           python-version: "3.13"
           enable-cache: true
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -58,7 +58,7 @@ jobs:
           .venv/bin/python -m pytest -q -rs tests | tee pytest.out
           ! grep SKIPPED pytest.out | grep -v "live LLM test: set ABI_PI_LIVE=1"
       - if: failure() || cancelled()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: logs
           path: |
