@@ -144,5 +144,6 @@ def test_the_image_checks_health_and_compose_passes_the_memory_settings(tmp_path
                      (ROOT / "Dockerfile").read_text(), re.M)
     env = compose(tmp_path, "")["abi"]["environment"]
     assert env["ABI_DUCKDB_MEMORY_LIMIT"] == "1500MB" and env["ABI_QUERY_CACHE_MB"] == "256", env
+    assert env["ABI_DUCKDB_THREADS"] == "", env  # storage.THREADS: half the CPUs
     env = compose(tmp_path, "ABI_DUCKDB_MEMORY_LIMIT=3GB\nABI_QUERY_CACHE_MB=512\n")["abi"]["environment"]
     assert env["ABI_DUCKDB_MEMORY_LIMIT"] == "3GB" and env["ABI_QUERY_CACHE_MB"] == "512", env

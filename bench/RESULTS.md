@@ -407,6 +407,51 @@ Seen on the way, for round 2:
 - The volume held 13,991,192,971 bytes at the end (apparent size): 9.76 GB of lake (perf_brewline, perf_brew1 and 8
   deleted projects' lakes, kept for their retention) and 4.14 GB of uploads, which M3.5 purges with them after 30 days.
 
+## 1.2 M3 round 2 (pve1): isolation
+
+Round 1 missed one target: another project's uncached queries during a 100M load. Found and fixed here. A throwaway
+compose install of this branch (abi-m3r2, its own port, volume and image, removed after; the live abi and lake
+containers' start time, restarts and image unchanged), each run at an LXC load average under 1.5. `diag` is
+perf.py isolation --door app with each of B's queries followed by the parts it is made of, and each engine
+process's CPU and the container's cpu/io pressure sampled every 2 s.
+
+What B's query waits for (20M orders; idle -> during the load, p50 ms): the whole semantic_query 78.0 -> 175.8; the
+same SQL on a DuckDB of another process 18.5 -> 38.1; a lake snapshot read 6.1 -> 10.8; a new Postgres connection
+3.6 -> 4.9; a WAL-flushing commit 0.2 -> 0.2. I/O pressure stayed 0 and CPU pressure rose to 30-45 %; the heavy
+worker ran at 374 % CPU. Every part that runs on a CPU got about 2x slower, so the cause is CPU, not disk or
+Postgres. pve1 is a Ryzen 5 PRO 2400G: 4 cores, 8 threads. The container may use 6 of them, but DuckDB counts the
+host's 8, and every project's lake in every process ran 8 threads. A load occupied every core, so B's threads shared
+their cores with it. Renicing it doesn't help (round 1: x2.07) because a lower priority still shares the core.
+
+| one project's lake threads (20M orders) | load to Ready s | x p50 | x p95 |
+|---|---|---|---|
+| 8, DuckDB's count (round 1's code) | 118.50 | 2.25 | 2.41 |
+| 6 (the container's CPUs) | 125.51 | 1.85 | 2.00 |
+| heavy worker 4, engine 6 | 143.56 | 1.37 | 1.45 |
+| heavy worker 3, engine 6 | 157.39 | 1.23 | 1.21 |
+
+At 100M, with only the heavy worker at 3, the rest at 6: x1.24 p50 and x1.56 p95. B's queries over time showed
+where the tail came from: during the heavy worker's load they stayed at p95 104-114 ms, and from 720 s on they
+rose to p95 293-405 ms. That is when build_model ran in the engine itself (66 s at 455-488 % CPU), on A's lake of
+6 threads beside B's. So the cap belongs to every lake, not only to the heavy worker's: `storage.THREADS`, half the
+CPUs the process may use (ABI_DUCKDB_THREADS overrides it), set when a lake is attached (never `SET threads` at run
+time, D-04-fix-2).
+
+| 100M orders through the app's upload, to Ready | orders s | Ready s | idle p50 / p95 ms | during p50 / p95 ms | x p50 | x p95 |
+|---|---|---|---|---|---|---|
+| 1.1.0 (part 1: 50M, server path) | | | | | 2.26 | 2.92 |
+| round 1 (every lake 8 threads) | 522.53 | 599.94 | 79.9 / 95.0 | 189.9 / 283.0 | 2.38 | 2.98 |
+| heavy worker 3, engine 6 | 719.31 | 785.15 | 75.7 / 81.4 | 93.8 / 130.8 | 1.24 | 1.61 |
+| every lake 3 (diag) | 725.58 | 824.85 | 78.1 / 86.8 | 92.5 / 118.7 | 1.18 | 1.37 |
+| every lake 3, this commit's image | 729.83 | 824.88 | 77.0 / 153.5 | 91.1 / 119.3 | 1.18 | (0.78) |
+
+Met. In the last run, one idle query in 30 took 153 ms, so its x p95 is meaningless. Its during-load p95 (119.3 ms)
+against the other runs' idle p95 (81.4-86.8 ms) is x1.37-1.47. Every load was exact to the cent. The cost: a 100M
+load alone takes 38 % longer (orders in 730 s, Ready at 825 s against 522 and 600), and build_model 96 s against
+66 s. A small query alone is no slower (idle p50 77 ms against 80). One big query of one project gets half the
+CPUs. ABI_DUCKDB_THREADS set to the CPU count gives back round 1's speed and round 1's isolation. Container peak
+4,540 MB with no memory limit.
+
 ## 1.2 M2 round 1 (MacBook Air, 8 cores, 24 GB; model proxy/claude-sonnet-5-5)
 
 4 Nov 2026 08:57-09:13, release-1.2 at 7e68c71: M2.3's change measures (2c55e2d), M2.1's expressions (377a868), M2.2's

@@ -39,6 +39,7 @@ _project: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # connection 
 _locks: dict[tuple[str, str | None], threading.Lock] = {}
 _locks_lock = threading.Lock()  # held only to look a lock up in `_locks`: never during I/O, an ATTACH or a query
 RETRIES = 5
+THREADS = int(os.environ.get("ABI_DUCKDB_THREADS") or max(1, (os.process_cpu_count() or 2) // 2))  # per lake
 
 
 def project_lock(kind: str, project: str | None) -> threading.Lock:
@@ -58,7 +59,10 @@ def connect(project: str, catalog: str | None = None, data_path: str | None = No
         raise ValueError(f"invalid project name {project!r}")
     catalog = catalog or os.environ.get("ABI_LAKE_CATALOG", "postgres:")
     data_path = data_path or os.environ.get("ABI_DATA_PATH", "/data/lake")
-    con = duckdb.connect()
+    # M3 round 2: half the CPUs this process may use, so one project's load or build_model leaves the rest to other
+    # projects' queries (DuckDB's own count, the host's 8 CPUs on pve1 in a container of 6, let a 100M load slow them
+    # x2.4). A set-up value: never `SET threads` once queries run (D-04-fix-2).
+    con = duckdb.connect(config={"threads": THREADS})
     # Spills go to this instance's own folder: DuckDB's default `.tmp` in the cwd is shared by every lake of the process
     # and by the worker, and instances spilling into one folder delete and overwrite each other's files (LOAD-MEMORY).
     # DuckDB creates it on the first spill and removes it on close.
