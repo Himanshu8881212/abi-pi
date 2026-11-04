@@ -2532,12 +2532,12 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                     out = settings.public()
             except ValueError as e:
                 return 400, json.dumps({"error": str(e)}).encode()
-            if op in ("settings/provider", "settings/remove", "settings/default"):  # ABI's custom agents use the same model
-                threading.Thread(target=engine_model, daemon=True).start()
-            for h in HUBS.values():  # the next message starts each chat's agent with the new settings
-                if h.pi and h.pi.poll() is None and not h.busy:
-                    h.pi.terminate()
-                    h.pi = None
+            if op in ("settings/provider", "settings/remove", "settings/default"):  # a change, not a read or a test
+                threading.Thread(target=engine_model, daemon=True).start()  # ABI's custom agents use the same model
+                for h in HUBS.values():  # the next message starts each chat's agent with the new settings
+                    if h.pi and h.pi.poll() is None and not h.busy:
+                        h.pi.terminate()
+                        h.pi = None
             return 200, json.dumps({"result": out}).encode()
         who = str(body.get("user") or "").strip()
         if op == "role":

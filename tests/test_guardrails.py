@@ -1,6 +1,7 @@
 """Guardrails that must hold (ABI_PI_LIVE=1: these drive the agent; the secret scan runs offline too)."""
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -49,8 +50,8 @@ def _secrets() -> list[str]:
               if re.match(r"\s*himanshu\b", l))
     key = subprocess.run(["python3", str(ROOT / "scripts/creds.py"), "llm-key"], capture_output=True, text=True).stdout.strip()
     rustfs = [subprocess.run(["security", "find-generic-password", "-s", "abi-pi-rustfs", "-a", a, "-w"], capture_output=True,
-                             text=True).stdout.strip() for a in ("key_id", "secret")]  # the local RustFS upload keys, if set up
-    return [pw, key, abi.token(), *[k for k in rustfs if k]]
+                             text=True).stdout.strip() for a in ("key_id", "secret")] if shutil.which("security") else []
+    return [pw, abi.token(), *[k for k in (key, *rustfs) if k]]  # the model key and macOS's RustFS upload keys where this machine has them
 
 
 def test_no_token_or_password_in_transcripts_logs_or_git():

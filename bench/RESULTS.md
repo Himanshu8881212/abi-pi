@@ -34,18 +34,25 @@
 
 ## 1.1.0 baseline (pve1 LXC 100: 6 cores, 10 GB RAM)
 
-3 Nov 2026, bench/perf.py and bench/brewline.py of 309ee47. Method: the image the live install runs (2fcf2e3d5762, 2.84 GB;
-the 252 repo files in it are byte-identical to `git archive v1.1.0`) as a throwaway compose install beside the live one
-on the same LXC (own volume and port, removed after), 1.1.0's defaults (engine DuckDB limit 1500MB), no model
-configured. The bench ran inside the container (`docker cp bench`, `docker exec`). Pages: Brewline 0.01 (73,941 orders)
-loaded with abi.load, its starter Overview report, a 297 KB page. Load and isolation: generated orders in the files
-folder, loaded with the engine's add_data on a server path. Process MB are perf.py's RSS sums (shared pages count more
-than once); container MB is the cgroup's memory.current (every 2 s under load; with chats its memory.peak).
+3 Nov 2026, bench/perf.py and bench/brewline.py of 309ee47. Method: the image the live install runs (2fcf2e3d5762,
+2.84 GB by the size method below; the 252 repo files in it are byte-identical to `git archive v1.1.0`) as a throwaway
+compose install beside the live one on the same LXC (own volume and port, removed after), 1.1.0's defaults (engine
+DuckDB limit 1500MB), no model configured. The bench ran inside the container (`docker cp bench`, `docker exec`).
+Pages: Brewline 0.01 (73,941 orders) loaded with abi.load, its starter Overview report, a 297 KB page. Load and
+isolation: generated orders in the files folder, loaded with the engine's add_data on a server path. Process MB are
+perf.py's RSS sums (shared pages count more than once); container MB is the cgroup's memory.current (every 2 s under
+load; with chats its memory.peak).
 
 | pages: 50 sessions, 50 people | p50 s | p95 s | p99 s | max s | errors | dropped |
 |---|---|---|---|---|---|---|
 | first | 44.2 | 84.7 | 88.3 | 88.3 | 0 | 0 |
 | right after a commit | 45.7 | 87.8 | 91.4 | 91.4 | 0 | 0 |
+
+"first" is each person's first page in the app, not a cold one: the engine caches results by SQL and lake snapshot,
+people without row-level security share them, and the owner's page had filled them before the round. With no rule in
+this project, 1.1's numbers are the app computing 50 pages in turn under its one page lock; a cache per role and rule
+(M3.3) would compute this project's pages twice. `perf.py pages --rls` (every account a Viewer with its own café)
+measures the cost per person; it wasn't run on pve1 (the Mac's numbers are below).
 
 | memory MB | app | engine | worker | Postgres | Pi | container |
 |---|---|---|---|---|---|---|
@@ -54,7 +61,7 @@ than once); container MB is the cgroup's memory.current (every 2 s under load; w
 | idle after pages, loads and isolation | 73.6 | 370.4 | 326.3 | 285.7 (16 processes) | 0 | 706 |
 
 Per chat (app + Pi after start; no model, so no answer): 156.5 MB in the first run after the container started, then
-106.4 and 105.8 MB.
+106.4 and 105.8 MB. Each run counted 8 Pi processes for its 8 chats.
 
 | load | orders | orders add_data s | rows/s | 4 tables s | Ready s | lake bytes | revenue by region | container peak MB |
 |---|---|---|---|---|---|---|---|---|
@@ -62,14 +69,31 @@ Per chat (app + Pi after start; no model, so no answer): 156.5 MB in the first r
 | 50M | 49,999,905 | 224.32 | 222,895 | 226.20 | 252.43 | 1,181,105,645 | exact to the cent | 2408 |
 
 The lake keeps each table twice, in raw/ and model/ (85 + 85 MB at 10M, 389 + 389 MB at 50M on ZFS's compressed
-disk; lake bytes are the files' sizes). 50M stayed inside the app's and the agent's timeout (they wait 900 s for an
-engine call, scripts/abi.py) and nothing failed. A server path isn't open to 1.1's app or agent (uploads and s3://
-Parquet only); those doors weren't measured.
+disk; lake bytes are the files' sizes). Nothing failed. These loads used a door neither 1.1's app nor its agent has:
+the engine's add_data on a server path, which perf.py reaches past abi.py's Parquet-only check (M1.1 is to limit it
+to the caller's own uploads). 1.1's doors are an upload (the app takes 24 MB pieces and hands the file to the engine in
+64 MB pieces, the last of which runs add_data within the 900 s the app and the agent wait for an engine call,
+scripts/abi.py) and an s3:// folder of Parquet, so these times are no baseline for "a 100M-row folder loads from the
+app with no timeout".
+
+Not measured for 1.1 yet, though the 1.2 targets name them: loads through the app's upload and from an s3:// folder at
+10M, 50M and 100M rows; a measure-only Publish (seconds, sources reloaded); the bronze-silver-gold rebuild's lake
+bytes; a killed process serving again; 8 chats and a load together inside a 4 GB limit (measured apart above: 1756
+and 2408 MB container peaks). The 1.1.0 image (ghcr.io/himanshu8881212/abi:1.1.0, 2fcf2e3d5762 on pve1) stays
+measurable after the code moves on.
 
 | isolation: project B (Brewline 0.005) uncached semantic_query | queries | p50 ms | p95 ms |
 |---|---|---|---|
 | idle | 30 | 101.9 | 108.8 |
 | while project A loads 50M orders (249.41 s) | 1193 | 230.0 (x2.26) | 317.3 (x2.92) |
+
+Image size, measured one way from now on: `docker image inspect --format '{{.Size}}'` in pve1's Docker 26.1.5
+(overlay2 store), linux/amd64, layers uncompressed: 2,843,622,285 bytes for 1.1.0. Compressed (`docker save | gzip -6`)
+it is 993,637,823 bytes, about what a pull downloads. REPORT.md #40's 3.98 GB is another measure: the Mac's Docker
+Desktop on 29 Oct, an arm64 build of an earlier Dockerfile, not measured again here. A store that keeps the compressed
+layers beside the unpacked ones (Docker Desktop's containerd store) counts both, 2.84 + 0.99 = 3.83 GB, which is
+probably most of the gap. By this measure 1.1.0 already meets the plan's "default image <= 3.0 GB" (set from the
+3.98 GB), so M4.3's size target needs restating against 2.84 GB.
 
 ## 1.1.0 baseline (MacBook Air, 8 cores, 24 GB; model proxy/claude-sonnet-5-5)
 
@@ -102,15 +126,42 @@ filter's end date ("from 2025-01-01 to [not verified]") in 19. why named North i
 in the closing offer ("save this as an [not verified] analysis", 6 runs), a café name (2) or a word before "orders" (1).
 The 2 report misses masked a page title and a visual count.
 
+Re-scored with bench.py's checks as the M0 review tightened them (any figure anywhere passed ask, any mention of North
+passed why, any line passed report): from the logged answers, ask and why pass exactly as above. All 20 ask answers
+state each region's figure after its own name, and all 20 why answers give both months' revenue, North's two months
+after its name, and North as where the drop sits. Counted from the harness's footer, ask masked 2 figures per run,
+not 1 (the end date's two parts share one marker), so its masked median is 2 in both tables. report would pass 3/5
+and 2/5: by their own answers quiet runs 0 and 3 and run 1 beside the build drew the line on the month number alone
+(12 points that add 2023-2025 together), which the line check now fails (the reports were deleted, so this comes from
+the answers). The check that a question changes nothing looked only at uncommitted files, in a project with
+auto-commit on (abi.load turns it on), so it couldn't see a change; bench.py now also compares the last commit. why
+went from 9/10 to 3/10 between the two sessions on the same code: judge M2's gate on 20 runs or more, and read the
+masked figures per run in the logs.
+
 | pages: 20 sessions, 20 people (3 runs) | p50 s | p95 s | p99 s | max s | errors | dropped |
 |---|---|---|---|---|---|---|
 | first | 6.0 / 10.5 / 6.6 | 11.3 / 20.1 / 12.3 | 11.9 / 21.1 / 13.0 | 11.9 / 21.1 / 13.0 | 0 | 0 |
 | right after a commit | 13.2 / 7.1 / 6.4 | 20.1 / 13.3 / 12.2 | 20.8 / 14.0 / 12.9 | 20.8 / 14.0 / 12.9 | 0 | 0 |
 
+These runs didn't wait for the worker's query copies of the new project or note the lake snapshot, so a copy landing
+mid-round may explain why the order swaps. Again 4 Nov 01:25-01:30 (load average 1.7-2.6) with perf.py's M0 review
+fixes: a new Brewline 0.01 bench project (`perf.py project`), its copies written before the first round, the lake
+snapshot the same at the start and end of every round, 20 sessions, 3 runs of each kind in turn:
+
+| pages: 20 sessions, 20 people (3 runs) | p50 s | p95 s | p99 s | max s | errors | dropped |
+|---|---|---|---|---|---|---|
+| first: Viewers and Developers, no rule | 5.1 / 5.2 / 5.3 | 9.6 / 9.9 / 10.0 | 10.1 / 10.4 / 10.5 | 10.1 / 10.4 / 10.5 | 0 | 0 |
+| right after a commit | 5.0 / 5.2 / 5.3 | 9.4 / 9.9 / 10.1 | 9.9 / 10.4 / 10.6 | 9.9 / 10.4 / 10.6 | 0 | 0 |
+| first: `--rls cafes.cafe_id`, 20 Viewers with a café each | 8.9 / 8.2 / 9.0 | 16.9 / 15.6 / 16.7 | 17.8 / 16.4 / 17.6 | 17.8 / 16.4 / 17.6 | 0 | 0 |
+| right after a commit | 7.8 / 8.3 / 8.9 | 14.9 / 15.9 / 16.8 | 15.7 / 16.7 / 17.7 | 15.7 / 16.7 / 17.7 | 0 | 0 |
+
 | memory MB | app | engine | worker | Postgres | Pi |
 |---|---|---|---|---|---|
 | idle, the pages project loaded | 38.8 | 845.8 | 1193.1 | 495.0 (30 processes) | 0 |
-| 3 chats started | 42.7 | 846.1 | 1193.3 | 496.3 | 463.4 |
-| after each answered (claude-sonnet-5-5) | 42.7 | 846.1 | 1193.3 | 496.3 | 463.4 |
+| 3 chats, each after one short answer (claude-sonnet-5-5) | 42.7 | 846.1 | 1193.3 | 496.3 | 463.4 (4 processes) |
 
-Per chat (app + Pi): 155.8 MB after start and after the answer.
+Per chat (app + Pi): 155.8 MB after the answer. This was one state, not two: a chat's Pi starts with its first
+message, and the answers came while perf.py waited for the Pi processes to settle, so its "started" and "answered"
+samples were the same. The Pi column summed every process the app had started (4 for 3 chats), so the figure per
+chat is a little off; perf.py now counts only `pi --mode rpc` and their children and gives a figure per chat only with
+one Pi per chat.

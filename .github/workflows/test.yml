@@ -11,7 +11,7 @@ permissions:
   contents: read
 jobs:
   offline:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # the Postgres, Playwright and uv steps are proven there; move after a 26.04 run passes
     timeout-minutes: 30
     env:
       PGBIN: /usr/lib/postgresql/17/bin  # scripts/engine.sh's Postgres, as in the Dockerfile
@@ -34,8 +34,8 @@ jobs:
           cache-dependency-path: engine/frontend/package-lock.json
       - name: Python environments
         run: |
-          uv sync --frozen
-          cd engine/backend && uv sync --frozen --no-dev
+          uv sync --locked  # fails when a lock is out of date with its pyproject (run `uv lock` there)
+          cd engine/backend && uv sync --locked --no-dev
       - name: The engine's UI
         working-directory: engine/frontend
         run: |
@@ -52,13 +52,11 @@ jobs:
           scripts/engine.sh start
           python3 scripts/accounts.py
       - name: Offline tests
-        # tests/test_guardrails.py's secret scan also asks macOS's keychain (`security`) and needs a model key: here a
-        # `security` that finds nothing, and a random key that must not turn up in logs, files or git either
+        # every test runs here but the live ones: any other skip (a missing engine, account or project) fails the run
         run: |
-          mkdir -p "$RUNNER_TEMP/bin"
-          printf '#!/bin/sh\nexit 44\n' > "$RUNNER_TEMP/bin/security"
-          chmod +x "$RUNNER_TEMP/bin/security"
-          ABI_PI_LLM_KEY=$(openssl rand -hex 16) PATH="$RUNNER_TEMP/bin:$PATH" .venv/bin/python -m pytest -q -rs tests
+          set -o pipefail
+          .venv/bin/python -m pytest -q -rs tests | tee pytest.out
+          ! grep SKIPPED pytest.out | grep -v "live LLM test: set ABI_PI_LIVE=1"
       - if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:

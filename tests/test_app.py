@@ -17,13 +17,15 @@ import abi
 import app
 from pi_driver import ROOT
 
-P = "pi_app_test"
+P, OTHER = "pi_app_test", "pi_app_other"  # OTHER: a second project the person can open (a fresh engine has none)
 HUB = None  # the server's hub: the agent key lives there (the harness gets it through the env)
 
 
 @pytest.fixture(scope="module")
 def srv():
     global HUB
+    if not abi.folder(OTHER):
+        abi.new_project("demo", OTHER)
     if not abi.folder(P):
         drop = ROOT / "scratch" / P
         drop.mkdir(parents=True, exist_ok=True)
@@ -111,9 +113,7 @@ def test_the_chat_agent_opens_a_project_it_just_made(srv):
     """A project the agent built in the chat opens in that person's app (the page reloads on it, and the server checks
     their access there); before, abi_show found no app for the new project and told the person to run a command."""
     port, key, _ = srv
-    other = next((p["project"] for p in abi.call("list_projects")["projects"] if p["project"] != P), None)
-    if not other:
-        pytest.skip("needs a second project")
+    other = OTHER
     stream = urllib.request.urlopen(f"http://127.0.0.1:{port}/events?k={key}&c=open1&m=0", timeout=10)
     req = urllib.request.Request(f"http://127.0.0.1:{port}/agent/show", json.dumps({"project": other, "page": "report", "report": "overview"}).encode(),
                                  {"X-Abi-Agent": HUB.agent_key, "X-Abi-Client": "open1", "Content-Type": "application/json"})
@@ -183,14 +183,15 @@ def test_bad_input_gets_an_answer_not_a_dropped_connection(srv):
 
 def test_a_confirmation_belongs_to_the_browser_that_asked(srv):
     port, key, _ = srv
-    _, r = post(port, "/api/set_measure", {"project": P, "id": "c_probe", "name": "C", "expression": "SUM(orders.amount)"}, key)
-    if "confirm" not in r:
-        pytest.skip("ABI asked no confirmation for this change")
+    assert post(port, "/api/set_measure", {"project": P, "id": "c_probe", "name": "C", "expression": "SUM(orders.amount)"}, key)[1].get("result")
+    _, r = post(port, "/api/delete_measure", {"project": P, "id": "c_probe"}, key)  # destructive: ABI always asks
     req = urllib.request.Request(f"http://127.0.0.1:{port}/confirm/{r['confirm']['id']}", b"{}",
                                  {"X-Abi-App": key, "Content-Type": "application/json", "X-Abi-Client": "another-browser"})
     with pytest.raises(urllib.error.HTTPError) as e:
         urllib.request.urlopen(req)
     assert e.value.code == 410
+    assert "c_probe" in json.dumps(abi.call("semantic_model", project=P)["measures"]), "nothing ran"
+    assert post(port, "/confirm/" + r["confirm"]["id"], {}, key)[1].get("result"), "the browser that asked still can"
 
 
 def test_switcher_lists_workspaces_and_their_projects(srv):
@@ -445,6 +446,27 @@ def test_settings_take_a_key_and_never_give_it_back(srv):
     finally:
         post(port, "/mode", {"mode": "developer"}, key)
         post(port, "/admin/settings/remove", {"id": "e2e-prov"}, key)
+
+
+def test_opening_settings_leaves_the_chat_agents_running(srv):
+    """Every Settings call, a plain read too, stopped every idle chat agent of every person (M0.4): only a change does."""
+    port, key, _ = srv
+    prov = {"id": "e2e-idle", "name": "E2E", "api": "openai-completions", "base_url": "http://127.0.0.1:9/v1", "models": ["m1"]}
+    first, later = subprocess.Popen(["sleep", "60"]), None
+    HUB.pi, HUB.busy = first, False  # an idle chat agent
+    try:
+        assert post(port, "/admin/settings/provider", {"provider": prov}, key)[0] == 200
+        assert first.wait(5) is not None and HUB.pi is None, "a change restarts the idle agents with it"
+        HUB.pi = later = subprocess.Popen(["sleep", "60"])
+        assert post(port, "/admin/settings", {}, key)[0] == 200 and post(port, "/admin/settings/test", {"id": "e2e-idle"}, key)[0] == 200
+        assert later.poll() is None and HUB.pi is later, "opening Settings or testing a provider stops no one's agent"
+    finally:
+        for x in (first, later):
+            if x:
+                x.kill()
+                x.wait()
+        HUB.pi = None
+        post(port, "/admin/settings/remove", {"id": "e2e-idle"}, key)
 
 
 def test_an_agent_that_dies_gives_an_answer_not_silence():
