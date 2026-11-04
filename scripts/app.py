@@ -1565,6 +1565,7 @@ class Hub:
             model = conf["model"] or (f"cliproxy/{os.environ['ABI_PI_LLM_MODEL']}" if os.environ.get("ABI_PI_LLM_MODEL") else None)  # Settings, else the deployment's
             flags = (["--model", model] if model else []) + ["--thinking", conf["thinking"]]
             env |= {"ABI_PI_MODEL": conf["model"] or "", "ABI_PI_THINKING": conf["thinking"]}
+            (abi.ROOT / "logs").mkdir(exist_ok=True)  # a source checkout has none until now (Docker links it to /data/logs)
             self.pi = subprocess.Popen(["pi", "--mode", "rpc", "--session", session, *flags], cwd=abi.ROOT, env=env, text=True, bufsize=1,
                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=open(abi.ROOT / "logs" / "pi-stderr.log", "ab"))
             threading.Thread(target=self.read, daemon=True).start()
