@@ -283,3 +283,81 @@ with them after the load), and perf.py now counts `pi` too.
 
 The volume held 13 GB at the end: 9.6 GB of lake (perf_brewline and 11 deleted projects' lakes, kept for their
 retention) and 2.8 GB of uploads that no project reads any more (M3.5).
+
+## 1.2 M2 round 1 (MacBook Air, 8 cores, 24 GB; model proxy/claude-sonnet-5-5)
+
+4 Nov 2026 08:57-09:13, release-1.2 at 7e68c71: M2.3's change measures (2c55e2d), M2.1's expressions (377a868), M2.2's
+grounding (8fd7a9d) and the second planted "why". Method as the 1.1.0 baseline's: bench/bench.py at scale 0.01,
+--model proxy/claude-sonnet-5-5 --fallback proxy/claude-opus-5-5, through a scratch wrapper that keeps every run's RPC
+lines and transcript (it would ask again a run no model answered; none needed it). why ran 10 times on each planted
+dataset: north, the baselines' data (`--plant north`: North's orders halve in December 2025, 82% of the chain's
+-14.55%), and retail (`--plant retail`: every café's Retail orders halve that month, 93% of the chain's -19.6%, no
+region over 31%); ask 10 and report 5 on north. Sonnet answered all 35 runs and no model call failed. Load average
+2.2-6.9, nothing else building. The engine was the one started at 06:07 with M2.1's code (M2.2's change to the
+engine's grounding.py isn't on this path: the harness checks Pi's answers with scripts/ground.py), and the harness's
+files had the same sha256 at the start and the end.
+
+| task | data | pass | runs masked | median s | turns | tools | tool errors | masked | input tok | cached tok | output tok |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| ask | north | 10/10 | 0 | 6.2 | 2 | 2 | 0 | 0 | 4 | 47690 | 428 |
+| why | north | 8/10 | 1 | 44.5 | 7 | 11.5 | 1 | 0 | 19089.5 | 195991 | 4053 |
+| why | retail | 10/10 | 0 | 24.4 | 6 | 10 | 0 | 0 | 16245.5 | 160663.5 | 3004 |
+| why | both | 18/20 | 1 | 34.1 | 6.5 | 10.5 | 0.5 | 0 | 17872 | 175717.5 | 3299 |
+| report | north | 0/5 | 3 | 20.6 | 6 | 7 | 0 | 1 | 51777 | 164156 | 1677 |
+
+Against the 1.1.0 quiet-Mac baseline (ask 1/10 with 9 runs masked, 9.4 s, 3 turns; why 9/10 with 1 masked, 33.9 s,
+6.5 turns; report 5/5 as scored then, 3/5 as now, 20.5 s, 6 turns): ask passes every run, unmasked, in 6.2 s and 2
+turns; why passes 18 of 20 in 34.1 s and 6.5 turns; report fails all 5 (below) in 20.6 s and 6 turns.
+
+M2's gate is not met. Met: why 18 of 20, ask 10 of 10 with no run masked, and ask's and report's medians within 10% of
+the baseline's (6.2 s against 9.4, 20.6 s against 20.5). Not met: one why run masked (north 8), why's median 34.1 s
+(30 s or less) and 6.5 turns (4 or fewer). By the plan that calls for M2.4 (explain_change). Report's pass rate fell
+from 3/5 to 0/5, which the gate doesn't count.
+
+Where the time goes, from the RPC lines' arrival times: the model's turns take 97% of a why run (median 32.1 of
+33.6 s) and ABI's part 1.1 s (tool calls 0.5 s, the harness's grounding check 0.6 s). Of the model's time, 16.7 s a
+run is waiting for the first streamed token: 26.4 s in the north runs (09:00-09:06) and 10.1 s in the retail runs
+(09:08-09:13), on the same code, most of the gap between their medians. One turn of north 4 waited 17.2 s for its
+first token; one of retail 2 took 33.0 s to stream 278 tokens. A turn's model time is 5.0 s at the median, so the
+time target turns on the turn count: 4 turns are about 20 s. What takes the turns in the 20 why runs:
+- each run reads the months first (1-3 queries to find the latest complete month), then breaks the change down by
+  2-5 dimensions and most drill into the top member: 10.5 tool calls in 6.5 turns. Every run broke it down by region and
+  by category, some also by city, format, café or product. M2.1's expressions were used in 11 runs
+  and M2.3's governed *_change measures in 11. The fastest run (retail 9, 3 turns, 21.0 s) asked the months with
+  revenue_change, then the days, the categories and the regions with revenue_change at once, then answered;
+- the planner's "add calendar.year (or .day)" for a change grouped by calendar.month without the year: 12 times in 8
+  runs;
+- the grounding retry, one more turn of 5-9 s: in 10 of 20 runs the first answer stated a figure no row holds, and the
+  rewrite was clean in 9 of them. What it named: the model's own shares (82% and 93% of the fall, "about 1,685 of the
+  2,051 drop", "about 2,574 of the 2,756"), differences (North's 1,685 and Retail's 2,574: the rows held both months,
+  not the change), bounds and ranges ("by less than 190", "about 90 to 190 each", "150 or less"), counts ("three",
+  "two", "all four regions") and a day no row has (north 8);
+- a tool that doesn't exist, `mcp__abi__ship_abi_vault` (the harness's abi_vault under ABI's prefix), in 3 runs.
+
+Every run that failed or was masked:
+- why north 4 (55.3 s, 7 turns, unmasked): right in substance (both months' totals, North's 3,271.28 to 1,586.08 under
+  "Where the drop sits", "The other regions moved much less", North's cities and weeks), but bench.why_ok's driver
+  check finds no sentence naming North with a word like "most". The first answer had one ("The North region caused
+  most of it."), and also "about 1,685 of the 2,051 drop" and "fell by about 90 to 190 each", its own difference and
+  range; the rewrite after the grounding retry dropped those and the driver sentence with them.
+- why north 8 (56.5 s, 9 turns, 1 masked): "there are no rows for [not verified] and 26 December": from the daily rows
+  (24 December, then 27 to 31) the model named the two missing days. No row holds 25, so the first answer was flagged,
+  the rewrite kept the sentence and the final answer has it masked. "26" passed only because rows held 26.10 and 26.15
+  (November's discount, a North day's revenue): backed by chance. The rest is right: both months, North as the
+  driver with its two months.
+- report 0-4 (all fail): every run saved the build-report playbook's example nearly as it stands (visuals
+  kpi-revenue, rev-region and rev-month on page "main", named "Overview"), whose line is on calendar.month alone: 12
+  points that add 2023, 2024 and 2025 together, where bench.report_ok wants one point per month of every year (36). In
+  1.1.0 every run called semantic_model before saving (the digest listed only calendar.day) and 3 of 5 grouped it by
+  calendar.year and calendar.month; now the digest lists calendar.month (M2.2's fix 3e), no run calls semantic_model
+  and none adds the year. Every first answer was also flagged for "three" (its count of the three visuals asked for)
+  and "Overview" (the page name, in the agent's own save_report call and the playbook, in no ABI result until
+  list_reports). After the retry, runs 0, 2 and 3 still counted them ("with [not verified] visuals", "All [not
+  verified] use the revenue measure") and ended masked; runs 1 and 4 ended clean and fail on the line alone.
+
+ask: all 10 clean, each region's 2025 figure after its name, in 2 turns (semantic_query and abi_vault, then the answer);
+the query's own date range grounds now (1.1 masked its end date in 19 of 20). The two slow runs waited for the model's
+first token: 21.0 s (run 6, 25.1 s in all) and 7.2 s (run 4, 11.9 s). No question changed the project: the 30 ask and
+why runs called only semantic_query (182 times), abi_vault (27), data_quality (16), abi_show (1) and the missing tool
+(3), and the bench found each passing run's project as it was. The runs' records: logs/bench-1104085745.jsonl (north)
+and logs/bench-1104090801.jsonl (retail), on this Mac only.
