@@ -1,6 +1,7 @@
 # docker compose up -d   then open http://localhost:8790 and sign in as ABI_USER.
 # Put the settings in a .env file next to this one (never committed): see .env.example.
 # Prebuilt image: docker compose pull && docker compose up -d   (else `up` builds it here). Upgrade: scripts/upgrade.sh
+# HTTPS: COMPOSE_PROFILES=https and ABI_DOMAIN in .env put Caddy in front (docker/Caddyfile; README: Use it from other devices).
 # 1.0's .env names (ABI_PI_PROJECT, ABI_PI_LLM_BASE, ...) still work.
 name: abi
 services:
@@ -8,7 +9,7 @@ services:
     build: .
     image: ${ABI_IMAGE:-ghcr.io/himanshu8881212/abi:latest}
     container_name: abi
-    ports: ["${ABI_PORT:-8790}:8790"]              # ABI_PORT in .env when 8790 is taken
+    ports: ["${ABI_BIND:+${ABI_BIND:-}:}${ABI_PORT:-8790}:8790"]  # ABI_PORT when 8790 is taken; ABI_BIND=127.0.0.1: this machine only
     environment:
       ABI_USER: ${ABI_USER:?set ABI_USER in .env (the workspace owner)}
       ABI_PASSWORD: ${ABI_PASSWORD:?set ABI_PASSWORD in .env (8 characters or more)}
@@ -19,11 +20,28 @@ services:
       ABI_PI_LLM_MODEL: ${ABI_LLM_MODEL:-${ABI_PI_LLM_MODEL:-}}  # the model's id at that endpoint, e.g. gpt-5 or llama3.1
       ABI_PI_LLM_API: ${ABI_LLM_API:-${ABI_PI_LLM_API:-}}        # optional: openai-completions (default with a model) or openai-responses
       ABI_PI_SECRET_KEY: ${ABI_SECRET_KEY:-${ABI_PI_SECRET_KEY:-}}  # encrypts the API keys admins save; empty: a key file in the volume
-      ABI_PUBLIC_URL: ${ABI_PUBLIC_URL:-}         # optional: the address people open (https://abi.example.com): email links and SSO
+      # the address people open (emailed links, single sign-on): with HTTPS, https://ABI_DOMAIN unless .env says otherwise
+      ABI_PUBLIC_URL: ${ABI_PUBLIC_URL:-${ABI_DOMAIN:+https://${ABI_DOMAIN:-}${ABI_HTTPS_PORT:+:${ABI_HTTPS_PORT:-}}}}
     volumes:
       - abi-data:/data                           # everything: the engine's database and lake, projects, chats, packs
     extra_hosts: ["host.docker.internal:host-gateway"]   # a model on this machine (Ollama) on Linux too
     restart: unless-stopped
+  https:  # the https profile: Caddy in front with a certificate, http sent on to https (docker/Caddyfile)
+    image: caddy:2.11.7
+    profiles: [https]
+    command: [sh, -c, '[ -n "$$ABI_DOMAIN" ] || { echo "Set ABI_DOMAIN in .env." >&2; exit 1; }; exec caddy run --config /etc/caddy/Caddyfile']
+    ports: ["${ABI_HTTP_PORT:-80}:80", "${ABI_HTTPS_PORT:-443}:${ABI_HTTPS_PORT:-443}"]  # when 80 or 443 is taken
+    environment:
+      ABI_DOMAIN: ${ABI_DOMAIN:-}
+      ABI_HTTPS_PORT: ${ABI_HTTPS_PORT:-443}
+      ABI_TLS: ${ABI_TLS:-${ABI_TLS_CERT:+/certs/cert.pem /certs/key.pem}}  # empty: a public certificate; internal; your files
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${ABI_TLS_CERT:-./docker/Caddyfile}:/certs/cert.pem:ro  # your own certificate and key when .env names them, else a stand-in
+      - ${ABI_TLS_KEY:-./docker/Caddyfile}:/certs/key.pem:ro
+      - caddy:/data                                             # its certificates, keys and certificate authority
+    restart: unless-stopped
 volumes:
   abi-data:
     name: ${ABI_VOLUME:-abi_abi-data}            # an install from 1.0 keeps its volume: ABI_VOLUME=abi-pi_abi-pi-data
+  caddy:

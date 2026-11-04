@@ -1,0 +1,16 @@
+# HTTPS in front of ABI: the https profile in docker-compose.yml (README: Use it from other devices). ABI_DOMAIN is
+# the name or address people open. ABI_TLS: empty, a public certificate (Let's Encrypt) for a public name; internal,
+# Caddy's own certificate authority for a LAN name or an IP address; or your own two files (ABI_TLS_CERT, ABI_TLS_KEY).
+# Caddy sends http on to https and streams both ways with no proxy timeout: the page's event stream (/events), a long
+# upload and its load pass as they come.
+{
+	default_sni {$ABI_DOMAIN} # a browser sends no name for an IP address: it gets ABI_DOMAIN's certificate
+}
+{$ABI_DOMAIN}:{$ABI_HTTPS_PORT:443} {
+	tls {$ABI_TLS} {
+		protocols tls1.2 tls1.3 # Caddy's default: the block lets ABI_TLS be empty
+	}
+	reverse_proxy abi:8790 {
+		flush_interval -1
+	}
+}

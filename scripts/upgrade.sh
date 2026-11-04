@@ -3,6 +3,7 @@
 # (backups/abi-<time>.tar), then the new image (pulled, else built here) on the same data volume, then wait until it
 # is healthy. An install from 1.0 (compose project abi-pi) moves over too: its volume stays where it is (ABI_VOLUME
 # in .env) and its old container goes once the backup is done. Restore a backup: scripts/backup.sh (restore).
+# The profiles .env names (COMPOSE_PROFILES=https: Caddy in front) come along: plain docker compose reads them.
 #
 #   git pull && scripts/upgrade.sh
 set -eu
@@ -28,9 +29,10 @@ docker compose pull 2>/dev/null || docker compose build
 docker compose up -d
 printf 'waiting for ABI'
 for _ in $(seq 60); do
-  case $(docker inspect abi --format '{{.State.Health.Status}}' 2>/dev/null) in
-    healthy) echo " ok: $(docker exec abi cat /data/VERSION)"; exit 0 ;;
+  C=$(docker compose ps -q abi)  # this install's new container, never another install's on this machine
+  case $(docker inspect "$C" --format '{{.State.Health.Status}}' 2>/dev/null) in
+    healthy) echo " ok: $(docker exec "$C" cat /data/VERSION)"; exit 0 ;;
   esac
   printf .; sleep 5
 done
-echo; echo "Not healthy after 5 minutes: docker logs abi" >&2; exit 1
+echo; echo "Not healthy after 5 minutes: docker compose logs abi" >&2; exit 1

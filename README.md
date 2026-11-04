@@ -156,24 +156,42 @@ their name. Both need `ABI_PUBLIC_URL`, the address people open, so the links co
 | `ABI_USER` | yes | The workspace owner, created on the first start. |
 | `ABI_PASSWORD` | yes | The owner's password, 8 characters or more. |
 | `ABI_PORT` | no | The port on this machine. Default `8790`. |
+| `ABI_BIND` | no | The address that port listens on: `127.0.0.1` for this machine only (HTTPS in front, or your own proxy). Default: every address. |
 | `ABI_PROJECT` | no | The project to open first; created if missing. Default `main`. |
 | `ABI_WORKSPACE` | no | Its workspace. Default `main`. |
 | `ABI_LLM_BASE`, `ABI_LLM_KEY`, `ABI_LLM_MODEL` | no | One OpenAI-compatible model endpoint, its key and the model's id there (e.g. `https://api.openai.com/v1`, `gpt-5`), instead of Settings. |
 | `ABI_LLM_API` | no | `openai-completions` (the default with a model) or `openai-responses`. |
-| `ABI_PUBLIC_URL` | no | The address people open, e.g. `https://abi.example.com`: emailed links and single sign-on return there. |
+| `ABI_PUBLIC_URL` | no | The address people open, e.g. `https://abi.example.com`: emailed links and single sign-on return there. With HTTPS on (below), `https://ABI_DOMAIN` by itself. |
+| `COMPOSE_PROFILES`, `ABI_DOMAIN`, `ABI_TLS`, `ABI_TLS_CERT`, `ABI_TLS_KEY`, `ABI_HTTP_PORT`, `ABI_HTTPS_PORT` | no | HTTPS in front of ABI (below). |
 | `ABI_VOLUME` | no | The data volume's name. Default `abi_abi-data`; an install from 1.0 keeps `abi-pi_abi-pi-data` (`scripts/upgrade.sh` sets it). |
 | `ABI_IMAGE` | no | The image to run. Default `ghcr.io/himanshu8881212/abi:latest` (pulled with `docker compose pull`, else built here). |
 | `ABI_SECRET_KEY` | no | A Fernet key that encrypts the API keys admins save. Default: a key file in the volume. Make one with `python3 -c "import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())"`. |
 
 ### Use it from other devices (HTTPS)
 
-ABI serves plain HTTP. Other machines on your network can open `http://<server>:8790`, but for anything beyond a
-trusted network put it behind an HTTPS reverse proxy that sends `X-Forwarded-Proto: https`. With
-[Caddy](https://caddyserver.com) that's one line:
+ABI's own port serves plain HTTP: fine on this machine or a trusted network (`http://<server>:8790`). For anything
+else, turn on HTTPS: [Caddy](https://caddyserver.com) in front with a certificate, and http sent on to https. Add to
+`.env`:
 
-```sh
-caddy reverse-proxy --from abi.example.com --to localhost:8790
+```ini
+COMPOSE_PROFILES=https       # docker compose (and scripts/upgrade.sh) start Caddy too
+ABI_DOMAIN=abi.example.com   # the name or address people open
+ABI_BIND=127.0.0.1           # ABI's own port for this machine only: people come in over HTTPS
 ```
+
+then `docker compose up -d` and open `https://abi.example.com`. The certificate:
+
+- **A public name** that points at this machine, with ports 80 and 443 open to the internet: Caddy gets one from
+  Let's Encrypt and renews it.
+- **A LAN name or an IP address**: add `ABI_TLS=internal` for one from Caddy's own authority. Browsers warn until a
+  device trusts its root: `docker compose cp https:/data/caddy/pki/authorities/local/root.crt .` and add that file to
+  the device's trusted certificates.
+- **Your own** (a company authority, an air-gapped network): `ABI_TLS_CERT=/path/fullchain.pem` and
+  `ABI_TLS_KEY=/path/key.pem`; after you replace the files, `docker compose restart https`.
+
+`ABI_PUBLIC_URL` becomes `https://ABI_DOMAIN` by itself, so emailed links and single sign-on come back over HTTPS.
+Port 443 or 80 taken? `ABI_HTTPS_PORT=8443`, `ABI_HTTP_PORT=8080` (a public certificate needs one of the two kept).
+Your own proxy instead: `ABI_BIND=127.0.0.1`, and have it send `X-Forwarded-Proto: https`.
 
 ### Update
 
@@ -183,16 +201,16 @@ scripts/upgrade.sh
 ```
 
 It backs up the running install to `backups/`, pulls the new image (or builds it here), starts it on the same volume
-and waits until it's healthy. An install from 1.0 moves over too: it keeps its volume and its `.env`. The volume
-remembers its version (`docker exec abi cat /data/VERSION`) and an older image refuses it: to go back, restore a
-backup into a new volume (below).
+and waits until it's healthy; Caddy comes along when HTTPS is on (`COMPOSE_PROFILES` in `.env`). An install from 1.0
+moves over too: it keeps its volume and its `.env`. The volume remembers its version (`docker exec abi cat
+/data/VERSION`) and an older image refuses it: to go back, restore a backup into a new volume (below).
 
 ### If something goes wrong
 
 | What you see | What to do |
 |---|---|
 | `set ABI_PASSWORD in .env` | `.env` is missing or the line is empty: step 2. |
-| `port is already allocated` | Set `ABI_PORT` in `.env`. |
+| `port is already allocated` | Set `ABI_PORT` in `.env` (with HTTPS on, also `ABI_HTTP_PORT` and `ABI_HTTPS_PORT`). |
 | The chat says nothing for two minutes | The model isn't reachable: check Govern › Settings (the key, the model id, the URL). |
 | A file is refused | The message under the form says why; CSV, TSV, Excel, JSON, Parquet and Avro files load (step 6). |
 | `ABI isn't answering right now` | The engine is still starting or restarting: wait a minute, or check `docker compose logs`. |
@@ -235,7 +253,8 @@ requests, and its revenue by region matched an independent DuckDB sum to the cen
 
 ### Known limits
 
-- HTTP only; use a reverse proxy for HTTPS (above).
+- HTTPS (above) gets a public certificate only for a name the internet reaches on port 80 or 443 (no DNS
+  challenge); anywhere else the certificate is Caddy's own or yours.
 - Email (invitations, password resets, flow emails) needs a mail server; until then add people with a password, set
   forgotten ones in Users & access, and flows deliver to the app's inbox.
 - A database source copies one whole table (no custom query) and appends the rows past its increasing column each
