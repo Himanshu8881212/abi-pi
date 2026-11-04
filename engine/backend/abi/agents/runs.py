@@ -35,7 +35,7 @@ from abi.flows import inbound
 from abi.project import ID, git, imports
 from abi.project.bundle import bundle, dumps
 from abi.security import MEMBERS, Role, User, role_in
-from abi.semantic import SemanticQuery, lineage
+from abi.semantic import SemanticQuery, lineage, uses
 from abi.tools import builtin
 
 MAX_DEPTH = 2  # AGENT-AS-TOOL: an agent may ask agents that ask agents, no further
@@ -72,6 +72,9 @@ def _refused(name: str, payload: dict, allowed: list[str], files: dict, g: dict,
             q = SemanticQuery.model_validate(q).model_dump(mode="json")
         except ValidationError:
             q = None  # actions.run refuses it with the details
+    if name == "semantic_query" and isinstance(q, dict) and isinstance(payload.get("expressions"), list):
+        ms, cols = uses(payload["expressions"])  # M2.1: what its inline expressions read is in the query too
+        q = q | {"measures": q["measures"] + ms, "dimensions": q["dimensions"] + cols}
     if isinstance(q, dict) and isinstance(q.get("tool"), str):
         if q["tool"] not in allowed:
             return f"Tool '{q['tool']}' is not one of your tools."

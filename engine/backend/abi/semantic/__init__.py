@@ -32,7 +32,7 @@ from sqlglot import exp
 
 from abi import actions, db, ops, storage, transform, writeback
 from abi.actions import ActionFailed, action, audit, current_user
-from abi.project import git
+from abi.project import ID, git
 from abi.security import Role, User, role_in, usage
 from abi.semantic import detect, mel, planner, rls
 from abi.semantic import live as _live
@@ -342,15 +342,53 @@ class SemanticQuery(BaseModel):
     limit: int | None = Field(None, ge=1, le=100_000)
 
 
-def plan(project: str, q: dict, user_id: int | None = None) -> tuple[dict, str, list[str], list[dict], dict]:
+EXPRESSIONS = 10  # M2.1: inline expressions per query
+
+
+def _inline(expressions: list[dict], ms: list[dict], asked: list[str]) -> None:
+    """M2.1: 400 naming the first refused one of a semantic query's inline expressions (mel.inline). A name is a new
+    result column: never a measure ID, a measure the query asks for or `grouping_id`."""
+    if len(expressions) > EXPRESSIONS:
+        raise ActionFailed(400, f"A query takes at most {EXPRESSIONS} expressions; split it into several queries.")
+    ids = {m["id"] for m in ms}
+    taken = {*ids, *asked, "grouping_id"}
+    for e in expressions:
+        try:
+            if e["name"] in taken:
+                raise mel._Bad(f"'{e['name']}' already names a measure or a column of this query.",
+                               "Ask for that measure, or give the expression a name of its own.")
+            mel.inline(e["expr"], ids)
+        except mel._Bad as x:
+            raise ActionFailed(400, f"Expression '{e['name']}': {x} {x.fix}") from None
+        taken.add(e["name"])
+
+
+def uses(expressions: list) -> tuple[list[str], list[str]]:
+    """M2.1: (measure IDs, table.column columns) that a query's inline expressions name, for scope checks (a named
+    model, a custom agent's scope, D-24); one that doesn't parse names nothing here, as planning refuses it."""
+    nodes = []
+    for e in expressions:
+        if isinstance(e, dict) and isinstance(e.get("expr"), str):
+            with contextlib.suppress(mel._Bad):
+                nodes += mel._walk(mel.parse(e["expr"]))
+    return [n.name for n in nodes if type(n) is mel.Ref], [f"{n.table}.{n.column}" for n in nodes if type(n) is mel.Col]
+
+
+def plan(project: str, q: dict, user_id: int | None = None,
+         expressions: list[dict] = ()) -> tuple[dict, str, list[str], list[dict], dict]:
     """Plan a semantic query without running it (S-02 plus order and limit): (validated query, DuckDB SQL, result
     columns, every measure of the project, ClickHouse reads {DuckDB table name: (live table, ClickHouse SQL)}).
     RP-5 shows this SQL. Raises ActionFailed(400) with the planner's reason. A user restricted by row-level security
-    (SE-6) gets no query copy or pair table: they're built unfiltered, so its plan reads the (filtered) tables."""
+    (SE-6) gets no query copy or pair table: they're built unfiltered, so its plan reads the (filtered) tables.
+    M2.1 `expressions` ([{name, expr}], semantic_query's): planned as more measures of this query only, after its
+    measures, through the same row and column security; never saved (rule 7)."""
     from abi.semantic import model  # not at top: model imports this package
 
-    q = SemanticQuery.model_validate(q).model_dump(mode="json")
     ms = model._read(project, "measures.json").get("measures", [])
+    _inline(expressions, ms, q.get("measures") or [])
+    exprs = {e["name"]: e["expr"] for e in expressions}
+    q = SemanticQuery.model_validate({**q, "measures": [*q["measures"], *exprs]} if exprs else q).model_dump(mode="json")
+    measures = {m["id"]: m["expression"] for m in ms} | exprs
     mj = model._read(project, "model.json")
     # ponytail: ~7 ms of catalog reads per plan (S-09-fix-3); cache them by snapshot ID + model.json if that shows
     have = _columns_of(storage.lake(project).cursor(), "query")
@@ -365,11 +403,11 @@ def plan(project: str, q: dict, user_id: int | None = None) -> tuple[dict, str, 
     try:
         types = _live.columns(project)
         live = {t: (_live.table_sql(project, t), types.get(t, {})) for t in _live._sources(project)}
-        sql = planner.plan(q, {m["id"]: m["expression"] for m in ms}, mj, copies, live, reads, days, rates, joins)
+        sql = planner.plan(q, measures, mj, copies, live, reads, days, rates, joins)
     except (planner.PlanError, mel.MelError) as e:
         raise ActionFailed(400, str(e))
     if hid := rls.hidden(project, user_id):  # D-110: refused, never computed over a column the user can't see
-        trees = mel.compile({m["id"]: m["expression"] for m in ms})  # compiles: plan() just did
+        trees = mel.compile(measures)  # compiles: plan() just did
         # COL-SEC.2: and every relationship key the plan joins on (the planner lists them)
         used = {*q["dimensions"], *(f["column"] for f in q["filters"])} | {
             f"{n.table}.{n.column}" for m in q["measures"] for n in mel._walk(trees[m]) if type(n) is mel.Col} | {
@@ -387,17 +425,20 @@ def plan(project: str, q: dict, user_id: int | None = None) -> tuple[dict, str, 
             f"{exp.to_identifier(c, quoted=True).sql('duckdb')} {'DESC' if d else 'ASC'} NULLS LAST" for c, d in order)
     if q["limit"]:
         sql += f" LIMIT {int(q['limit'])}"
+    if exprs:
+        q["expressions"] = list(expressions)  # what was asked (OB-1 query_log)
     return q, sql, cols, ms, reads
 
 
-def query(project: str, q: dict, user_id: int | None = None) -> dict:
-    """Run a semantic query: plan, execute. Raises ActionFailed(400) with the planner's or DuckDB's reason."""
-    q, sql, cols, ms, reads = plan(project, q, user_id)
+def query(project: str, q: dict, user_id: int | None = None, expressions: list[dict] = ()) -> dict:
+    """Run a semantic query: plan, execute. Raises ActionFailed(400) with the planner's or DuckDB's reason.
+    `expressions` as in `plan`; the result's `measures` names each by its MEL."""
+    q, sql, cols, ms, reads = plan(project, q, user_id, expressions)
     try:
         rows = execute(project, sql, q, user_id, reads=reads)
     except duckdb.Error as e:
         raise ActionFailed(400, f"The query failed: {e}")
-    names = {m["id"]: m["name"] for m in ms}
+    names = {m["id"]: m["name"] for m in ms} | {e["name"]: e["expr"] for e in expressions}
     rows = [tuple(map(tidy, r)) for r in rows]
     return {"columns": cols, "measures": {m: names[m] for m in q["measures"]}, "rows": rows,
             "filters": q["filters"],  # AG-2: the members it filtered on ground the answer's names (LLM-2-fix-2)
@@ -405,20 +446,29 @@ def query(project: str, q: dict, user_id: int | None = None) -> dict:
             **locale(project)}  # SE-13: the time zone and display currency these numbers are in
 
 
+class Expression(BaseModel):
+    name: str = Field(pattern=ID, description="the column it adds (not a measure ID)")
+    expr: str = Field(max_length=1000, description="MEL over measure IDs, e.g. [m] - PREVIOUS_PERIOD([m])")
+
+
 class QueryInput(SemanticQuery):
     project: str = Field(pattern=storage.PROJECT)
     model: str | None = Field(None, description="a named model of the project (semantic_model lists them): the query may use only its tables and measures")
+    expressions: list[Expression] = Field([], description="comparisons of measures for this query only, never saved; each is a result column after the measures")
 
 
 @action(Role.viewer)
 def semantic_query(conn, user: User, args: QueryInput) -> dict:
-    """Answers a data question through the semantic model: measure IDs, grouped by table.column dimensions, with filters, optional totals, order and limit. Returns the columns (dimensions, then measure IDs), each measure's display name and the rows. Every number you state must come from these rows."""
-    q = args.model_dump(mode="json", exclude={"project", "model"})
+    """Answers a data question through the semantic model: measure IDs, grouped by table.column dimensions, with filters, optional totals, order and limit. Returns the columns (dimensions, then measure IDs), each measure's display name and the rows. Every number you state must come from these rows. `expressions` compare measures in this query only (never saved), for what no measure (e.g. a *_change) gives: each {name, expr} is one more column, which order_by takes; expr is MEL over measure IDs with + - * /, DIVIDE, ABS, PREVIOUS_PERIOD, PREVIOUS_YEAR, YTD, QTD, MTD, ROLLING, WHERE and IGNORE, and no number but 0, 1 and 100. A month against the one before: group by calendar.year, calendar.month and the dimension to break down, filter that month, and ask {name: "change", expr: "[m] - PREVIOUS_PERIOD([m])"} and {name: "change_pct", expr: "DIVIDE([m] - PREVIOUS_PERIOD([m]), ABS(PREVIOUS_PERIOD([m])))"} (a fraction: -0.25 is -25%); order_by change ranks the members. DIVIDE([m], IGNORE([m], table.column)) is each member's share of the total."""
+    q = args.model_dump(mode="json", exclude={"project", "model", "expressions"})
+    exprs = [e.model_dump() for e in args.expressions]
     if args.model:
         from abi.semantic import model  # not at top: model imports this package
 
-        model.in_scope(args.project, args.model, q["measures"], q["dimensions"] + [f["column"] for f in q["filters"]])
-    return query(args.project, q, user.id)
+        ms, cols = uses(exprs)  # what the expressions read counts too
+        model.in_scope(args.project, args.model, [*dict.fromkeys(q["measures"] + ms)],
+                       [*dict.fromkeys(q["dimensions"] + [f["column"] for f in q["filters"]] + cols)])
+    return query(args.project, q, user.id, exprs)
 
 
 EXPORT_BATCH = 65_536  # rows per Arrow batch (D-17); DuckDB reserves a whole batch per column (duckdb#26270)

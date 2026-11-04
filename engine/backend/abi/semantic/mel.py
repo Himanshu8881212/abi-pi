@@ -334,3 +334,42 @@ def compile(measures: dict[str, str], columns: dict[str, set[str] | None] | None
     for m in order:
         done[m] = _inline(trees[m], done)
     return {m: done[m] for m in measures}
+
+
+INLINE = ("+", "-", "*", "/", "NEG", "DIVIDE", "ABS")  # M2.1: the operators of a semantic query's inline expressions
+DEPTH = 8
+
+
+def inline(text: str, measures: set[str]):
+    """M2.1: a semantic query's inline expression (evaluated for that query, never saved) as its parse tree: `measures`
+    ([id]) combined with + - * /, DIVIDE, ABS, the time functions, WHERE and IGNORE, with no constant but 0, 1 and
+    100 and none computed from constants alone, so every figure it gives comes from the data (AGENTS.md rule 3).
+    Raises _Bad; compile() checks the rest (WHERE conditions, ROLLING) as for any measure."""
+    has = lambda n: any(type(x) is Ref for x in _walk(n))  # noqa: E731
+    allowed = "Allowed: [measure-id], + - * /, DIVIDE, ABS, " + ", ".join(sorted(TIME)) + ", WHERE and IGNORE."
+
+    def ok(n, depth: int) -> None:
+        t = type(n)
+        if depth > DEPTH:
+            raise _Bad(f"It nests more than {DEPTH} levels deep.", "Split it into simpler expressions.")
+        if t is Ref and n.name not in measures:
+            raise _Bad(f"[{n.name}] is not a measure of this project.",
+                       "Use one of: " + ", ".join(sorted(f"[{m}]" for m in measures)) + ".")
+        if t is Lit and not (isinstance(n.value, Decimal) and n.value in (0, 1, 100)):
+            raise _Bad(f"The number {n.value} isn't allowed: an expression's only numbers are 0, 1 and 100." if isinstance(
+                n.value, Decimal) else "Text, TRUE, FALSE and NULL go only in a WHERE condition.", allowed)
+        if t in (Agg, Conv, Col, _Word):
+            what = f"{n.fn}(...)" if t is Agg else f"{n.table}.{n.column}" if t is Col else "CONVERT(...)" if t is Conv else f"'{n.name}'"
+            raise _Bad(f"{what} isn't a measure: an expression combines existing measures, and a column goes only in a"
+                       " WHERE condition or IGNORE.", allowed)
+        if t is Op and n.op not in INLINE:
+            raise _Bad(f"{n.op} isn't allowed in an expression.", allowed)
+        if t is Op and n.op != "NEG" and not any(map(has, n.args)):
+            raise _Bad("Arithmetic between constants isn't allowed: each operation needs a measure.", allowed)
+        for k in n.args if t is Op else (n.expr,) if t in (Where, Ignore, Time) else ():
+            ok(k, depth + 1)
+
+    ok(tree := parse(text), 1)
+    if not has(tree):
+        raise _Bad("It names no measure.", "Combine measures, e.g. [revenue] - PREVIOUS_PERIOD([revenue]).")
+    return tree
