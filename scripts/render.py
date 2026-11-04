@@ -170,11 +170,18 @@ def shell(title: str, sub: str, body: str, script: str = "") -> str:
             f"<span class=sub>{sub}</span></header><main>{body}</main>{script}</body></html>")
 
 
-def report_pages(project: str, rid: str, rep: dict, measures: dict) -> list[dict]:
-    """Each page's visuals with ABI's visual_data rows (or the text, or ABI's error) and a "how" note."""
+def report_pages(project: str, rid: str, rep: dict, measures: dict, ex=None) -> list[dict]:
+    """Each page's visuals with ABI's visual_data rows (or the text, or ABI's error) and a "how" note; the visuals
+    asked at once through `ex` (an executor asking as the person: app.Reads); without one, no rows."""
     import abi  # noqa: PLC0415 (sibling; REST as the signed-in person)
 
-    pages = []
+    def fetch(item: dict, page: str) -> None:
+        try:
+            item["data"] = abi.call("visual_data", project=project, report=rid, page=page, visual=item["id"])
+        except abi.ActionError as e:
+            item["error"] = str(e.body.get("message"))
+
+    pages, todo = [], []
     for p in rep.get("pages", []):
         vs = []
         for v in p.get("visuals", []):
@@ -187,12 +194,11 @@ def report_pages(project: str, rid: str, rep: dict, measures: dict) -> list[dict
                 item["text"] = v.get("text") or ""
                 vs.append(item)
                 continue
-            try:
-                item["data"] = abi.call("visual_data", project=project, report=rid, page=p["id"], visual=v["id"])
-            except abi.ActionError as e:
-                item["error"] = str(e.body.get("message"))
+            todo.append((item, p["id"]))
             vs.append(item)
         pages.append({"id": p["id"], "name": p.get("name"), "visuals": vs})
+    if ex:
+        list(ex.map(lambda t: fetch(*t), todo))  # all in (another error than ABI's raises here)
     return pages
 
 

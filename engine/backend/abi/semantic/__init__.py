@@ -345,7 +345,9 @@ class SemanticQuery(BaseModel):
 
 EXPRESSIONS = 10  # M2.1: inline expressions per query
 CONTEXTS = 4  # M2 review: the distinct periods and IGNOREs a query's expressions step through (each a scan and a join)
-TIMEOUT = 60  # s: a semantic_query or explain_change read still running then is stopped (sql_query's SE-10 limit)
+# s: a semantic_query, explain_change, visual_data or dataset_data read still running then is stopped (DuckDB's
+# interrupt) and answers a plain 400; sql_query's SE-10 limit is the same 60 by default (M3.3)
+TIMEOUT = float(os.environ.get("ABI_QUERY_TIMEOUT", "60"))
 
 
 def _steps(n, path: tuple = ()) -> set:

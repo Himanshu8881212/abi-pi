@@ -580,3 +580,35 @@ logs/bench-1104132002.jsonl and logs/bench-1104132213.jsonl, on this Mac only.
 
 Against PLAN.md's gate as worded (above) these 10 why runs are 8 passes, short of 18 in 20 at this rate, both misses the
 count words D-22 masks; 5 runs a dataset can't decide it either way.
+
+## 1.2 M3.3 pages (MacBook Air, 8 cores, 24 GB)
+
+4 Nov 2026 14:03-15:21, release-1.2 after 56df773 with M3.3 uncommitted beside the other M3 items' work in the same
+tree (M3.1's per-project locks, committed at 14:51 as 04e84c0; M3.2's and M3.4's not yet), on this machine's engine
+restarted with it (14:03, and at 15:14 for the last step). `perf.py project perf_brewline`: Brewline 0.01, 73,941 orders, its Overview
+report of six visuals; `perf.py pages --sessions 20` (20 people: Viewers and Editors), then `--rls cafes.cafe_id` (20
+Viewers with a café each), 3 runs each, through an app started here (signed in) on port 8797. Every round's lake
+snapshot was the same at its start and end (9), no error and no dropped connection. The Mac was shared with other
+agents' builds and test suites the whole time: the 1-minute load average at each run's start was 15-128 (M0's: 1.7-2.6),
+so the 1.1.0 rows (a quiet Mac) aren't comparable as times; HEAD's app (the 1.1 page cache: one global lock, one
+computation per person, every ABI call one after another) ran on the same engine and load as a comparison.
+
+| 20 sessions right after a commit, p95 s (3 runs) | no rule | `--rls cafes.cafe_id` |
+|---|---|---|
+| 1.1.0 (M0, quiet Mac) | 9.4 / 9.9 / 10.1 | 14.9 / 15.9 / 16.8 |
+| HEAD's app, this engine (load 15-19; with the rule 29-64) | 40.5 / 37.9 / 55.5 | 91.2 / 125.4 / 92.8 |
+| M3.3 first cut: shared entries, single flight, 6 calls at once, docs in the page (load 15-25; 16-31) | 2.23 / 2.14 / 2.63 | 42.6 / 39.0 / 38.8 |
+| + docs asked by its page, restricted people share the rest (load 26-43; 39-57) | 0.87 / 0.95 / 0.96 | 38.8 / 39.4 / 42.8 |
+| + one row-level security build per person (this commit; load 121-128; 121-126) | 0.90 / 0.82 / 1.79 | 11.5 / 12.9 / 11.9 |
+
+The first round of each run (the people's first pages, after the owner's) was the same within 0.2 s, but for one first
+cut run at 5.6 s and HEAD's rule runs (126-368 s). What each step took off: the 11 lists and six visuals of a page
+computation came to 0.29-0.39 s once asked 6 at once, but `docs` alone took 1.77 s (a worked example is a query per
+measure), so the page no longer carries it (the Docs page asks when shown; the page went from 375 to 268 KB). With
+the rule, 20 people still needed 20 computations: everything but the report rows is now one computation for all
+restricted people (none of it depends on a person's values), and each person's own part is their rows and rules; and a
+person's six visuals asked at once each built that person's row-level security views (rls.context): six cold
+visuals for one restricted Viewer took 1.96 s at once against 1.10 s one after another, and 0.68 s now that their
+reads wait for one build (1.53 s one after another at that load). Engine: Postgres connections pooled (20), a
+connection out of the pool in 0.23 ms against 3 ms for a new one (200 in a loop). PLAN.md's page target is for pve1
+at 50 sessions (M3's measure step).

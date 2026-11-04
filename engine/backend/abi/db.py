@@ -3,8 +3,13 @@
 Connection comes from the standard libpq env vars (PGHOST, PGUSER, PGPASSWORD, PGDATABASE).
 """
 
+import atexit
+import contextlib
 import importlib.metadata
+import logging
+import os
 import re
+import threading
 import time
 import tomllib
 from pathlib import Path
@@ -12,6 +17,7 @@ from pathlib import Path
 import psycopg
 from procrastinate import schema as queue_schema
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool, PoolTimeout  # procrastinate's psycopg[pool]
 
 VERSION = tomllib.loads((Path(__file__).parent.parent / "pyproject.toml").read_text())["project"]["version"]
 # H-03.2: bump with every change to SCHEMA (test_H03_schema_number_bumped pins SCHEMA's sha256 to it), so older code
@@ -633,9 +639,66 @@ CREATE TABLE IF NOT EXISTS backups (
 """
 
 
+POOL = int(os.environ.get("ABI_PG_POOL", "20"))  # M3.3: open connections a process keeps for reuse (0: none, as 1.1)
+
+
+class _Conn(psycopg.Connection):
+    """`with db.connect() as conn:` as ever: commit, or roll back on an error; then a pooled connection goes back to
+    its pool clean (any other closes)."""
+
+    def __exit__(self, *exc) -> None:
+        pool = getattr(self, "_pool", None)
+        try:
+            super().__exit__(*exc)
+        finally:
+            if pool:
+                try:
+                    _clean(self)
+                except Exception:  # noqa: BLE001 - not known clean: the pool opens another in its place
+                    self.close()
+                pool.putconn(self)
+
+
+def _clean(conn: psycopg.Connection) -> None:
+    """A returned connection carries nothing of one person's action to the next: no open transaction, and DISCARD ALL
+    resets the role, search_path and every SET and drops temporary tables, prepared statements and advisory locks."""
+    if conn.info.transaction_status != psycopg.pq.TransactionStatus.IDLE:
+        conn.rollback()
+    conn.autocommit = True  # DISCARD ALL can't run in a transaction
+    conn.execute("DISCARD ALL")
+    conn.autocommit = False
+
+
+_pool: tuple[int, ConnectionPool] | None = None
+_pool_lock = threading.Lock()
+
+
+def _pooled() -> ConnectionPool:
+    global _pool
+    if _pool and _pool[0] == os.getpid():
+        return _pool[1]
+    with _pool_lock:
+        if _pool is None or _pool[0] != os.getpid():  # a forked child opens its own: its parent's sockets aren't its
+            logging.getLogger("psycopg.pool").setLevel(logging.WARNING)  # not a line per connection in the logs
+            # prepare_threshold None: psycopg's own prepared statements would outlive DISCARD ALL in its cache
+            p = ConnectionPool(connection_class=_Conn, kwargs={"row_factory": dict_row, "prepare_threshold": None},
+                               min_size=min(2, POOL), max_size=POOL, check=ConnectionPool.check_connection, open=True, name="abi")
+            atexit.register(lambda pid=os.getpid(): os.getpid() == pid and p.close())  # threads and sockets go first
+            _pool = os.getpid(), p
+        return _pool[1]
+
+
 def connect() -> psycopg.Connection:
-    # ponytail: one connection per call; add psycopg_pool when request rate makes connects show up.
-    return psycopg.connect(row_factory=dict_row)
+    """A Postgres connection for one `with` block: a pooled one when one is free or the pool may open another, else
+    one of its own, closed after (an action holds its connection while its reads open more: waiting for the pool
+    there could wait for ever)."""
+    if POOL > 0:
+        p = _pooled()
+        s = p.get_stats()
+        if s["pool_available"] or s["pool_size"] < POOL:
+            with contextlib.suppress(PoolTimeout):
+                return p.getconn(timeout=0.25)
+    return _Conn.connect(row_factory=dict_row)
 
 
 class Downgrade(RuntimeError):

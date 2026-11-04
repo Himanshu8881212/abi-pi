@@ -20,7 +20,7 @@ def parquet(*csvs) -> list[str]:
     return out
 
 
-TEST_PROJECT = re.compile(r"(pi_app_(test|other)|pi_test_layout|pi_date_test|pi_model_test|yt|(sec|s1)_\d{8})(_pub)?")
+TEST_PROJECT = re.compile(r"(pi_app_(test|other)|pi_test_layout|pi_date_test|pi_model_test|pi_pages_test|yt|(sec|s1)_\d{8})(_pub)?")
 
 
 def drop(projects) -> None:

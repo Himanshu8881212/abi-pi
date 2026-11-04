@@ -280,7 +280,14 @@ def context(project: str, user_id: int, con, snap: int, edited: frozenset, model
     """(the search-path schema of a restricted user's views, {live table: (its ClickHouse filter or None, columns
     hidden from the user)}), built once per lake
     connection and snapshot. The schema name hashes the view SQL, so it is also the user's part of the SE-7 cache key.
-    Filters that read a live table's rows (a relationship into one) are rebuilt per call: live data has no snapshot."""
+    Filters that read a live table's rows (a relationship into one) are rebuilt per call: live data has no snapshot.
+    M3.3: one build per user at a time, so their reads at once (a page's visuals) wait for it instead of each making
+    it (six cold visuals at once took 1.96 s, one after another 1.10 s)."""
+    with storage.project_lock(f"rls user {user_id}", project):
+        return _context(project, user_id, con, snap, edited, model_columns, read)
+
+
+def _context(project: str, user_id: int, con, snap: int, edited: frozenset, model_columns: dict, read) -> tuple[str, dict]:
     from abi.semantic import live, model  # not at top: circular imports
 
     root = git.path(project)  # rules + relationships make the filters; datasets + ML models the ml_<id> denials

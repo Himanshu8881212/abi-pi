@@ -21,6 +21,7 @@ gets ABI's message and preview and the person's click redeems it. Only the actio
 """
 import atexit
 import contextlib
+import hashlib
 import html
 import json
 import os
@@ -38,6 +39,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -1094,7 +1096,9 @@ function agents(box){newBtn(box,'agent');const g=h('div','cards');box.append(g);
   act(c,'Run evaluation set',async()=>{const r=await api('test_agent',{agent:a.id});out.textContent=(r.cases||[]).map(x=>`${x.passed?'✓':'✗'} ${x.question}${x.missing?.length?' · missing '+x.missing.join(', '):''}`).join('\n')||JSON.stringify(r,null,1)});editBtns(c,'agent',a);c.append(out);g.append(c)})}
 
 // ---------- Govern ----------
-function docs(box){const d=D.docs?.projects?.[0];if(!d){box.append(h('p','empty','No documentation yet.'));return}
+function docs(box){if(D.docs==null){box.append(h('p','empty','Reading the documentation from ABI…'));  // asked when shown (the page's data has none: M3.3)
+  api('docs',{}).then(r=>{D.docs=r||{};if(CUR==='docs')show('docs')},e=>{box.textContent=e.message});return}
+ const d=D.docs?.projects?.[0];if(!d){box.append(h('p','empty','No documentation yet.'));return}
  (d.sections||[]).forEach(s=>{const c=card(`${s.number}. ${s.title}`);(s.items||[]).forEach(it=>{c.append(h('h4','',it.title));const t=h('table');
   (it.facts||[]).forEach(([k,v])=>{const r=t.insertRow();r.insertCell().textContent=k;r.insertCell().textContent=typeof v==='string'?v:JSON.stringify(v)});c.append(t)});box.append(c)});
  act(box.firstChild||box,'Regenerate from ABI',async()=>{D.docs=await api('docs',{});show('docs')});
@@ -1310,7 +1314,7 @@ $('#chat .stop').onclick=()=>fetch('/chat/stop',{method:'POST',headers:{'X-Abi-A
   else if(e.type==='open'){location.href='/?p='+encodeURIComponent(e.project)+'#'+encodeURIComponent(e.page)}
   else if(e.type==='mode'){setMode(e.mode);show(CUR);if(e.mode==='viewer'&&!e.published){let seen=0;try{seen=sessionStorage.getItem('abi-unpub');sessionStorage.setItem('abi-unpub','1')}catch(x){}if(!seen)toast('Nothing published yet: Viewer shows the working version until you publish.')}}
   else if(e.type==='vault'){await loadVault();sidebar();show(CUR)}
-  else if(e.type==='note')toast(e.text)}}
+  else if(e.type==='note'){if(e.chat)bubble('sys',e.text);else toast(e.text)}}}
 """
 
 
@@ -1359,38 +1363,64 @@ def app_save(project: str, name: str, data, by: str = "") -> None:
     subprocess.run([*git, "commit", "-q", "-m", f"{name} by {by or 'the app'}"], capture_output=True)  # nothing new: no commit
 
 
-def snapshot(dest: Path, project: str) -> dict:
+AT_ONCE = 6  # ABI calls one page's data has under way at once: the page's lists and its visuals (M3.3)
+ASKED = ("changes", "semantic_model", "list_reports", "list_flows", "ml_models", "list_tools", "list_agents", "readiness",
+         "data_quality", "rls_rules", "history")  # not docs: its worked examples run a query per measure, so the Docs page asks
+
+
+class Reads(ThreadPoolExecutor):
+    """AT_ONCE threads that ask ABI as the person the creating thread acts as (abi.as_user holds per thread)."""
+
+    def __init__(self):
+        super().__init__(AT_ONCE)
+        self.token = abi.token()
+
+    def submit(self, fn, /, *args, **kwargs):
+        def as_them():
+            with abi.as_user(self.token):
+                return fn(*args, **kwargs)
+        return super().submit(as_them)
+
+
+def snapshot(dest: Path, project: str, visuals: bool = True) -> dict:
     """What the page shows: ABI's live state, uncommitted changes included. The folder holds commits only, so the
-    definitions read from it (sources, staged tables' steps, queries) come from a copy with ABI's pending changes applied."""
+    definitions read from it (sources, staged tables' steps, queries) come from a copy with ABI's pending changes applied.
+    Everything it asks ABI is asked at once (Reads), as this person; without `visuals`, the reports' visuals have no rows."""
     import shutil  # noqa: PLC0415
     import tempfile  # noqa: PLC0415
-    pending = read("changes", project)
-    patch = "".join((f.get("patch") or "").rstrip("\n") + "\n" for f in (pending or {}).get("files") or [])
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory() as tmp, Reads() as ex:
+        got = {a: ex.submit(read, a, project) for a in ASKED}
+        pending = got["changes"].result()
+        patch = "".join((f.get("patch") or "").rstrip("\n") + "\n" for f in (pending or {}).get("files") or [])
         if patch.strip():
             shutil.copytree(dest, tmp, ignore=shutil.ignore_patterns(".git", "app.html"), dirs_exist_ok=True)
             if subprocess.run(["git", "apply", "--whitespace=nowarn", "-"], cwd=tmp, input=patch, text=True, capture_output=True).returncode == 0:
                 dest = Path(tmp)  # ponytail: a patch that doesn't apply falls back to the last commit
-        return _snapshot(dest, project, pending)
+        return _snapshot(dest, project, pending, lambda a: got[a].result(), ex if visuals else None)
 
 
-def _snapshot(dest: Path, project: str, pending: dict | None) -> dict:
-    j = render.j
-    sm = read("semantic_model", project) or {}
-    measures = sm.get("measures") or (j(dest / "model/measures.json", {}) or {}).get("measures", [])
-    by_id = {m["id"]: m for m in measures}
-    reports = []
-    for rep in sorted((read("list_reports", project) or {}).get("reports") or [], key=lambda r: r.get("id", "")):
-        pages = render.report_pages(project, rep["id"], rep, by_id)
+def report_data(project: str, specs: list[dict], measures: list[dict], ex: Reads | None) -> list[dict]:
+    """The page's reports: each page's visuals with their rows read through `ex` (None: no rows)."""
+    by_id, reports = {m["id"]: m for m in measures}, []
+    for rep in specs:
+        pages = render.report_pages(project, rep["id"], rep, by_id, ex)
         for p, spec in zip(pages, rep.get("pages", [])):  # the dimension a click filters on
             dims = {v["id"]: ((v.get("query") or {}).get("dimensions") or [None])[0] for v in spec.get("visuals", [])}
             for v in p["visuals"]:
                 v["dim"] = dims.get(v["id"])
         reports.append({"id": rep["id"], "name": rep.get("name"), "pages": pages, "spec": rep})
+    return reports
+
+
+def _snapshot(dest: Path, project: str, pending: dict | None, ask, ex: Reads | None) -> dict:
+    j = render.j
+    sm = ask("semantic_model") or {}
+    measures = sm.get("measures") or (j(dest / "model/measures.json", {}) or {}).get("measures", [])
+    reports = report_data(project, sorted((ask("list_reports") or {}).get("reports") or [], key=lambda r: r.get("id", "")), measures, ex)
     dims = sorted(f"{t}.{c}" for t, cols in (sm.get("columns") or {}).items() if t in (sm.get("tables") or {})
                   for c, ty in cols.items() if any(k in str(ty) for k in ("VARCHAR", "BOOLEAN")) or t == "calendar")
     g = lambda d: [j(f, {}) for f in sorted((dest / d).glob("*.json")) if not f.name.endswith(".eval.json")]  # noqa: E731
-    live = lambda action, key, d: ((read(action, project) or {}).get(key)) or g(d)  # noqa: E731 (status from ABI, else files)
+    live = lambda action, key, d: ((ask(action) or {}).get(key)) or g(d)  # noqa: E731 (status from ABI, else files)
     queries = {d["id"]: d for d in (j(dest / "model/datasets.json", {}) or {}).get("datasets", [])}
     table_steps = {f.stem: (j(f, {}) or {}).get("steps") for f in sorted((dest / "tables").glob("*.json"))}
     sources = {f.stem: j(f, {}) for f in sorted((dest / "sources").glob("*.json"))}
@@ -1404,9 +1434,9 @@ def _snapshot(dest: Path, project: str, pending: dict | None) -> dict:
            "agent_evals": {f.name.removesuffix(".eval.json"): (j(f, {}) or {}).get("cases", []) for f in sorted((dest / "agents").glob("*.eval.json"))}, "glossary": sm.get("glossary") or [], "models": sm.get("models") or [],
            "datasets": [queries.get(d["id"], {}) | d for d in sm.get("datasets") or []], "model": model,
            "columns": sm.get("columns") or {}, "sources": sorted(sources), "source_specs": sources, "table_steps": table_steps,
-           "tables": sorted(model["tables"]), "readiness": read("readiness", project), "pending": pending,
-           "quality": read("data_quality", project), "rls": read("rls_rules", project), "history": (read("history", project) or {}).get("commits", []),
-           "docs": read("docs", project), "sections": sections, "published": published(project.removesuffix("_pub")),
+           "tables": sorted(model["tables"]), "readiness": ask("readiness"), "pending": pending,
+           "quality": ask("data_quality"), "rls": ask("rls_rules"), "history": (ask("history") or {}).get("commits", []),
+           "docs": None, "sections": sections, "published": published(project.removesuffix("_pub")),
            "stamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
     q = out["quality"] or {}
     qi = {c: i for i, c in enumerate(q.get("columns") or [])}
@@ -1634,6 +1664,24 @@ class Hub:
         if any(h.busy for h in self.watchers()):  # one agent per chat: the other window's turn first
             self.emit({"type": "note", "text": "This chat is still running in another window. Wait until it answers, or start a new chat."})
             return
+        with AGENTS:  # an agent starts only in a free slot (ABI_MAX_AGENTS); else the question waits its turn (admit)
+            if not (self.pi and self.pi.poll() is None) and (any(w[0] is self for w in WAITING) or not room(self)):
+                WAITING.append((self, self.chat_id, message, page))
+                self.emit({"type": "note", "chat": True, "text": f"All {MAX_AGENTS} agents are answering other questions:"
+                                                                 " yours starts as soon as one is free."})
+                self.emit({"type": "busy", "on": True})
+                return
+            self.ask(message, page)
+
+    def unwait(self) -> bool:
+        """Stop pressed while the question waits for an agent: it goes."""
+        with AGENTS:
+            n = len(WAITING)
+            WAITING[:] = [w for w in WAITING if w[0] is not self]
+            return len(WAITING) < n
+
+    def ask(self, message: str, page: str) -> None:
+        """The question to this chat's agent, started first if it isn't running (in a slot: chat, admit)."""
         if not self.pi or self.pi.poll() is not None:
             env = {**os.environ, "ABI_TOKEN": self.token or abi.token(), "ABI_APP_URL": self.url, "ABI_APP_PROJECT": self.project,
                    "ABI_APP_AGENT_KEY": self.agent_key, "ABI_APP_CLIENT": self.hid}
@@ -1734,14 +1782,48 @@ class Hub:
                 final, failed, tried, by = "", "", [], ""
                 self.busy = False
                 self.emit({"type": "busy", "on": False})
+                admit()  # this agent may now make room for a waiting question
         if self.busy and self.pi is proc:  # the agent ended without an answer (it couldn't start, or it crashed): say so
             self.busy = False
             self.emit({"type": "busy", "on": False})
             self.emit({"type": "answer", "text": "The agent stopped before it could answer (details in logs/pi-stderr.log). Try again; if it keeps happening, check the model settings (Govern › Settings)."})
+        admit()
 
 
 HUBS: dict[str, Hub] = {}
 USAGE_LOCK = threading.Lock()
+MAX_AGENTS = int(os.environ.get("ABI_MAX_AGENTS", "8"))  # the chats' Pi processes running at once (M3.3)
+AGENTS = threading.Lock()  # a slot is taken or given only under it
+WAITING: list[tuple] = []  # (hub, chat ID, message, page): questions waiting for a slot, first asked first
+
+
+def room(hub: Hub) -> bool:
+    """A slot for hub's agent (AGENTS held): fewer than MAX_AGENTS run, or the one idle longest stops for it (its chat
+    starts again from its own session the next time, as after the idle sweep)."""
+    running = [h for h in list(HUBS.values()) if h is not hub and h.pi and h.pi.poll() is None]
+    if len(running) < MAX_AGENTS:
+        return True
+    if quiet := min((h for h in running if not h.busy), key=lambda h: h.last, default=None):
+        quiet.pi.terminate()
+        quiet.pi = None
+    return quiet is not None
+
+
+def admit() -> None:
+    """An answer ended or an agent stopped: waiting questions start in the slots now free, first asked first (one asked
+    in a chat the person has since left goes)."""
+    with AGENTS:
+        while WAITING:
+            hub, cid, message, page = WAITING[0]
+            if hub.chat_id == cid and not (hub.pi and hub.pi.poll() is None) and not room(hub):
+                return
+            WAITING.pop(0)
+            if hub.chat_id == cid:
+                try:
+                    hub.ask(message, page)
+                except Exception as e:  # noqa: BLE001 (this thread reads another chat's agent: say it in this one)
+                    hub.emit({"type": "busy", "on": False})
+                    hub.emit({"type": "note", "chat": True, "text": f"The agent couldn't start ({type(e).__name__}). Try again."})
 
 
 def usage_totals(days: int = 30, f: Path | None = None) -> dict:
@@ -1767,31 +1849,104 @@ def usage_totals(days: int = 30, f: Path | None = None) -> dict:
             row["cost"] = round(row["cost"] + r.get("cost", 0), 6)
             row["unpriced"] += not r.get("cost") and any(r.get(t) for t in ("input", "output", "cacheRead", "cacheWrite"))
     return {"days": days, **{k: [{"name": n, **v} for n, v in sorted(d.items(), key=lambda x: -x[1]["output"])] for k, d in by.items()}}
-_SNAP: dict[tuple, dict] = {}
-_SNAP_LOCK = threading.Lock()
+_SNAP: dict[tuple, dict] = {}  # (project, its version here, role, what of the rules applies) -> the page data of all alike
+_FLIGHT: dict[tuple, Future] = {}  # the computations under way: one per key, the others asking wait for it
+_GEN: dict[str, int] = {}  # project -> version: changed() moves it on, so nothing computed before is served after
+_SNAP_LOCK = threading.Lock()  # these three only, never held while computing
+_PAGES = threading.BoundedSemaphore(4)  # page data computed at once, each with AT_ONCE ABI calls under way
+
+
+class _Moved(Exception):
+    """The project or the person's rules changed while page data was computed for them: it is kept for nobody."""
+
+
+def seen_as(project: str) -> tuple:
+    """(role, rules) of the person this thread acts as (abi.as_user), as ABI says now: their role in the project and,
+    when row-level or column security restricts them, the rules as they apply to them (rls_rules: their own values,
+    the hidden columns); rules None for those who read every row and column."""
+    role = abi._open("GET", f"/api/projects/{project}/me")[1].get("role")
+    rules = role and abi.call("rls_rules", project=project)  # an error fails the page: never another's rows instead
+    return role, rules if rules and rules.get("restricted") else None
+
+
+def _once(key: tuple, compute, still) -> dict:
+    """Single flight: the first asking computes, as themselves; the others with the same key wait for it. It is kept,
+    and given to those waiting, only when still() holds after (the version and the person's rules as when the key was
+    made); else they get _Moved and ask again."""
+    with _SNAP_LOCK:
+        if key in _SNAP:
+            return _SNAP[key]
+        if mine := key not in _FLIGHT:
+            _FLIGHT[key] = Future()
+        job = _FLIGHT[key]
+    if not mine:
+        return job.result()
+    try:
+        with _PAGES:
+            out = compute()
+        same = still()
+    except BaseException as e:
+        with _SNAP_LOCK:
+            _FLIGHT.pop(key, None)
+        job.set_exception(e)
+        raise
+    with _SNAP_LOCK:
+        _FLIGHT.pop(key, None)
+        if same:
+            _SNAP[key] = out
+    job.set_result(out) if same else job.set_exception(_Moved())
+    return out  # computed as this person: theirs either way
 
 
 def cached(project: str, who: str = "") -> dict:
-    """One snapshot per project version and person (row-level security), computed as them (abi.as_user)."""
-    with _SNAP_LOCK:
-        if (project, who) not in _SNAP:
-            _SNAP[(project, who)] = snapshot(abi.folder(project), project)
-        return _SNAP[(project, who)]
+    """The page's data for this person (abi.as_user). People of one role who read every row and column share one
+    computation. Those row-level or column security restricts share the rest of the page and get the reports' rows
+    and their rules read as them, shared only with people the rules give the same (seen_as). Without a role: their own."""
+    while True:
+        gen, (role, rules) = _GEN.get(project, 0), seen_as(project)
+        still = lambda: (_GEN.get(project, 0), *seen_as(project)) == (gen, role, rules)  # noqa: E731
+        dest = abi.folder(project)
+        try:
+            if not rules:
+                return _once((project, gen, role, None if role else who), lambda: snapshot(dest, project), still)
+            base = _once((project, gen, role, ""), lambda: snapshot(dest, project, visuals=False), still)
+            alike = hashlib.sha256(json.dumps(rules, sort_keys=True, default=str).encode()).hexdigest()
+            return _once((project, gen, role, alike), lambda: own(project, base, rules), still)
+        except _Moved:  # computed across a change of the project or of the person's rules
+            continue
+
+
+def own(project: str, base: dict, rules: dict) -> dict:
+    """A restricted person's page: what every restricted person sees (base, its rows read by none), with the reports'
+    rows read as this person and their own rules."""
+    with Reads() as ex:
+        return base | {"reports": report_data(project, [r["spec"] for r in base["reports"]], base["measures"], ex), "rls": rules}
 
 
 def changed(project: str) -> None:
+    """ABI changed the project: once the folder has its commits, page data computed before is never served again (this
+    project's and its published copy's; other projects' stay) and the open pages of the project get the new data."""
+    def push(hub):
+        try:
+            hub.push_data()
+        except Exception as e:  # noqa: BLE001 (a failed refresh keeps the page as it was)
+            hub.emit({"type": "note", "text": f"Couldn't refresh: {type(e).__name__}"})
+
     def go():
         try:
             abi.sync(project)  # pull ABI's commits, re-render the folder views (writes app.html too)
-            with _SNAP_LOCK:
-                for k in [k for k in _SNAP if k[0] in (project, pub_id(project))]:
-                    _SNAP.pop(k, None)
-            for hub in list(HUBS.values()):
-                if hub.clients:
-                    hub.push_data()
-        except Exception as e:  # noqa: BLE001 (a failed refresh keeps the pages as they were)
+        except Exception as e:  # noqa: BLE001
             for hub in list(HUBS.values()):
                 hub.emit({"type": "note", "text": f"Couldn't refresh: {type(e).__name__}"})
+            return
+        both = (project, pub_id(project))
+        with _SNAP_LOCK:
+            for p in both:
+                _GEN[p] = _GEN.get(p, 0) + 1
+            for k in [k for k in _SNAP if k[0] in both]:
+                _SNAP.pop(k, None)
+        for hub in [h for h in list(HUBS.values()) if h.clients and h.project == project]:
+            threading.Thread(target=push, args=(hub,), daemon=True).start()
     threading.Thread(target=go, daemon=True).start()
 
 
@@ -2679,6 +2834,8 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
             if self.path == "/chat/stop":
                 if hub.pi:
                     hub.send({"type": "abort"})
+                elif hub.unwait():  # still waiting for an agent: the question goes
+                    hub.emit({"type": "busy", "on": False})
                 return self.reply(200, b"{}")
             if self.path.startswith("/confirm/"):
                 cid = self.path.split("/")[-1]

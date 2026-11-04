@@ -26,6 +26,9 @@ services:
       ABI_PUBLIC_URL: ${ABI_PUBLIC_URL:-${ABI_DOMAIN:+https://${ABI_DOMAIN:-}${ABI_HTTPS_PORT:+:${ABI_HTTPS_PORT:-}}}}
       ABI_SOURCE_URL: ${ABI_SOURCE_URL:-}  # AGPL §13: where a changed build's source is published; empty: this repo
       ABI_HEAVY_CONCURRENCY: ${ABI_HEAVY_CONCURRENCY:-1}  # loads, query copies and ML trainings at a time: 1 or 2
+      ABI_MAX_AGENTS: ${ABI_MAX_AGENTS:-8}  # chats whose agent runs at once; the next question waits its turn
+      ABI_QUERY_TIMEOUT: ${ABI_QUERY_TIMEOUT:-60}  # seconds a question's or a page visual's read may run
+      ABI_PG_POOL: ${ABI_PG_POOL:-20}  # Postgres connections each engine process keeps open for reuse
       ABI_DUCKDB_MEMORY_LIMIT: ${ABI_DUCKDB_MEMORY_LIMIT:-1500MB}  # DuckDB's memory per project in each engine process; it spills to disk above it
       ABI_QUERY_CACHE_MB: ${ABI_QUERY_CACHE_MB:-256}  # query results kept for reuse, megabytes per project in each engine process
     volumes:

@@ -603,7 +603,7 @@ def dataset_data(conn, user: User, args: DatasetRef) -> dict:
     """Rows of one dataset (model/datasets.json): its saved semantic query run through the semantic engine as you (row-level security applies). Columns: the dimensions, then the measure IDs."""
     if not (d := next((x for x in _read(args.project, "datasets.json").get("datasets", []) if x["id"] == args.dataset), None)):
         raise ActionFailed(404, f"No dataset '{args.dataset}' in project '{args.project}'.")
-    return {"id": d["id"], "name": d["name"], **semantic.query(args.project, d["query"], user.id)}
+    return {"id": d["id"], "name": d["name"], **semantic.query(args.project, d["query"], user.id, timeout=semantic.TIMEOUT)}
 
 
 @action(Role.editor, destructive=True, definition=True)
