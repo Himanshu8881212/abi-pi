@@ -75,6 +75,9 @@ def test_known_answers_are_what_a_fresh_query_over_the_files_says(runs):
     assert max(m, key=lambda r: abs(m[r][1] - m[r][0])) == "North"  # the member that moved most
     assert w["change_pct"] == round((dec - nov) / nov * 100, 2) < -8  # a noticeable fall
     assert w["share_of_change"] == round(north / (dec - nov), 4) > Decimal("0.6")  # mostly North
+    assert w["member_orders"] == dict(zip(("2025-11", "2025-12"), db.execute(f"""SELECT count(*) FILTER (order_date < DATE '2025-12-01'),
+       count(*) FILTER (order_date >= DATE '2025-12-01') FROM {o} o JOIN {c} c ON c.cafe_id = o.cafe_id
+     WHERE order_date >= DATE '2025-11-01' AND region = 'North'""").fetchone()))  # M2 review: what moved it, fewer orders
     # the CSV door's file: CSV_SAFE's quoting (scripts/abi.py before 0ba59da) reads the same orders, notes over two lines
     csv = (f"""read_csv('{out}/brewline.csv', header = true, quote = '"', escape = '"', strict_mode = false, """
            "types = {'revenue': 'DECIMAL(10,2)'})")

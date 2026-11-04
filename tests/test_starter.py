@@ -65,6 +65,13 @@ def test_a_project_with_no_date_gets_no_change_measures(tmp_path):
     assert made.get("report") == "overview" and "amount" in ids and not [i for i in ids if i.endswith(TIMED)], (made, ids)
 
 
+def test_sync_names_abis_last_commit():
+    """M2 review: abi_sync's head was `git log -1` of the folder after pull --rebase: the harness's own skeleton commit
+    on top of ABI's, so two report runs told the person their saved report wasn't committed."""
+    head = abi.sync(BARE)["head"].split()[0]
+    assert abi.call("history", project=BARE)["commits"][0]["id"].startswith(head), head
+
+
 def test_a_dated_build_reports_without_them_and_running_it_again_adds_nothing_unasked(tmp_path):
     """The change measures come after the count and the SUM, so the Overview's KPIs (no date to step back from) are
     those two, and every visual reads. The person's own amount_prev, a deleted % change: the build again (same file)

@@ -338,38 +338,59 @@ def compile(measures: dict[str, str], columns: dict[str, set[str] | None] | None
 
 INLINE = ("+", "-", "*", "/", "NEG", "DIVIDE", "ABS")  # M2.1: the operators of a semantic query's inline expressions
 DEPTH = 8
+ROLLS = 1000  # M2 review: ROLLING's periods at most in an inline expression
+SHAPES = ("a measure [id], under time functions (" + ", ".join(sorted(TIME)) + ") and IGNORE or not; two of those"
+          " subtracted; or DIVIDE of one or a difference by one, ABS(one) or a difference: e.g. [m] - PREVIOUS_PERIOD([m]),"
+          " DIVIDE([m] - PREVIOUS_PERIOD([m]), ABS(PREVIOUS_PERIOD([m]))), DIVIDE([m], IGNORE([m], table.column)), DIVIDE([a], [b])")
 
 
 def inline(text: str, measures: set[str]):
-    """M2.1: a semantic query's inline expression (evaluated for that query, never saved) as its parse tree: `measures`
-    ([id]) combined with + - * /, DIVIDE, ABS, the time functions, WHERE and IGNORE, with no constant but 0, 1 and
-    100 and none computed from constants alone, so every figure it gives comes from the data (AGENTS.md rule 3).
-    Raises _Bad; compile() checks the rest (WHERE conditions, ROLLING) as for any measure."""
-    has = lambda n: any(type(x) is Ref for x in _walk(n))  # noqa: E731
-    allowed = "Allowed: [measure-id], + - * /, DIVIDE, ABS, " + ", ".join(sorted(TIME)) + ", WHERE and IGNORE."
+    """M2.1: a semantic query's inline expression (evaluated for that query, never saved) as its parse tree. M2 review:
+    one of a few shapes (SHAPES) over `measures` ([id]) under time functions and IGNORE, with no number, no WHERE (a
+    filter in disguise: the query's filters do that) and no other arithmetic, so no figure is built from constants
+    (free arithmetic made DIVIDE([m], [m]) + DIVIDE([m], [m]) a 2, and so any number): every figure it gives is a
+    measure's or a comparison of two (AGENTS.md rule 3). Raises _Bad; compile() checks the rest (ROLLING's unit,
+    columns) as for any measure."""
+    allowed = f"An expression is {SHAPES}."
 
-    def ok(n, depth: int) -> None:
+    def scan(n, depth: int) -> None:  # what it names and holds, top down, before its shape
         t = type(n)
         if depth > DEPTH:
             raise _Bad(f"It nests more than {DEPTH} levels deep.", "Split it into simpler expressions.")
         if t is Ref and n.name not in measures:
             raise _Bad(f"[{n.name}] is not a measure of this project.",
                        "Use one of: " + ", ".join(sorted(f"[{m}]" for m in measures)) + ".")
-        if t is Lit and not (isinstance(n.value, Decimal) and n.value in (0, 1, 100)):
-            raise _Bad(f"The number {n.value} isn't allowed: an expression's only numbers are 0, 1 and 100." if isinstance(
-                n.value, Decimal) else "Text, TRUE, FALSE and NULL go only in a WHERE condition.", allowed)
+        if t is Lit:
+            raise _Bad(f"The number {n.value} isn't allowed: an expression combines measures only." if isinstance(
+                n.value, Decimal) else "Text, TRUE, FALSE and NULL aren't allowed: filter the query instead.", allowed)
         if t in (Agg, Conv, Col, _Word):
             what = f"{n.fn}(...)" if t is Agg else f"{n.table}.{n.column}" if t is Col else "CONVERT(...)" if t is Conv else f"'{n.name}'"
-            raise _Bad(f"{what} isn't a measure: an expression combines existing measures, and a column goes only in a"
-                       " WHERE condition or IGNORE.", allowed)
+            raise _Bad(f"{what} isn't a measure: an expression combines existing measures, and a column goes only in"
+                       " IGNORE.", allowed)
+        if t is Where:
+            raise _Bad("WHERE isn't allowed in an expression: filter the query (filters) instead.", allowed)
         if t is Op and n.op not in INLINE:
             raise _Bad(f"{n.op} isn't allowed in an expression.", allowed)
-        if t is Op and n.op != "NEG" and not any(map(has, n.args)):
-            raise _Bad("Arithmetic between constants isn't allowed: each operation needs a measure.", allowed)
-        for k in n.args if t is Op else (n.expr,) if t in (Where, Ignore, Time) else ():
-            ok(k, depth + 1)
+        if t is Time and n.fn == "ROLLING" and n.n > ROLLS:
+            raise _Bad(f"ROLLING over {n.n} periods is too long: at most {ROLLS}.", allowed)
+        for k in n.args if t is Op else (n.expr,) if t in (Ignore, Time) else ():
+            scan(k, depth + 1)
 
-    ok(tree := parse(text), 1)
-    if not has(tree):
-        raise _Bad("It names no measure.", "Combine measures, e.g. [revenue] - PREVIOUS_PERIOD([revenue]).")
+    def term(n) -> None:  # a measure under time functions and IGNORE
+        if type(n) in (Time, Ignore):
+            return term(n.expr)
+        if type(n) is not Ref:
+            raise _Bad(f"{'-' if n.op == 'NEG' else n.op} isn't allowed here: an expression computes nothing else.", allowed)
+
+    def diff(n) -> None:
+        for k in n.args if type(n) is Op and n.op == "-" else (n,):
+            term(k)
+
+    scan(tree := parse(text), 1)
+    if type(tree) is Op and tree.op == "DIVIDE":
+        top, bottom = tree.args
+        diff(top)
+        diff(bottom.args[0] if type(bottom) is Op and bottom.op == "ABS" else bottom)
+    else:
+        diff(tree)
     return tree

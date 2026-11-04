@@ -36,6 +36,8 @@ NUM = re.compile(
 # 1.2 M2: a range's first figure shares its last one's percent sign ("each fell 44–61%" is 44% to 61%; a spaced
 # dash is an aside: "December 2025 – 14.6% down")
 UPTO = re.compile(r"(?:[–—-]|\sto\s)[-−]?\d[\d,]*(?:\.\d+)?(?:\s?%|\s(?i:percent|per cent)\b)")
+# M2 review: "between 44 and 61%" too
+BETWEEN, AND = re.compile(r"\bbetween\s+$", re.I), re.compile(r"\s+and\s+[-−]?\d[\d,]*(?:\.\d+)?(?:\s?%|\s(?i:percent|per cent)\b)")
 # LLM-2-fix-11, D-75: English contractions (I’ll, Don’t, Here’s) from a closed list of stems are words, never names;
 # any other stem (Atlantis’ll, Bob’s) is still checked as a name
 _CON = (r"(?!(?:(?:I|You|We|They|He|She|It|That|There|Here|What|Where|Who|How|Let)['’](?:ll|m|ve|d|re|s)"
@@ -102,7 +104,9 @@ COMMON = {"monthly", "daily", "weekly", "yearly", "tell", "load", "ask", "traini
           "any", "done", "not", "on", "chosen", "time", "average", "main", "then", "also",
           "active", "proposed", "undone", "rejected", "synced", "queued", "running", "ok", "failed", "stopped",
           "waiting", "approved", "pending", "published", "draft",
-          "total", "overall", "christmas", "easter", "new", "year"}  # M2.2: "**Volume:** Total orders", "New Year closures"
+          "total", "overall", "christmas", "easter", "new", "year",
+          "mom", "yoy", "qoq", "wow", "eve", "boxing"}  # M2.2: "**Volume:** Total orders", "New Year closures";
+# M2 review: "down 14.6% MoM", "Christmas Eve", "Boxing Day"
 # GATE-9-fix-3: a whole identifier token (URL, email, ISO date/timestamp, IPv4 host, UUID, hyphenated ID starting with
 # a letter and holding a digit such as `claude-sonnet-5-5`) that a result text or the person's question carries is quoted as one ID,
 # never read as figures; only between positive delimiters (the lookbehind's list and ID_END)
@@ -179,7 +183,8 @@ def _numbers(text: str, ids: set[str], lists: bool = False) -> list[tuple[tuple[
         if mult := (m["mult"] or "").strip().lower():
             f = SCALES.get(mult) or {"k": 1e3, "m": 1e6, "bn": 1e9}[mult]
             v, tol = v * f, tol * f
-        pct = bool(m["pct"] or m["n"] and not m["mult"] and UPTO.match(text, m.end()))
+        pct = bool(m["pct"] or m["n"] and not m["mult"] and (UPTO.match(text, m.end()) or BETWEEN.search(text, 0, m.start())
+                                                         and AND.match(text, m.end())))
         out.append((m.span(), (m[0].strip(), -v if m["neg"] else v, tol + 1e-9, pct, bool(m["neg"]))))
     return out
 
@@ -210,7 +215,12 @@ def _pcts(results: list) -> list[float]:
     for r in results:
         if isinstance(r, dict) and isinstance(r.get("columns"), list) and isinstance(r.get("rows"), list):
             names = r["measures"] if isinstance(r.get("measures"), dict) else {}
-            on = {str(c) for c in r["columns"] if PCT.search(str(c)) or PCT.search(str(names.get(c, "")))}
+            # M2 review: never an inline expression by its name (the model picks it: "rows_pct" made a count a %); a
+            # measure in percentage points (its MEL multiplies by 100: semantic.query's `percent`) is one
+            mine = r["expressions"] if isinstance(r.get("expressions"), dict) else {}
+            points = {str(c) for c in r["percent"]} if isinstance(r.get("percent"), list) else set()
+            on = {str(c) for c in r["columns"] if str(c) in points or str(c) not in mine and (
+                PCT.search(str(c)) or PCT.search(str(names.get(c, ""))))}
             for row in r["rows"]:
                 pairs = row.items() if isinstance(row, dict) else zip(r["columns"], row) if isinstance(row, (list, tuple)) else []
                 _walk([v for c, v in pairs if str(c) in on], out, [])
@@ -388,7 +398,8 @@ def check(answer: str, results: list, vocab: set[str] = frozenset(), members: se
     GATE-9-fix-9: `today` = the server's date (`today()`): its year grounds as a figure, exactly; its day and month only
     inside that date written out (ISO, "October 15", "15th of Oct"), never as bare figures; its month and weekday name."""
     have, texts, said, cells = [], [], [], []
-    _walk([{k: v for k, v in r.items() if k != "filters"} if _query(r) else r for r in results], [], texts)
+    # M2 review: nor an expression's MEL (its literals are the model's)
+    _walk([{k: v for k, v in r.items() if k not in ("filters", "expressions")} if _query(r) else r for r in results], [], texts)
     _walk([r["rows"] for r in results if isinstance(r, dict) and isinstance(r.get("rows"), list)], have, cells)
     _walk(notes, [], said)
     told, named = [], []

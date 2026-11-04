@@ -266,7 +266,8 @@ def _sync(project: str, dest: Path) -> dict:
                 (dest / rel).unlink()
     git(dest, "pull", "-q", "--rebase")
     skeleton(dest)
-    return {"project": project, "folder": str(dest), "head": git(dest, "log", "-1", "--format=%h %s").strip(),
+    # ABI's last commit (M2 review: HEAD is the local skeleton commit, rebased on ABI's, so it told reports "uncommitted")
+    return {"project": project, "folder": str(dest), "head": git(dest, "log", "-1", "--format=%h %s", "@{u}").strip(),
             **({} if os.environ.get("ABI_APP_URL") else {"live": f"python scripts/app.py {project}"})}  # in the app: it is open
 
 
@@ -314,12 +315,17 @@ def _changes(m: dict, cal: dict) -> list[dict]:
     [<id>_prev]), so a starter SUM that already took one of these IDs leaves the others meaning what they say."""
     i, n, prev = m["id"], m["name"], f"PREVIOUS_PERIOD([{m['id']}])"
     by = f" Group by {cal['table']}.year and {cal['table']}.month (or .quarter), or by {cal['table']}.{cal['column']}."
+    # M2 review: ordering by the change put a café that closed last (its change is empty), and a month still filling
+    # always showed a fall
+    caveat = (" A period still filling is compared, in part, with the whole period before: filter complete periods."
+              " A member with no rows in one of the two periods (closed or new) has an empty change: rank members by their"
+              " change with explain_change.")
     return [{"id": f"{i}_prev", "name": f"{n}, previous period", "expression": prev,
              "description": f"{n} in the period before each row's: the month before for a month, the year before for a year." + by},
             {"id": f"{i}_change", "name": f"{n} change", "expression": f"[{i}] - {prev}",
-             "description": f"{n} minus the period before's; negative is a fall. Order by it to rank members by their change." + by},
+             "description": f"{n} minus the period before's; negative is a fall." + by + caveat},
             {"id": f"{i}_change_pct", "name": f"{n} % change", "expression": f"DIVIDE([{i}] - {prev}, ABS({prev}))",
-             "description": f"{n}'s change as a fraction of the period before (-0.25 is a 25% fall); empty when that is 0." + by}]
+             "description": f"{n}'s change as a fraction of the period before (-0.25 is a 25% fall); empty when that is 0." + by + caveat}]
 
 
 def _measures(project: str, sm: dict | None = None) -> list[dict]:

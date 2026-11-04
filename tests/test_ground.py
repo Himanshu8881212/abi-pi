@@ -495,10 +495,12 @@ let n = 0;
 for (const x of JSON.parse(process.argv[3])) {
   const sections = {};
   await fire("before_agent_start", { messageType: "user", prompt: x.prompt, systemPromptOptions: { sections } });
-  for (const result of x.results) {
-    const ev = { toolCallId: `t${n++}`, toolName: "mcp__abi__semantic_query", input: { project: "brew" } };
+  for (const item of x.results) {  // a result, or [tool, its output]
+    const [toolName, result] = Array.isArray(item) ? item : ["mcp__abi__semantic_query", item];
+    const ev = { toolCallId: `t${n++}`, toolName, input: { project: "brew" } };
     await fire("tool_call", ev);
-    await fire("tool_result", { ...ev, isError: false, content: [{ type: "text", text: JSON.stringify({ result }) }] });
+    const text = JSON.stringify(toolName.startsWith("mcp__") ? { result } : result);
+    await fire("tool_result", { ...ev, isError: false, content: [{ type: "text", text }] });
   }
   const shown = [];
   for (const a of x.answers) {
@@ -544,7 +546,8 @@ def test_the_harness_grounds_an_answer_on_this_exchange_and_the_one_before():
     from long ago still grounded; its digest listed calendar.day only (the filter tested the table's name), so the
     model grouped by month without a year. Driven as Pi runs it: the ask task's own end date grounds through ABI; a
     draft's own % change is masked and the hidden retry names it and lists the rows; the previous exchange's figures
-    ground; one from three exchanges back is masked, and stays masked when the retry repeats it."""
+    ground; one from three exchanges back is masked, and stays masked when the retry repeats it. M2 review: a figure only
+    an echo of the model's own input holds (its sql_query SELECT of literals, a preference it set) is masked."""
     if not shutil.which("node"):
         pytest.skip("no node")
     chat = [
@@ -560,6 +563,11 @@ def test_the_harness_grounds_an_answer_on_this_exchange_and_the_one_before():
         {"prompt": "In project brew: sum it up for me.", "results": [], "answers": [
             "Revenue in 2025 was 158,138.98, and Coffee fell to 4,167.02 in December.",
             "Revenue in 2025 was 158,138.98, and Coffee fell to 4,167.02 in December."]},
+        # M2 review: what echoes the model's own input grounds no figure: its SELECT of literals, a preference it set
+        {"prompt": "In project brew: how big was the drop?", "results": [
+            ["mcp__abi__sql_query", {"columns": ["drop_amount", "region"], "types": ["DECIMAL(6,2)", "VARCHAR"], "rows": [[1234.56, "North"]]}],
+            ["abi_prefs", {"recipient": "cfo@example.com", "note": "4321.12"}]], "answers": [
+            "The drop was 1,234.56, or 4,321.12 as noted."]},
     ]
     srv = ThreadingHTTPServer(("127.0.0.1", 0), FakeABI)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -573,7 +581,7 @@ def test_the_harness_grounds_an_answer_on_this_exchange_and_the_one_before():
     finally:
         srv.shutdown()
     assert r.returncode == 0, r.stderr[-2000:]
-    ask, why, category, recap = json.loads(r.stdout.splitlines()[-1])
+    ask, why, category, recap, echo = json.loads(r.stdout.splitlines()[-1])
     assert "calendar.year" in ask["context"] and "calendar.month" in ask["context"]  # the digest
     assert ask["shown"] == [{"text": None, "retry": None}]  # "to 2025-12-31": the query's own range, read through ABI
     first, second = why["shown"]
@@ -585,3 +593,34 @@ def test_the_harness_grounds_an_answer_on_this_exchange_and_the_one_before():
     assert "158,138.98" not in first["text"] and "4,167.02" in first["text"]  # three exchanges back, the one before
     assert "what no tool row backs: 158,138.98." in first["retry"] and '"4167.02"' in first["retry"] and "158138.98" not in first["retry"]
     assert "158,138.98" not in second["text"] and "_Grounding: 1 figure(s)" in second["text"] and second["retry"] is None
+    (first,) = echo["shown"]
+    assert "1,234.56" not in first["text"] and "4,321.12" not in first["text"] and "1,234.56, 4,321.12" in first["retry"]
+
+
+# M2 review: what the model wrote never grounds (an expression's MEL, a name it gave a column), percentage points do, and
+# ordinary "why" words pass; the engine's copy takes the same cases (test_engine.py)
+MADE = q(["cafes.region", "revenue", "x", "rows_pct"], [["North", "1586.08", None, 280]],
+         measures={"revenue": "Revenue", "x": "x", "rows_pct": "rows_pct"}) | {
+    "expressions": {"x": "WHERE([revenue], orders.revenue > 1234.56) - WHERE([revenue], cafes.region = 'Atlantis')",
+                    "rows_pct": "[orders_rows]"}}
+MARGIN = q(["calendar.month", "gross_margin"], [[11, 25.1], [12, 23.4]], measures={"gross_margin": "Gross margin"})
+REVIEW = [  # (answer, results, flagged)
+    ("Revenue in North was 1586.08; the drop was 1,234.56, most of it in Atlantis.", [MADE], ["1,234.56", "Atlantis"]),
+    ("North's orders fell 280%.", [MADE], ["280%"]),
+    ("North's orders fell 280%.", [{k: v for k, v in MADE.items() if k != "expressions"}], []),  # a governed *_pct column
+    ("Gross margin fell to 23.4% in December from 25.1% in November.", [MARGIN | {"percent": ["gross_margin"]}], []),
+    ("Gross margin fell to 23.4% in December from 25.1% in November.", [MARGIN], ["23.4%", "25.1%"]),
+    ("Revenue fell 14.6% MoM (14,095.04 to 12,043.64), quiet on Christmas Eve, Boxing Day and New Year's Eve.",
+     [BREW["explain"]], []),
+    ("Its cities fell between 44 and 61%.", [BREW["explain"]], []),
+    ("Its cities fell 44 and 61%.", [BREW["explain"]], ["44"]),
+]
+
+
+def test_what_the_model_wrote_never_grounds_and_why_words_pass():
+    """An expression's MEL is under `expressions` and grounds nothing (WHERE([revenue], orders.revenue > 1234.56) backed
+    "1,234.56", a WHERE's 'Atlantis' a name); a column the model named *_pct is no percent column (a count of 280 backed
+    "fell 280%"); a measure in percentage points is one (semantic.query's `percent`: 1.1 grounded "23.4%", M2.2 not);
+    "MoM", "Christmas Eve", "Boxing Day", "New Year's Eve" and "between 44 and 61%" are ordinary words."""
+    got = [(lambda o: o["numbers"] + o["names"])(ground.check(a, rs, fields={"day"})) for a, rs, _ in REVIEW]  # "Day": the calendar.day of every Brewline model
+    assert got == [want for _, _, want in REVIEW]

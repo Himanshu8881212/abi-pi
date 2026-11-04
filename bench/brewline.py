@@ -11,8 +11,8 @@ rest of the chain dips a little for Christmas. --plant retail plants another cha
 orders (beans and cups) halve that month, so every region falls, none with most of the change: it sits in a product
 category.
 known_answers.json beside the data (revenue by region per year to the cent, the latest complete month, the member
-that moved most and its share of the change) comes from a fresh DuckDB query over the written files, not from the
-generator's own tables.
+that moved most, its share of the change and its orders in both months) comes from a fresh DuckDB query over the
+written files, not from the generator's own tables.
 
     .venv/bin/python bench/brewline.py OUT [--scale 0.01] [--seed 42] [--csv] [--plant north|retail]
 
@@ -149,16 +149,17 @@ def answers(out, dim: str) -> dict:
     month, prev = db.execute(f"""SELECT strftime(m, '%Y-%m'), strftime(m - INTERVAL 1 MONTH, '%Y-%m')
      FROM (SELECT date_trunc('month', max(order_date) + 1) - INTERVAL 1 MONTH AS m FROM {o})""").fetchone()
     ch = db.execute(f"""SELECT {dim}, sum(revenue) FILTER (strftime(order_date, '%Y-%m') = '{prev}') AS a,
-       sum(revenue) FILTER (strftime(order_date, '%Y-%m') = '{month}') AS b
+       sum(revenue) FILTER (strftime(order_date, '%Y-%m') = '{month}') AS b,
+       count(*) FILTER (strftime(order_date, '%Y-%m') = '{prev}'), count(*) FILTER (strftime(order_date, '%Y-%m') = '{month}')
      FROM {o} JOIN {c} USING (cafe_id) JOIN {p} USING (product_id) WHERE strftime(order_date, '%Y-%m') IN ('{prev}', '{month}')
      GROUP BY ALL ORDER BY abs(b - a) DESC, {dim}""").fetchall()
     a, b = sum(r[1] for r in ch), sum(r[2] for r in ch)
-    member, ma, mb = ch[0]
+    member, ma, mb, na, nb = ch[0]
     return {"rows": rows, "revenue_by_region_year": by, "latest_complete_month": month,
             "why": {"measure": "revenue", "month": month, "previous_month": prev, "revenue": {prev: float(a), month: float(b)},
                     "change": float(b - a), "change_pct": float(round((b - a) / a * 100, 2)), "dimension": dim, "member": member,
                     "member_revenue": {prev: float(ma), month: float(mb)}, "member_change": float(mb - ma),
-                    "share_of_change": float(round((mb - ma) / (b - a), 4))}}
+                    "share_of_change": float(round((mb - ma) / (b - a), 4)), "member_orders": {prev: na, month: nb}}}
 
 
 if __name__ == "__main__":

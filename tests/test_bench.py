@@ -14,9 +14,9 @@ import bench  # noqa: E402
 KNOWN = {"revenue_by_region_year": {"East": {"2025": 40774.45}, "North": {"2025": 36360.52}, "South": {"2025": 39285.46},
                                     "West": {"2025": 41718.55}},  # seed 42, scale 0.01 (bench/brewline.py)
          "why": {"revenue": {"2025-11": 14095.04, "2025-12": 12043.64}, "dimension": "region", "member": "North",
-                 "member_revenue": {"2025-11": 3271.28, "2025-12": 1586.08}}}
+                 "member_revenue": {"2025-11": 3271.28, "2025-12": 1586.08}, "share_of_change": 0.8215}}
 RETAIL = {**KNOWN, "why": {"revenue": {"2025-11": 14059.04, "2025-12": 11303.05}, "dimension": "category", "member": "Retail",
-                           "member_revenue": {"2025-11": 4719.6, "2025-12": 2145.7}}}  # brewline.py --plant retail
+                           "member_revenue": {"2025-11": 4719.6, "2025-12": 2145.7}, "share_of_change": 0.9339}}  # brewline.py --plant retail
 
 
 def test_answers_that_look_right_and_arent_fail():
@@ -25,8 +25,13 @@ def test_answers_that_look_right_and_arent_fail():
                         "| North | 36,360.52 |", KNOWN)
     assert not bench.ask_ok("Revenue in 2025: West 36,360.52; East 39,285.46; South 40,774.45; North 41,718.55.", KNOWN)
     why = ("Revenue fell from 14,095.04 in November 2025 to 12,043.64 in December. Most of the fall is in the North region:"
-           " it went from 3,271.28 to 1,586.08, while East, South and West dipped slightly.")
+           " it went from 3,271.28 to 1,586.08 (82.1% of the change), while East, South and West dipped slightly.")
     assert bench.why_ok(why, KNOWN)
+    # M2 review: answers that named North with its figures and still blamed another member, or quoted another's share
+    assert not bench.why_ok(why.replace("(82.1% of the change)", "(29.0% of the change)"), KNOWN), "another member's share"
+    assert not bench.why_ok(why.replace("Most of the fall is in the North region:", "The North region is not the main driver,")
+                            .replace("slightly.", "slightly. West accounts for most of the drop."), KNOWN), "North cleared, West blamed"
+    assert not bench.why_ok(why + " The drop comes mainly from West.", KNOWN), "two members blamed"
     assert not bench.why_ok(why.replace("the North region:", "the East region. North"), KNOWN), "the wrong driver"
     assert not bench.why_ok(why.replace("14,095.04", "13,100.00"), KNOWN), "the wrong months"
     assert not bench.why_ok(why.replace("1,586.08", "2,986.08"), KNOWN), "the driver's figures"
@@ -35,7 +40,7 @@ def test_answers_that_look_right_and_arent_fail():
     assert not bench.clean(bench.WITHHELD) and not bench.clean("Revenue was [not verified].") and bench.clean(why)
     # --plant retail: the driver is a product category, so a region (any region) named as the driver fails
     retail = ("Revenue fell from 14,059.04 in November 2025 to 11,303.05 in December. Most of the fall is in Retail: it went"
-              " from 4,719.60 to 2,145.70, across every region, while Coffee, Bakery, Food and Tea dipped slightly.")
+              " from 4,719.60 to 2,145.70, 93.4% of the change, across every region, while Coffee, Bakery, Food and Tea dipped slightly.")
     assert bench.why_ok(retail, RETAIL) and not bench.why_ok(retail, KNOWN)
     assert not bench.why_ok(retail.replace("in Retail:", "in the North region. Retail"), RETAIL), "a region as the driver"
     assert not bench.why_ok(retail.replace("in Retail:", "in Coffee. Retail"), RETAIL), "the wrong category"
@@ -84,8 +89,9 @@ def pi(prompt: str) -> Run:
     elif kind == "why":
         nov, dec = month(p, 11), month(p, 12)
         top, calm = (f(nov, key=lambda r: abs(dec[r] - nov[r])) for f in (max, min))
+        share = (dec[top] - nov[top]) / (sum(dec.values()) - sum(nov.values())) * 100
         answer = (f"Revenue fell from {sum(nov.values()):,.2f} in November 2025 to {sum(dec.values()):,.2f} in December. Most of"
-                  f" the fall is in {calm if k else top}. {top} went from {nov[top]:,.2f} to {dec[top]:,.2f}.")
+                  f" the fall is in {calm if k else top}. {top} went from {nov[top]:,.2f} to {dec[top]:,.2f}, {share:.1f}% of it.")
     elif kind == "report":
         rid = re.search(r"id (\w+)", prompt)[1]
         report(p, rid, ["calendar.month"] if k == 1 else ["calendar.year", "calendar.month"])

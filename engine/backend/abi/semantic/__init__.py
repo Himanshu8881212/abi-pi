@@ -12,6 +12,7 @@ import io
 import json
 import logging
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -343,24 +344,42 @@ class SemanticQuery(BaseModel):
 
 
 EXPRESSIONS = 10  # M2.1: inline expressions per query
+CONTEXTS = 4  # M2 review: the distinct periods and IGNOREs a query's expressions step through (each a scan and a join)
+TIMEOUT = 60  # s: a semantic_query or explain_change read still running then is stopped (sql_query's SE-10 limit)
 
 
-def _inline(expressions: list[dict], ms: list[dict], asked: list[str]) -> None:
-    """M2.1: 400 naming the first refused one of a semantic query's inline expressions (mel.inline). A name is a new
-    result column: never a measure ID, a measure the query asks for or `grouping_id`."""
+def _steps(n, path: tuple = ()) -> set:
+    """M2 review: the time functions and IGNOREs above each [measure] of an expression, outermost first. Each distinct
+    path is one more aggregate context for the planner, whose plan grows faster than their number (ten expressions of 32
+    ROLLING windows each planned for 452 s, before DuckDB ran)."""
+    t = type(n)
+    if t is mel.Ref:
+        return {path} if path else set()
+    step = (n.fn, n.n, n.unit) if t is mel.Time else n.cols if t is mel.Ignore else None
+    kids = n.args if t is mel.Op else (n.expr,) if t in (mel.Where, mel.Ignore, mel.Time) else ()
+    return set().union(*(_steps(k, path + (step,) if step else path) for k in kids))
+
+
+def _inline(expressions: list[dict], ms: list[dict], asked: list[str], strict: bool = True) -> None:
+    """M2.1: 400 naming the first refused one of a semantic query's inline expressions (mel.inline; not `strict`: ABI's
+    own, explain_change's period WHEREs, only parsed). A name is a new result column: never a measure ID, a measure the
+    query asks for or `grouping_id`. M2 review: together they step through at most CONTEXTS periods or IGNOREs."""
     if len(expressions) > EXPRESSIONS:
         raise ActionFailed(400, f"A query takes at most {EXPRESSIONS} expressions; split it into several queries.")
     ids = {m["id"] for m in ms}
-    taken = {*ids, *asked, "grouping_id"}
+    taken, steps = {*ids, *asked, "grouping_id"}, set()
     for e in expressions:
         try:
             if e["name"] in taken:
                 raise mel._Bad(f"'{e['name']}' already names a measure or a column of this query.",
                                "Ask for that measure, or give the expression a name of its own.")
-            mel.inline(e["expr"], ids)
+            steps |= _steps(mel.inline(e["expr"], ids) if strict else mel.parse(e["expr"]))
         except mel._Bad as x:
             raise ActionFailed(400, f"Expression '{e['name']}': {x} {x.fix}") from None
         taken.add(e["name"])
+    if len(steps) > CONTEXTS:
+        raise ActionFailed(400, f"These expressions step through {len(steps)} different periods or IGNOREs; a query takes"
+                                f" at most {CONTEXTS} (each is one more read of the data): split it into several queries.")
 
 
 def uses(expressions: list) -> tuple[list[str], list[str]]:
@@ -375,17 +394,17 @@ def uses(expressions: list) -> tuple[list[str], list[str]]:
 
 
 def plan(project: str, q: dict, user_id: int | None = None,
-         expressions: list[dict] = ()) -> tuple[dict, str, list[str], list[dict], dict]:
+         expressions: list[dict] = (), strict: bool = True) -> tuple[dict, str, list[str], list[dict], dict]:
     """Plan a semantic query without running it (S-02 plus order and limit): (validated query, DuckDB SQL, result
     columns, every measure of the project, ClickHouse reads {DuckDB table name: (live table, ClickHouse SQL)}).
     RP-5 shows this SQL. Raises ActionFailed(400) with the planner's reason. A user restricted by row-level security
     (SE-6) gets no query copy or pair table: they're built unfiltered, so its plan reads the (filtered) tables.
     M2.1 `expressions` ([{name, expr}], semantic_query's): planned as more measures of this query only, after its
-    measures, through the same row and column security; never saved (rule 7)."""
+    measures, through the same row and column security; never saved (rule 7). `strict` as in `_inline`."""
     from abi.semantic import model  # not at top: model imports this package
 
     ms = model._read(project, "measures.json").get("measures", [])
-    _inline(expressions, ms, q.get("measures") or [])
+    _inline(expressions, ms, q.get("measures") or [], strict)
     exprs = {e["name"]: e["expr"] for e in expressions}
     q = SemanticQuery.model_validate({**q, "measures": [*q["measures"], *exprs]} if exprs else q).model_dump(mode="json")
     measures = {m["id"]: m["expression"] for m in ms} | exprs
@@ -430,17 +449,27 @@ def plan(project: str, q: dict, user_id: int | None = None,
     return q, sql, cols, ms, reads
 
 
-def query(project: str, q: dict, user_id: int | None = None, expressions: list[dict] = ()) -> dict:
-    """Run a semantic query: plan, execute. Raises ActionFailed(400) with the planner's or DuckDB's reason.
-    `expressions` as in `plan`; the result's `measures` names each by its MEL."""
-    q, sql, cols, ms, reads = plan(project, q, user_id, expressions)
+def query(project: str, q: dict, user_id: int | None = None, expressions: list[dict] = (), strict: bool = True,
+          timeout: float | None = None) -> dict:
+    """Run a semantic query: plan, execute. Raises ActionFailed(400) with the planner's or DuckDB's reason, or when it
+    runs past `timeout` seconds. `expressions`, `strict` as in `plan`: the result's `measures` names each by its name,
+    `expressions` gives its MEL (M2 review: an answer's figures and names never ground from it: a literal is the
+    model's, not the data's). `percent`: the asked measures whose MEL multiplies by 100 (percentage points, so the
+    grounding checks "23.4%" against 23.4 as for a % column; M2 review)."""
+    q, sql, cols, ms, reads = plan(project, q, user_id, expressions, strict)
     try:
-        rows = execute(project, sql, q, user_id, reads=reads)
+        rows = execute(project, sql, q, user_id, reads=reads, timeout=timeout)
     except duckdb.Error as e:
+        if isinstance(e, duckdb.InterruptException) and timeout:
+            raise ActionFailed(400, f"The query ran longer than the {timeout:g} s limit and was stopped; ask for less"
+                                    " (fewer dimensions or a shorter period).") from None
         raise ActionFailed(400, f"The query failed: {e}")
-    names = {m["id"]: m["name"] for m in ms} | {e["name"]: e["expr"] for e in expressions}
+    names = {m["id"]: m["name"] for m in ms} | {e["name"]: e["name"] for e in expressions}
     rows = [tuple(map(tidy, r)) for r in rows]
+    points = [m["id"] for m in ms if m["id"] in q["measures"] and re.search(r"\*\s*100\b|\b100\s*\*", m.get("expression") or "")]
     return {"columns": cols, "measures": {m: names[m] for m in q["measures"]}, "rows": rows,
+            **({"expressions": {e["name"]: e["expr"] for e in expressions}} if expressions else {}),
+            **({"percent": points} if points else {}),
             "filters": q["filters"],  # AG-2: the members it filtered on ground the answer's names (LLM-2-fix-2)
             "live": sorted({t for t, _ in reads.values()}),  # RP-7: the live tables these numbers read
             **locale(project)}  # SE-13: the time zone and display currency these numbers are in
@@ -448,7 +477,7 @@ def query(project: str, q: dict, user_id: int | None = None, expressions: list[d
 
 class Expression(BaseModel):
     name: str = Field(pattern=ID, description="the column it adds (not a measure ID)")
-    expr: str = Field(max_length=1000, description="MEL over measure IDs, e.g. [m] - PREVIOUS_PERIOD([m])")
+    expr: str = Field(max_length=1000, description="measures compared, e.g. [m] - PREVIOUS_PERIOD([m])")
 
 
 class QueryInput(SemanticQuery):
@@ -459,7 +488,7 @@ class QueryInput(SemanticQuery):
 
 @action(Role.viewer)
 def semantic_query(conn, user: User, args: QueryInput) -> dict:
-    """Answers a data question through the semantic model: measure IDs, grouped by table.column dimensions, with filters, optional totals, order and limit. Returns the columns (dimensions, then measure IDs), each measure's display name and the rows. Every number you state must come from these rows. `expressions` compare measures in this query only (never saved), for what no measure (e.g. a *_change) gives: each {name, expr} is one more column, which order_by takes; expr is MEL over measure IDs with + - * /, DIVIDE, ABS, PREVIOUS_PERIOD, PREVIOUS_YEAR, YTD, QTD, MTD, ROLLING, WHERE and IGNORE, and no number but 0, 1 and 100. A month against the one before: group by calendar.year, calendar.month and the dimension to break down, filter that month, and ask {name: "change", expr: "[m] - PREVIOUS_PERIOD([m])"} and {name: "change_pct", expr: "DIVIDE([m] - PREVIOUS_PERIOD([m]), ABS(PREVIOUS_PERIOD([m])))"} (a fraction: -0.25 is -25%); order_by change ranks the members. DIVIDE([m], IGNORE([m], table.column)) is each member's share of the total."""
+    """Answers a data question through the semantic model: measure IDs, grouped by table.column dimensions, with filters, optional totals, order and limit. Returns the columns (dimensions, then measure IDs), each measure's display name and the rows. Every number you state must come from these rows. `expressions` compare measures in this query only (never saved), for what no measure (e.g. a *_change) gives: each {name, expr} is one more column, which order_by takes; expr is a measure [id], under PREVIOUS_PERIOD, PREVIOUS_YEAR, YTD, QTD, MTD, ROLLING or IGNORE or not, two of those subtracted, or DIVIDE of those, with no number, WHERE or other arithmetic. A month against the one before: group by calendar.year, calendar.month and the dimension to break down, filter that month, and ask {name: "change", expr: "[m] - PREVIOUS_PERIOD([m])"} and {name: "change_pct", expr: "DIVIDE([m] - PREVIOUS_PERIOD([m]), ABS(PREVIOUS_PERIOD([m])))"} (a fraction: -0.25 is -25%). A member with no rows in one of the two periods (a café that closed or opened) has an empty change, and a period still filling is compared in part with the whole one before: rank members by their change with explain_change. DIVIDE([m], IGNORE([m], table.column)) is each member's share of the total."""
     q = args.model_dump(mode="json", exclude={"project", "model", "expressions"})
     exprs = [e.model_dump() for e in args.expressions]
     if args.model:
@@ -468,7 +497,7 @@ def semantic_query(conn, user: User, args: QueryInput) -> dict:
         ms, cols = uses(exprs)  # what the expressions read counts too
         model.in_scope(args.project, args.model, [*dict.fromkeys(q["measures"] + ms)],
                        [*dict.fromkeys(q["dimensions"] + [f["column"] for f in q["filters"]] + cols)])
-    return query(args.project, q, user.id, exprs)
+    return query(args.project, q, user.id, exprs, timeout=TIMEOUT)
 
 
 EXPORT_BATCH = 65_536  # rows per Arrow batch (D-17); DuckDB reserves a whole batch per column (duckdb#26270)

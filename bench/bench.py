@@ -3,13 +3,18 @@
 at the terminal would (tests/pi_driver.py) and checked against the generator's known answers.
 
     .venv/bin/python bench/bench.py [--runs 2 | --runs ask=10,why=20,report=5,load=3] [--tasks ask,why,report,load]
-                                    [--model provider/model] [--fallback p/m,...] [--plant north|retail]
+                                    [--model provider/model] [--fallback p/m,...] [--plant north|retail] [--seed 42]
+                                    [--wording change|drove]
 
   ask     revenue by region in 2025: every region's figure stated after its own name
   why     why revenue changed in the latest complete month: both months' revenue, the planted member named as where
-          the change sits (the member of its dimension nearest a word like "most" or "drove") and its two months'
-          revenue after its name; --plant picks the data's planted change (bench/brewline.py: North among the
-          regions, the default, or Retail among the product categories)
+          the change sits and no other member (in a sentence without not, n't, never or rather than, the member of
+          its dimension nearest a word like "most" or "drove"), and its two months' revenue and its share of the
+          change after its name; which month is which is not checked. --plant picks the data's planted change
+          (bench/brewline.py: North among the regions, the default, or Retail among the product categories); --seed
+          the data's seed and --wording the question (M2 review: judge a fix on data and words it wasn't tuned on).
+          Not in the pass: whether the answer states the member's orders in both months (what moved it), counted
+          as "orders stated"
   report  a small managers' report: a KPI, a bar by region and a line by month; the KPI and the bar right to the cent,
           the line one point per month of every year adding up to the total
   load    a raw Parquet export to a Ready model in a new project, revenue by region right (the wall time is the load's)
@@ -51,6 +56,9 @@ UNITS = {"k": 1e3, "thousand": 1e3, "m": 1e6, "mn": 1e6, "million": 1e6}
 # words that say a member is where a change sits ("North drove most of it", "the drop is concentrated in North")
 DRIVER = re.compile(r"\b(most|mostly|almost all|bulk|drove|driven|drivers?|drives|accounts? for|concentrated|explains?|"
                     r"biggest|largest|sharpest|steepest|main|mainly|outlier|stands? out)\b", re.I)
+NOT = re.compile(r"\b(?:not|never|rather than)\b|n't\b", re.I)  # a sentence that clears a member names no driver
+WHY = {"change": "why did revenue change in the latest complete month of data compared with the month before?",
+       "drove": "what drove the change in revenue in the last full month of data, against the month before?"}
 
 
 def says(text: str, value: float) -> bool:
@@ -79,15 +87,15 @@ def stated(text: str, want: dict, members) -> bool:
     return all(any(says(s, v) for s in said.get(m, [])) for m, vs in want.items() for v in vs)
 
 
-def driver(text: str, member: str, members) -> bool:
-    """A sentence says `member` is where the change sits: a DRIVER word whose nearest member in that sentence is it
-    ("Most of the fall is in North, while East ...", not "most of it came from East, not North")."""
-    names = re.compile(r"\b(" + "|".join(map(re.escape, members)) + r")\b")
+def drivers(text: str, members) -> set:
+    """The members a sentence says the change sits in: per DRIVER word, its nearest member in that sentence ("Most of
+    the fall is in North, while East ...", not "most of it came from East"). M2 review: a sentence with not, n't, never
+    or rather than names none ("North fell from A to B, but it is not the main driver")."""
+    names, out = re.compile(r"\b(" + "|".join(map(re.escape, members)) + r")\b"), set()
     for s in re.split(r"(?<=[.!?;])\s+|\n", text):
-        named = list(names.finditer(s))
-        if named and any(min(named, key=lambda m: max(m.start() - d.end(), d.start() - m.end()))[1] == member for d in DRIVER.finditer(s)):
-            return True
-    return False
+        if (named := list(names.finditer(s))) and not NOT.search(s):
+            out |= {min(named, key=lambda m: max(m.start() - d.end(), d.start() - m.end()))[1] for d in DRIVER.finditer(s)}
+    return out
 
 
 def ask_ok(answer: str, known: dict) -> bool:
@@ -96,12 +104,20 @@ def ask_ok(answer: str, known: dict) -> bool:
 
 
 def why_ok(answer: str, known: dict) -> bool:
-    """known_answers.json's why: the total revenue of both months, the member that moved most named as the driver,
-    and its two months' revenue after its name (among the members of the planted dimension: brewline.PLANTS)."""
+    """known_answers.json's why: the total revenue of both months, the member that moved most named as the driver and
+    no other member of the planted dimension (brewline.PLANTS), and its two months' revenue and its share of the change
+    after its name (M2 review: the share and "no other" fail an answer that blames another member, or quotes another's
+    share). Which month is which is not checked."""
     w = known["why"]
     members = brewline.MEMBERS[w["dimension"]]
-    return (all(says(answer, v) for v in w["revenue"].values()) and driver(answer, w["member"], members)
-            and stated(answer, {w["member"]: list(w["member_revenue"].values())}, members))
+    return (all(says(answer, v) for v in w["revenue"].values()) and drivers(answer, members) == {w["member"]}
+            and stated(answer, {w["member"]: [*w["member_revenue"].values(), w["share_of_change"] * 100]}, members))
+
+
+def orders_ok(answer: str, known: dict) -> bool:
+    """M2 review, not in the pass: the answer says what moved it, the planted member's orders in both months."""
+    w = known["why"]
+    return stated(answer, {w["member"]: list(w["member_orders"].values())}, brewline.MEMBERS[w["dimension"]])
 
 
 def state(p: str) -> tuple:
@@ -126,7 +142,7 @@ def t_ask(c: dict, i: int):
 
 def t_why(c: dict, i: int):
     before = state(c["project"])
-    r = ask(f"In project {c['project']}: why did revenue change in the latest complete month of data compared with the month before?")
+    r = ask(f"In project {c['project']}: {WHY[c['wording']]}")
     read = r.called("semantic_query") or r.called("explain_change")  # the engine's reads
     return r, bool(read) and clean(r.answer) and why_ok(r.answer, c["known"]) and state(c["project"]) == before
 
@@ -177,10 +193,10 @@ def loaded(p: str, want: dict) -> bool:
 TASKS = {"ask": t_ask, "why": t_why, "report": t_report, "load": t_load}
 
 
-def data(out: Path, plant: str = "north") -> dict:
+def data(out: Path, plant: str = "north", seed: int = 42) -> dict:
     """Brewline at SCALE with that planted change: one Parquet file per table for the shared project (the orders'
     months in one), and every order with its café and product in one file, the raw export the load task starts from."""
-    known = brewline.generate(out, SCALE, plant=plant)
+    known = brewline.generate(out, SCALE, seed, plant=plant)
     orders, cafes, products = (f"read_parquet('{brewline.q(out)}/{t}/*.parquet')" for t in ("orders", "cafes", "products"))
     duckdb.sql(f"COPY (SELECT * FROM {orders}) TO '{brewline.q(out)}/orders.parquet' (FORMAT parquet)")
     duckdb.sql(f"COPY (SELECT o.order_id, o.order_date, o.cafe_id, city, region, o.customer_id, o.product_id, product_name, category,"
@@ -201,6 +217,8 @@ def main(argv=None) -> None:
     ap.add_argument("--model", default=os.environ.get("ABI_PI_LIVE_MODEL"), help="provider/model (default ABI_PI_LIVE_MODEL, else Pi's)")
     ap.add_argument("--fallback", default=os.environ.get("ABI_PI_LIVE_FALLBACK"), help="provider/model,... asked in order when the model fails")
     ap.add_argument("--plant", default="north", choices=brewline.PLANTS, help="the data's planted change for why (bench/brewline.py)")
+    ap.add_argument("--seed", type=int, default=42, help="the data's seed (bench/brewline.py; 42: the M0-M2 runs')")
+    ap.add_argument("--wording", default="change", choices=WHY, help="the why question: " + "; ".join(f"{k}: {v}" for k, v in WHY.items()))
     a = ap.parse_args(argv)
     try:
         n = {t: int(k) for t, k in (x.split("=") for x in a.runs.split(","))} if "=" in a.runs else dict.fromkeys(a.tasks.split(","), int(a.runs))
@@ -211,17 +229,19 @@ def main(argv=None) -> None:
         ap.error(f"unknown task {', '.join(sorted(bad))}; one of {', '.join(TASKS)}")
     os.environ.update({k: v for k, v in (("ABI_PI_LIVE_MODEL", a.model), ("ABI_PI_LIVE_FALLBACK", a.fallback)) if v})
     stamp = time.strftime("%m%d%H%M%S")
-    c, out, runs = {"project": f"bench_{stamp}"}, ROOT / "scratch" / f"bench_{stamp}", []
+    c, out, runs = {"project": f"bench_{stamp}", "wording": a.wording}, ROOT / "scratch" / f"bench_{stamp}", []
     RUNS.mkdir(exist_ok=True)
     try:
-        c |= data(out, a.plant)
+        c |= data(out, a.plant, a.seed)
         if set(tasks) - {"load"} and not (made := abi.load("demo", c["project"], c["files"])).get("readiness", {}).get("ready"):
             raise SystemExit(f"The bench project isn't Ready, so no run would be fair: {made.get('failed') or made.get('readiness')}")
         for task in tasks:
             for i in range(n[task]):
                 load = os.getloadavg()[0]
                 r, ok = TASKS[task](c, i)
-                rec = {"task": task, "plant": a.plant, "run": i, "ok": ok, "seconds": r.seconds, "turns": r.usage["turns"], "tools": len(r.tools),
+                rec = {"task": task, "plant": a.plant, "seed": a.seed, **({"wording": a.wording, "orders": orders_ok(r.answer, c["known"])}
+                                                                           if task == "why" else {}),
+                       "run": i, "ok": ok, "seconds": r.seconds, "turns": r.usage["turns"], "tools": len(r.tools),
                        "tool_errors": sum(1 for t in r.tools if t[2]), "masked": masked(r.answer), "withheld": WITHHELD in r.answer,
                        "input": r.usage["input"], "cached": r.usage["cacheRead"], "output": r.usage["output"], "model": r.model,
                        "load": [round(load, 1), round(os.getloadavg()[0], 1)], "tool_names": [t[0] for t in r.tools], "answer": r.answer}
@@ -236,13 +256,15 @@ def main(argv=None) -> None:
     load = [x for r in runs for x in r["load"]] or [0]
     lines = [f"\n## {time.strftime('%Y-%m-%d %H:%M')}: {a.model or 'Pi default model'}"
              f"{f', fallback {a.fallback}' if a.fallback else ''} (runs: {', '.join(f'{t} {k}' for t, k in n.items())};"
-             f" answered by {by}; load average {num(min(load))}-{num(max(load))}; plant {a.plant})\n",
-             "| task | pass | runs masked | median s | turns | tools | tool errors | masked | input tok | cached tok | output tok |",
-             "|---|---|---|---|---|---|---|---|---|---|---|"]
+             f" answered by {by}; load average {num(min(load))}-{num(max(load))}; plant {a.plant}, seed {a.seed}, why wording {a.wording})\n",
+             "| task | pass | runs masked | median s | turns | tools | tool errors | masked | input tok | cached tok | output tok | orders stated |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for task in tasks:
         rs = [x for x in runs if x["task"] == task]
+        orders = f"{sum(x['orders'] for x in rs)}/{len(rs)}" if task == "why" else "-"
         lines.append(f"| {task} | {sum(x['ok'] for x in rs)}/{len(rs)} | {sum(bool(x['masked'] or x['withheld']) for x in rs)} | " + " | ".join(
-            num(statistics.median(x[k] for x in rs)) for k in ("seconds", "turns", "tools", "tool_errors", "masked", "input", "cached", "output")) + " |")
+            num(statistics.median(x[k] for x in rs)) for k in ("seconds", "turns", "tools", "tool_errors", "masked", "input", "cached", "output"))
+            + f" | {orders} |")
     with open(RESULTS, "a") as f:
         f.write("\n".join(lines) + "\n")
     print("\n".join(lines))

@@ -9,9 +9,10 @@ ROOT = Path(__file__).resolve().parents[1]
 PY = ROOT / "engine/backend/.venv/bin/python"
 
 
-def engine(code: str, timeout=60) -> subprocess.CompletedProcess:
+def engine(code: str, timeout=60, stdin: str | None = None) -> subprocess.CompletedProcess:
     env = subprocess.run(["sh", "-c", "scripts/engine.sh env"], cwd=ROOT, capture_output=True, text=True).stdout
-    return subprocess.run(["sh", "-c", f"{env}\nexec {PY} -c \"$0\"", code], cwd=ROOT, capture_output=True, text=True, timeout=timeout)
+    return subprocess.run(["sh", "-c", f"{env}\nexec {PY} -c \"$0\"", code], cwd=ROOT, capture_output=True, text=True, timeout=timeout,
+                          input=stdin)
 
 
 @pytest.mark.skipif(not PY.exists() or engine("from abi import db; db.connect().close()").returncode, reason="engine's Postgres not running")
@@ -139,3 +140,14 @@ def test_the_engines_grounding_takes_the_harness_rules_of_m2_round_2():
                " c('- **Cities:** Within Atlantis, -44%.'), c('- **Segment:** No segment stands out: -44%.'), c('- **Member:** No, -44%.'),"
                " c('- **Hanover:** Down 44%.'), c('| Down | -44% |')]))")
     assert json.loads(r.stdout.strip().splitlines()[-1]) == [[], ["11"], [], ["Atlantis"], [], ["No"], [], ["Down"]], r.stderr[-500:]
+
+
+@pytest.mark.skipif(not PY.exists(), reason="no engine venv")
+def test_the_engines_grounding_takes_the_harness_rules_of_the_m2_review():
+    """tests/test_ground.py's REVIEW cases (an expression's MEL and a name the model gave a column ground nothing,
+    percentage points do, ordinary "why" words pass) give the same flags in ABI's grounding.py."""
+    import test_ground
+    r = engine("import json, sys\nfrom abi.agents import grounding as g\n"
+               "print(json.dumps([(lambda o: o['numbers'] + o['names'])(g.check(a, rs, fields={'day'})) for a, rs, _ in json.load(sys.stdin)]))",
+               stdin=json.dumps(test_ground.REVIEW))
+    assert json.loads(r.stdout.strip().splitlines()[-1]) == [want for _, _, want in test_ground.REVIEW], r.stderr[-500:]

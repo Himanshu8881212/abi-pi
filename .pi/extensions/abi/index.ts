@@ -509,11 +509,16 @@ export default async function abi(pi: ExtensionAPI) {
 		status(ctx);
 	});
 
+	// M2 review: outputs that hold what the model wrote (a SELECT of its own literals, a preference it set, a check or analysis
+	// it saved, the team's brief, plan and handoffs) ground its words, never a figure (D-22: an echoed input grounds none)
+	const ECHO = new Set([`${MCP}sql_query`, "abi_prefs", "abi_monitor", "abi_explore", "abi_brief", "abi_plan", "abi_handoff"]);
 	/** A tool result as a grounding source: ABI results ground figures from their rows, refusals only words. */
 	function ingest(name: string, raw: string, isError: boolean) {
 		let out: any;
 		try { out = JSON.parse(raw); } catch { out = undefined; }
-		if (name.startsWith(MCP)) {
+		if (ECHO.has(name)) {
+			if (!isError) now().notes.push(name.startsWith(MCP) && out && "result" in out ? out.result : out ?? raw);
+		} else if (name.startsWith(MCP)) {
 			if (out && "result" in out) now().results.push(out.result);
 			else if (out) now().notes.push(out);
 		} else if ((name.startsWith("abi_") && out) || (name === "subagent" && !isError)) {

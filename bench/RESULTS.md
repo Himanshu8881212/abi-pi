@@ -510,3 +510,73 @@ question, why retail 3, called explain_change alone). The report runs called abi
 times each, visual_data 5 (2 in report 0, none in report 3), abi_vault 3 and abi_show 2 (each told that nothing was
 shown; both answers were in words). The runs' records: logs/bench-1104114136.jsonl (north) and
 logs/bench-1104114703.jsonl (retail), on this Mac only.
+
+Read again after the M2 review (4 Nov):
+- In sample. Round 3's fixes were tuned over 90 live why runs of this same prompt, seed (42), scale and both plants (9
+  scratch batches of 10 while building ffc2648), and ground.py against the 313 recorded drafts of rounds 1-3; the
+  measured round then asked the same question of the same data, and all 20 why runs called explain_change with its
+  defaults alone. So 19 of 20 shows that this one question works after tuning, not that "why" does. bench/bench.py now
+  takes --seed and --wording (a second why question) to judge a fix on data and words it wasn't tuned on.
+- False statements in passing answers. The grounding checks figures and names, not claims, and why_ok checked the
+  driver, not the rest, so these passed: why retail 4 and 5 (and round 2's retail 2) say Bakery "is the only category
+  that rose", but Food (1,286.12 to 1,374.60) and Tea (1,411.10 to 1,486.22) rose too, in rows explain_change didn't
+  show (`partial`); why north 0 and 9 say "Every format fell" and north 6 "each format fell" of the partial
+  cafes.format, true only by chance (campus, not shown, fell from 2,052.50 to 1,728.69); why retail 2 says "The data has
+  no price, stock or promotion detail to test that", but orders.unit_price and orders.discount are in the model; why
+  north 6 and 8 conclude that the drop "shows mostly in card payments", noise (bench/brewline.py draws the payment per
+  order, whatever the region); report 1 says "The change is uncommitted" and report 4 "Changes are not committed yet",
+  false (auto-commit is on; abi_sync named the folder's own skeleton commit, not ABI's). The review's fixes: an
+  "(others)" row per partial breakdown, only the dimensions where the change sits most, abi_sync naming ABI's commit.
+- How the gate was read. PLAN.md: 'Target: "why" ≥ 18/20 runs pass (10 per planted dataset) with zero [not verified]
+  and the right top member, median ≤ 30 s, ≤ 4 turns; ask passes ≥ 9/10 with zero masks; ask and report medians no
+  worse than baseline.' Rounds 1-3 here read "with zero [not verified]" as no masked run at all, stricter than its words,
+  which make it a condition of each passing run (a masked run fails, so round 3's 19 of 20 meets it); and they read "no
+  worse than baseline" with a 10% allowance for noise that PLAN.md doesn't give (round 1's report, 20.6 s against 20.5,
+  was "Met" only by it). Under PLAN.md's words round 3 meets why and ask and misses report's 23.3 s against 20.5 s. Neither
+  reading separates the provider's latency from the harness: the baseline ran 11 hours earlier, and the wait for first
+  tokens moved from 26.4 s to 10.1 s within 10 minutes on the same code (round 1). Deciding report's time needs 1.1.0
+  (a 309ee47 worktree) and release-1.2 report runs interleaved in one window, at least 10 each: not done.
+
+## 1.2 M2 after review (MacBook Air, 8 cores, 24 GB; model proxy/claude-sonnet-5-5)
+
+4 Nov 2026 13:20-13:23, release-1.2 at d2ffd0d with the M2 review's fixes (committed with this section). What the agent
+sees changed: semantic_query's inline expressions take fixed shapes (a measure under time functions and IGNORE, two of
+those subtracted, or DIVIDE of those; no number, no WHERE, at most 4 distinct periods or IGNOREs); explain_change ends a
+partial breakdown with an "(others)" row, shows only the dimensions scoring at least a third of the leader's (region
+and city here; category and product on retail), gives shares only for sums and counts, and counts a period complete
+once it is over and the data reaches into its last days; SYSTEM.md asks for explain_change on the row count too (for a
+sum), the person's words, and explain_change (not *_change) to rank members; the grounding reads no expression's MEL,
+no figure from what echoes the model's own input (sql_query, abi_prefs and the saved-item tools), percentage points
+as percents, and "MoM", "Christmas Eve", "Boxing Day", "between 44 and 61%" as ordinary words. A check, not a gate
+(13 runs): the same scratch wrapper as round 3; why 5 and ask 3 on north at seed 42 with round 3's question, then why
+5 on retail at seed 7 with the second wording ("what drove the change in revenue in the last full month of data,
+against the month before?"), data and words no round was tuned on. why_ok is now the review's stricter one (the
+member's share after its name, no other member named as the driver), and "orders stated" counts the answers that give
+the planted member's orders in both months (not in the pass). Sonnet answered all 13 runs. Load average 34.5-76.1 from
+other work on this Mac (round 3: 2.4-6.2), so the times aren't comparable with earlier rounds'; HEAD, the engine and the
+43 files the harness and the bench read were the same at the start, between the datasets and at the end.
+
+| task | data | pass | runs masked | median s | turns | tools | tool errors | masked | input tok | cached tok | output tok | orders stated |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| ask | north, seed 42 | 3/3 | 0 | 9.5 | 2 | 2 | 1 | 0 | 4 | 51610 | 458 | - |
+| why | north, seed 42 | 4/5 | 1 | 15.4 | 2 | 2 | 0 | 0 | 14484 | 58273 | 777 | 5/5 |
+| why | retail, seed 7, second wording | 4/5 | 1 | 10.4 | 2 | 2 | 0 | 0 | 1903 | 53677 | 715 | 5/5 |
+| why | both | 8/10 | 2 | 13.9 | 2 | 2 | 0 | 0 | 7049 | 55975 | 768.5 | 10/10 |
+
+Every why run called explain_change twice in its first step, for revenue and for orders_rows, and nothing else; 6 of
+10 first answers passed the grounding check (2 turns; round 3: 8 of 20). The other 4 were flagged only for counts of
+what the rows listed ("three" cities, "two" Retail products), as in round 3; 2 rewrites were clean and 2 kept the count,
+masked: why north 1 ("[not verified] cities lost the most") and retail 2 ("[not verified] Retail products hold most of
+it"). Both are right in substance. Every answer now says what moved it, in orders (north 0: "Its orders fell from 576
+to 280, so the cause is volume, not smaller orders"; retail 3: "Retail orders went from 313 to 130, so fewer sales
+explain it, not smaller ones"), and none says "the only", "every" or "all" of a partial breakdown's members; they
+quote its "(others)" row ("The other cities together went from 10,823.76 to 10,457.56"). No answer singles out a
+payment type any more (4 name it among the breakdowns checked). Still wrong in words:
+retail 2 lists Banana Bread, a product, among "Other categories"; 2 answers still say "rows" ("Order rows dropped",
+"The rows show where the drop sits"). ask: 3 of 3 clean in 2 turns; each called a tool that doesn't exist
+(mcp__abi__ship_abi_vault, with abi_vault's arguments: a model slip round 1's logs show too) and semantic_query. No
+question changed the project (the bench found each passing run's project as it was). The runs' records:
+logs/bench-1104132002.jsonl and logs/bench-1104132213.jsonl, on this Mac only.
+
+Against PLAN.md's gate as worded (above) these 10 why runs are 8 passes, short of 18 in 20 at this rate, both misses the
+count words D-22 masks; 5 runs a dataset can't decide it either way.

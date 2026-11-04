@@ -5,7 +5,8 @@ dimension, and the call answers uncached within 3 s; a dimension's members add u
 and dimensions; a Viewer who may see North only gets North's members and totals over North's rows, and a column hidden
 from him is no dimension; an answer written from the rows passes the harness's grounding; what can't be explained is a
 400; measures.json and the project's Git are as they were after every call (rule 7). The harness offers the tool
-directly and in Viewer mode."""
+directly and in Viewer mode. M2 review: a member without rows in one period, the retail plant's default dimensions, a
+ratio's (no shares) and when a period is complete."""
 import hashlib
 import json
 import re
@@ -26,7 +27,7 @@ sys.path.insert(0, str(abi.ROOT / "bench"))
 import bench  # noqa: E402
 import brewline  # noqa: E402
 
-P = "pi_explain_test"
+P, R = "pi_explain_test", "pi_explain_retail"
 WHY = f"In project {P}: why did revenue change in the latest complete month of data compared with the month before?"
 NORTH = {c for c, r in brewline.CITIES if r == "North"}
 
@@ -89,13 +90,17 @@ def test_the_latest_months_change_by_dimension_is_the_files_to_the_cent_within_3
     total = r["rows"][0]
     assert total[:2] == ["total", None] and [cents(x) for x in total[4:7]] == [cents(ta), cents(tb), cents(tb - ta)]
     assert round(total[7], 9) == round((tb - ta) / ta, 9) and total[8] == 1
-    assert 3 <= len(r["dimensions"]) <= 5 and r["dimensions"][0] == f"cafes.{w['dimension']}"  # where the change sits
+    assert 1 <= len(r["dimensions"]) <= 5 and r["dimensions"][0] == f"cafes.{w['dimension']}"  # where the change sits
     for dim in r["dimensions"]:
         got = [row for row in r["rows"] if row[0] == dim]
         want = hand(brew["out"], dim, a, b)
         top = max(want, key=lambda k: abs(want[k][1] - want[k][0]))
-        assert 1 <= len(got) <= 3 and got[0][1] == top, (dim, got[0], top)
         assert (dim in r["partial"]) == (len(want) > 3), dim  # round 2: "all three formats" of the four, top 3 shown
+        # M2 review: a partial one ends with the members not shown, added up, so its rows add up to the total change
+        assert [row[1] == "(others)" for row in got] == [False] * min(len(want), 3) + [True] * (len(want) > 3), (dim, got)
+        assert round(sum(row[6] for row in got), 2) == cents(tb - ta) and round(sum(row[8] for row in got), 9) == 1, dim
+        got = got[:3]
+        assert got[0][1] == top, (dim, got[0], top)
         x, y = want[top]
         assert [cents(v) for v in got[0][4:7]] == [cents(x), cents(y), cents(y - x)], dim
         assert round(got[0][8], 9) == round((y - x) / (tb - ta), 9) and round(got[0][7], 9) == round((y - x) / x, 9)
@@ -104,6 +109,7 @@ def test_the_latest_months_change_by_dimension_is_the_files_to_the_cent_within_3
     assert [cents(v) for v in north[4:6]] == [cents(v) for v in w["member_revenue"].values()]
     assert round(north[8], 4) == w["share_of_change"]
     assert "products.note" in r["also_checked"]  # a note per product is prose, not a breakdown
+    assert "orders.payment" in r["also_checked"]  # M2 review: drawn per order, its "card holds 77%" was noise answers promoted
     assert state() == brew["before"]
 
 
@@ -160,7 +166,10 @@ def test_what_explain_change_cant_compare_is_refused(brew):
     for args, says in (({"measure": "revenue_change"}, "compares the periods itself"), ({"measure": "nope"}, "Unknown measure nope"),
                        ({"measure": "revenue", "b": "2025-13"}, "'2025-13' is not a month"),
                        ({"measure": "revenue", "period": "quarter", "b": "2025-12"}, "write it like 2025-Q4"),
-                       ({"measure": "revenue", "a": "2025-12", "b": "2025-12"}, "the same month")):
+                       ({"measure": "revenue", "a": "2025-12", "b": "2025-12"}, "the same month"),
+                       # M2 review: a date filter emptied period a, so its "change" was all of b
+                       ({"measure": "revenue", "filters": [{"column": "calendar.month", "op": "=", "value": 12}]},
+                        "leave calendar.month out of the filters")):
         with pytest.raises(abi.ActionError) as e:
             abi.call("explain_change", project=P, **args)
         assert e.value.status == 400 and says in e.value.body["message"], (args, e.value.body)
@@ -176,3 +185,67 @@ def test_the_harness_offers_it_directly_and_in_viewer_mode():
     reads = set(re.findall(r'"(\w+)"', re.search(r"const READS = new Set\(\[(.*?)\]\);", ts, re.S)[1]))
     assert "explain_change" in core and {t for t, v in exposure.items() if v == "direct"} == set(core)
     assert set(core) - {"remember"} <= reads
+
+
+def test_a_member_without_rows_in_a_period_counts_as_0_there(brew):
+    """M2 review: every M2 test compared November and December 2025, where every member has rows in both, so the zero
+    of a member with no rows in one period never ran. Brewline sells nothing on 25 December: each region's change is
+    all of its 24 December (-100%), and the shares add up to 1. The governed revenue_change (M2.3) is empty there, as
+    its description says (rank members with explain_change)."""
+    r = abi.call("explain_change", project=P, measure="revenue", period="day", a="2025-12-24", b="2025-12-25",
+                 dimensions=["cafes.region", "cafes.region"], top=4)  # the same dimension twice is read once
+    regions = [row for row in r["rows"] if row[0] == "cafes.region"]
+    assert sorted(row[1] for row in regions) == ["East", "North", "South", "West"] and r["dimensions"] == ["cafes.region"]
+    assert r["rows"][0][5] == 0 and all(row[5] == 0 and row[6] == -row[4] and row[7] == -1 for row in regions), regions
+    assert round(sum(row[8] for row in regions), 9) == 1 and r["partial"] == []
+    q = abi.call("semantic_query", project=P, measures=["revenue", "revenue_prev", "revenue_change"],
+                 dimensions=["calendar.day", "cafes.region"], filters=[{"column": "calendar.day", "op": "=", "value": "2025-12-25"}])
+    assert {row[1]: (row[2], cents(row[3]), row[4]) for row in q["rows"]} == {row[1]: (None, cents(row[4]), None) for row in regions}
+    assert state() == brew["before"]
+
+
+@pytest.fixture(scope="module")
+def retail(tmp_path_factory):
+    """--plant retail (every café's Retail orders halve in December 2025) loaded as the bench loads it."""
+    out = tmp_path_factory.mktemp("retail")
+    if R in projects():
+        drop([R])
+    d = bench.data(out, "retail")
+    assert abi.load("demo", R, d["files"])["readiness"]["ready"]
+    try:
+        yield d["known"]
+    finally:
+        if R in projects():
+            drop([R])
+
+
+def test_the_retail_plant_leads_with_the_category_and_a_ratio_has_no_shares(retail):
+    """M2 review: the data-ranked default (M2.4 deviation 3) was built for this plant and checked only live. No region
+    holds most of the change, so the product category leads and Retail tops it with its share, the categories not shown
+    added up last. A ratio's members don't add up to its total: no share, no "(others)" ("South holds 200% of it")."""
+    w = retail["why"]
+    r = abi.call("explain_change", project=R, measure="revenue")
+    cat = [row for row in r["rows"] if row[0] == "products.category"]
+    assert r["dimensions"][0] == "products.category"
+    assert cat[0][1] == w["member"] == "Retail" and round(cat[0][8], 4) == w["share_of_change"] and cat[-1][1] == "(others)"
+    assert round(sum(row[6] for row in cat), 2) == cents(r["rows"][0][6])
+    abi.call("set_measure", project=R, id="aov", name="Average order value", expression="DIVIDE([revenue], [orders_rows])")
+    r = abi.call("explain_change", project=R, measure="aov", dimensions=["products.category"])
+    assert [row[8] for row in r["rows"]] == [None] * 4 and "(others)" not in [row[1] for row in r["rows"]], r["rows"]
+    assert r["partial"] == ["products.category"] and "none" in r["measures"]["share_pct"]
+
+
+def test_a_period_that_is_over_with_its_last_days_closed_is_complete():
+    """M2 review: a period counted as complete only when the data had a row on its last day, so a shop closed at weekends
+    lost its latest month, every week, and a quarter or year ending on a weekend (data through Friday 29 December 2023
+    gave 2021 against 2022). Now also when the period is over and the data reaches into its last days (2 for a week, 3
+    otherwise); a month still filling, or one that ends 11 days early, still gives the one before."""
+    code = ("import json\nfrom datetime import date\nfrom abi.semantic import explain as x\n"
+            "print(json.dumps([x.label(x.complete(date.fromisoformat(d), g, date(2026, 11, 4)), g) for d, g in ["
+            "('2025-11-28', 'month'), ('2025-11-28', 'week'), ('2023-12-29', 'quarter'), ('2023-12-29', 'year'),"
+            " ('2025-12-30', 'month'), ('2025-12-31', 'week'), ('2025-12-20', 'month'), ('2026-11-03', 'month')]]))")
+    r = subprocess.run(["sh", "-c", 'eval "$(scripts/engine.sh env)"; cd engine/backend; exec .venv/bin/python -c "$0"', code],
+                       cwd=abi.ROOT, capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert json.loads(r.stdout.splitlines()[-1]) == ["2025-11", "2025-W48", "2023-Q4", "2023", "2025-12", "2025-W52",
+                                                     "2025-11", "2026-10"]

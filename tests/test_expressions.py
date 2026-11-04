@@ -28,9 +28,16 @@ REFUSED = {  # an expression: a word of its 400
     "SUM(orders.revenue)": "SUM(...) isn't a measure",  # a raw aggregate
     "orders.revenue": "orders.revenue isn't a measure",  # a column
     "[revenue] * 1.15": "The number 1.15 isn't allowed",  # a figure the model picked
-    "[revenue] * (1 + 1)": "Arithmetic between constants",  # or built from the allowed ones
-    "100": "It names no measure",
-    "[revenue] + 'x'": "go only in a WHERE condition",
+    "[revenue] * (1 + 1)": "The number 1 isn't allowed",  # or built from others (M2 review: no number at all)
+    "100": "The number 100 isn't allowed",
+    "[revenue] + 'x'": "Text, TRUE, FALSE and NULL aren't allowed",
+    # M2 review: free arithmetic built any figure from constants: 2 (so "three cities" grounded), 1/3 ("33%"), 100
+    "DIVIDE([revenue], [revenue]) + DIVIDE([revenue], [revenue])": "+ isn't allowed here",
+    "DIVIDE([revenue], [revenue] + [revenue] + [revenue])": "+ isn't allowed here",
+    "[revenue] * 0 + 100": "The number 0 isn't allowed",
+    "-[revenue]": "- isn't allowed here",
+    "WHERE([revenue], orders.revenue > 1234.56)": "WHERE isn't allowed",  # a filter in disguise, its literal echoed back
+    "ROLLING([revenue], 5000, day)": "at most 1000",
     "[revenue_by_magic] - [revenue]": "[revenue_by_magic] is not a measure",
     "ROUND([revenue], 2)": "ROUND isn't allowed",  # a function outside the set
     "[revenue] > 0": "> isn't allowed",
@@ -103,7 +110,8 @@ def test_the_latest_months_change_by_region_is_the_files_to_the_cent(brew):
                  "cafes.region"], filters=[{"column": "calendar.year", "op": "=", "value": y}, {"column": "calendar.month", "op": "=", "value": m}],
                  expressions=CHANGE, order_by=[{"field": "change", "desc": False}])
     assert r["columns"] == ["calendar.year", "calendar.month", "cafes.region", "revenue", "revenue_change_pct", "prev", "change", "change_pct"]
-    assert r["measures"]["change"] == "[revenue] - PREVIOUS_PERIOD([revenue])"  # the figure says how it was made
+    assert r["expressions"]["change"] == "[revenue] - PREVIOUS_PERIOD([revenue])"  # the figure says how it was made
+    assert r["measures"]["change"] == "change"  # M2 review: not its MEL, which the grounding never reads (its literals)
     assert [row[:2] for row in r["rows"]] == [[y, m]] * len(want)
     assert all(row[4] == row[-1] for row in r["rows"])  # the governed % change (M2.3) and the inline one agree
     got = {row[2]: [row[3], *row[5:]] for row in r["rows"]}
@@ -117,7 +125,9 @@ def test_what_could_make_up_a_figure_or_read_around_the_model_is_refused(brew):
     base = {"project": P, "measures": ["revenue"], "dimensions": ["calendar.year", "calendar.month"]}
     cases = [([{"name": "x", "expr": e}], says) for e, says in REFUSED.items()] + [
         ([{"name": "revenue", "expr": "[revenue] + 0"}], "'revenue' already names a measure"),
-        ([{"name": f"x{i}", "expr": "[revenue]"} for i in range(11)], "at most 10 expressions")]
+        ([{"name": f"x{i}", "expr": "[revenue]"} for i in range(11)], "at most 10 expressions"),
+        # M2 review: each distinct period or IGNORE is one more scan and join: 10 of 32 ROLLING windows planned for 452 s
+        ([{"name": f"r{i}", "expr": f"ROLLING([revenue], {i}, day)"} for i in range(1, 6)], "at most 4")]
     for exprs, says in cases:
         with pytest.raises(abi.ActionError) as e:
             abi.call("semantic_query", **base, expressions=exprs)
@@ -127,7 +137,8 @@ def test_what_could_make_up_a_figure_or_read_around_the_model_is_refused(brew):
 
 def test_a_restricted_viewer_gets_only_their_rows_and_ignore_never_widens_them(brew):
     """IGNORE drops the query's region filter and grouping, so the owner's share reads every region; Bob's reads the
-    North rows the rule lets him see, also when he filters on South. WHERE or IGNORE on his hidden column is a 403."""
+    North rows the rule lets him see, also when he filters on South. IGNORE on his hidden column is a 403 (M2 review:
+    WHERE is no expression for anyone: a 400)."""
     (y, m), want = hand(brew["out"])
     month = [{"column": "calendar.year", "op": "=", "value": y}, {"column": "calendar.month", "op": "=", "value": m}]
     q = {"project": P, "measures": ["revenue"], "dimensions": ["cafes.region"], "filters": month, "expressions": [
@@ -137,7 +148,7 @@ def test_a_restricted_viewer_gets_only_their_rows_and_ignore_never_widens_them(b
     assert {r[0]: round(r[2], 2) for r in rows} == dict.fromkeys(want, total)
     assert round(sum(r[3] for r in rows), 9) == 1
     south = {**q, "dimensions": [], "filters": [*month, {"column": "cafes.region", "op": "=", "value": "South"}]}
-    hidden = [{"name": "x", "expr": e} for e in ("WHERE([revenue], cafes.format = 'mall')", "IGNORE([revenue], cafes.format)")]
+    hidden = [{"name": "x", "expr": "IGNORE([revenue], cafes.format)"}]
     with abi.as_user(brew["bob"]):
         assert [[r[0], round(r[1], 2), round(r[2], 2), r[3]] for r in abi.call("semantic_query", **q)["rows"]] == [["North", north, north, 1]]
         assert [[r[0], round(r[1], 2), r[2]] for r in abi.call("semantic_query", **south)["rows"]] == [[None, north, None]]
