@@ -163,7 +163,7 @@ body[data-mode=viewer] .ed{background:transparent;border-color:transparent;paddi
 .tbl .col .ty{grid-column:3;color:var(--mute);font:10px var(--mono)}.tbl .col>span:not(.dot):not(.ty){grid-column:2;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tbl .dot{width:9px;height:9px;border:1.5px solid var(--mute);border-radius:50%;cursor:crosshair}.tbl .dot:hover{background:var(--signal);border-color:var(--signal)}
 .cards>.wide{grid-column:1/-1}
 .loose{display:grid;grid-template-columns:minmax(0,1fr);gap:16px}.lay>.rowhead{grid-column:1/-1;order:-1}.lay{display:grid!important;grid-template-columns:repeat(12,minmax(0,1fr))!important}.lay>*{max-width:none!important}
-.card.sized{overflow:auto}.card.sized>.body{flex:1;min-height:0}.card.sized>.body svg{height:100%}
+.card.sized{overflow:auto}.card.sized>.body{flex:1;min-height:0}.card.sized>.body svg{height:100%}.pick [data-r]{cursor:pointer}
 body.laying .lay>*{outline:1px dashed var(--signal);outline-offset:-1px;cursor:grab;position:relative;user-select:none}body.laying .lay>*.drag{opacity:.4}body.laying .lay>*.over{box-shadow:inset 3px 0 0 var(--signal)}
 .rz{position:absolute;right:0;bottom:0;width:18px;height:18px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,var(--signal) 50%);z-index:2;opacity:0;transition:opacity .12s}*:hover>.rz,body.laying .rz{opacity:1}:has(>.rz){position:relative}body[data-mode=viewer] .rz{display:none}
 #layout.on{background:var(--signal);color:#fff;border-color:var(--signal)}.mobile #layout{display:none}
@@ -371,9 +371,8 @@ function report(box,rep){let flt=PENDING.filters||[];PENDING.filters=null;
    if(v.text!==undefined){$('.tools',c).remove();body.textContent=v.text;body.style.whiteSpace='pre-wrap';return}
    if(!d||d.error||v.error){body.append(h('div','bad',d?.error||v.error||'no data'));return}
    if(flt.length&&(!d.rows.length||d.rows.every(r=>r.every(x=>x===null||typeof x!=='number')))){body.append(h('p','empty','No rows for these filters: they fall outside what this visual covers (the report\'s period or population). Remove a filter to see it again.'));return}
-   let asTable=false;const dr=()=>{body.innerHTML='';asTable?table(body,d):chart(body,d);
-    if(v.dim){const nm=Math.max(1,Object.keys(d.measures).length),rs=d.rows.filter(r=>r.slice(1).some(x=>typeof x==='number'));
-     body.querySelectorAll('rect,circle').forEach((e,i)=>{e.style.cursor='pointer';e.onclick=()=>{const r=rs[e.tagName==='rect'?Math.floor(i/nm):i%rs.length];if(r)cross(v.dim,r[0])}})}};
+   let asTable=false;const dr=()=>{body.innerHTML='';asTable?table(body,d):chart(body,d)};
+   if(v.dim){body.classList.add('pick');body.onclick=e=>{const r=d.rows[e.target.dataset?.r];if(r)cross(v.dim,r[0])}}  // a mark knows its row (render.mark)
    requestAnimationFrame(dr);$('[data-a=t]',c).onclick=()=>{asTable=!asTable;dr()};$('[data-a=c]',c).onclick=()=>csv(d);
    $('[data-a=h]',c).onclick=()=>{const x=$('.how',c);x.hidden=!x.hidden;x.textContent=v.how+(flt.length?`\nfilters ${JSON.stringify(flt)}`:'')}})}
  rep.pages.forEach(p=>{const b=h('button','',p.name||p.id);b.dataset.id=p.id;b.onclick=()=>page(p);tabs.append(b)});flt.length?draw():page(cur)}

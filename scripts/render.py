@@ -40,6 +40,7 @@ table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:8px 12px;
 th{cursor:pointer;user-select:none;color:var(--mute);font-weight:500;font-size:12px;white-space:nowrap}
 td.n{text-align:right;font:13px var(--mono);font-variant-numeric:tabular-nums}tr:hover td{background:var(--hover)}
 .scroll{max-height:400px;overflow:auto}svg text{fill:var(--mute);font:11px var(--text)}
+svg text.on{fill:var(--ink);stroke:var(--card);stroke-width:3px;paint-order:stroke;stroke-linejoin:round;pointer-events:none}
 .tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--sheet);padding:6px 10px;border-radius:var(--r);font-size:12px;display:none;z-index:9}
 code,pre{font:12.5px/1.6 var(--mono)}pre{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);padding:12px 16px;overflow:auto;max-height:320px}
 .file{color:var(--mute);font:12px var(--mono);margin-top:8px}
@@ -68,21 +69,85 @@ function table(box,d){const t=document.createElement('table');const cols=d.colum
   let rows=d.rows.slice();if(sort!==null)rows.sort((a,b)=>((a[sort]>b[sort])-(a[sort]<b[sort]))*(desc?-1:1));
   rows.forEach(r=>{const tr=t.insertRow();r.forEach((v,i)=>{const td=tr.insertCell();td.textContent=fmt(v,d.format[cols[i]]);if(typeof v==='number')td.className='n'})})}
  draw();const s=document.createElement('div');s.className='scroll';s.appendChild(t);box.appendChild(s)}
+const cut=(s,n)=>{s=String(s??'—');return s.length>n?s.slice(0,Math.max(1,n-1))+'…':s};
+// a mark is one visual_data row: data-r is the row (a click cross-filters on its first dimension), the tooltip its values
+function mark(e,r,t,o=.7){const was=e.getAttribute('opacity')||1;if(r!=null)e.dataset.r=r;
+ e.onmousemove=v=>{e.setAttribute('opacity',o);showTip(v,t)};e.onmouseleave=()=>{e.setAttribute('opacity',was);hideTip()};return e}
+// the series' names over the plot in their colours, wrapped as measured; three lines at most (two on a short chart),
+// then how many more. Returns the plot's top
+function legend(svg,W,names){let x=8,y=14,i=0;const k=Math.max(4,Math.min(18,Math.floor((W-38)/7))),last=svg.viewBox.baseVal.height<200?30:46;
+ for(;i<names.length;i++){const t=cut(names[i],k),e=el('text',{x,y},svg);el('tspan',{fill:COL[i%6]},e).textContent='■ ';e.append(t);
+  const w=(e.getComputedTextLength()||t.length*6.5+12)+10;if(x>8&&x+w>W-(y>=last?36:8)){if(y>=last){e.remove();break}x=8;y+=16;e.setAttribute('x',x);e.setAttribute('y',y)}x+=w}
+ if(i<names.length)el('text',{x:W-8,y,'text-anchor':'end'},svg).textContent='+'+(names.length-i);return y+12}
+// squarified treemap: [x,y,w,h] for each value (largest first) filling the box
+function sq(vs,x,y,w,h){const out=[],k=w*h/(vs.reduce((a,b)=>a+b,0)||1),a=vs.map(v=>v*k);
+ while(a.length){if(!(w>0&&h>0)){out.push(...a.map(()=>[x,y,0,0]));break}const s=Math.min(w,h);let n=1,best=Infinity;
+  for(;n<=a.length;n++){const t=a.slice(0,n).reduce((p,q)=>p+q,0),q=Math.max(s*s*a[0]/(t*t),t*t/(s*s*a[n-1]));if(q>best)break;best=q}
+  const r=a.splice(0,n-1),z=r.reduce((p,q)=>p+q,0)/s;let o=0;r.forEach(v=>{out.push(w>=h?[x,y+o,z,v/z]:[x+o,y,v/z,z]);o+=v/z});w>=h?(x+=z,w-=z):(y+=z,h-=z)}
+ return out}
+// an axis over lo..hi with at most n steps of 1, 2 or 5 x 10^k: its ends (outer ticks) and ticks
+function nice(lo,hi,n){const r=hi-lo||Math.abs(hi)||1,e=10**Math.floor(Math.log10(r/n)),s=[1,2,5,10].map(k=>k*e).find(s=>r/s<=n),a=Math.floor(lo/s)*s,b=Math.max(Math.ceil(hi/s)*s,a+s);
+ return {lo:a,hi:b,t:Array.from({length:Math.round((b-a)/s)+1},(_,i)=>a+i*s)}}
 function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;const ms=d.columns.slice(nd);const type=d.type;
  if(type==='kpi'||(nd===0&&d.rows.length===1)){box.innerHTML='';ms.forEach(m=>{const k=document.createElement('div');k.className='kpi';k.innerHTML=`<div class="v">${E(fmt(d.rows[0]?.[d.columns.indexOf(m)],d.format[m]))}</div><div class="l">${E(d.measures[m]||m)}</div>`;box.appendChild(k)});return}
- if(nd!==1||!['bar','line','pie','combo','funnel','treemap','waterfall','scatter','map'].includes(type)){table(box,d);return}
- const sz=box.closest('.sized'),W=box.clientWidth||600,H=sz?Math.max(140,box.clientHeight||260):260,L=60,B=40,svg=el('svg',{viewBox:`0 0 ${W} ${H}`,width:'100%'},box);
+ // RP-8 as the PDF export draws them: a second dimension's members are the series (bars stack here, the export groups
+ // them), a (month or quarter, year) pair is one time axis; a type or shape not drawn here says so over its rows
+ const c=d.columns,two=nd===2&&!c.includes('grouping_id'),yi=+!c[0].endsWith('.year'),
+  per=two&&['bar','line','combo'].includes(type)&&c[0].split('.')[0]===c[1].split('.')[0]&&c[yi].endsWith('.year')&&/\.(month|quarter)$/.test(c[1-yi])&&d.rows.every(r=>typeof r[0]==='number'&&typeof r[1]==='number');
+ if(!(nd===1&&['bar','line','combo','pie','funnel','waterfall','treemap','scatter'].includes(type)||two&&['bar','line','combo','treemap','scatter'].includes(type))){
+  if(['bar','line','pie','combo','funnel','treemap','waterfall','scatter','map','heatmap','sankey'].includes(type)){const p=document.createElement('p');p.className='empty';
+   p.textContent=`Shown as a table: a ${type} chart ${['map','heatmap','sankey'].includes(type)?"isn't drawn on this page yet (the PDF export draws it)":"can't be drawn from these columns"}.`;box.appendChild(p)}
+  table(box,d);return}
+ const sz=box.closest('.sized'),W=box.clientWidth||600,H=sz?Math.max(140,box.clientHeight||260):260,svg=el('svg',{viewBox:`0 0 ${W} ${H}`,width:'100%'},box);
  // drawn for its box: a card made wider, narrower or (sized) taller draws again rather than stretching its text
  if(window.ResizeObserver){const ro=new ResizeObserver(()=>{if(svg.parentNode!==box)return ro.disconnect();if(Math.abs(box.clientWidth-W)>8||(sz&&Math.abs(box.clientHeight-H)>8)){ro.disconnect();svg.remove();chart(box,d)}});ro.observe(box)}
- const rows=d.rows.filter(r=>ms.some((m,i)=>typeof r[nd+i]==='number'));const vals=rows.flatMap(r=>ms.map((m,i)=>r[nd+i]||0));
- const max=Math.max(0,...vals),min=Math.min(0,...vals),y=v=>H-B-(v-min)/((max-min)||1)*(H-B-10);
- for(let g=0;g<=4;g++){const v=min+(max-min)*g/4;el('line',{x1:L,x2:W-8,y1:y(v),y2:y(v),stroke:'var(--line)'},svg);el('text',{x:L-6,y:y(v)+4,'text-anchor':'end'},svg).textContent=fmt(v,{compact:true,decimals:1})}
- const n=rows.length,step=(W-L-8)/Math.max(n,1),lab=Math.max(1,Math.ceil(n/Math.max(1,Math.floor((W-L)/80))));
- rows.forEach((r,i)=>{if(i%lab===0){const s=String(r[0]??'—');el('text',{x:L+step*i+step/2,y:H-B+14,'text-anchor':'middle'},svg).textContent=s.length>11?s.slice(0,10)+'…':s}});
- if(type==='line'){ms.forEach((m,j)=>{const pts=rows.map((r,i)=>[L+step*i+step/2,y(r[nd+j]||0)]);el('polyline',{points:pts.map(p=>p.join(',')).join(' '),fill:'none',stroke:COL[j%6],'stroke-width':2},svg);
-   pts.forEach((p,i)=>{const c=el('circle',{cx:p[0],cy:p[1],r:Math.max(2,Math.min(4,step/3)),fill:COL[j%6],opacity:.01},svg);c.onmousemove=e=>{c.setAttribute('opacity',1);showTip(e,`${rows[i][0]} · ${d.measures[m]||m}: ${fmt(rows[i][nd+j],{...d.format[m],compact:false})}`)};c.onmouseleave=()=>{c.setAttribute('opacity',.01);hideTip()}})});return}
- const bw=step/ms.length*.8;rows.forEach((r,i)=>ms.forEach((m,j)=>{const v=r[nd+j]||0;const b=el('rect',{x:L+step*i+step*.1+bw*j,y:Math.min(y(v),y(0)),width:Math.max(bw,1),height:Math.abs(y(v)-y(0)),fill:COL[j%6]},svg);
-  b.onmousemove=e=>{b.setAttribute('opacity',.7);showTip(e,`${r[0]} · ${d.measures[m]||m}: ${fmt(v,{...d.format[m],compact:false})}`)};b.onmouseleave=()=>{b.setAttribute('opacity',1);hideTip()}}))}
+ const at=m=>c.indexOf(m),N=m=>d.measures[m]||m,val=(i,m)=>d.rows[i][at(m)],num=(i,m)=>typeof val(i,m)==='number',idx=d.rows.map((r,i)=>i),
+  key=r=>!per?r[0]:c[1-yi].endsWith('.month')?`${r[yi]}-${String(r[1-yi]).padStart(2,'0')}`:`${r[yi]} Q${r[1-yi]}`,tick=(v,m)=>fmt(v,{...d.format[m],compact:true,decimals:2}),
+  mk=(e,i,ks,o)=>mark(e,per?null:i,[...(per?[key(d.rows[i])]:d.rows[i].slice(0,nd).map(x=>x??'—')),...ks.map(m=>`${N(m)}: ${fmt(val(i,m),{...d.format[m],compact:false})}`)].join(' · '),o);
+ if(type==='pie'){const m=ms[0],rs=idx.filter(i=>val(i,m)>0),tot=rs.reduce((s,i)=>s+val(i,m),0),T=legend(svg,W,rs.map(i=>d.rows[i][0])),
+   R=Math.max(8,Math.min(W-16,H-T-8)/2),r=R*.57,cx=W/2,cy=(H+T)/2,p=(a,q)=>`${cx+q*Math.sin(a)},${cy-q*Math.cos(a)}`;let a=0;
+  rs.forEach((i,k)=>{const b=a+Math.min(val(i,m)/tot,.99999)*2*Math.PI,f=+(b-a>Math.PI);
+   mk(el('path',{d:`M${p(a,R)}A${R},${R} 0 ${f} 1 ${p(b,R)}L${p(b,r)}A${r},${r} 0 ${f} 0 ${p(a,r)}Z`,fill:COL[k%6],stroke:'var(--card)'},svg),i,[m]);a=b});return}
+ if(type==='funnel'){const m=ms[0],rs=idx.filter(i=>val(i,m)>0).sort((i,j)=>val(j,m)-val(i,m)),h=(H-8)/Math.max(rs.length,1),w=i=>(W-16)*val(i,m)/val(rs[0],m),x=W/2;
+  rs.forEach((i,k)=>{const y=4+h*k,a=w(i)/2,b=w(rs[k+1]??i)/2;mk(el('path',{d:`M${x-a},${y}L${x+a},${y}L${x+b},${y+h-2}L${x-b},${y+h-2}Z`,fill:COL[k%6]},svg),i,[m]);
+   if(h>=14)el('text',{x,y:y+h/2+3,'text-anchor':'middle',class:'on'},svg).textContent=cut(d.rows[i][0],Math.floor((W-16)/7))});return}
+ if(type==='treemap'){const m=ms[0],rs=idx.filter(i=>val(i,m)>0).sort((i,j)=>val(j,m)-val(i,m)),sum=g=>g.reduce((s,i)=>s+val(i,m),0),
+   gs=two?[...new Set(rs.map(i=>d.rows[i][0]))].map(g=>rs.filter(i=>d.rows[i][0]===g)).sort((a,b)=>sum(b)-sum(a)):rs.map(i=>[i]),T=two?legend(svg,W,gs.map(g=>d.rows[g[0]][0])):0;
+  sq(gs.map(sum),0,T,W,H-T).forEach(([x,y,w,h],k)=>sq(gs[k].map(i=>val(i,m)),x+1,y+1,Math.max(w-2,0),Math.max(h-2,0)).forEach(([x,y,w,h],j)=>{const i=gs[k][j];if(w<3||h<3)return;  // too small to draw: in the rows
+   mk(el('rect',{x:x+1,y:y+1,width:Math.max(w-2,0),height:Math.max(h-2,0),fill:COL[k%6]},svg),i,[m]);
+   if(w>40&&h>18)el('text',{x:x+6,y:y+15,class:'on'},svg).textContent=cut(d.rows[i][nd-1],Math.floor((w-10)/7))}));return}
+ const L=60,B=40;
+ if(type==='scatter'&&ms.length>1){const [mx,my]=ms,rs=idx.filter(i=>num(i,mx)&&num(i,my)),g=two?[...new Set(rs.map(i=>d.rows[i][1]))]:[],T=(two?legend(svg,W,g):8)+16,R=20;
+  if(!rs.length)return;const sc=(m,a,b,n)=>{const vs=rs.map(i=>val(i,m)),k=nice(Math.min(...vs),Math.max(...vs),n);return [v=>a+(v-k.lo)/(k.hi-k.lo)*(b-a),k.t]},
+   [X,xt]=sc(mx,L,W-R,Math.max(2,Math.floor((W-L-R)/60))),[Y,yt]=sc(my,H-B,T,Math.max(2,Math.floor((H-B-T)/28)));
+  yt.forEach(v=>{el('line',{x1:L,x2:W-R,y1:Y(v),y2:Y(v),stroke:'var(--line)'},svg);el('text',{x:L-6,y:Y(v)+4,'text-anchor':'end'},svg).textContent=tick(v,my)});
+  xt.forEach(u=>el('text',{x:X(u),y:H-B+16,'text-anchor':'middle'},svg).textContent=tick(u,mx));
+  el('text',{x:W-R,y:H-B+32,'text-anchor':'end'},svg).textContent=cut(N(mx),Math.floor((W-L)/7)-2)+' →';el('text',{x:L,y:T-6},svg).textContent='↑ '+cut(N(my),Math.floor((W-L)/7)-2);
+  rs.forEach(i=>mk(el('circle',{cx:X(val(i,mx)),cy:Y(val(i,my)),r:4,fill:COL[two?g.indexOf(d.rows[i][1])%6:0]},svg),i,[mx,my]));return}
+ // categories (x) and series: one per measure, or per member of the second dimension (its first measure)
+ const ord=idx.filter(i=>ms.some(m=>num(i,m))),ix=new Map,S=[];if(per)ord.sort((i,j)=>d.rows[i][yi]-d.rows[j][yi]||d.rows[i][1-yi]-d.rows[j][1-yi]);
+ ord.forEach(i=>ix.has(key(d.rows[i]))||ix.set(key(d.rows[i]),ix.size));const cats=[...ix.keys()];
+ ord.forEach(i=>(two&&!per?[[d.rows[i][1],ms[0]]]:ms.map(m=>[m,m])).forEach(([n,m])=>{let s=S.find(s=>s.n===n);if(!s)S.push(s={n,m,v:cats.map(()=>null),r:cats.map(()=>null)});const k=ix.get(key(d.rows[i]));s.v[k]=val(i,m);s.r[k]=i}));
+ if(!S.length)return;
+ const stack=type==='bar'&&two&&!per,combo=type==='combo'&&S.length>1,R=combo?60:8,T=S.length>1&&type!=='waterfall'?legend(svg,W,S.map(s=>two&&!per?s.n:N(s.m))):10,cum=[];
+ let run=0;if(type==='waterfall')S[0].v.forEach(v=>cum.push([run,run+=v||0]));
+ const ax=(vs,m,x,an)=>{const {lo,hi,t}=nice(Math.min(0,...vs),Math.max(0,...vs),Math.max(2,Math.floor((H-B-T)/28))),y=v=>H-B-(v-lo)/(hi-lo)*(H-B-T);
+  t.forEach(v=>{an==='end'&&el('line',{x1:L,x2:W-R,y1:y(v),y2:y(v),stroke:'var(--line)'},svg);el('text',{x,y:y(v)+4,'text-anchor':an},svg).textContent=tick(v,m)});return y};
+ const y=ax(type==='waterfall'?cum.flat():stack?cats.flatMap((_,k)=>[Math.max,Math.min].map(f=>S.reduce((t,s)=>t+f(0,s.v[k]||0),0))):(combo?S.slice(0,1):S).flatMap(s=>s.v.map(v=>v||0)),S[0].m,L-6,'end'),
+  y2=combo?ax(S.slice(1).flatMap(s=>s.v.map(v=>v||0)),S[1].m,W-R+6,'start'):y;
+ const n=cats.length,step=(W-L-R)/Math.max(n,1),lab=Math.ceil(n*(Math.min(11,Math.max(...cats.map(v=>String(v??'—').length)))*6.2+8)/(W-L-R)),X=k=>L+step*k+step/2;
+ let edge=0;cats.forEach((v,k)=>{if(k%lab)return;const t=el('text',{x:X(k),y:H-B+14,'text-anchor':'middle'},svg);t.textContent=cut(v,11);  // inside the box, none over the last
+  const w=t.getComputedTextLength()/2,x=Math.min(X(k),W-w-2);if(x-w<edge)return t.remove();t.setAttribute('x',x);edge=x+w+6});
+ if(type==='waterfall'){S[0].v.forEach((v,k)=>{if(v==null)return;const [p,q]=cum[k];  // each step floats from the running total; the tooltip shows the row's own value
+   mk(el('rect',{x:L+step*k+step*.15,y:Math.min(y(p),y(q)),width:Math.max(step*.7,1),height:Math.max(Math.abs(y(p)-y(q)),1),fill:v<0?'var(--red)':'var(--ok)'},svg),S[0].r[k],[S[0].m]);
+   k&&el('line',{x1:X(k-1)+step*.35,x2:X(k)-step*.35,y1:y(p),y2:y(p),stroke:'var(--mute)','stroke-dasharray':'2 2'},svg)});return}
+ if(stack)cats.forEach((_,k)=>{let p=0,q=0;S.forEach((s,j)=>{const v=s.v[k];if(v==null)return;const a=v<0?q:p,b=a+v;v<0?q=b:p=b;
+  mk(el('rect',{x:L+step*k+step*.1,y:Math.min(y(a),y(b)),width:Math.max(step*.8,1),height:Math.abs(y(a)-y(b)),fill:COL[j%6]},svg),s.r[k],[s.m])})});
+ else{const bs=type==='bar'?S:type==='combo'?S.slice(0,1):[],bw=step/Math.max(bs.length,1)*.8;
+  cats.forEach((_,k)=>bs.forEach((s,j)=>{const v=s.v[k];if(v!=null)mk(el('rect',{x:L+step*k+step*.1+bw*j,y:Math.min(y(v),y(0)),width:Math.max(bw,1),height:Math.abs(y(v)-y(0)),fill:COL[j%6]},svg),s.r[k],[s.m])}))}
+ (type==='combo'?S.slice(1):type==='line'||type==='scatter'?S:[]).forEach(s=>{const j=S.indexOf(s),yy=combo?y2:y,dot=type==='scatter',pts=s.v.map((v,k)=>v==null?null:[X(k),yy(v)]);
+  dot||el('path',{d:pts.map((p,k)=>p?(pts[k-1]?'L':'M')+p:'').join(''),fill:'none',stroke:COL[j%6],'stroke-width':2},svg);
+  pts.forEach((p,k)=>p&&mk(el('circle',{cx:p[0],cy:p[1],r:dot?4:Math.max(2,Math.min(4,step/3)),fill:COL[j%6],opacity:dot?1:.01},svg),s.r[k],[s.m],dot?.7:1))})}
 function csv(d){const q=v=>v===null?'':/[",\n]/.test(String(v))?'"'+String(v).replace(/"/g,'""')+'"':String(v);
  const blob=new Blob([[d.columns.join(','),...d.rows.map(r=>r.map(q).join(','))].join('\n')],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=d.id+'.csv';a.click()}
 """

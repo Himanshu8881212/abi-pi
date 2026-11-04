@@ -630,6 +630,169 @@ print(json.dumps(out))
     assert out["viewer"] == "viewer" and out["developer"] == "developer", out
 
 
+def _chromium(code: str, *args: str) -> dict:
+    """A Playwright script run with the engine's venv (as report exports are): the JSON it prints last."""
+    py = ROOT / "engine/backend/.venv/bin/python"
+    if not py.exists():
+        pytest.skip("no engine venv with Playwright")
+    env = {**os.environ, "HOME": os.environ.get("ENGINE_HOME", str(ROOT / "data/home"))} if (ROOT / "data/home").exists() else None
+    r = subprocess.run([str(py), "-c", code, *args], capture_output=True, text=True, timeout=300, env=env)
+    if r.returncode and "Executable doesn't exist" in r.stderr:
+        pytest.skip("Playwright's Chromium isn't installed here")
+    assert r.returncode == 0, r.stderr[-3000:]
+    return json.loads(r.stdout.strip().splitlines()[-1])
+
+
+# Each chart drawn alone in a page with the app's CSS and chart code: its marks (shape, row, tooltip, box, fill), each
+# pie slice's share of a circle through the ring, and whatever is drawn outside the chart's box.
+PROBE = r"""
+import json, sys
+from playwright.sync_api import sync_playwright
+spec = json.load(open(sys.argv[1]))
+probe = '''([d, w, h]) => {
+  const card = document.getElementById('card'), box = document.getElementById('box'), tip = document.querySelector('.tip');
+  card.classList.toggle('sized', !!h); box.style.height = h ? h + 'px' : ''; box.style.width = w + 'px'; box.innerHTML = ''; chart(box, d);
+  const svg = box.querySelector('svg'), marks = [...box.querySelectorAll('[data-r]')].map(e => {
+    e.dispatchEvent(new MouseEvent('mousemove', {bubbles: true})); const b = e.getBBox();
+    return {r: +e.dataset.r, tag: e.tagName, tip: tip.textContent, x: b.x, y: b.y, w: b.width, h: b.height, fill: getComputedStyle(e).fill}});
+  const share = {};
+  if (d.type === 'pie' && marks.length) {
+    const x0 = Math.min(...marks.map(m => m.x)), x1 = Math.max(...marks.map(m => m.x + m.w)), y0 = Math.min(...marks.map(m => m.y));
+    const cx = (x0 + x1) / 2, cy = y0 + (x1 - x0) / 2, R = (x1 - x0) * .4;
+    for (const e of box.querySelectorAll('path[data-r]')) { let n = 0;
+      for (let i = 0; i < 720; i++) n += e.isPointInFill(new DOMPoint(cx + R * Math.sin(i * Math.PI / 360), cy - R * Math.cos(i * Math.PI / 360)));
+      share[e.dataset.r] = n / 720 } }
+  const vb = svg && svg.viewBox.baseVal, out = svg ? [...svg.querySelectorAll('text,rect,path,circle')].filter(e => { const b = e.getBBox();
+    return b.x < -1 || b.y < -1 || b.x + b.width > vb.width + 1 || b.y + b.height > vb.height + 1 }).map(e => e.tagName + ' ' + e.textContent) : [];
+  return {marks, share, out, bg: getComputedStyle(card).backgroundColor, shapes: svg ? [...svg.querySelectorAll('rect,path,circle')].map(e => e.tagName) : [],
+          text: svg ? svg.textContent : '', note: box.querySelector('p.empty')?.textContent || '', table: !!box.querySelector('table')}}'''
+out, errors = {}, []
+with sync_playwright() as p:
+    b = p.chromium.launch(); pg = b.new_page(locale="en-US", viewport={"width": 1440, "height": 900})
+    pg.on("pageerror", lambda e: errors.append(str(e)[:200]))
+    pg.set_content("<style>" + spec["css"] + "</style><div class=tip></div><div class=card id=card><div id=box></div></div><script>" + spec["js"] + "</script>")
+    for theme in ("light", "dark"):
+        pg.evaluate(f"document.documentElement.dataset.theme = '{theme}'")
+        for w, h in ((224, 0), (1096, 0), (224, 140)):  # a 3-column card, a full-width one, the shortest a resized card gets
+            for name, d in spec["cases"].items():
+                out[f"{name} | {theme} {w}x{h}"] = pg.evaluate(probe, [d, w, h])
+    b.close()
+print(json.dumps({"errors": errors, "out": out}))
+"""
+
+
+def test_each_chart_type_draws_its_own_shape_from_its_rows(srv, tmp_path):
+    """Pie, combo, stacked bars, scatter, waterfall, funnel and treemap drew as plain bars, and two dimensions as a
+    table, though the report format and its PDF export have them (M1.5). In a real browser, light and dark, from a
+    3-column card to a full-width one: each type is its own SVG shape sized by its rows' values, each mark's tooltip is
+    its visual_data row's values and the mark carries that row (a click filters by it); a type not drawn says so."""
+    import render
+    sm = abi.call("semantic_model", project=P)
+    amt = next(m["id"] for m in sm["measures"] if m["expression"] == "SUM(orders.amount)")
+    n = next(m["id"] for m in sm["measures"] if m["expression"].startswith("COUNT("))
+    vd = lambda t, ms, ds: abi.call("visual_data", project=P, query={"measures": ms, "dimensions": ds}, type=t)  # noqa: E731
+    week, day, reg = "calendar.week", "calendar.day", "orders.region"
+    syn = lambda t, cols, rows: {"id": t, "type": t, "columns": cols, "measures": {"chg": "Change"}, "format": {"chg": {"style": "number", "decimals": 0}}, "rows": rows}  # noqa: E731
+    cases = {  # name: (visual_data, what its marks are; None: not drawn on this page)
+        "pie": (vd("pie", [amt], [reg]), {"path"}), "combo": (vd("combo", [amt, n], [week]), {"rect", "circle"}),
+        "stacked": (vd("bar", [amt], [week, reg]), {"rect"}), "grouped": (vd("bar", [amt, n], [reg]), {"rect"}),
+        "scatter": (vd("scatter", [amt, n], [week]), {"circle"}), "waterfall": (vd("waterfall", [amt], [week]), {"rect"}),
+        "funnel": (vd("funnel", [n], [week]), {"path"}), "treemap": (vd("treemap", [amt], [week, reg]), {"rect"}),
+        "lines": (vd("line", [amt], [day, reg]), {"circle"}), "map": (vd("map", [amt], [reg]), None),
+        "bridge": (syn("waterfall", ["s.step", "chg"], [["Start", 500], ["Price", -120], ["Volume", 180], ["FX", -25]]), {"rect"}),
+        "net": (syn("bar", ["s.week", "s.kind", "chg"], [["W1", "Sales", 120], ["W1", "Refunds", -30], ["W2", "Sales", 140], ["W2", "Refunds", -10]]), {"rect"}),
+    }
+    period = vd(None, [amt], ["calendar.year", "calendar.month"])  # one time axis, as exports draw it: no one member to filter by
+    f = tmp_path / "charts.json"
+    f.write_text(json.dumps({"css": render.CSS, "js": render.JS, "cases": {k: d for k, (d, _) in cases.items()} | {"period": period}}, default=str))
+    res = _chromium(PROBE, str(f))
+    assert res["errors"] == [], res["errors"]
+    val = lambda m: float(m["tip"].rsplit(": ", 1)[1].replace(",", ""))  # noqa: E731 (a mark's value: its tooltip is checked first)
+    for k, o in res["out"].items():
+        name = k.split(" | ")[0]
+        if name == "period":
+            assert not o["marks"] and "circle" in o["shapes"] and "2026-05" in o["text"], k
+            continue
+        d, shapes = cases[name]
+        if shapes is None:
+            assert "isn't drawn" in o["note"] and o["table"] and not o["shapes"], k
+            continue
+        nd = len(d["columns"]) - len(d["measures"])
+        say = lambda row, ks: " · ".join([str(x) for x in row[:nd]] + [f"{d['measures'][m]}: {row[d['columns'].index(m)]:,.0f}" for m in ks])  # noqa: E731
+        want = {r: {say(row, d["columns"][nd:])} if name == "scatter" else {say(row, [m]) for m in d["columns"][nd:]} for r, row in enumerate(d["rows"])}
+        got: dict = {}
+        for m in o["marks"]:
+            got.setdefault(m["r"], set()).add(m["tip"])
+        assert got == want, (k, got, want)  # every row's every value, and nothing else
+        assert {m["tag"] for m in o["marks"]} == shapes and not o["out"], (k, o["out"])
+        assert all(m["fill"] not in (o["bg"], "none") for m in o["marks"]), k  # seen on the card, light and dark
+        rects, dots = ([m for m in o["marks"] if m["tag"] == t] for t in ("rect", "circle"))
+        if name == "pie":
+            tot = sum(map(val, o["marks"]))
+            assert set(o["shapes"]) == {"path"} and all(abs(o["share"][str(m["r"])] - val(m) / tot) < .01 for m in o["marks"]), (k, o["share"])
+        elif name == "treemap":  # a tile grows with its value
+            s = sorted(rects, key=val)
+            assert all(a["w"] * a["h"] <= b["w"] * b["h"] + 1 for a, b in zip(s, s[1:])), k
+        elif name == "funnel":  # a stage is as wide as its value
+            assert all(abs(m["w"] - o["marks"][0]["w"] * val(m) / val(o["marks"][0])) <= 1 for m in o["marks"]), k
+        elif name == "scatter":  # x the first measure, y the second
+            xy = lambda m: [float(s.rsplit(": ", 1)[1].replace(",", "")) for s in m["tip"].split(" · ")[-2:]]  # noqa: E731
+            for i, c, sign in ((0, "x", 1), (1, "y", -1)):
+                s = sorted(dots, key=lambda m: xy(m)[i])
+                assert all(sign * (b[c] - a[c]) >= -.5 for a, b in zip(s, s[1:])), k
+        elif rects:  # a bar or step is as tall as its value
+            q = sum(m["h"] for m in rects) / sum(abs(val(m)) for m in rects)
+            assert all(abs(m["h"] - q * abs(val(m))) <= 1.5 for m in rects), k
+        if dots and name != "scatter":  # a point is higher the more it is
+            s = sorted(dots, key=val)
+            assert all(a["y"] >= b["y"] - .5 for a, b in zip(s, s[1:])), k
+        if name in ("waterfall", "bridge"):  # each step starts where the last ended; falls and rises in two colours
+            ends = [(m["y"] + m["h"], m["y"]) if val(m) > 0 else (m["y"], m["y"] + m["h"]) for m in sorted(rects, key=lambda m: m["r"])]
+            assert all(abs(a[1] - b[0]) <= 1 for a, b in zip(ends, ends[1:])), (k, ends)
+            assert not {m["fill"] for m in rects if val(m) < 0} & {m["fill"] for m in rects if val(m) > 0}, k
+        if name in ("stacked", "net"):  # a category's segments are one bar; a negative one hangs below zero
+            assert all(len({round(m["x"], 1) for m in rects if m["tip"].split(" · ")[0] == c}) == 1 for c in {m["tip"].split(" · ")[0] for m in rects}), k
+        if name == "net":
+            for wk in ("W1", "W2"):
+                s, r = (next(m for m in rects if m["tip"].startswith(f"{wk} · {x}")) for x in ("Sales", "Refunds"))
+                assert abs(r["y"] - (s["y"] + s["h"])) <= 1, k
+        if name == "grouped":  # a category's measures stand side by side
+            assert all(len({round(m["x"], 1) for m in rects if m["r"] == r}) == 2 for r in want), k
+    light, dark = ({m["fill"] for m in res["out"][f"pie | {t} 224x0"]["marks"]} for t in ("light", "dark"))
+    assert light != dark, "the palette follows the theme"
+
+
+def test_a_click_on_a_pie_slice_filters_the_report_by_its_member(srv):
+    """The report page took a clicked rect's or circle's index for its row, which fits plain bars and lines only: a pie
+    slice (a path) would filter nothing, a treemap tile (drawn largest first) the wrong member. A mark carries its row."""
+    port, key, _ = srv
+    amt = next(m["id"] for m in abi.call("semantic_model", project=P)["measures"] if m["expression"] == "SUM(orders.amount)")
+    q = {"measures": [amt], "dimensions": ["orders.region"]}
+    rep = {"id": "charts", "name": "Charts", "pages": [{"id": "all", "name": "All", "visuals": [
+        {"id": "share", "type": "pie", "title": "Share", "query": q, "layout": {"x": 0, "y": 0, "w": 6, "h": 4}},
+        {"id": "where", "type": "map", "title": "Where", "query": q, "layout": {"x": 6, "y": 0, "w": 6, "h": 4}}]}]}
+    code, r = post(port, "/api/save_report", {"project": P, "report": rep}, key)
+    assert code == 200, r
+    d = abi.call("visual_data", project=P, report="charts", page="all", visual="share")
+    out = _chromium("""
+import json, sys
+from playwright.sync_api import sync_playwright
+with sync_playwright() as p:
+    b = p.chromium.launch(); pg = b.new_page(locale="en-US", viewport={"width": 1440, "height": 900})
+    pg.goto(sys.argv[1]); pg.wait_for_selector("aside button.it"); pg.evaluate("show('rep:charts')")
+    s = pg.wait_for_selector(".card path[data-r]")
+    tip = s.evaluate("e => (e.dispatchEvent(new MouseEvent('mousemove', {bubbles: true})), document.querySelector('.tip').textContent)")
+    s.evaluate("e => e.dispatchEvent(new MouseEvent('click', {bubbles: true}))")
+    pg.wait_for_function("document.querySelectorAll('.card path[data-r]').length === 1")  # the report again, for that member
+    out = {"tip": tip, "chips": pg.eval_on_selector_all(".chip.x", "cs => cs.map(c => c.textContent)"), "map": pg.inner_text(".card:has(p.empty)")}
+    b.close()
+print(json.dumps(out))
+""", f"http://127.0.0.1:{port}/")
+    tips = {f"{r[0]} · {d['measures'][amt]}: {r[1]:,.0f}": r[0] for r in d["rows"]}
+    assert out["tip"] in tips and out["chips"] == [f"orders.region = {tips[out['tip']]}"], (out, tips)
+    assert "isn't drawn on this page yet" in out["map"], out
+
+
 def test_page_layouts_are_a_draft_until_publish(srv):
     """Layout edits land in layouts.json "draft"; Publish copies them to "published", which Viewer reads."""
     port, key, _ = srv
