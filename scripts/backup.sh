@@ -12,7 +12,9 @@
 # In the container:   docker exec abi scripts/backup.sh backup > abi-backup.tar
 #                     docker exec abi scripts/backup.sh keys > abi-keys.tar
 #   restore (new volume, container stopped):
-#                     docker run --rm -i -v abi-data:/data --entrypoint scripts/backup.sh abi:latest restore < abi-backup.tar
+#                     docker run --rm -i -v abi_abi-data:/data -v "$PWD/abi-keys.tar:/keys.tar:ro" \
+#                       --entrypoint scripts/backup.sh ghcr.io/himanshu8881212/abi:latest restore /keys.tar < abi-backup.tar
+#                     (README: Back up and restore; your ABI_VOLUME and ABI_IMAGE if .env sets them)
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
 eval "$("$ROOT/scripts/engine.sh" env)"

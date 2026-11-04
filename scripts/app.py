@@ -532,7 +532,7 @@ async function settingsPage(box){
    key.value='';if(x.error)throw new Error(x.error);S=x.result;draw();return 'Saved.'},1);g.append(add);people()};
  const people=async()=>{const r=(await post('sso')).result||{providers:[]},M=r.mail||{},f=(ph,v,t)=>{const i=h('input','f');i.placeholder=ph;i.value=v??'';if(t)i.type=t;i.autocomplete='off';return i};
   const warn=r.reachable?null:h('p','bad','Set ABI_PUBLIC_URL (the address people open, e.g. https://abi.example.com) in .env and restart: emailed links and SSO go there.');
-  const em=card('Email','invites and "forgot your password" links; without it you set passwords in Users & access'),host=f('smtp.example.com',M.host),port=f('587',M.port),from=f('abi@example.com',M.from),sec=h('select','f'),us=f('user name (optional)',M.username),pw=f(M.username?'password (stored in ABI; empty keeps it)':'password','','password');
+  const em=card('Email','invites, "forgot your password" links, and every email of a project without its own mail server (reports, Monitor alerts, flows, the agent; a new domain asks once per project); without it you set passwords in Users & access'),host=f('smtp.example.com',M.host),port=f('587',M.port),from=f('abi@example.com',M.from),sec=h('select','f'),us=f('user name (optional)',M.username),pw=f(M.username?'password (stored in ABI; empty keeps it)':'password','','password');
   ['starttls','tls','none'].forEach(x=>sec.append(new Option({starttls:'STARTTLS (port 587)',tls:'TLS (port 465)',none:'none (a local relay)'}[x],x)));sec.value=M.security||'starttls';
   em.append(...(warn?[warn.cloneNode(true)]:[]),h('p','',M.host?`On: ${M.host}:${M.port} from ${M.from}`:'Off.'),h('label','l','Server'),host,h('label','l','Port'),port,h('label','l','Connection'),sec,h('label','l','From'),from,h('label','l','Sign-in'),us,pw);
   act(em,'Save',async()=>{const x=await confirmed(await post('mail',{host:host.value,port:Number(port.value),security:sec.value,from:from.value,username:us.value,password:pw.value}));pw.value='';if(!x)return 'Not changed.';draw();return 'Saved.'},1);
@@ -618,10 +618,12 @@ function newMonitor(box,ck){box.querySelector('.monform')?.remove();ck=ck||{};co
   if(kind.value==='measure'){const ms=D.measures.map(x=>[x.id,x.name||x.id]),m=s(ms,ck.measure),vs=s([['value','a value'],['measure','another measure (e.g. a target)'],['prev','its previous period (% change)']],ck.against||'value'),
     op=s(OPS,ck.op),v=h('input','f'),other=s(ms,ck.other),per=s(D.dims.filter(d=>d.startsWith('calendar.')).map(d=>[d,d]),ck.period),by=s([['','the total'],...D.dims.map(d=>[d,'each '+d])],ck.by||''),
     fc=s([['','no filter'],...D.dims.map(d=>[d,d])],ck.filters?.[0]?.column||''),fv=h('input','f');v.type='number';v.placeholder='value';v.value=ck.value??'';fv.placeholder='equals…';fv.value=ck.filters?.[0]?.value??'';
-   const lv=L('Value'),lo=L('Other measure'),lp=L('Period'),lb=L('Check');const vis=()=>{const a=vs.value;lv.hidden=v.hidden=a==='measure';lv.textContent=a==='prev'?'Change in %':'Value';lo.hidden=other.hidden=a!=='measure';lp.hidden=per.hidden=a!=='prev';lb.hidden=by.hidden=a==='prev'};vs.onchange=vis;
-   f.append(L('Measure'),m,L('Compare with'),vs,L('Alert when it'),op,lv,v,lo,other,lp,per,lb,by,L('Only where (optional)'),fc,fv);vis();
+   // completed periods only, unless they untick it: with daily loads the latest period is still filling, so its change on a whole period would alert at every period's start
+   const dn=h('label','chk'),dc=h('input');dc.type='checkbox';dc.checked=ck.id?!!ck.skip_latest:true;dn.append(dc,h('span','','Completed periods only (the latest may still be filling)'));
+   const lv=L('Value'),lo=L('Other measure'),lp=L('Period'),lb=L('Check');const vis=()=>{const a=vs.value;lv.hidden=v.hidden=a==='measure';lv.textContent=a==='prev'?'Change in %':'Value';lo.hidden=other.hidden=a!=='measure';lp.hidden=per.hidden=dn.hidden=a!=='prev';lb.hidden=by.hidden=a==='prev'};vs.onchange=vis;
+   f.append(L('Measure'),m,L('Compare with'),vs,L('Alert when it'),op,lv,v,lo,other,lp,per,dn,lb,by,L('Only where (optional)'),fc,fv);vis();
    f.get=()=>{const a=vs.value;if(a!=='measure'&&v.value==='')throw new Error('Give the value to compare with.');if(a==='prev'&&!per.value)throw new Error('The model has no calendar to compare periods.');
-    return {measure:m.value,against:a,op:op.value,...(a==='measure'?{other:other.value}:{value:Number(v.value)}),...(a==='prev'?{period:per.value}:by.value?{by:by.value}:{}),...(fc.value?{filters:[{column:fc.value,op:'=',value:fv.value}]}:{})}}}
+    return {measure:m.value,against:a,op:op.value,...(a==='measure'?{other:other.value}:{value:Number(v.value)}),...(a==='prev'?{period:per.value,skip_latest:dc.checked}:by.value?{by:by.value}:{}),...(fc.value?{filters:[{column:fc.value,op:'=',value:fv.value}]}:{})}}}
   else if(kind.value==='fresh'){const t=s((D.tables||[]).map(x=>[x,x]),ck.table),hr=h('input','f');hr.type='number';hr.value=ck.hours??36;f.append(L('Table'),t,L('Alert after (hours without a load)'),hr);f.get=()=>({table:t.value,hours:Number(hr.value)})}
   else{const fl=s((D.flows||[]).map(x=>[x.id,x.name||x.id]),ck.flow);f.append(L('Flow'),fl);f.get=()=>({flow:fl.value})}};kind.onchange=draw;draw();
  const em=h('input','f');em.type='email';em.placeholder='name@company.com (optional)';em.value=ck.id?monMail(ck)||'':/@/.test(window.ME?.name||'')?ME.name:'';
@@ -765,7 +767,7 @@ function sources(box){const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),qr=
    pw.value='';if(r.error)throw new Error(r.error);const col=inc.value.trim();
    await api('add_data',{table:t.value,location:`${kd.value}://${ho.value.trim()}:${po.value.trim()||po.placeholder}/${db.value.trim()}`,
     database:{table:(sc.value.trim()?sc.value.trim()+'.':'')+tb.value.trim(),...r.result,...(col?{incremental:col}:{})}});return `Loaded ${t.value}.`},1);return c};
- bar.append(btn('Add source',()=>g.prepend(add()),1),btn('Add a database table',()=>g.prepend(addDb())));
+ bar.append(btn('Add source',()=>g.prepend(add()),1),...((window.ME||{admin:true}).admin?[btn('Add a database table',()=>g.prepend(addDb()))]:[]));  // its login is a workspace owner's (/admin/dbkey)
  if(!D.sources.length)box.append(h('p','empty','No sources yet: upload a file, add a folder on S3 or a database table.'));
  D.sources.forEach(id=>{const sp=D.source_specs?.[id]||{},r=qr[id],c=card(id,`sources/${id}.json`),k=h('div','kv');
   [['location',sp.location||'—'],['format',sp.format||'from the file'],['refresh',sp.refresh||(r?r[ix('refresh')]:'—')],['rows',r?fmt(r[ix('rows')]):'—'],['last load',r?cell(r[ix('last_load')]):'—']]
@@ -1324,6 +1326,13 @@ def pub_id(project: str) -> str:
     return f"{project}_pub"[:63]
 
 
+def db_secret(project: str, table: str) -> str:
+    """The name of a database card's two login secrets (+ _USER, _PASSWORD), one per project and table: sales_eu's
+    orders and sales' eu_orders were both DB_SALES_EU_ORDERS, so one card overwrote the other's login and host."""
+    import hashlib  # noqa: PLC0415
+    return f"DB_{hashlib.sha256(f'{project}/{table}'.encode()).hexdigest()[:10]}_{table}".upper()
+
+
 def published(project: str) -> dict:
     f = abi.folder(project).parent / "_views" / project / "published.json"
     return json.loads(f.read_text()) if f.exists() else {}
@@ -1427,10 +1436,10 @@ def publish_bundle(project: str) -> tuple[str, dict, str]:
     bundle = {}
     for f in sorted(dest.rglob("*")):
         rel = f.relative_to(dest).as_posix()
-        if f.is_file() and ".git" not in f.relative_to(dest).parts and f.name not in (".gitkeep", "app.html"):
+        # flows run once, in the project: the copy gets none (each schedule would email twice, each Monitor alert post
+        # twice), and the import needn't take a flow someone else saved in the publisher's name (it refuses that)
+        if f.is_file() and ".git" not in f.relative_to(dest).parts and f.name not in (".gitkeep", "app.html") and not rel.startswith("flows/"):
             bundle[rel] = json.loads(f.read_text()) if rel.endswith(".json") else f.read_text()
-            if rel.startswith("flows/") and isinstance(bundle[rel], dict):  # flows run once, in the project: switched off here,
-                bundle[rel]["enabled"] = False  # or each schedule would email twice and each Monitor alert post twice
     pub = pub_id(project)
     if not abi.folder(pub):
         abi.new_project(dest.parent.name, pub, f"{(bundle.get('project.json') or {}).get('name', project)} (published)")
@@ -2013,7 +2022,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
     project, opened = default, set()
     asking = threading.local()  # the hub of this request's thread: a confirmation is redeemed by the browser that asked
     people: dict[str, dict] = {}  # session id -> {name, token, admin, roles, t}: memory only, never written
-    tries: dict[str, int] = {}  # wrong sign-ins per client address (ABI throttles too, but sees only this server)
+    tries: dict[tuple, int] = {}  # wrong sign-ins per client address and name (ABI throttles too, but sees only this server)
 
     def role_of(sess: dict | None, p: str) -> str | None:
         """The person's role in a project, as ABI says (cached a minute); one person on this machine: the owner."""
@@ -2312,17 +2321,19 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                 return self.reply(413, b'{"error":"That request is too large (64 MB at most)."}')
             raw = self.rfile.read(n) or b"{}"
             if self.path == "/signin" and signin and self.allowed():  # ABI checks the password; the app keeps only the session
-                ip = self.client_address[0]
                 f = urllib.parse.parse_qs(raw.decode(errors="replace"))
                 name, code = f.get("name", [""])[0].strip()[:254], (f.get("code", [""])[0].strip() or None)
+                who = (self.client_address[0], name.lower())  # and name: behind HTTPS every browser comes from Caddy's address
                 status, b = abi.login(name, f.get("password", [""])[0], code)
                 f = None  # the password is not kept
                 if status != 200:
-                    tries[ip] = tries.get(ip, 0) + 1
-                    time.sleep(min(20, 2 ** min(tries[ip], 4)))
+                    if len(tries) > 10_000:  # ponytail: a flood of names forgets the counts; ABI's own throttle keeps its own
+                        tries.clear()
+                    tries[who] = tries.get(who, 0) + 1
+                    time.sleep(min(20, 2 ** min(tries[who], 4)))
                     msg = "Set up the authenticator for this account in ABI first." if b.get("mfa") == "setup" else b.get("message") or "Sign-in failed."
                     return self.signin_page(msg, name, b.get("mfa") == "code")
-                tries.pop(ip, None)
+                tries.pop(who, None)
                 self.send_response(303)
                 self.start(name, b["token"])
                 self.send_header("Location", "/")
@@ -2482,7 +2493,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                     return self.reply(200, json.dumps({"result": {"received": f.stat().st_size}}).encode())
                 ext, sheet = f.suffix.lower(), str(body.get("sheet") or "")
                 try:
-                    out = {"result": abi.upload(project, str(body.get("table")), f, abi.CSV_SAFE if ext in (".csv", ".tsv") else None,
+                    out = {"result": abi.upload(project, str(body.get("table")), f, abi.csv_options(f) if ext in (".csv", ".tsv") else None,
                                                 {"sheet": sheet} if sheet and ext == ".xlsx" else None)}
                 except abi.ActionError as e:
                     out = {"error": str(e.body.get("message") if isinstance(e.body, dict) else e.body)}
@@ -2784,9 +2795,10 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
             user, pw = str(body.get("user") or ""), str(body.get("password") or "")
             if not (re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,62}", tbl) and re.fullmatch(r"[a-z0-9.-]{1,253}", host) and user and pw):
                 return 400, b'{"error":"A table id, the host, and the user and password of the login."}'
-            name = f"DB_{p}_{tbl}".upper()[:90]  # per project and table: another project's login is never overwritten
+            name = db_secret(p, tbl)  # and the project's tenant's: a tenant's project resolves only those
+            tenant = next((t["id"] for t in run("list_tenants", {}, None).get("result", {}).get("tenants") or [] if p in t["projects"]), None)
             for suffix, value in (("_USER", user), ("_PASSWORD", pw)):
-                r = run("set_secret", {"name": name + suffix, "value": value, "allowed_hosts": [host]}, None)
+                r = run("set_secret", {"name": name + suffix, "value": value, "allowed_hosts": [host], **({"tenant": tenant} if tenant else {})}, None)
                 if "error" in r:
                     return 200, json.dumps({"error": r["error"]}).encode()
             return 200, json.dumps({"result": {"user": f"${{secret:{name}_USER}}", "password": f"${{secret:{name}_PASSWORD}}"}}).encode()

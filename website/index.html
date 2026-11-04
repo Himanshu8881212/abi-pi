@@ -347,7 +347,7 @@ footer .top > :last-child { margin-left: auto; font: 12px var(--mono) }
         sync. ABI ships all of it, end to end, out of the box.</p>
     </div>
     <div class="rows" id="rows">
-      <div class="row"><span class="n">01</span><span class="old">ETL & ingestion tool</span><span class="to">→</span><span class="new"><b>Sources</b>: Parquet uploads and S3 folders, public or with keys, refreshed on change or on a schedule</span></div>
+      <div class="row"><span class="n">01</span><span class="old">ETL & ingestion tool</span><span class="to">→</span><span class="new"><b>Sources</b>: CSV, Excel, JSON and Parquet uploads, S3 folders (public or with keys), Postgres and MySQL tables, refreshed on change or on a schedule</span></div>
       <div class="row"><span class="n">02</span><span class="old">Data warehouse</span><span class="to">→</span><span class="new"><b>Built in</b>: Postgres and a Parquet lake with bronze, silver and gold layers</span></div>
       <div class="row"><span class="n">03</span><span class="old">Semantic layer</span><span class="to">→</span><span class="new"><b>Measures, glossary and joins</b>: one definition of revenue, everywhere</span></div>
       <div class="row"><span class="n">04</span><span class="old">Dashboard tool</span><span class="to">→</span><span class="new"><b>Reports, Explore and Home</b> with cross-filtering and drag-and-resize layouts</span></div>
@@ -373,8 +373,8 @@ footer .top > :last-child { margin-left: auto; font: 12px var(--mono) }
       <div class="steps" id="steps">
         <article class="step" data-shot="0">
           <div class="k">01 <i>/ data</i></div><h3>Bring the data in.</h3>
-          <p>Upload Parquet files, or point at an S3 folder of them: public, or private with keys that are stored encrypted for that bucket only. Each source refreshes when it changes or on a schedule.</p>
-          <ul><li>Parquet</li><li>S3 / MinIO / R2</li><li>keys stay encrypted</li><li>on change</li></ul>
+          <p>Upload CSV, Excel, JSON or Parquet files, point at an S3 folder of them, or add a Postgres or MySQL table: public, or private with keys and logins stored encrypted for that host only. Each source refreshes when it changes or on a schedule.</p>
+          <ul><li>CSV · Excel · Parquet</li><li>S3 / MinIO / R2</li><li>Postgres / MySQL</li><li>keys stay encrypted</li></ul>
           <div class="file">saved as <b>sources/bronze_orders.json</b></div>
           <img class="shot" src="shots/sources.webp" alt="Sources page with four S3 Parquet sources: customers, orders (7.4 million rows), products and stores" loading="lazy" width="1600" height="1000">
         </article>
@@ -415,7 +415,7 @@ footer .top > :last-child { margin-left: auto; font: 12px var(--mono) }
         </article>
         <article class="step" data-shot="6">
           <div class="k">07 <i>/ write-back</i></div><h3>Plan in place.</h3>
-          <p>Edit rows, or change a total and let ABI spread it across the rows below. Every edit waits for approval, undoes in one step and can sync back to a Postgres or MySQL source.</p>
+          <p>Edit rows, or change a total and let ABI spread it across the rows below. The agent's edits wait for your approval, every edit undoes in one step, and an Owner can sync them back to a Postgres or MySQL table after a preview.</p>
           <ul><li>edit rows</li><li>spread totals</li><li>approve</li><li>sync to source</li></ul>
           <div class="file">tracked as <b>edit batches</b> with history</div>
           <img class="shot" src="shots/edits.webp" alt="Edits page with editable customer rows and a waiting-for-approval panel" loading="lazy" width="1600" height="1000">

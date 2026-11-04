@@ -114,7 +114,8 @@ def test_pages_and_memory_through_an_app_here(capsys, monkeypatch, tmp_path):
         monkeypatch.setattr(perf.settings, "load", lambda: {"model": None, "thinking": "medium"})  # the app's chats read it too
         monkeypatch.delenv("ABI_PI_LLM_MODEL", raising=False)
         r = run(capsys, "memory", "--url", url, "--project", P, "--chats", "1", "--app-pid", str(os.getpid()), "--hold", "0.5")
-        assert r["started"]["pi"]["chats"] == 1 and r["per_chat_mb"]["started"] > 0 and "answered" not in r, r
+        # the app here is this pytest process, whose memory moves by itself (once -65 MB between samples): Pi's own counts
+        assert r["started"]["pi"]["chats"] == 1 and r["started"]["pi"]["mb"] > 0 and "started" in r["per_chat_mb"] and "answered" not in r, r
         assert r["held"]["pi"]["chats"] == 1, "the chat stays open while held"
         assert not abi.call("changes", project=P)["files"], "roles.json without the account is committed"
         assert {u["name"] for u in abi.call("list_users")["users"]} == users

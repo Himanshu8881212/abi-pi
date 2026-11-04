@@ -530,7 +530,7 @@ def _delivery(c):
         for n, ch in sorted(d.get("channels", {}).items())]})]
 
 
-SERVER_RUN = re.compile(r"(manual|test|webhook|message)-[0-9a-f]{32}|(condition-after-)?\d{4}-\d\d-\d\dT\d\d:\d\dZ"
+SERVER_RUN = re.compile(r"(manual|test|webhook|message)-[0-9a-f]{32}|(condition-after-)?\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d)?Z"
                         r"|condition-first|(snapshot|writeback)-\d+")
 
 

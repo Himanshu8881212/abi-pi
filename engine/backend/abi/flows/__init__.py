@@ -570,7 +570,8 @@ def tick(now: datetime) -> None:
 
 def _data_condition(project: str, f: dict, now: datetime) -> None:
     """FL-2 data condition (D-31), every tick: evaluated as the owner (FL-6) through the condition check every
-    condition uses; starts a run (key `condition-after-<last fire, UTC minute>` or `condition-first`) only when it goes false→true (never checked = false)
+    condition uses; starts a run (key `condition-after-<UTC minute of the last fire, or second of a new trigger's
+    start>` or `condition-first`) only when it goes false→true (never checked = false)
     and the last fire is older than the cooldown; an edge inside the cooldown is dropped. The state row is locked
     while deciding, so concurrent ticks see each edge once. A check error notifies once (D-10), state unchanged."""
     # ponytail: one query per data-condition flow per minute; live tables re-query ClickHouse (as subscriptions.check)
@@ -583,12 +584,14 @@ def _data_condition(project: str, f: dict, now: datetime) -> None:
         holds = evaluate(project, t, u.id)["holds"]
         with db.connect() as conn:
             conn.execute("INSERT INTO flow_conditions VALUES (%s, %s, false, NULL) ON CONFLICT DO NOTHING", [project, f["id"]])
-            s = conn.execute("SELECT holds, fired FROM flow_conditions WHERE project = %s AND flow = %s FOR UPDATE",
+            s = conn.execute("SELECT holds, fired, since FROM flow_conditions WHERE project = %s AND flow = %s FOR UPDATE",
                              [project, f["id"]]).fetchone()
             # FL-4: the run ID names an edge by the fire before it (fires are >= 60 min apart), so after a crash between
-            # the start below and the state update, the next tick finds that run and saves its edge as fired.
+            # the start below and the state update, the next tick finds that run and saves its edge as fired. A new
+            # trigger's first edge is named by its start (to the second), never by one of the old trigger's runs.
             was, fired = s["holds"], s["fired"]
-            key = lambda: f"condition-after-{fired.astimezone(UTC):%Y-%m-%dT%H:%MZ}" if fired else "condition-first"
+            key = lambda: (f"condition-after-{fired.astimezone(UTC):%Y-%m-%dT%H:%MZ}" if fired else
+                           f"condition-after-{s['since'].astimezone(UTC):%Y-%m-%dT%H:%M:%SZ}" if s["since"] else "condition-first")
             if crashed := conn.execute("SELECT created FROM flow_runs WHERE id = %s", [f"{project}/{f['id']}/{key()}"]).fetchone():
                 was, fired = True, crashed["created"]
             if holds and not was and (fired is None or now - fired >= timedelta(minutes=t.get("cooldown_minutes", 1440))):
@@ -681,6 +684,9 @@ def _save(conn, user: User, project: str, f: dict) -> dict:
             conn.execute("INSERT INTO send_targets VALUES (%s, %s) ON CONFLICT DO NOTHING", [project, t])
     if why:
         require_confirmation(" ".join(why))  # one token for every reason
+    if (old.get(rel) or {}).get("trigger") != f["trigger"]:  # a new check (also a deleted flow's ID again) starts as never checked
+        conn.execute("UPDATE flow_conditions SET holds = false, fired = NULL, since = now() WHERE project = %s AND flow = %s",
+                     [project, f["id"]])
     imports.write(project, {rel: f})
     return {"id": f["id"]}
 

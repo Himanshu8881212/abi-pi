@@ -151,14 +151,37 @@ def test_brewline_csv_with_quoted_line_breaks_loads_every_row(srv, tmp_path):
     assert rows(P, "brewline_late") == want
 
 
+def test_a_csv_quoted_another_way_loads_as_written(srv, tmp_path):
+    """The CSV-safe defaults are standard quoting: they read a backslash-escaped CSV (MySQL's exports) with stray
+    backslashes and a single-quoted one as one column, without an error. Through the Sources form and abi.py's load
+    (the agent's abi_load) both now load as DuckDB's sniffer reads their first rows. An empty file is refused in words."""
+    (tmp_path / "escaped.csv").write_text('id,note\n1,"he said \\"hi\\" there"\n2,"a, b"\n')
+    (tmp_path / "single.csv").write_text("id,note\n1,'single, quoted'\n2,'x'\n")
+    want = {"escaped": [["1", 'he said "hi" there'], ["2", "a, b"]], "single": [["1", "single, quoted"], ["2", "x"]]}
+
+    def got(t: str) -> tuple:
+        r = abi._open("GET", f"/api/projects/{P}/tables/{t}/rows?offset=0&limit=20")[1]
+        return [c["name"] for c in r["columns"]], r["rows"]
+    for t, v in want.items():
+        assert "result" in upload(srv, f"{t}_form", tmp_path / f"{t}.csv")
+        assert got(f"{t}_form") == (["id", "note"], v)
+    r = abi.load("demo", P, [str(tmp_path / f"{t}.csv") for t in want])
+    assert sorted(x["table"] for x in r["loaded"]) == sorted(want) and not r["failed"], r
+    assert {t: got(t) for t in want} == {t: (["id", "note"], v) for t, v in want.items()}
+    (tmp_path / "empty.csv").write_bytes(b"")
+    assert upload(srv, "empty", tmp_path / "empty.csv") == {"error": "empty.csv is empty."}
+
+
 def test_the_second_sheet_of_a_workbook_and_ndjson_load(srv, tmp_path):
     """An .xlsx of three sheets (2, 5 and 3 rows, written with the engine's own xlsxwriter) loads its second sheet
-    through the Sources form's sheet option; a sheet it lacks fails and loads nothing; an NDJSON file loads."""
+    through the Sources form's sheet option, all of it past a blank row (DuckDB stops at one by default); a sheet it
+    lacks fails and loads nothing; an NDJSON file loads."""
     book = tmp_path / "book.xlsx"
     code = ("import sys, xlsxwriter\nwb = xlsxwriter.Workbook(sys.argv[1])\n"
             "for name, n in (('Notes', 2), ('Orders 2025', 5), ('Regions', 3)):\n"
             "    ws = wb.add_worksheet(name)\n    ws.write_row(0, 0, ['id', 'region', 'amount'])\n"
-            "    for i in range(n):\n        ws.write_row(i + 1, 0, [i + 1, 'North' if i % 2 else 'South', (i + 1) * 2.5])\n"
+            "    for i in range(n):  # a blank row after the second\n"
+            "        ws.write_row(i + 1 + (i > 1), 0, [i + 1, 'North' if i % 2 else 'South', (i + 1) * 2.5])\n"
             "wb.close()\n")
     subprocess.run([abi.ROOT / "engine/backend/.venv/bin/python", "-c", code, book], check=True)
     r = upload(srv, "book_orders", book, sheet="Orders 2025")
@@ -202,17 +225,22 @@ def test_a_postgres_table_loads_from_the_database_card(srv, tmp_path):
     MCP call with a confirm header) asks first for the new host. The password is in no log, Git history, audit row
     or page afterwards."""
     with postgres(tmp_path) as (port, pw, psql):
-        psql("CREATE TABLE orders (id serial PRIMARY KEY, region text, amount numeric(10,2));"
-             "INSERT INTO orders (region, amount) SELECT (ARRAY['North','South','East','West'])[1 + i % 4], i * 1.25"
-             " FROM generate_series(1, 500) i; CREATE TABLE regions AS SELECT DISTINCT region FROM orders;")
+        psql("CREATE TYPE status AS ENUM ('open', 'paid'); CREATE TABLE orders (id serial PRIMARY KEY, region text, amount numeric(10,2), status status);"
+             "INSERT INTO orders (region, amount, status) SELECT (ARRAY['North','South','East','West'])[1 + i % 4], i * 1.25,"
+             " (ARRAY['open','paid'])[1 + i % 2]::status FROM generate_series(1, 500) i; CREATE TABLE regions AS SELECT DISTINCT region FROM orders;")
         refs = post(srv, "/admin/dbkey", {"table": "pg_orders", "host": "127.0.0.1", "user": "shop", "password": pw})
         names = [re.fullmatch(r"\$\{secret:(\w+)\}", refs.get("result", {}).get(k, ""))[1] for k in ("user", "password")]
         try:
+            assert names == [app.db_secret(P, "pg_orders") + x for x in ("_USER", "_PASSWORD")], names
+            assert app.db_secret("sales_eu", "orders") != app.db_secret("sales", "eu_orders"), "one card overwrote the other's login"
             loc = f"postgres://127.0.0.1:{port}/postgres"
             r = post(srv, "/api/add_data", {"project": P, "table": "pg_orders", "location": loc,
                                             "database": {"table": "public.orders", **refs["result"], "incremental": "id"}})
             assert "result" in r, r
             assert rows(P, "pg_orders") == 500
+            got = abi._open("GET", f"/api/projects/{P}/tables/pg_orders/rows?offset=0&limit=5")[1]
+            i = [c["name"] for c in got["columns"]].index("status")  # an ENUM (DuckLake has none: it refused the table) as its labels
+            assert got["columns"][i]["type"] == "VARCHAR" and {x[i] for x in got["rows"]} <= {"open", "paid"} and got["rows"], got
             assert source(P, "pg_orders")["database"] == {"table": "public.orders", **refs["result"], "incremental": "id"}
             agent = {"project": P, "table": "pg_regions", "location": loc, "database": {"table": "regions", **refs["result"]}}
             with pytest.raises(abi.ActionError) as e:  # what the confirm bridge sends first

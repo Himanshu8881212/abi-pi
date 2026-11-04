@@ -9,7 +9,9 @@ services:
     build: .
     image: ${ABI_IMAGE:-ghcr.io/himanshu8881212/abi:latest}
     container_name: abi
-    ports: ["${ABI_BIND:+${ABI_BIND:-}:}${ABI_PORT:-8790}:8790"]  # ABI_PORT when 8790 is taken; ABI_BIND=127.0.0.1: this machine only
+    # ABI_PORT when 8790 is taken; ABI_BIND the address it listens on: every one, or with HTTPS (ABI_DOMAIN) this
+    # machine only, so plain HTTP never reaches the network beside Caddy (ABI_BIND=0.0.0.0 opens it again)
+    ports: ["${ABI_BIND:-${ABI_DOMAIN:+127.0.0.1}}:${ABI_PORT:-8790}:8790"]
     environment:
       ABI_USER: ${ABI_USER:?set ABI_USER in .env (the workspace owner)}
       ABI_PASSWORD: ${ABI_PASSWORD:?set ABI_PASSWORD in .env (8 characters or more)}

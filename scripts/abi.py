@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ABI-on-Pi harness helpers: deterministic steps the agent (or a person) runs. Everything goes through ABI's REST
-action API as the signed-in person; nothing here reads data files or ABI's folders except `git clone/pull` of the
-project repository (read-only).
+action API as the signed-in person; nothing here reads data files (but the bytes of an upload, and a CSV's first rows
+for its quoting) or ABI's folders except `git clone/pull` of the project repository (read-only).
 
   abi.py health                                  ABI up, signed in, MCP reachable, model proxy reachable
   abi.py workspace <ws>                          new workspace: an empty folder
@@ -147,6 +147,8 @@ def upload(project: str, table: str, path: Path, csv: dict | None = None, xlsx: 
     """IN-7 resumable upload; the last PATCH runs add_data (with these CSV or Excel options) and returns its result.
     Bytes go to ABI, never to the LLM."""
     size = path.stat().st_size
+    if not size:  # ABI's answer to an empty upload is its validation dump
+        raise ActionError(400, {"message": f"{path.name} is empty."})
     name = re.sub(r"[^\w .-]", "_", path.name)
     _, started, _ = _open("POST", f"/api/uploads/{project}/{table}/{urllib.parse.quote(name)}", headers={"Upload-Length": str(size)})
     q = urllib.parse.urlencode({k: json.dumps(v) for k, v in (("csv", csv), ("xlsx", xlsx)) if v})
@@ -158,6 +160,20 @@ def upload(project: str, table: str, path: Path, csv: dict | None = None, xlsx: 
                                 headers={"Upload-Offset": str(off), "Content-Type": "application/offset+octet-stream"})
             off += len(chunk)
     return out
+
+
+def csv_options(path: Path) -> dict | None:
+    """The options a local CSV loads with: CSV_SAFE, standard quoting, so a quoted line break or "" far down the file
+    stays one row (DuckDB guesses from the first rows only), unless those rows use another quote or escape (a
+    single-quoted or backslash-escaped CSV, which CSV_SAFE misreads without an error): then None, DuckDB's own guess.
+    Its sniffer runs in the engine's Python, the DuckDB that loads the file; it reads only those first rows."""
+    code = "import duckdb, json, sys; print(json.dumps(duckdb.connect().execute('SELECT Quote, Escape FROM sniff_csv(?)', [sys.argv[1]]).fetchone()))"
+    try:
+        r = subprocess.run([ABI_CLI / ".venv/bin/python", "-I", "-c", code, path], capture_output=True, text=True, timeout=120, check=True)
+        sniffed = set(json.loads(r.stdout))
+    except (OSError, ValueError, TypeError, subprocess.SubprocessError):  # no sniff: the safe defaults (the load says if they don't fit)
+        return CSV_SAFE
+    return CSV_SAFE if sniffed <= {'"', "(empty)"} else None
 
 
 def table_id(path: Path) -> str:
@@ -327,9 +343,9 @@ def load(ws: str, project: str, paths: list[str]) -> dict:
         t = table_id(f)
         t0 = time.time()
         try:
-            csv = f.suffix.lower() in (".csv", ".tsv")
+            csv = csv_options(f) if f.suffix.lower() in (".csv", ".tsv") else None
             try:  # demo lesson: DuckDB's guess splits quoted multi-line fields, so CSVs load with explicit quoting first
-                r = upload(project, t, f, CSV_SAFE if csv else None)
+                r = upload(project, t, f, csv)
             except ActionError:
                 if not csv:
                     raise

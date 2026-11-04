@@ -16,7 +16,7 @@ from psycopg.rows import dict_row
 VERSION = tomllib.loads((Path(__file__).parent.parent / "pyproject.toml").read_text())["project"]["version"]
 # H-03.2: bump with every change to SCHEMA (test_H03_schema_number_bumped pins SCHEMA's sha256 to it), so older code
 # refuses a database newer code has upgraded instead of running on it.
-SCHEMA_NUMBER = 2
+SCHEMA_NUMBER = 3  # 3: ABI-PI 1.2 (flow_conditions.since)
 QUEUE = importlib.metadata.version("procrastinate")
 # The Procrastinate of v0.5.0-alpha, the oldest release we upgrade from (D-133); installs before H-03.2 recorded none.
 QUEUE_BASELINE = "3.10.0"
@@ -263,6 +263,8 @@ CREATE TABLE IF NOT EXISTS flow_conditions (
   fired timestamptz,
   PRIMARY KEY (project, flow)
 );
+-- ABI-PI 1.2: a new trigger under the flow's ID (edited, or the flow deleted and saved again) starts over at `since`
+ALTER TABLE flow_conditions ADD COLUMN IF NOT EXISTS since timestamptz;
 -- SE-8 (D-03.1): a user's semantic query re-checked every minute; fingerprint = sha256 of the last result, NULL = no baseline yet.
 CREATE TABLE IF NOT EXISTS subscriptions (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

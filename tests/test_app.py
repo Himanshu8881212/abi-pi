@@ -265,6 +265,9 @@ def test_people_sign_in_with_their_abi_account_and_get_only_their_access():
         # collects failures toward ABI's 10-per-15-minutes lock from repeated runs
         st, cookie, body = sign("nobody-here", "wrong-" + "x" * 12)
         assert st == 200 and "Wrong name or password" in body and not cookie
+        t0 = time.time()  # another name's first miss waits 2 s, not the 4 s of this address's second: behind HTTPS every
+        st, cookie, body = sign("nobody-else", "wrong-" + "x" * 12)  # browser comes from Caddy's address, one count for all
+        assert st == 200 and not cookie and time.time() - t0 < 3.5, time.time() - t0
         st, cookie, _ = sign("himanshu", _account("himanshu"))
         assert st == 303 and "abi_u=" in cookie and "HttpOnly" in cookie
         sid = cookie.split(";")[0]

@@ -579,9 +579,13 @@ def _load(conn, src: Source, author: str, unless: str | None = None, used: dict 
             raw_sql, append, truncated = _api(con, src, loc, (headers, query, hide), tmp, since)
         if src.database:  # hostaddr='' stops libpq taking PGHOSTADDR from the env and connecting there (D-27)
             con.execute(f"ATTACH '{_lit("hostaddr=''") if kind == "postgres" else ""}' AS {name} (TYPE {kind}, SECRET {name}, READ_ONLY)")
+            have = {r[0]: r[1] for r in con.execute(f"DESCRIBE {raw_sql}").fetchall()}
+            if enums := {c: "VARCHAR[]" if t.endswith("[]") else "VARCHAR" for c, t in have.items() if t.startswith("ENUM(")}:
+                # DuckLake has no ENUM type (a Postgres status column, often), so it refused the whole load: its labels as text
+                raw_sql = raw_sql.replace("SELECT *", f"SELECT * REPLACE ({', '.join(f'CAST({_q(c)} AS {t}) AS {_q(c)}' for c, t in enums.items())})", 1)
+                have |= enums
             col, bad = src.database.incremental, None
             if col:  # principle 7: a hand-set column that isn't there is an error, or (gone since) a visible full reload
-                have = {r[0]: r[1] for r in con.execute(f"DESCRIBE {raw_sql}").fetchall()}
                 if not re.fullmatch(ORDERABLE, have.get(col, "")):
                     bad = f"incremental column {col} {f'is {have[col]}, not orderable,' if col in have else 'missing'} in {src.database.table}"
                 if same:  # posted once per change (D-10), and once more when the column is back
@@ -646,6 +650,8 @@ def _reader(fmt: str, loc: str, src: Source) -> str:
         csv = given.model_dump(exclude_none=True) if given else {}  # whitelisted values only (`Csv`, `Xlsx`)
         opts = "".join(f", {'delim' if k == 'delimiter' else k} = {str(v).lower() if isinstance(v, bool) else f"'{_lit(v)}'"}"
                        for k, v in csv.items())
+        if fmt == "xlsx":  # read_xlsx stops at the first empty row: a blank separator row would cut the rest off unseen
+            return f"SELECT * FROM read_xlsx('{_lit(loc)}'{opts}, stop_at_empty = false) WHERE concat_ws('', *COLUMNS(*)) <> ''"
         return f"SELECT * FROM {READERS[fmt]}('{_lit(loc)}'{opts})"
     moved = ", allow_moved_paths = true" if fmt == "iceberg" else ""  # a copied table reads under its new location
     return (f"SELECT * EXCLUDE (__abi_file) FROM {READERS[fmt]}('{_lit(loc)}'{moved}, filename = '__abi_file')"

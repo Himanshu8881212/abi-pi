@@ -1,6 +1,6 @@
 """HTTPS in one command: the https compose profile puts Caddy (docker/Caddyfile) in front of the app, the app's own port
-stays on this machine with ABI_BIND, and ABI_PUBLIC_URL follows ABI_DOMAIN; scripts/upgrade.sh brings the profile along
-and waits for its own install's container."""
+stays on this machine (unless ABI_BIND opens it), and ABI_PUBLIC_URL follows ABI_DOMAIN; scripts/upgrade.sh brings the
+profile along and waits for its own install's container."""
 import json
 import os
 import re
@@ -29,7 +29,7 @@ def test_the_https_profile_puts_caddy_in_front_and_keeps_the_app_port_local(tmp_
     plain = compose(tmp_path, "")  # no profile: as 1.1, the app alone on every interface
     assert list(plain) == ["abi"] and ports(plain["abi"]) == [(None, "8790", 8790)] and plain["abi"]["environment"]["ABI_PUBLIC_URL"] == ""
 
-    s = compose(tmp_path, "COMPOSE_PROFILES=https\nABI_DOMAIN=abi.example.com\nABI_BIND=127.0.0.1\n")  # a public name
+    s = compose(tmp_path, "COMPOSE_PROFILES=https\nABI_DOMAIN=abi.example.com\n")  # a public name: plain HTTP stays on this machine
     app, caddy = s["abi"], s["https"]
     assert ports(app) == [("127.0.0.1", "8790", 8790)] and app["environment"]["ABI_PUBLIC_URL"] == "https://abi.example.com"
     assert re.fullmatch(r"caddy:\d+\.\d+\.\d+", caddy["image"]) and ports(caddy) == [(None, "443", 443), (None, "80", 80)]
@@ -38,12 +38,13 @@ def test_the_https_profile_puts_caddy_in_front_and_keeps_the_app_port_local(tmp_
     assert mounts["/etc/caddy/Caddyfile"] == (str(ROOT / "docker/Caddyfile"), True) and mounts["/data"][0] == "caddy"
 
     s = compose(tmp_path, "COMPOSE_PROFILES=https\nABI_DOMAIN=10.0.0.5\nABI_TLS=internal\nABI_HTTPS_PORT=8443\nABI_HTTP_PORT=8080\n")  # a LAN address
-    assert s["abi"]["environment"]["ABI_PUBLIC_URL"] == "https://10.0.0.5:8443" and ports(s["abi"]) == [(None, "8790", 8790)]
+    assert s["abi"]["environment"]["ABI_PUBLIC_URL"] == "https://10.0.0.5:8443" and ports(s["abi"]) == [("127.0.0.1", "8790", 8790)]
     assert ports(s["https"]) == [(None, "8080", 80), (None, "8443", 8443)]  # inside too: Caddy's redirect names the port
     assert s["https"]["environment"] == {"ABI_DOMAIN": "10.0.0.5", "ABI_HTTPS_PORT": "8443", "ABI_TLS": "internal"}
 
     s = compose(tmp_path, "COMPOSE_PROFILES=https\nABI_DOMAIN=abi.corp\nABI_TLS_CERT=/etc/ssl/abi.crt\nABI_TLS_KEY=/etc/ssl/abi.key\n"
-                          "ABI_PUBLIC_URL=https://bi.corp\n")  # your own certificate; an ABI_PUBLIC_URL of your own wins
+                          "ABI_PUBLIC_URL=https://bi.corp\nABI_BIND=0.0.0.0\n")  # your own certificate; your own ABI_PUBLIC_URL and ABI_BIND win
+    assert ports(s["abi"]) == [("0.0.0.0", "8790", 8790)]
     mounts = {v["target"]: (v["source"], v.get("read_only")) for v in s["https"]["volumes"]}
     assert mounts["/certs/cert.pem"] == ("/etc/ssl/abi.crt", True) and mounts["/certs/key.pem"] == ("/etc/ssl/abi.key", True)
     assert s["https"]["environment"]["ABI_TLS"] == "/certs/cert.pem /certs/key.pem" and s["abi"]["environment"]["ABI_PUBLIC_URL"] == "https://bi.corp"

@@ -138,7 +138,7 @@ def test_a_huge_body_is_refused_cleanly(srv):  # noqa: F811
 def test_the_agent_tools_know_every_page():
     src = (app.abi.ROOT / ".pi/extensions/abi/index.ts").read_text()
     pages = set(__import__("re").search(r"const PAGES = \[([^\]]+)\]", src).group(1).replace('"', "").replace(" ", "").split(","))
-    nav = {"home", "chat", "sources", "staged", "tables", "edits", "model", "measures", "glossary", "datasets", "reports", "monitor", "explore",
+    nav = {"home", "chat", "sources", "staged", "tables", "edits", "model", "measures", "glossary", "datasets", "reports", "monitor", "inbox", "explore",
            "flows", "ml", "tools", "agents", "vault", "docs", "security", "environments", "history"}
     assert nav <= pages | {"chat", "edits"}, sorted(nav - pages)
 

@@ -323,19 +323,29 @@ def test_a_report_emails_itself_on_schedule_with_the_figures_of_visual_data(w):
         f"{fire.astimezone(UTC):%Y-%m-%dT%H:%MZ}"], "one run, for that minute"
 
 
-def test_publish_switches_the_flows_off_in_the_published_copy(w):
-    """Viewer's published copy gets the flows switched off: a schedule there would send every email twice."""
+def test_publish_leaves_the_flows_out_of_the_published_copy(w):
+    """Viewer's published copy gets no flows: a schedule there would send every email twice. They also blocked the
+    workspace owner's Publish, as ABI's import takes a changed flow only from its owner and Ann saved these (her Monitor
+    checks and report email). A copy that 1.1 published with Ann's flows switched on (they ran twice) loses them."""
     abi.call("commit", project=P, message="Results reach people")
-    _, bundle, _ = app.publish_bundle(P)
-    flows = {rel: f["enabled"] for rel, f in bundle.items() if rel.startswith("flows/")}
-    assert not any(flows.values()) and set(flows) >= {"flows/email_overview.json", "flows/monitor_a_region_above_3500.json",
-                                                      "flows/monitor_amount_down_on_last_month.json"}, flows
+    pub, bundle, _ = app.publish_bundle(P)
+    assert "reports/overview.json" in bundle and not [rel for rel in bundle if rel.startswith("flows/")]
+    sure("import_project", project=pub, bundle=bundle)  # the workspace owner's Publish
+    ann, theirs = w["ann"].name, ("flows/email_overview.json", "flows/monitor_a_region_above_3500.json")
+    abi.call("set_role", project=pub, user=ann, role="editor")
+    with abi.as_user(w["tok"][ann]):  # the copy as 1.1's Publish left it: Ann's flows, switched on
+        sure("import_project", project=pub, bundle=bundle | {rel: json.loads((abi.ABI_PROJECTS / P / rel).read_text()) for rel in theirs})
+    assert sorted(f["id"] for f in abi.call("list_flows", project=pub)["flows"]) == ["email_overview", "monitor_a_region_above_3500"]
+    sure("import_project", project=pub, bundle=bundle)  # the owner's next Publish
+    assert abi.call("list_flows", project=pub)["flows"] == [], "they run once, in the project"
     assert json.loads((abi.ABI_PROJECTS / P / "flows/email_overview.json").read_text())["enabled"], "the project's own stay on"
 
 
 def test_monitor_inbox_and_email_this_report_draw_in_a_real_browser(w):
     """Ann's pages in headless Chromium: Monitor shows ABI's verdicts and figures and where alerts go with the page
-    closed, the Inbox lists her alerts and test run with their rows, the report's Email this report opens as saved."""
+    closed, the Inbox lists her alerts and test run with their rows, the report's Email this report opens as saved.
+    A new change-on-last-period check compares completed periods unless unticked: with daily loads the latest one is
+    still filling, and its change on a whole period would alert at the start of every period."""
     ann = w["ann"]
     out = _chromium(r"""
 import json, sys
@@ -353,6 +363,12 @@ with sync_playwright() as pw:
     out["inbox"] = pg.inner_text("main"); out["badge"] = pg.inner_text("aside button.it[data-k='inbox']")
     pg.evaluate("location.hash = 'rep:overview'"); pg.click("button:has-text('Email this report')"); pg.wait_for_selector("text=Save schedule")
     out["to"] = pg.eval_on_selector("input[placeholder^='name@company.com, ']", "e => e.value")
+    pg.evaluate("location.hash = 'monitor'"); pg.click("button:has-text('New monitor')")
+    pg.select_option(".monform select:has(option[value=prev])", "prev"); out["completed"] = pg.is_checked(".monform label.chk input")
+    pg.fill(".monform input[placeholder^='e.g. Views']", "Down on last month"); pg.fill(".monform input[type=number]", "-10")
+    with pg.expect_request(lambda r: r.url.endswith("/monitor") and r.method == "POST") as rq:
+        pg.click(".monform button:has-text('Create')")  # ABI asks before the flow is saved: left unanswered here
+    out["sent"] = json.loads(rq.value.post_data)["check"]
     b.close()
 print(json.dumps({"out": out, "errors": errors}))
 """, f"http://127.0.0.1:{w['srv'].server_address[1]}", ann.sid.split("=", 1)[1], P)
@@ -364,3 +380,27 @@ print(json.dumps({"out": out, "errors": errors}))
     inbox = out["out"]["inbox"]
     assert "Monitor: A region above 3500" in inbox and "3,578" in inbox and "Test run: email to" in inbox, inbox
     assert out["out"]["to"] == "cfo@example.test, ops@example.test" and re.search(r"\d", out["out"]["badge"]), out["out"]
+    assert out["out"]["completed"] and out["out"]["sent"]["against"] == "prev" and out["out"]["sent"]["skip_latest"] is True, out["out"]
+
+
+def test_a_check_made_again_or_edited_alerts_when_it_holds(w):
+    """Monitor names a check's flow after the check, so a check deleted and made again, or edited, kept the old one's
+    state ("holds", "fired today", its run IDs): the new check, which holds, never alerted. A new trigger starts as
+    never checked; the same check saved again (its email changed) changes nothing."""
+    ann, fid = w["ann"], "monitor_a_region_above_3500"
+    check = {"name": "A region above 3500", "kind": "measure", "measure": "amount", "op": ">", "against": "value", "value": 3500,
+             "by": "orders.region"}
+    runs = lambda: len(abi.call("flow_runs", project=P, flow=fid)["runs"])  # noqa: E731
+    save = lambda b: (lambda r: ann.yes(r) if "confirm" in r else r)(ann.post("/monitor", b))  # noqa: E731 (Ann's yes when ABI asks)
+    assert runs() == 1
+    assert "result" in save({"action": "delete", "id": "a_region_above_3500"})
+    assert "result" in save({"action": "save", "check": check})  # made again: North 3578 holds
+    tick(fid)
+    assert runs() == 2, "the new check alerts"
+    assert "result" in save({"action": "save", "check": check, "email": "ann@alerts.example.test"})  # the same trigger
+    tick(fid)
+    assert runs() == 2
+    assert "result" in save({"action": "save", "check": check | {"value": 3000}})  # edited: still holds
+    tick(fid)
+    tick(fid)
+    assert runs() == 3, "the edited check alerts once"

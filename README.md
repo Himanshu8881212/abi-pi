@@ -51,7 +51,7 @@ One app, in the order the work happens:
 | **Data** | CSV, Excel, JSON and Parquet files (upload, or an S3 folder of them), Delta and Iceberg tables, Postgres and MySQL tables, into medallion layers: bronze sources, silver cleaned tables, gold facts and dimensions. Sources refresh on change or on a schedule, incrementally where the source allows. |
 | **Data model** | Measures, a glossary, saved queries, joins and a calendar, row-level and column security, a model canvas. |
 | **Write-back** | Edit rows in the app, or have the agent change a total and let ABI spread it over the rows below; the agent's edits wait for your approval, and every edit undoes in one step. For a table loaded straight from a Postgres or MySQL table (its source added with `"sync": true`, its key the source's primary key), an Owner can have the agent write the edits back to it, after a preview of every change they confirm. |
-| **Visualize** | Reports with cross-filtering, drag-and-resize layouts, Explore with saved analyses, Monitor checks (a measure against a value, a target or its last period, freshness, failed flows; measure checks alert in the Inbox, and by email if you like, with no browser open), an Inbox of alerts, flow posts and subscriptions, a Home page of pinned widgets. |
+| **Visualize** | Reports with cross-filtering, drag-and-resize layouts, Explore with saved analyses, Monitor checks (a measure against a value, a target or its last period, freshness, failed flows; measure checks saved there alert in the Inbox, and by email if you like, with no browser open), an Inbox of alerts, flow posts and subscriptions, a Home page of pinned widgets. |
 | **Export** | Board packs and one-pagers as PDF, PPTX and PNG, data extracts (Excel, CSV), and short explainer videos (MP4) of a report. |
 | **Automate** | Flows on a schedule, a report emailed as a PDF on the days you pick (**Email this report** on its page), ML forecasts, tools, and custom agents with their own evaluation sets, each from a form, from a sentence to the agent, or as JSON. |
 | **Knowledge** | A vault for your business definitions; the agent cites it before it defines or judges a measure. |
@@ -129,14 +129,17 @@ per million tokens, on the provider's card); a model without prices counts token
 **6. Bring data.** **Data › Sources › Add source**: upload a CSV, TSV, Excel (.xlsx: name the sheet, or the first is
 read), JSON/NDJSON, Parquet or Avro file (any size; it goes up in pieces), or give an S3 location like
 `s3://bucket/sales/*.csv` with its region: a glob of any of those formats, or a Delta or Iceberg table's folder (pick
-the format). CSVs load with standard quoting, so quoted values with line breaks and `""` inside stay one row. For a
-private bucket, add the access key and secret there: they're stored encrypted, usable only for that bucket's host, and
-never shown again or given to the agent. MinIO, Cloudflare R2 and other S3-compatible stores take their host as the
-endpoint; untick HTTPS for a plain-HTTP one.
+the format). An uploaded CSV loads with standard quoting, so quoted values with line breaks and `""` inside stay one
+row (one whose first rows quote with `'` or escape with `\` loads as those rows show); a CSV location is read as
+DuckDB guesses from its first rows, so if its quoted line breaks come only further down, upload it, or have the agent
+load it with quote and escape set. For a private bucket, add the access key and secret there: they're stored
+encrypted, usable only for that bucket's host, and never shown again or given to the agent. MinIO, Cloudflare R2 and
+other S3-compatible stores take their host as the endpoint; untick HTTPS for a plain-HTTP one.
 
-**Add a database table** does the same for a Postgres or MySQL table: host, port, database, schema, table, the login
-and, optionally, an increasing column (an ID or an updated-at time). The login is stored encrypted for that host only,
-never shown again or given to the agent; the table reloads daily, appending the rows past the increasing column.
+**Add a database table** (workspace owners) does the same for a Postgres or MySQL table: host, port, database, schema,
+table, the login and, optionally, an increasing column (an ID or an updated-at time). The login is stored encrypted for
+that host only, never shown again or given to the agent; the table reloads daily, appending the rows past the
+increasing column.
 
 **7. Ask.** Open the chat and say what you need: "Model this data and build me a report of revenue by month and
 region."
@@ -146,10 +149,11 @@ change it by clicking their name at the top. Then give them a role (Viewer reads
 limit the sections and reports they see. Someone forgot their password? Set a new one for them on the same page.
 
 With a mail server (**Govern › Settings › Email**) you can also invite people by email, "Forgot your password?" on
-the sign-in page sends a reset link, and reports and Monitor alerts go out by email (the first send to a domain asks
-you once). With **Settings › Single sign-on** people sign in with your company account
-(Google, Microsoft Entra, Okta, Keycloak: any OpenID Connect provider); each person links theirs once by clicking
-their name. Both need `ABI_PUBLIC_URL`, the address people open, so the links come back to ABI.
+the sign-in page sends a reset link, and every project without a mail server of its own sends its email through it:
+reports, Monitor alerts, flows and the agent's (the first send to a domain asks once per project). With **Settings ›
+Single sign-on** people sign in with your company account (Google, Microsoft Entra, Okta, Keycloak: any OpenID
+Connect provider); each person links theirs once by clicking their name. Both need `ABI_PUBLIC_URL`, the address
+people open, so the links come back to ABI.
 
 ### All settings
 
@@ -158,7 +162,7 @@ their name. Both need `ABI_PUBLIC_URL`, the address people open, so the links co
 | `ABI_USER` | yes | The workspace owner, created on the first start. |
 | `ABI_PASSWORD` | yes | The owner's password, 8 characters or more. |
 | `ABI_PORT` | no | The port on this machine. Default `8790`. |
-| `ABI_BIND` | no | The address that port listens on: `127.0.0.1` for this machine only (HTTPS in front, or your own proxy). Default: every address. |
+| `ABI_BIND` | no | The address that port listens on: `127.0.0.1` for this machine only (your own proxy in front). Default: every address; with HTTPS on (below), `127.0.0.1`. |
 | `ABI_PROJECT` | no | The project to open first; created if missing. Default `main`. |
 | `ABI_WORKSPACE` | no | Its workspace. Default `main`. |
 | `ABI_LLM_BASE`, `ABI_LLM_KEY`, `ABI_LLM_MODEL` | no | One OpenAI-compatible model endpoint, its key and the model's id there (e.g. `https://api.openai.com/v1`, `gpt-5`), instead of Settings. |
@@ -179,10 +183,10 @@ else, turn on HTTPS: [Caddy](https://caddyserver.com) in front with a certificat
 ```ini
 COMPOSE_PROFILES=https       # docker compose (and scripts/upgrade.sh) start Caddy too
 ABI_DOMAIN=abi.example.com   # the name or address people open
-ABI_BIND=127.0.0.1           # ABI's own port for this machine only: people come in over HTTPS
 ```
 
-then `docker compose up -d` and open `https://abi.example.com`. The certificate:
+then `docker compose up -d` and open `https://abi.example.com`. ABI's own port then listens on this machine only, so
+plain HTTP never reaches the network (`ABI_BIND=0.0.0.0` opens it again). The certificate:
 
 - **A public name** that points at this machine, with ports 80 and 443 open to the internet: Caddy gets one from
   Let's Encrypt and renews it.
@@ -192,7 +196,8 @@ then `docker compose up -d` and open `https://abi.example.com`. The certificate:
 - **Your own** (a company authority, an air-gapped network): `ABI_TLS_CERT=/path/fullchain.pem` and
   `ABI_TLS_KEY=/path/key.pem`; after you replace the files, `docker compose restart https`.
 
-`ABI_PUBLIC_URL` becomes `https://ABI_DOMAIN` by itself, so emailed links and single sign-on come back over HTTPS.
+`ABI_PUBLIC_URL` becomes `https://ABI_DOMAIN` by itself, so emailed links and single sign-on come back over HTTPS,
+unless `.env` already sets one: remove an old `http://` address there, or change it to the https one.
 Port 443 or 80 taken? `ABI_HTTPS_PORT=8443`, `ABI_HTTP_PORT=8080` (a public certificate needs one of the two kept).
 Your own proxy instead: `ABI_BIND=127.0.0.1`, and have it send `X-Forwarded-Proto: https`.
 
@@ -220,7 +225,8 @@ moves over too: it keeps its volume and its `.env`. The volume remembers its ver
 
 ## Back up and restore
 
-Everything lives in one volume: the database, the lake, projects, the vault, chats and board packs.
+Everything lives in one volume: the database, the lake, projects, the vault, chats and board packs (with HTTPS on,
+Caddy's certificates in a second one: below).
 
 ```sh
 docker exec abi scripts/backup.sh backup > abi-backup.tar   # database dump + all files, checksummed
@@ -240,6 +246,11 @@ docker compose up -d
 Without the keys, your data, reports, history and logins come back, but stored source secrets and saved API keys
 have to be entered again.
 
+With HTTPS on, Caddy's certificates and keys (with `ABI_TLS=internal`, also the authority your devices trust) live in a
+second volume: keep a copy with `docker compose cp https:/data abi-caddy`, and on a new machine put it back after the
+first start (`docker compose cp abi-caddy/. https:/data && docker compose restart https`), or every device has to
+trust a new authority.
+
 ## How it's checked
 
 Every release runs three suites, and their results go into [RELEASE.md](RELEASE.md):
@@ -258,14 +269,17 @@ requests, and its revenue by region matched an independent DuckDB sum to the cen
 
 - HTTPS (above) gets a public certificate only for a name the internet reaches on port 80 or 443 (no DNS
   challenge); anywhere else the certificate is Caddy's own or yours.
-- Email needs a mail server: invitations, password resets, scheduled reports and alerts use the one in
-  **Settings › Email** (a project with its own, which the agent sets, uses that). Until then add people with a
+- Email needs a mail server: invitations, password resets and every email a project sends (scheduled reports,
+  alerts, flows, the agent's and custom agents' emails) use the one in **Settings › Email**, unless the project has
+  its own (which the agent sets); the first send to a domain asks once per project. Until then add people with a
   password, set forgotten ones in Users & access, and read alerts and flow posts in the **Inbox**.
-- Monitor's measure checks alert with no browser open (ABI checks them every minute, at most once a day each); its
-  freshness and failed-flow checks are evaluated while the page is open, though failed flows and data problems also
-  reach the Inbox's alerts. Viewer's published copy keeps the flows switched off: they run once, in the project.
+- Monitor's measure checks saved on its page alert with no browser open (ABI checks them every minute, at most once a
+  day each); a check from 1.1 or made by the agent does once you click **Alert with the page closed** on its card.
+  Freshness and failed-flow checks are evaluated while the page is open, though failed flows and data problems also
+  reach the Inbox's alerts. Viewer's published copy has no flows: they run once, in the project.
 - A database source copies one whole table (no custom query) and appends the rows past its increasing column each
-  day: rows changed or deleted in place at the source stay as loaded until a **Reload** on its card. No Snowflake,
+  day: rows changed or deleted in place at the source stay as loaded until a **Reload** on its card. A Postgres
+  `money` column loads as text, a `numeric` without a scale as a float, an enum as its labels. No Snowflake,
   BigQuery, SQL Server or Oracle yet, and no `gs://` or `az://` locations.
 - Files already in ABI's files folder on the server (server paths) are the workspace owner's to load; everyone else
   uploads their files.

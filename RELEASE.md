@@ -12,8 +12,9 @@ ML, custom agents), the Pi agent with a team of specialists, and a one-page app.
 - **Model:** measures, glossary, saved queries, named models, row-level security, a model canvas.
 - **Visualize:** reports (drag and resize their cards; the layout is saved in the report), Explore with saved
   analyses, Monitor checks (a measure against a value, a target or its last completed period; freshness; failed
-  flows), Home with pinned widgets (+ Add widget). (From 1.2: measure checks alert in the Inbox and by email with no
-  browser open; an Inbox screen.)
+  flows), Home with pinned widgets (+ Add widget). (From 1.2: measure checks saved on the Monitor page alert in the
+  Inbox and by email with no browser open, a check from 1.1 or the agent's once you click Alert with the page closed
+  on its card; an Inbox screen.)
 - **Automate:** flows, ML models, tools and custom agents, each from a form, from a description to the agent, or as
   JSON; the engine uses the same model as the agent, so custom agents answer and pass their evaluation sets.
 - **Every page:** cards can be moved and resized (Developer); Publish shows the layout to Viewer; a collapsible sidebar.
@@ -55,4 +56,6 @@ Checked: offline 80 passed, live agent tests 18 of 18, container check 13 of 13 
   one command, README › Use it from other devices.)
 - Email (invitations, flow emails) needs the engine's mail settings. (From 1.1: invitations and password resets use
   Govern › Settings › Email; a flow's emails use the project's own mail server, which the agent sets. From 1.2: a
-  project without its own sends through Settings › Email too: Email this report on a report's page, Monitor alerts.)
+  project without its own sends all its email through Settings › Email: Email this report, Monitor alerts, flows, the
+  agent and custom agents, the first send to a domain asking once per project; a mail server set up for invitations
+  in 1.1 serves every such project after the upgrade.)
