@@ -514,6 +514,45 @@ project it had just loaded (build_copies started 23:23:00 and 23:48:00; delete_p
 round 1's at 17:49. The supervisor started a new worker in 0 s and every run here ended right, but a heavy job beside
 it would die with it (a load's run is then failed by retry_stalled_runs within about a minute, c2c7437).
 
+## 1.2 M3.6 round 1 (pve1)
+
+5 Nov 2026, 02:13-02:19 UTC: release-1.2 at b378753 (M3.6: shared partials for restricted reads, the per-person
+caches, dimension keys) measured on pve1 with M3 round 3's method. `git archive b378753` built on LXC 100 as a
+throwaway compose install (project, container and volume abi-m36, port 8798 on the LXC's loopback, the owner's
+password in a root-only file; image abi-m36:b378753, 2,843,813,666 bytes), no memory limit as in M3's pages runs,
+this branch's docker-compose.yml defaults (ABI_RLS_SHARED_ROWS 1,000,000). Removed afterwards; the live abi and lake
+containers' start time, restart count and image were the same before and after. bench/perf.py of this commit ran
+inside the container: `perf.py project perf_brewline --scale 0.01` (73,941 orders, its Overview report, a 261-264 KB
+page), then each `pages` run, one at a time, each started at an LXC 1-minute load average of 0.68-1.38 with no build,
+no other bench and no container but abi and lake beside it; [a-b] is the load average's range during the run, and
+peak is the cgroup's memory.peak, reset at each run's start.
+
+| M3.6 target (PLAN.md) | 1.1.0 (part 2) | M3 round 3 (c2c7437) | 1.2 M3.6 round 1 (b378753) | |
+|---|---|---|---|---|
+| 50 sessions right after a commit with `--rls cafes.cafe_id` (50 distinct restricted Viewers): page p95 <= 5 s | 152.7 s | 25.59 s | 9.14 s [0.59-2.14]; again last, 9.38 s [1.29-3.63] (2.8x M3, 16.7x 1.1.0) | missed |
+| 50 sessions right after a commit, no rule: no worse than M3 | 87.6 s | 1.44 s | 1.30 s [1.12-1.77] | met |
+| run 1's memory peak within M3's mem_limit 4g | | | 2,217,697,280 bytes (2.07 GiB; 2,345,668,608 in the repeat), no OOM event | met |
+
+| pages, Brewline 0.01 | first p50 / p95 s | right after a commit p50 / p95 / max s | errors | peak bytes |
+|---|---|---|---|---|
+| `--rls cafes.cafe_id`, 10 Viewers | 2.33 / 2.53 | 2.07 / 2.26 / 2.26 | 0 | 2,330,951,680 |
+| `--rls cafes.cafe_id`, 25 Viewers | 3.75 / 4.98 | 3.45 / 4.93 / 4.95 | 0 | 2,321,993,728 |
+| `--rls cafes.cafe_id`, 50 Viewers | 7.15 / 11.67 | 5.62 / 9.14 / 9.21 | 0 | 2,217,697,280 |
+| `--rls cafes.cafe_id`, 50 Viewers, repeated last | 6.19 / 9.83 | 5.88 / 9.38 / 9.41 | 0 | 2,345,668,608 |
+| `--rls cafes.region` (4 values, people share), 50 Viewers | 3.04 / 3.12 | 2.04 / 2.13 / 2.13 | 0 | 2,330,439,680 |
+| no rule, 50 people (Viewers and Developers) | 1.36 / 1.48 | 1.23 / 1.30 / 1.31 | 0 | 2,343,247,872 |
+
+0 dropped in every run; the lake snapshot was the same at each round's start and end. Missed by 4.1-4.4 s at 50 café
+Viewers. It grows with people at about 0.15-0.2 s per Viewer (10: 2.26 s, 25: 4.93 s, 50: 9.14 s), so 25 meets 5 s.
+What the time is: the query log (the visuals' reads in these runs) shows nearly every person's visual read as an SE-7
+hit, and a hit still took 138-216 ms on average (misses 208-337 ms), at 50 people at once in one engine; the shared
+partials were built 5 times in all (89 ms on average), and the day chart's (72,961 groups for 73,941 orders) is over
+half the fact's rows, so that visual takes each person's own read as designed. So at this scale DuckDB isn't what
+costs: what's left is the engine's work around each read, 6 a person (auth, role, audit, query_log, the RLS context,
+a catalog connection for the snapshot), which is what step 1's L4 removes (one engine read per person per page instead of one per
+visual, and the snapshot read once per action), not built in b378753. Not measured here: a 7.4M-order project right
+after a refresh, the cold morning case the shared partials are for.
+
 ## 1.2 M2 round 1 (MacBook Air, 8 cores, 24 GB; model proxy/claude-sonnet-5-5)
 
 4 Nov 2026 08:57-09:13, release-1.2 at 7e68c71: M2.3's change measures (2c55e2d), M2.1's expressions (377a868), M2.2's
