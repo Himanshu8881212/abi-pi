@@ -164,9 +164,23 @@ def j(path: Path, default=None):
         return default
 
 
+# 1.2 (owner, 5 Nov 2026): the fonts ship with ABI (scripts/fonts, SIL Open Font License), so no page or export makes a
+# browser contact Google: Inter Tight and IBM Plex Mono as data URIs (about 100 KB), which also work offline and in
+# file:// exports
+def _font(file: str, family: str, weight: str) -> str:
+    import base64  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+    b = base64.b64encode((Path(__file__).resolve().parent / "fonts" / file).read_bytes()).decode()
+    return f"@font-face{{font-family:'{family}';font-style:normal;font-weight:{weight};font-display:swap;src:url(data:font/woff2;base64,{b}) format('woff2')}}"
+
+
+FONTS = (_font("inter-tight-latin.woff2", "Inter Tight", "100 900") + _font("ibm-plex-mono-latin-400.woff2", "IBM Plex Mono", "400")
+         + _font("ibm-plex-mono-latin-500.woff2", "IBM Plex Mono", "500"))
+
+
 def shell(title: str, sub: str, body: str, script: str = "") -> str:
     return (f"<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-            f"<title>{esc(title)}</title><link rel=stylesheet href='https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap'><style>{CSS}</style></head><body><div class=tip></div><header><h1>{esc(title)}</h1>"
+            f"<title>{esc(title)}</title><style>{FONTS}{CSS}</style></head><body><div class=tip></div><header><h1>{esc(title)}</h1>"
             f"<span class=sub>{sub}</span></header><main>{body}</main>{script}</body></html>")
 
 
