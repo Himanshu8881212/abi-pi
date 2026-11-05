@@ -95,3 +95,5 @@ def test_every_check_kind_is_one_the_handoff_offers():
     offered = set(re.findall(r"\b(\w+)\b", re.search(r"kind: (table, [^)]*)\)", ext)[1]))
     used = set(re.findall(r'ids\("(\w+)"\)', (root / "scripts/team.py").read_text()))
     assert used <= offered, used - offered
+    import team  # and the handoff accepts every kind it offers (it refused "pack" too)
+    assert used <= team.KINDS and offered - {"a", "board", "pack's", "ID", "s"} <= team.KINDS | {"pack"}, used - team.KINDS

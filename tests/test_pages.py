@@ -343,7 +343,8 @@ def standins(tmp_path, monkeypatch) -> None:
     (tmp_path / "logs").mkdir()
     monkeypatch.setenv("PATH", f"{tmp_path / 'bin'}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("PI_STANDIN", str(tmp_path))
-    monkeypatch.setenv("ABI_PI_WORKSPACES", str(tmp_path / "ws"))  # Settings: none, so no model flags
+    monkeypatch.setenv("ABI_PI_WORKSPACES", str(tmp_path / "ws"))  # Settings: none
+    monkeypatch.setenv("ABI_PI_LLM_MODEL", "standin")  # 1.2: ABI names no model, so the deployment's starts the agents
     monkeypatch.setattr(app.abi, "WORKSPACES", tmp_path / "ws")
     monkeypatch.setattr(app.abi, "ROOT", tmp_path)  # Pi's log and the usage lines go here
     monkeypatch.setattr(app, "HUBS", {})

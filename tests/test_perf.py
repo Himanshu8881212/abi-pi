@@ -70,6 +70,9 @@ def test_a_bench_project_is_made_as_the_baselines_were(capsys):
 
 def test_pages_and_memory_through_an_app_here(capsys, monkeypatch, tmp_path):
     monkeypatch.setenv("ABI_USER", "admin")
+    # 1.2: ABI names no model, so a chat needs one: an endpoint nobody answers, so the agents start and none replies
+    monkeypatch.setenv("ABI_PI_LLM_BASE", "http://127.0.0.1:9/v1")
+    monkeypatch.setenv("ABI_PI_LLM_MODEL", "standin")
     monkeypatch.delenv("ABI_PASSWORD", raising=False)  # the bench reads data/accounts.txt, as scripts/creds.py does
     if not perf.password("admin"):
         pytest.skip("no accounts file")

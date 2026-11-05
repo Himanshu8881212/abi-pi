@@ -28,7 +28,7 @@ TEAM = json.loads((abi.ROOT / "harness" / "team.json").read_text())
 AGENTS, PHASES = TEAM["agents"], TEAM["phases"]
 TASK_REF = re.compile(r"\bPlan task ([A-Za-z0-9_-]+)")
 MAX_ATTEMPTS = 3
-KINDS = {"table", "measure", "glossary", "relationship", "report", "dataset", "ml", "flow", "tool", "agent", "commit", "doc", "other"}
+KINDS = {"table", "measure", "glossary", "relationship", "report", "dataset", "ml", "flow", "tool", "agent", "commit", "doc", "pack", "other"}
 
 
 def tdir(project: str) -> Path:
