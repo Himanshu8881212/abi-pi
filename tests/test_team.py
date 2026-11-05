@@ -68,3 +68,17 @@ def test_flows_must_be_saved_off_and_attempts_are_limited():
         r = team.handoff("p", "automation-engineer", {"task_id": "f", "status": "done", "summary": "made", "done": [{"kind": "flow", "id": "weekly"}]})
         assert r["result"] == "failed" and "enabled" in r["checks"][0]["problems"][0]
     assert "ask the person" in team.guard("p", "automation-engineer", "Plan task f: again")["reason"]
+
+
+def test_specialists_run_on_the_leads_model():
+    """1.2 live team job on pve1: every specialist's file named cliproxy/gpt-6.1-sol, so on an install whose model is
+    set in Settings (or another built-in model) no specialist could start and the Lead did the whole job itself. The
+    files name no model, and the subagent extension takes Settings' model, else the Lead's own."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    for f in (root / ".pi/agents").glob("*.md"):
+        head = f.read_text().split("---")[1]
+        assert "\nmodel:" not in head, f.name
+    src = (root / ".pi/extensions/subagent/index.ts").read_text()
+    assert "process.env.ABI_PI_MODEL || dispatchDefaults.model || agent.model" in src
+    assert "MODEL" not in (root / "scripts/gen_agents.py").read_text().split("def main")[0]

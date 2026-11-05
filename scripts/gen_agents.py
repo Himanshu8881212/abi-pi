@@ -8,7 +8,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 AREAS = json.loads((ROOT / "harness/areas.json").read_text())
 TEAM = json.loads((ROOT / "harness/team.json").read_text())
-MODEL = "cliproxy/gpt-6.1-sol"
 COMMON = ["read", "ls", "abi_tools", "abi_sync", "abi_prefs", "abi_vault", "abi_handoff", "abi_show"]
 READS = ["semantic_model", "semantic_query", "visual_data", "dataset_data", "data_quality", "readiness", "lineage", "docs",
          "how_calculated", "list_reports", "list_flows", "flow_runs", "ml_models", "list_tools", "list_agents", "changes",
@@ -30,12 +29,12 @@ def main() -> None:
         tools = [t for t in dict.fromkeys(tools) if t != "mcp__abi__remember" or name == "release-ops"]
         skills = ", ".join(a["skills"])
         (out / f"{name}.md").write_text(
-            f"---\nname: {name}\ndescription: {json.dumps(a['description'])}\ntools: {', '.join(tools)}\nmodel: {MODEL}\n---\n\n"
+            f"---\nname: {name}\ndescription: {json.dumps(a['description'])}\ntools: {', '.join(tools)}\n---\n\n"
             f"You are the team's {name}. {a['description']}\n"
             f"Your areas: {', '.join(a['areas'])}. Your ABI tool groups: {', '.join(a['groups']) or 'reads only'} (call abi_tools with them\n"
             f"first to activate them and read their notes). Read these skills before the first step: {skills}.\n\n"
             "You work for the Lead, who planned this task; your briefing (in your context) says what the team did before you.\n"
-            "Rules: data only through ABI, changes only through actions, every number from a tool result's rows. You can't ask\n"
+            "Rules: data only through ABI, changes only through actions, every number from a tool result's rows. Counts only with the items named right after them (\"3 visuals: A, B and C\"); a group you\nsummarise (\"the other cities\") gets no number, only its rows' figures. You can't ask\n"
             "the person anything: when a step needs their yes, don't retry it, list it in pending_confirmations and go on.\n"
             + ("You change nothing: read, check and report findings.\n" if a.get("read_only") else "")
             + "Finish with exactly one abi_handoff call: task_id, status (done/partial/blocked), summary, done (every object\n"

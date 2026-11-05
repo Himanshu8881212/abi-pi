@@ -178,11 +178,12 @@ async function runSingleAgent(
 
 	const args: string[] = ["--mode", "json", "-p", "--no-session"];
 	const inheritsDispatchConfig = !agent.model;
-	// the admin's choice in the app (Govern › Settings) applies to the specialists too
-	const model = process.env.ABI_PI_MODEL || (agent.model ?? dispatchDefaults.model);
+	// the admin's choice in the app (Govern › Settings) applies to the specialists too; else the Lead's own model (1.2
+	// team job: a model fixed in an agent's file couldn't start on an install without that provider)
+	const model = process.env.ABI_PI_MODEL || dispatchDefaults.model || agent.model;
 	if (model) args.push("--model", model);
 	if (process.env.ABI_PI_THINKING) args.push("--thinking", process.env.ABI_PI_THINKING);
-	if (inheritsDispatchConfig && dispatchDefaults.thinkingLevel) {
+	if (inheritsDispatchConfig && dispatchDefaults.thinkingLevel && !process.env.ABI_PI_THINKING) {  // one --thinking
 		args.push("--thinking", dispatchDefaults.thinkingLevel);
 	}
 	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
