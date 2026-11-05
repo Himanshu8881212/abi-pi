@@ -11,6 +11,7 @@ import hashlib
 import json
 import math
 import re
+import threading
 import weakref
 from itertools import pairwise
 from typing import Annotated
@@ -36,6 +37,9 @@ HIDDEN = "not shown: row-level security rules apply to this project"  # in place
 MARK = "[hidden by row-level security]"  # D-47: in place of data-derived text in a restricted Viewer's inbox copy
 _built: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # lake connection -> {schema names built}
 _ctx: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # lake connection -> {(user, snap, rules sha): ctx}
+_where: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # lake connection -> {schema: {table: its row filter}}
+_outputs: dict = {}  # (project, bundle sha) -> unfiltered_outputs
+_outputs_lock = threading.Lock()
 
 
 def _file(project: str) -> dict:
@@ -53,8 +57,25 @@ def row_rules(project: str) -> list[dict]:
     return _file(project).get("rules", [])
 
 
+def digest(project: str) -> str:
+    """M3.6: sha256 of the definition files a restricted user's filters and plans are made from (rules, model,
+    measures, datasets, ML models, sources, tables, project.json), once per read action."""
+    def sha() -> str:
+        root, h = git.path(project), hashlib.sha256()
+        for f in [root / RLS, root / "project.json", *sorted(root.glob("model/*.json")), *sorted(root.glob("ml/*.json")),
+                  *sorted(root.glob("sources/*.json")), *sorted(root.glob("tables/*.json"))]:
+            if f.is_file():
+                h.update(f"{f.relative_to(root)}\0".encode() + f.read_bytes() + b"\0")
+        return h.hexdigest()
+    return actions.memo(("rls.digest", project), sha)
+
+
 def hidden(project: str, user_id: int | None) -> dict[str, set[str]]:
     """D-110: {table: lower-cased names of the columns hidden from this user}; {} when the user reads unfiltered."""
+    return actions.memo(("rls.hidden", project, user_id), lambda: _hidden(project, user_id))
+
+
+def _hidden(project: str, user_id: int | None) -> dict[str, set[str]]:
     out: dict[str, set[str]] = {}
     if restricted(project, user_id):
         for r in _file(project).get("columns", []):
@@ -66,6 +87,10 @@ def restricted(project: str, user_id: int | None) -> bool:
     """D-42: a user below Editor in a project with rules. System reads (user_id None) are never restricted."""
     if user_id is None or not rules(project):
         return False
+    return actions.memo(("rls.restricted", project, user_id), lambda: _restricted(project, user_id))
+
+
+def _restricted(project: str, user_id: int) -> bool:
     with db.connect() as conn:
         row = conn.execute("SELECT u.workspace_owner, r.role FROM users u LEFT JOIN project_roles r"
                            " ON r.user_id = u.id AND r.project = %s WHERE u.id = %s", [project, user_id]).fetchone()
@@ -142,10 +167,13 @@ def _ch_in(cols: tuple[str, ...], types: dict[str, str], keys: list[tuple]) -> s
     return exp.paren(exp.or_(*ors)).sql("clickhouse") if ors else "FALSE"
 
 
-def conditions(project: str, user_id: int, read) -> dict[str, str]:
+def conditions(project: str, user_id: int, read, types: dict | None = None) -> dict[str, str]:
     """{table: the filter of every row this user may see}: its own rules ANDed, plus `fk IN (<keys>)` for each
     relationship to a filtered table (SE-2 direction, any depth). DuckDB SQL for lake tables, ClickHouse SQL for live
-    ones (E-02.6). `read(sql, reads)` runs an unfiltered system read (`reads`: ClickHouse reads, as `execute`)."""
+    ones (E-02.6). `read(sql, reads)` runs an unfiltered system read (`reads`: ClickHouse reads, as `execute`).
+    `types`: {lake table: {column: DuckDB type}} of tables read as they are (no edits); M3.6: where a relationship's
+    foreign key has its key's types, `fk IN (<keys>)` takes the dimension's visible keys, never a scan of t (a key
+    no row of t holds matches nothing; a NULL key is left out by `_in`, as a NULL fk joins nothing)."""
     from abi.semantic import live, model  # not at top: circular imports
 
     lv = live.columns(project)
@@ -198,6 +226,12 @@ def conditions(project: str, user_id: int, read) -> dict[str, str]:
                     src, reads = f"(SELECT * FROM {storage._q(d)} WHERE {' AND '.join(dc)}) __d", ()
                 if t in lv:
                     cs.append(ch(t, fk, src, key, reads))
+                elif d not in lv and all((types or {}).get(t, {}).get(f, 1) == (types or {}).get(d, {}).get(k, 2)
+                                         for f, k in zip(fk, key)):
+                    try:
+                        cs.append(_in(fk, keys(src, key)))
+                    except (duckdb.Error, ActionFailed):
+                        cs.append("FALSE")
                 else:
                     on = " AND ".join(f"__d.{storage._q(k)} = {storage._q(t)}.{storage._q(f)}" for f, k in zip(fk, key))
                     cs.append(allowed(t, fk, f"EXISTS (SELECT 1 FROM {src} WHERE {on})", reads))
@@ -212,6 +246,22 @@ def conditions(project: str, user_id: int, read) -> dict[str, str]:
     while conds != last:
         last, conds = conds, {t: cs for t in tables if (cs := step(t, conds))}
     return {t: " AND ".join(cs) for t, cs in conds.items()} | {t: "FALSE" for t in unfiltered_outputs(project)}
+
+
+def where(con, schema: str, t: str) -> str | None:
+    """M3.6: the row filter user schema `schema`'s view of t applies (None: no filter), as `context` built it; raises
+    KeyError when that schema has no view of t."""
+    return _where[con][schema][t]
+
+
+def key_columns(project: str, t: str) -> list[str]:
+    """M3.6: the columns of t that any user's filter of t reads (`conditions`): its row rules' columns and the foreign
+    keys of its relationships into filtered tables. The same for every user."""
+    from abi.semantic import model  # not at top: model imports the semantic package
+
+    done, rels = filtered(project), model._read(project, "model.json").get("relationships", [])
+    return list(dict.fromkeys([r["column"] for r in row_rules(project) if r["table"] == t] + [
+        c for r in rels if r["from"]["table"] == t and r["to"]["table"] in done for c in r["from"]["columns"]]))
 
 
 def filtered(project: str) -> set[str]:
@@ -233,7 +283,21 @@ def unfiltered_outputs(project: str) -> list[str]:
     doesn't hide the input's rows). D-110: also every table built from a table with a column rule unless it has a
     column rule of its own (its Owner chose what it hides). Restricted Viewers see none of their rows (default deny);
     readiness names them. ponytail: table-level lineage, so an output that never read a hidden column is denied too;
-    column lineage if that bites"""
+    column lineage if that bites. M3.6: kept per bundle content (any change to the folder is a new key)."""
+    if not rules(project):
+        return []
+    sha = lambda: hashlib.sha256(dumps(bundle(git.path(project))).encode()).hexdigest()
+    if (hit := _outputs.get(key := (project, sha()))) is None:
+        hit = _unfiltered_outputs(project)
+        with _outputs_lock:
+            if sha() == key[1]:  # unchanged while it ran: the result is this content's
+                _outputs[key] = hit
+            while len(_outputs) > 64:  # oldest first
+                del _outputs[next(iter(_outputs))]
+    return list(hit)
+
+
+def _unfiltered_outputs(project: str) -> list[str]:
     from abi.semantic import lineage, model  # noqa: I001 - not at top: both import the semantic package
 
     ruled, cols = {r["table"] for r in row_rules(project)}, {r["table"] for r in _file(project).get("columns", [])}
@@ -290,17 +354,16 @@ def context(project: str, user_id: int, con, snap: int, edited: frozenset, model
 def _context(project: str, user_id: int, con, snap: int, edited: frozenset, model_columns: dict, read) -> tuple[str, dict]:
     from abi.semantic import live, model  # not at top: circular imports
 
-    root = git.path(project)  # rules + relationships make the filters; datasets + ML models the ml_<id> denials
-    files = [root / f for f in (RLS, "model/model.json", "model/measures.json", "model/datasets.json")] + sorted(
-        root.glob("ml/*.json")) + sorted(root.glob("sources/*.json")) + sorted(root.glob("tables/*.json"))  # live columns
-    key = (user_id, snap, hashlib.sha256(b"\0".join(f.read_bytes() for f in files if f.exists())).hexdigest())
+    # rules + relationships make the filters; datasets + ML models the ml_<id> denials, sources + tables live columns
+    key = (user_id, snap, digest(project))
     lv = live.columns(project)
     fresh = any(r["to"]["table"] in lv for r in model._read(project, "model.json").get("relationships", []))
     with storage.project_lock("rls", project):  # M3.1: one project's view build never stalls another's reads
         hit = None if fresh else _ctx.setdefault(con, {}).get(key)
     if hit:
         return hit
-    conds, hid = conditions(project, user_id, read), hidden(project, user_id)
+    conds = conditions(project, user_id, read, {t: c for t, c in model_columns.items() if t not in edited})
+    hid = hidden(project, user_id)
 
     def drop(t: str, cols) -> tuple[str | None, list[str]]:
         """D-110: (t's row filter, its columns to leave out); a table whose every column is hidden shows no rows
@@ -308,10 +371,11 @@ def _context(project: str, user_id: int, con, snap: int, edited: frozenset, mode
         out = [c for c in cols if c.lower() in hid.get(t, ())]
         return ("FALSE", []) if out and len(out) == len(cols) else (conds.get(t), out)
 
-    views = {}
+    views, wheres = {}, {}
     for t, cols in model_columns.items():
         if t in conds or t in hid:
             where, out = drop(t, cols)
+            wheres[t] = where
             views[t] = (f"SELECT *{' EXCLUDE (' + ', '.join(map(storage._q, out)) + ')' if out else ''} FROM"
                         f" {'memory.effective' if t in edited else 'lake.model'}.{storage._q(t)}" + (f" WHERE {where}" if where else ""))
     schema = "rls_" + hashlib.sha256(json.dumps(views, sort_keys=True).encode()).hexdigest()[:16]
@@ -329,6 +393,7 @@ def _context(project: str, user_id: int, con, snap: int, edited: frozenset, mode
                 cur.rollback()
                 raise
             _built[con].add(schema)  # ponytail: schemas are never dropped (a few views each); drop old ones if many
+        _where.setdefault(con, {})[schema] = wheres
         cache = _ctx.setdefault(con, {})
         for k in [k for k in cache if k[1] < snap]:  # older snapshots never come back
             del cache[k]

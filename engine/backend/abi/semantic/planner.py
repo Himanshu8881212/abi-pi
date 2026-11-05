@@ -30,6 +30,9 @@ totals: [[dimension, ...]]}. Semantics are the ones the golden suite fixes (work
   D-02.3: a time context reads those partials per day (grouped by the fact's date column too) and DuckDB applies the
   date windows; a DISTINCT_COUNT/MEDIAN context runs whole in ClickHouse (uniqExact, quantileExactInclusive) and may
   use only the live fact's own columns (D-8).
+- Shared partials (M3.6, `partials`): a context over a listed lake fact with no DISTINCT_COUNT, MEDIAN or CONVERT reads
+  the fact as a live fact's context does (its partials grouped by every fact column it reads), grouped also by the
+  listed columns, as DuckDB table `__lake<n>` named in `shared`; the planned SQL then regroups them the same way.
 - Refused (DECISIONS D-8): time intelligence without a date-table dimension, and a filter or grouping on a table a
   fact in the query has no relationship path to, or more than one shortest path to.
 """
@@ -280,7 +283,8 @@ def pairs_sql(copy: str, column: str, copy_cols, dt: dict) -> str | None:
 
 def plan(query: dict, measures: dict[str, str], model: dict, copies: dict[str, tuple] | None = None,
          live: dict[str, tuple] | None = None, reads: dict | None = None, days: dict | None = None,
-         rates: tuple | None = None, joins: list | None = None) -> str:
+         rates: tuple | None = None, joins: list | None = None, partials: dict[str, list[str]] | None = None,
+         shared: dict | None = None) -> str:
     """Semantic query -> DuckDB SQL. Columns: dimensions ("table.column", query order), `grouping_id` when totals
     are asked, then measures by ID. `copies`: {fact: (name of its current query copy in lake.query, its columns,
     {DISTINCT_COUNT column: name of its current distinct-pair table})}. `live`: {live table: (its ClickHouse
@@ -288,6 +292,8 @@ def plan(query: dict, measures: dict[str, str], model: dict, copies: dict[str, t
     `days`: `local(...)`, the timestamp columns reaching the date table, joined and windowed by their local day (SE-13).
     `rates`: (display currency or None, `zoned(...)`) for CONVERT, which reads model.json `rates_table` (`_converted`).
     `joins` is filled with every relationship the SQL joins on (COL-SEC.2: hidden keys are refused).
+    `partials`: {lake fact: more columns to group its partials by}; `shared` is filled with {DuckDB table name: (fact,
+    DuckDB SQL of its partials over the unqualified fact)} for each such read (M3.6).
     Raises PlanError (query/model problems) or mel.MelError (measures)."""
     names, dims = query.get("measures") or [], query.get("dimensions") or []
     if not names:
@@ -340,7 +346,8 @@ def plan(query: dict, measures: dict[str, str], model: dict, copies: dict[str, t
     finals = {m: walk(trees[m], Ctx(filters=filters), m) for m in names}
     reads = {} if reads is None else reads
     ctes = {f"s{i}": _aggregate(c, aggs, owner[c], dims, sets, totals, model, dt, (copies or {}).get(c.fact), live or {}, reads,
-                                    days or {}, rates, [] if joins is None else joins)
+                                    days or {}, rates, [] if joins is None else joins, partials or {},
+                                    {} if shared is None else shared)
             for i, (c, aggs) in enumerate(subs.items())}
 
     ids = list(ctes)
@@ -379,7 +386,7 @@ def plan(query: dict, measures: dict[str, str], model: dict, copies: dict[str, t
 
 def _aggregate(c: Ctx, aggs: dict, m: str, dims: list, sets: list, totals: bool, model: dict, dt: dict,
                copy: tuple | None, live: dict[str, tuple], reads: dict, days: dict, rates: tuple | None,
-               joins: list) -> exp.Select:
+               joins: list, partials: dict | None = None, shared: dict | None = None) -> exp.Select:
     """One aggregate query: the fact's rows under context `c`, grouped by the dimensions the context keeps; each
     aggregate in `aggs` ({(filters, Agg): alias}) reads the rows its own filters keep. `copy`: the fact's query copy
     (name, its "table.column" columns); read when it holds every dimension column the context uses. `live`, `reads`:
@@ -393,6 +400,8 @@ def _aggregate(c: Ctx, aggs: dict, m: str, dims: list, sets: list, totals: bool,
         raise PlanError(f"Measure '{m}' converts amounts with CONVERT over the live ClickHouse table '{c.fact}'; "
                         "conversion reads imported tables only (DECISIONS D-8).")
     whole = c.fact in live and next((a.fn for _, a in aggs if a.fn in HOLISTIC), None)
+    # M3.6: shared partials, read as a live fact's are (none for a holistic or converted aggregate)
+    lake = c.fact in (partials or {}) and c.fact not in live and not convs and all(a.fn not in HOLISTIC for _, a in aggs)
     if whole and (other := [x for x in [*(d for _, d in kept), *(x for fs, _ in aggs for f in fs for x in sorted(_cols(f)))]
                             if _col(x).table != c.fact]):
         raise PlanError(f"Measure '{m}' uses {whole} over the live ClickHouse table '{c.fact}', so it can be grouped "
@@ -442,7 +451,7 @@ def _aggregate(c: Ctx, aggs: dict, m: str, dims: list, sets: list, totals: bool,
     # fact by its foreign key first, then join the dimension to those rows and group again (S-09-fix-4).
     # ponytail: one joined table only; with two, grouping by both keys can make more groups than the join saves.
     # A snowflake chain behind that table (D-06) is fine: the fact is grouped by its one key either way.
-    by_key = (not time_dims and c.fact not in live and [r["from"]["table"] for r in rels.values()].count(c.fact) == 1
+    by_key = (not time_dims and c.fact not in live and not lake and [r["from"]["table"] for r in rels.values()].count(c.fact) == 1
               and all(a.fn not in HOLISTIC for _, a in aggs)
               and not {_col(x).table for fs in fsets for f in fs for x in _cols(f)} & set(rels))
 
@@ -463,9 +472,9 @@ def _aggregate(c: Ctx, aggs: dict, m: str, dims: list, sets: list, totals: bool,
         src = exp.table_(copy, db="query", catalog="lake", quoted=True, alias=exp.to_identifier(c.fact, quoted=True))
     elif whole:  # rendered for ClickHouse at the end (`_live_whole`)
         src = exp.to_table(live[c.fact][0], dialect="clickhouse").as_(c.fact, quoted=True)
-    elif c.fact in live:  # a time context also reads the fact's date column, to group the partials per day
+    elif c.fact in live or lake:  # a time context also reads the fact's date column, to group the partials per day
         dated = {**rels, dt["table"]: path(model, c.fact, dt["table"], m, time_dims[0])[0]} if time_dims else rels
-        src, part = _live_fact(c, aggs, fsets, kept, dated, live, reads)
+        src, part = _live_fact(c, aggs, fsets, kept, dated, live, reads, (partials[c.fact], shared) if lake else None)
     if convs:
         src = _converted(src, c.fact, convs, model, rates, m)
     leaves = {alias: _leaf(replace(a, fn="COUNT") if once else a, only(fs), plain, kept and top, part)
@@ -679,14 +688,16 @@ def _live_whole(t: str, q: exp.Select, live: dict, reads: dict) -> exp.Select:
         expressions=[pick(a, "lo", t), pick(a, "hi", t)])]), a, quoted=True) for a, _ in out)).from_(src)
 
 
-def _live_fact(c: Ctx, aggs: dict, fsets: list, kept: list, rels: dict, live: dict, reads: dict) -> tuple:
+def _live_fact(c: Ctx, aggs: dict, fsets: list, kept: list, rels: dict, live: dict, reads: dict,
+               lake: tuple | None = None) -> tuple:
     """(DuckDB table, partial column of (fn, mel.Col)) of a live fact's context: its rows grouped by every fact column
-    the context reads, so each DuckDB condition, join and regrouping sees the values its fact rows had."""
+    the context reads, so each DuckDB condition, join and regrouping sees the values its fact rows had. `lake`: (more
+    columns to group by, `shared`) for M3.6 shared partials of a lake fact: DuckDB SQL, registered in `shared`."""
     own = lambda col: exp.column(col.column, quoted=True)
     keys = dict.fromkeys([*(_col(d).column for _, d in kept if _col(d).table == c.fact),
                           *(x for r in rels.values() if r["from"]["table"] == c.fact for x in r["from"]["columns"]),
                           *(x.column for fs in fsets for f in fs for x in mel._walk(f)
-                            if type(x) is mel.Col and x.table == c.fact)])
+                            if type(x) is mel.Col and x.table == c.fact), *(lake[0] if lake else ())])
     parts: dict[tuple, str] = {}  # (fn, column) -> partial alias
     for _, a in aggs:
         for fn in ("SUM", "COUNT") if a.fn == "AVG" else (a.fn,):
@@ -694,13 +705,18 @@ def _live_fact(c: Ctx, aggs: dict, fsets: list, kept: list, rels: dict, live: di
     q = exp.select(*(exp.column(k, quoted=True) for k in keys), *(
         exp.alias_(AGG[fn](this=exp.column(col, quoted=True)), alias, quoted=True) for (fn, col), alias in parts.items()))
     # ponytail: a time context reads every day of the fact; push the members' date span down if live facts get long
-    q = q.from_(exp.to_table(live[c.fact][0], dialect="clickhouse"))
+    q = q.from_(exp.table_(c.fact, quoted=True) if lake else exp.to_table(live[c.fact][0], dialect="clickhouse"))
     # the rows any aggregate reads: each one's conditions on fact columns only (the rest is checked in DuckDB)
     pushed = list(dict.fromkeys(tuple(f for f in fs if {x.split(".")[0] for x in _cols(f)} <= {c.fact}) for fs in fsets))
     if all(pushed):
         q = q.where(exp.or_(*(exp.and_(*(_sql(f, own) for f in fs)) for fs in pushed)))
     if keys:
         q = q.group_by(*(exp.column(k, quoted=True) for k in keys))
+    if lake:  # DuckDB sums integers as HUGEINT already, and sums those the same
+        shared = lake[1]
+        shared[name := f"__lake{len(shared)}"] = (c.fact, q.sql("duckdb"))
+        return exp.table_(name, quoted=True, alias=exp.to_identifier(c.fact, quoted=True)), \
+            lambda fn, col: exp.column(parts[fn, col.column], c.fact, quoted=True)
     ints = live[c.fact][1]
 
     def part(fn, col):  # an integer sum comes back as DECIMAL(38, 0); DuckDB sums integers as HUGEINT

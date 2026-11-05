@@ -7,6 +7,7 @@ give the same bytes.
 """
 
 import json
+import os
 from collections import Counter
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -31,10 +32,12 @@ def loads(text: str) -> Any:
 def bundle(folder: Path) -> dict:
     """Folder -> bundle."""
     out = {}
-    for p in sorted(folder.rglob("*")):
+    paths = []
+    for root, dirs, files in os.walk(folder):  # M3.6: never into .git (327 ms of a 330 ms bundle walked its objects)
+        dirs[:] = [d for d in dirs if d != ".git"]  # repos (and nested ones) aren't project content
+        paths += [Path(root, n) for n in [*dirs, *files] if n != ".git"]
+    for p in sorted(paths):
         rel = p.relative_to(folder).as_posix()
-        if ".git" in p.relative_to(folder).parts:  # repos (and nested ones) aren't project content
-            continue
         if p.is_symlink():  # could pull a file from outside the project into the bundle
             raise ValueError(f"{rel}: symlinks can't be bundled.")
         if p.is_dir():

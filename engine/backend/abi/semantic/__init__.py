@@ -8,6 +8,7 @@ data through `execute`; the audit of what else touches lake data directly is wor
 """
 
 import contextlib
+import copy
 import io
 import json
 import logging
@@ -48,6 +49,14 @@ _cache_lock = threading.Lock()
 
 
 _eff: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # lake connection -> (snapshot, tables with edits)
+_model_cols: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # lake connection -> (snapshot, model columns)
+# M3.6: a restricted plan depends on the person only through their hidden columns: (definition, snapshot, query, hidden
+# columns, locale) as JSON -> plan, the last 1,024
+_plans: dict = {}
+_plans_lock = threading.Lock()
+# M3.6 shared partials: lake connection -> {(snapshot, partials SQL): (its memory.shared table, rows), or None (failed)}
+_parts: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+SHARED_ROWS = int(os.environ.get("ABI_RLS_SHARED_ROWS", "1000000"))  # 0: off, every restricted read is its own
 
 
 def _edited(con, snap: int) -> frozenset[str]:
@@ -94,7 +103,12 @@ def _columns_of(cur, schema: str) -> dict[str, dict[str, str]]:
 
 def locale(project: str) -> dict[str, str | None]:
     """SE-13 (E-11.md decision 1): the effective {time_zone, currency}: project.json settings, else the project's
-    tenant's, else UTC and no currency. A zone that isn't one (a pulled project.json) answers 400 naming the setting."""
+    tenant's, else UTC and no currency. A zone that isn't one (a pulled project.json) answers 400 naming the setting.
+    M3.6: read once per read action."""
+    return dict(actions.memo(("locale", project), lambda: _locale(project)))
+
+
+def _locale(project: str) -> dict[str, str | None]:
     s = git.settings(project) if (git.path(project) / "project.json").is_file() else {}
     if "time_zone" not in s or "currency" not in s:
         with db.connect() as conn:
@@ -208,7 +222,9 @@ def _rls(project: str, user_id: int | None, con, snap: int, sql: str | None,
     user reads unfiltered."""
     if not rls.restricted(project, user_id):
         return None, {}
-    cols = _columns_of(con.cursor(), "model")
+    if (hit := _model_cols.get(con)) is None or hit[0] != snap:  # M3.6: a catalog read per snapshot, not per read
+        _model_cols[con] = hit = (snap, _columns_of(con.cursor(), "model"))
+    cols = hit[1]
     ctx = rls.context(project, user_id, con, snap, _edited(con, snap), cols,
                       lambda q, r: execute(project, q, {"rls": "keys"}, reads=r or None))
     if sql is not None:
@@ -216,28 +232,97 @@ def _rls(project: str, user_id: int | None, con, snap: int, sql: str | None,
     return ctx
 
 
+class _Unshared(Exception):  # noqa: N818 - not an error: the read takes the person's own path (M3.6)
+    pass
+
+
+def _partials(project: str, con, snap: int, fact: str, sql: str) -> str | None:
+    """M3.6: the memory.shared table of partials `sql` (planner `shared`: `fact` grouped by every column a context and
+    any user's filter of the fact read) at this snapshot, built once (single flight) as a system read with no user's
+    filter; None when it failed, ran past TIMEOUT, or holds more than SHARED_ROWS rows or half the fact's (remembered,
+    so it is built once per snapshot). No person ever reads it but through their own filter (`_shared`); restricted
+    SQL can't name it (`rls.check` refuses qualified names). Older snapshots' tables go."""
+    name = "p_" + actions.sha(f"{snap}\0{sql}")[:16]
+    # ponytail: a lock per table name is kept for good (as per user for rls); a striped lock if processes run for months
+    with storage.project_lock(f"shared {name}", project):
+        with _cache_lock:
+            built = _parts.setdefault(con, {})
+        if (snap, sql) in built:
+            return (hit := built[snap, sql]) and hit[1] <= SHARED_ROWS and hit[0] or None
+        start, rows, error, ok, scanned, cur = time.perf_counter(), None, None, False, None, con.cursor()
+        try:
+            _effective(cur, con, snap)
+            with storage.project_lock("rls", project):  # one catalog write of the schema at a time
+                cur.execute("CREATE SCHEMA IF NOT EXISTS memory.shared")
+            _profile(cur)
+            with limited(cur, TIMEOUT):
+                cur.execute(f"CREATE OR REPLACE TABLE memory.shared.{name} AS {sql}")
+            scanned = _scanned(cur)
+            [(rows,)] = cur.execute(f"SELECT count(*) FROM memory.shared.{name}").fetchall()
+            [(facts,)] = cur.execute(f"SELECT count(*) FROM {storage._q(fact)}").fetchall()
+            ok = rows <= min(SHARED_ROWS, facts / 2)  # finer, and it is no cheaper than each person's own read
+        except duckdb.Error as e:  # never shown: the person's own read runs instead
+            error = str(e)
+        finally:
+            _log(None, project, {"rls": "partials", "table": fact}, sql, snap, False, rows, start, error, scanned)
+        with _cache_lock:
+            for k in [k for k in built if k[0] < snap]:  # older snapshots never come back
+                if old := built.pop(k):
+                    with contextlib.suppress(duckdb.Error):
+                        con.cursor().execute(f"DROP TABLE IF EXISTS memory.shared.{old[0]}")
+            if not ok:
+                with contextlib.suppress(duckdb.Error):
+                    cur.execute(f"DROP TABLE IF EXISTS memory.shared.{name}")
+            built[snap, sql] = (name, rows) if ok else None
+        return name if ok and rows <= SHARED_ROWS else None
+
+
+def _shared(project: str, con, snap: int, ctx: str | None, shared: dict) -> dict[str, str]:
+    """M3.6: {read name: its view for this person}: the shared partials of each fact (`plan`'s `shared`) kept to the
+    groups the person's own filter of the fact passes (`rls.where`, the filter their view of the fact applies). The
+    filter reads only key columns the partials are grouped by, and each fact row is in exactly one group, so the
+    groups kept are exactly their rows'. Raises _Unshared when a table isn't there (their own read runs instead)."""
+    out = {}
+    for n, (fact, sql) in shared.items():
+        try:
+            cond = rls.where(con, ctx, fact)
+        except KeyError:
+            raise _Unshared from None
+        if not (name := _partials(project, con, snap, fact, sql)):
+            raise _Unshared
+        out[n] = f"SELECT * FROM memory.shared.{name}" + (f" WHERE {cond}" if cond else "")
+    return out
+
+
 def execute(project: str, sql: str, asked: dict, user_id: int | None = None, live: str | None = None,
-            over: str = 'SELECT * FROM "__live"', reads: dict | None = None, timeout: float | None = None) -> list[tuple]:
+            over: str = 'SELECT * FROM "__live"', reads: dict | None = None, timeout: float | None = None,
+            shared: dict | None = None) -> list[tuple]:
     """Run one read on the project's lake. SE-5: imported tables in DuckDB; with `live` (a live table), `sql` is
     ClickHouse SQL on that table's source and `over` DuckDB SQL over its result as table "__live"; with `reads`
     ({name: (live table, ClickHouse SQL)}, from `plan`), DuckDB `sql` reads each ClickHouse result as table `name`
     (live.run). Live reads are never cached and are logged with their ClickHouse SQL.
     SE-7: results are cached by (SQL, snapshot ID); the SQL is the planned query, so a changed measure or model
     is a new key. OB-1: every call is logged: what was asked, the SQL, snapshot, cache hit, rows, time, error.
-    `timeout` (s): a lake read still running then is interrupted (duckdb.InterruptException, SE-10)."""
+    `timeout` (s): a lake read still running then is interrupted (duckdb.InterruptException, SE-10).
+    M3.6 `shared` ({read name: (fact, partials SQL)}, a restricted user's lake-only `plan`): each name is a temporary
+    view of the shared partials through the user's own filter (`_shared`); raises _Unshared, unlogged, when they
+    can't be read (the caller plans the person's own read)."""
     con, start, rows, error = storage.lake(project), time.perf_counter(), None, None
     snap = storage.snapshot_id(con)  # read before the query, so a cached result is never older than its key
     with _cache_lock:  # per lake connection: a recreated lake restarts its snapshot IDs
         cache = _caches.setdefault(con, {})
-    rows, cached, ctx, scanned = None, False, None, 0
+    rows, cached, ctx, scanned, views, key = None, False, None, 0, {}, sql
     try:
-        ctx, filters = _rls(project, user_id, con, snap, None if live else sql, reads)  # SE-6
+        ctx, filters = _rls(project, user_id, con, snap, None if live else sql, {**(reads or {}), **(shared or {})})  # SE-6
+        if shared:
+            views = _shared(project, con, snap, ctx, shared)
+            key = sql + "".join(f"\n-- {n} = {v}" for n, v in views.items())  # the tables are the snapshot's and SQL's
         # E-02.6: each live read gets its own table's filter in the ClickHouse SQL itself, logged as run
         add = lambda t, ch: _live.filtered(ch, _live.table_sql(project, t), *filters[t]) if t in filters else ch
         sql = add(live, sql) if live else sql
         reads = reads and {n: (t, add(t, ch)) for n, (t, ch) in reads.items()}
         # SE-7: keyed by the RLS views too (their name hashes every filter), so users never share a result
-        if hit := None if live or reads else cache.get((sql, snap, ctx)):  # live data has no snapshot
+        if hit := None if live or reads else cache.get((key, snap, ctx)):  # live data has no snapshot
             rows, cached = hit[0], True
         if live:
             rows = _live.run(project, {"__live": (live, sql)}, over)
@@ -249,13 +334,25 @@ def execute(project: str, sql: str, asked: dict, user_id: int | None = None, liv
         elif not cached:
             cur = con.cursor()
             _effective(cur, con, snap, ctx)
-            _profile(cur)
-            with limited(cur, timeout):
-                rows = cur.execute(sql).fetchall()
-            scanned = _scanned(cur)
+            if views:  # one transaction: a shared table dropped meanwhile (a newer snapshot) is still read
+                cur.begin()
+            try:
+                for n, v in views.items():  # the cursor's own: no other read sees them
+                    cur.execute(f"CREATE TEMP VIEW {storage._q(n)} AS {v}")
+                _profile(cur)
+                with limited(cur, timeout):
+                    rows = cur.execute(sql).fetchall()
+                scanned = _scanned(cur)
+            except duckdb.CatalogException:
+                if views:  # a shared table gone before the transaction began
+                    raise _Unshared from None
+                raise
+            finally:
+                if views:
+                    cur.rollback()
             if (size := _bytes(sql, rows)) <= CACHE_BYTES:  # a result above the cap is never cached
                 with _cache_lock:
-                    cache[sql, snap, ctx] = rows, size
+                    cache[key, snap, ctx] = rows, size
                     total = sum(s for _, s in cache.values())
                     while total > CACHE_BYTES:  # old snapshots first (never hit again), then oldest entry (FIFO)
                         total -= cache.pop(min(cache, key=lambda k: k[1]))[1]
@@ -263,14 +360,23 @@ def execute(project: str, sql: str, asked: dict, user_id: int | None = None, liv
     except (duckdb.Error, ActionFailed) as e:
         error = str(e)
         raise
+    except _Unshared:
+        views = None
+        raise
     finally:
-        logged = sql + "".join(f"\n-- {n} = ClickHouse ({t}): {ch}" for n, (t, ch) in (reads or {}).items())
-        if actions.inbound():  # D-32: a filter value may be the message text; the cache key keeps the real SQL
-            logged = actions.redacted(sql, bool(live)) + "".join(
-                f"\n-- {n} = ClickHouse ({t}): {actions.redacted(ch, True)}" for n, (t, ch) in (reads or {}).items())
-            asked, error = actions.hashed(asked), error and f"<sha256:{actions.sha(error)}>"
-        _log(user_id, project, asked, logged, snap, cached, None if rows is None else len(rows), start, error,
-             None if rows is None or error else scanned)
+        if views is not None:  # None: not run, the caller runs the person's own read
+            _logged(project, sql, asked, user_id, live, reads, shared, snap, cached, rows, start, error, scanned)
+
+
+def _logged(project, sql, asked, user_id, live, reads, shared, snap, cached, rows, start, error, scanned) -> None:
+    logged = sql + "".join(f"\n-- {n} = ClickHouse ({t}): {ch}" for n, (t, ch) in (reads or {}).items()) + "".join(
+        f"\n-- {n} = shared partials of {f} (M3.6), through your filter" for n, (f, _) in (shared or {}).items())
+    if actions.inbound():  # D-32: a filter value may be the message text; the cache key keeps the real SQL
+        logged = actions.redacted(sql, bool(live)) + "".join(
+            f"\n-- {n} = ClickHouse ({t}): {actions.redacted(ch, True)}" for n, (t, ch) in (reads or {}).items())
+        asked, error = actions.hashed(asked), error and f"<sha256:{actions.sha(error)}>"
+    _log(user_id, project, asked, logged, snap, cached, None if rows is None else len(rows), start, error,
+         None if rows is None or error else scanned)
 
 
 def _log(user_id, project, asked, sql, snap, cached, rows, start, error, scanned: int | None = None) -> None:
@@ -395,14 +501,42 @@ def uses(expressions: list) -> tuple[list[str], list[str]]:
     return [n.name for n in nodes if type(n) is mel.Ref], [f"{n.table}.{n.column}" for n in nodes if type(n) is mel.Col]
 
 
-def plan(project: str, q: dict, user_id: int | None = None,
-         expressions: list[dict] = (), strict: bool = True) -> tuple[dict, str, list[str], list[dict], dict]:
+def plan(project: str, q: dict, user_id: int | None = None, expressions: list[dict] = (), strict: bool = True,
+         shared: dict | None = None) -> tuple[dict, str, list[str], list[dict], dict]:
+    """`_plan`; M3.6: a restricted user's plan is kept per (definition files, snapshot, query, their hidden columns,
+    locale), the only inputs that differ between people (a demotion or a role change isn't one: an unrestricted plan
+    is never taken from here), so people who see different rows share one plan."""
+    if not rls.restricted(project, user_id):
+        return _plan(project, q, user_id, expressions, strict)
+    key = json.dumps([project, rls.digest(project), storage.snapshot_id(storage.lake(project)), q, list(expressions), strict,
+                      shared is not None and SHARED_ROWS > 0, sorted((t, sorted(c)) for t, c in rls.hidden(project, user_id).items()),
+                      locale(project)], sort_keys=True, default=str)
+    with _plans_lock:
+        hit = _plans.pop(key, None)
+    if hit is None:
+        made: dict | None = {} if shared is not None and SHARED_ROWS > 0 else None
+        hit = (*_plan(project, q, user_id, expressions, strict, made), made)
+    with _plans_lock:
+        _plans[key] = hit
+        while len(_plans) > 1024:
+            del _plans[next(iter(_plans))]
+    *out, made = copy.deepcopy(hit)
+    if made:
+        shared.update(made)
+    return tuple(out)
+
+
+def _plan(project: str, q: dict, user_id: int | None = None, expressions: list[dict] = (), strict: bool = True,
+          shared: dict | None = None) -> tuple[dict, str, list[str], list[dict], dict]:
     """Plan a semantic query without running it (S-02 plus order and limit): (validated query, DuckDB SQL, result
     columns, every measure of the project, ClickHouse reads {DuckDB table name: (live table, ClickHouse SQL)}).
     RP-5 shows this SQL. Raises ActionFailed(400) with the planner's reason. A user restricted by row-level security
     (SE-6) gets no query copy or pair table: they're built unfiltered, so its plan reads the (filtered) tables.
     M2.1 `expressions` ([{name, expr}], semantic_query's): planned as more measures of this query only, after its
-    measures, through the same row and column security; never saved (rule 7). `strict` as in `_inline`."""
+    measures, through the same row and column security; never saved (rule 7). `strict` as in `_inline`.
+    M3.6 `shared` (a dict: `query`'s), for a restricted user in a project without live tables: each context over a
+    filtered lake fact the user sees every column of reads that fact's partials, grouped also by every column any
+    user's filter of it reads, and `shared` gets {read name: (fact, partials SQL)} (planner `partials`)."""
     from abi.semantic import model  # not at top: model imports this package
 
     ms = model._read(project, "measures.json").get("measures", [])
@@ -424,10 +558,13 @@ def plan(project: str, q: dict, user_id: int | None = None,
     try:
         types = _live.columns(project)
         live = {t: (_live.table_sql(project, t), types.get(t, {})) for t in _live._sources(project)}
-        sql = planner.plan(q, measures, mj, copies, live, reads, days, rates, joins)
+        hid = rls.hidden(project, user_id)
+        parts = {f: rls.key_columns(project, f) for f in rls.filtered(project) if not hid.get(f)} if (
+            SHARED_ROWS and shared is not None and not live and rls.restricted(project, user_id)) else None
+        sql = planner.plan(q, measures, mj, copies, live, reads, days, rates, joins, parts, shared)
     except (planner.PlanError, mel.MelError) as e:
         raise ActionFailed(400, str(e))
-    if hid := rls.hidden(project, user_id):  # D-110: refused, never computed over a column the user can't see
+    if hid:  # D-110: refused, never computed over a column the user can't see
         trees = mel.compile(measures)  # compiles: plan() just did
         # COL-SEC.2: and every relationship key the plan joins on (the planner lists them)
         used = {*q["dimensions"], *(f["column"] for f in q["filters"])} | {
@@ -458,9 +595,14 @@ def query(project: str, q: dict, user_id: int | None = None, expressions: list[d
     `expressions` gives its MEL (M2 review: an answer's figures and names never ground from it: a literal is the
     model's, not the data's). `percent`: the asked measures whose MEL multiplies by 100 (percentage points, so the
     grounding checks "23.4%" against 23.4 as for a % column; M2 review)."""
-    q, sql, cols, ms, reads = plan(project, q, user_id, expressions, strict)
+    asked, shared = q, {}
+    q, sql, cols, ms, reads = plan(project, asked, user_id, expressions, strict, shared)
     try:
-        rows = execute(project, sql, q, user_id, reads=reads, timeout=timeout)
+        try:
+            rows = execute(project, sql, q, user_id, reads=reads, timeout=timeout, shared=shared)
+        except _Unshared:  # M3.6: the person's own read, as without shared partials
+            q, sql, cols, ms, reads = plan(project, asked, user_id, expressions, strict)
+            rows = execute(project, sql, q, user_id, reads=reads, timeout=timeout)
     except duckdb.Error as e:
         if isinstance(e, duckdb.InterruptException) and timeout:
             raise ActionFailed(400, f"The query ran longer than the {timeout:g} s limit and was stopped; ask for less"

@@ -84,6 +84,19 @@ def _confirmed(token: str | None, user: User, name: str, args: str) -> bool:
 
 
 _call: ContextVar[tuple] = ContextVar("abi_call")  # (user, name, canonical args, confirm token) of the running action
+_memo: ContextVar[dict | None] = ContextVar("abi_memo", default=None)
+
+
+def memo(key: tuple, fn: Callable):
+    """M3.6: fn() once per read action (a Viewer's action that changes nothing, as `run` marks it): a role, a rule
+    file or a locale read again inside one visual_data call gives the same answer. Never across actions, so a
+    demotion or a rule change applies at the next one; outside a read action, fn() every time."""
+    m = _memo.get()
+    if m is None:
+        return fn()
+    if key not in m:
+        m[key] = fn()
+    return m[key]
 
 
 def require_confirmation(why: str, preview: dict | None = None) -> None:
@@ -287,8 +300,9 @@ def run(name: str, payload: dict, user: User, via: str, confirm: str | None = No
     args = logged = None
     VIA.set(via)
     held = INBOUND.get()  # an action may set INBOUND for itself and its audit row (approve_inbound_action)
+    act = ACTIONS.get(name)
+    token = _memo.set({} if act and act.role == Role.viewer and not (act.definition or act.destructive) else None)
     try:
-        act = ACTIONS.get(name)
         if act is None:
             raise ActionFailed(404, f"Unknown action '{name}'.")
         try:
@@ -346,6 +360,7 @@ def run(name: str, payload: dict, user: User, via: str, confirm: str | None = No
         raise
     finally:
         INBOUND.set(held)
+        _memo.reset(token)
 
 
 router = APIRouter(prefix="/api")

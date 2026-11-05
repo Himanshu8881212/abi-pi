@@ -10,7 +10,9 @@ Nodes are frozen dataclasses, so equal aggregates hash equal and the planner can
 Semantics of each construct: work/validation/S-03.md (golden suite).
 """
 
+import functools
 import hashlib
+import json
 from dataclasses import dataclass
 from decimal import Decimal
 from graphlib import CycleError, TopologicalSorter
@@ -297,7 +299,18 @@ def _inline(n, done: dict):
 
 def compile(measures: dict[str, str], columns: dict[str, set[str] | None] | None = None) -> dict:
     """{name: MEL} → {name: compiled tree}. `columns` ({table: column names, or None when unknown}) checks
-    column references against the model. Raises MelError listing every problem."""
+    column references against the model. Raises MelError listing every problem. M3.6: the last 256 compiled are
+    kept (a page compiled the same measures 24 times); trees are frozen, so they are shared."""
+    return dict(_compiled(json.dumps([measures, columns and {t: c if c is None else sorted(c) for t, c in columns.items()}])))
+
+
+@functools.lru_cache(256)
+def _compiled(key: str) -> dict:
+    measures, columns = json.loads(key)
+    return _compile(measures, columns and {t: c if c is None else set(c) for t, c in columns.items()})
+
+
+def _compile(measures: dict[str, str], columns: dict[str, set[str] | None] | None = None) -> dict:
     errors, trees = [], {}
 
     def bad(name, error, fix):

@@ -1,0 +1,378 @@
+"""M3.6 pages for people with row-level security (needs the engine at :8780, no LLM): each restricted read of a lake fact
+is the fact's partials computed once per snapshot (grouped also by every column a person's filter reads) and sliced
+through the person's own filter in the engine. Every visual of the report and a set of queries give each person exactly
+what their own read gives (ABI_RLS_SHARED_ROWS=0, 1.2's path), after new data and after a rule change; what doesn't
+decompose takes their own read; nothing shared reaches anyone but through their own filter."""
+import concurrent.futures as cf
+import json
+import re
+import secrets
+import shutil
+import subprocess
+import sys
+import time
+import urllib.request
+
+import pytest
+from conftest import drop
+from test_pages import PY, sure
+
+import abi
+import app
+from pi_driver import ROOT
+
+sys.path.insert(0, str(ROOT / "bench"))
+import brewline  # noqa: E402
+import duckdb  # noqa: E402
+
+P = "pi_rls_shared"
+WHO = ("one", "several", "region", "none")
+MEASURES = {"avg_revenue": "AVG(orders.revenue)", "customers": "DISTINCT_COUNT(orders.customer_id)",
+            "median_revenue": "MEDIAN(orders.revenue)", "max_quantity": "MAX(orders.quantity)",
+            "big_revenue": "WHERE([revenue], orders.quantity > 1)"}
+SHARE = {"name": "share", "expr": "DIVIDE([revenue], IGNORE([revenue], cafes.city))"}
+QUERIES = [  # beside every visual of the report: totals, filters, time, AVG, MIN/MAX, WHERE, top N, M2.1, holistic ones
+    {"measures": ["revenue", "orders_rows", "avg_revenue", "max_quantity", "big_revenue"]},
+    {"measures": ["revenue"], "dimensions": ["cafes.city"], "order_by": [{"field": "revenue", "desc": True}], "limit": 3},
+    {"measures": ["quantity", "quantity_prev", "quantity_change_pct"], "dimensions": ["calendar.year", "calendar.month"]},
+    {"measures": ["revenue", "avg_revenue"], "dimensions": ["products.category"], "totals": [[]]},
+    {"measures": ["revenue"], "dimensions": ["cafes.region"], "filters": [{"column": "products.category", "op": "<>", "value": "Tea"}]},
+    {"measures": ["revenue"], "dimensions": ["cafes.city"], "expressions": [SHARE]},
+    {"measures": ["customers", "revenue"], "dimensions": ["cafes.city"]},
+    {"measures": ["median_revenue"], "dimensions": ["products.category"]},
+]
+
+# The engine's own code in a process of its own, driven one JSON line at a time: each person's every visual and query
+# with shared partials (ABI_RLS_SHARED_ROWS) and without (0: each person's own read), compared value for value and type
+# for type (a DOUBLE within 1e-9: DuckDB's own parallel sums vary as much).
+DRIVER = r"""
+import concurrent.futures as cf, json, sys, time
+from abi import actions, db, security, semantic, storage
+import abi.reports  # noqa: F401 - registers visual_data
+from abi.project import imports
+
+def same(a, b):
+    if isinstance(a, float) and isinstance(b, float):
+        return abs(a - b) <= 1e-9 * max(1, abs(a), abs(b))
+    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        return len(a) == len(b) and all(map(same, a, b))
+    return type(a) is type(b) and a == b
+
+def one(p, u, item):
+    try:
+        if item[0] == "v":
+            r = actions.run("visual_data", {"project": p, "report": "overview", "page": item[1], "visual": item[2]}, u, "rest")
+        else:
+            r = actions.run("semantic_query", {"project": p, **item[1]}, u, "rest")
+        return r["columns"], r["rows"]
+    except actions.ActionFailed as e:
+        return f"{e.status}: {e}"
+
+def tables(p):
+    con = storage.lake(p)
+    built = {k: v and v[0] for k, v in semantic._parts.get(con, {}).items()}
+    have = {r[0] for r in con.cursor().execute("SELECT table_name FROM duckdb_tables() WHERE database_name = 'memory'"
+                                               " AND schema_name = 'shared'").fetchall()}
+    snap = storage.snapshot_id(con)
+    return {"names": sorted(n for (s, _), n in built.items() if n and s == snap), "none": sum(n is None for n in built.values()),
+            "old": sorted(n for (s, _), n in built.items() if n and s < snap), "have": sorted(have)}
+
+sliced, slice_ = [], semantic._shared
+semantic._shared = lambda *x: (v := slice_(*x), sliced.append(1))[0]  # each read through shared partials
+
+for line in sys.stdin:
+    a = json.loads(line)
+    with db.connect() as c:
+        users = {w: security.user(c, int(i)) for w, i in a["users"].items()}
+    p, out = a["project"], {}
+    if a["cmd"] == "check":
+        rep = imports.load(p, "report", "overview")
+        items = [("v", pg["id"], v["id"]) for pg in rep["pages"] for v in pg["visuals"] if "query" in v] + [("q", q) for q in a["queries"]]
+        label = lambda i: f"v:{items[i][2]}" if items[i][0] == "v" else f"q:{i - sum(x[0] == 'v' for x in items)}"
+        work = [(w, i) for w in users for i in range(len(items))]
+        semantic.SHARED_ROWS = 0
+        ref = {k: one(p, users[k[0]], items[k[1]]) for k in work}
+        semantic.SHARED_ROWS, sliced[:] = a.get("rows", 1_000_000), []
+        with cf.ThreadPoolExecutor(8) as ex:  # at once, as a page's visuals and many people come
+            got = dict(zip(work, ex.map(lambda k: one(p, users[k[0]], items[k[1]]), work)))
+        out = {"n": len(work), "diff": [[k[0], items[k[1]], str(ref[k])[:300], str(got[k])[:300]] for k in work if not same(ref[k], got[k])],
+               "rows": {f"{w} {label(i)}": got[w, i] for w, i in work}, "sliced": len(sliced), **tables(p)}
+    elif a["cmd"] == "plan":
+        shared = {}
+        semantic.plan(p, a["q"], users[a["who"]].id, a["q"].pop("expressions", []), shared=shared)
+        out = {"facts": sorted(f for f, _ in shared.values())}
+    elif a["cmd"] == "plans":  # people with the same hidden columns share a plan; a new time zone is a new one
+        from abi.semantic import planner
+        calls, plan = [], planner.plan
+        planner.plan = lambda *x, **k: calls.append(1) or plan(*x, **k)
+        try:
+            q = {"measures": ["quantity"], "dimensions": ["calendar.year", "calendar.month"], "limit": 7}
+            sqls = [semantic.plan(p, q, users[w].id, shared={})[1] for w in ("one", "several", "one")]
+            n, zone = len(calls), semantic._locale
+            semantic._locale = lambda p_: {**zone(p_), "time_zone": "Asia/Tokyo"}
+            try:
+                semantic.plan(p, q, users["one"].id, shared={})
+            finally:
+                semantic._locale = zone
+        finally:
+            planner.plan = plan
+        out = {"same": len(set(sqls)) == 1, "calls": n, "after_zone": len(calls)}
+    elif a["cmd"] == "inject":  # a shared build that fails quoting the data (a café ID that isn't the person's)
+        build, start = semantic._partials, time.time()
+        semantic._partials = lambda p_, con, snap, fact, sql: build(p_, con, snap, fact, sql.replace(
+            "SELECT ", 'SELECT CAST("cafe_id" AS INTEGER) AS "__bad", ', 1))
+        try:
+            got = one(p, users[a["who"]], ("q", a["q"]))
+        finally:
+            semantic._partials = build
+        with db.connect() as c:
+            log = c.execute("SELECT user_id, sql, error FROM query_log WHERE project = %s AND at >= to_timestamp(%s)",
+                            [p, start]).fetchall()
+        out = {"got": got, "theirs": [r for r in log if r["user_id"] == users[a["who"]].id],
+               "system": [r["error"] for r in log if r["user_id"] is None and r["error"]]}
+    print(json.dumps(out, default=str), flush=True)
+"""
+
+
+class Driver:
+    def __init__(self, users: dict):
+        e = subprocess.run(["sh", "-c", "scripts/engine.sh env"], cwd=ROOT, capture_output=True, text=True).stdout
+        self.users = users
+        self.p = subprocess.Popen(["sh", "-c", f'{e}\nexec {PY} -c "$0"', DRIVER], cwd=ROOT, stdin=subprocess.PIPE,
+                                  stdout=subprocess.PIPE, text=True)
+
+    def __call__(self, cmd: str, project: str = P, **args) -> dict:
+        self.p.stdin.write(json.dumps({"cmd": cmd, "project": project, "users": self.users, **args}) + "\n")
+        self.p.stdin.flush()
+        while (line := self.p.stdout.readline()) and not line.startswith("{"):  # anything else the engine prints
+            pass
+        assert line, "the engine driver stopped"
+        return json.loads(line)
+
+    def close(self):
+        self.p.stdin.close()
+        self.p.wait(30)
+
+
+@pytest.fixture(scope="module")
+def brew(tmp_path_factory):
+    """P: Brewline (37,000 orders) with its Overview report and more measures; Viewers who see one café, several, a
+    region (a rule on cafes.region, so orders through their cafés) and none (a café no row has). Gone at the end."""
+    d = tmp_path_factory.mktemp("brew")
+    brewline.generate(d, 0.005)
+    duckdb.sql(f"COPY (SELECT * FROM read_parquet('{d}/orders/*.parquet')) TO '{d}/orders.parquet' (FORMAT parquet)")
+    if P in {x["project"] for x in abi.call("list_projects")["projects"]}:
+        drop([P])
+    abi.load("demo", P, [str(d / f"{t}/{t}.parquet") for t in ("cafes", "customers", "products")] + [str(d / "orders.parquet")])
+    for i, x in MEASURES.items():
+        abi.call("set_measure", project=P, id=i, name=i, expression=x)
+    cafes = [r[0] for r in abi.call("sql_query", project=P, sql="SELECT cafe_id FROM cafes ORDER BY 1")["rows"]]
+    regions = [r[0] for r in abi.call("sql_query", project=P, sql="SELECT DISTINCT region FROM cafes ORDER BY 1")["rows"]]
+    stamp, made, tokens = time.strftime("%H%M%S"), {}, {}
+    try:
+        for w in WHO:
+            name, pw = f"pi_rls_{w}_{stamp}", secrets.token_urlsafe(16)
+            abi.call("create_user", name=name, password=pw)
+            made[w] = name
+            abi.call("set_role", project=P, user=name, role="viewer")
+            tokens[w] = abi.login(name, pw)[1]["token"]
+        ids = {u["name"]: u["id"] for u in abi.call("rls_rules", project=P)["accounts"]}
+        uid = {w: ids[made[w]] for w in WHO}
+        sees = {"one": cafes[:1], "several": [cafes[1], cafes[4], cafes[8]], "region": cafes, "none": ["CF999"]}
+        sure("set_rls_rule", project=P, id="cafe", table="cafes", column="cafe_id", users={uid[w]: v for w, v in sees.items()})
+        sure("set_rls_rule", project=P, id="region", table="cafes", column="region",
+             users={uid[w]: ["North"] if w == "region" else regions for w in WHO})
+        drv = Driver(uid)
+        yield {"uid": uid, "names": made, "tokens": tokens, "drv": drv, "cafes": cafes, "sees": sees, "dir": d}
+        drv.close()
+    finally:
+        for name in made.values():
+            sure("delete_user", name=name)
+        drop([x for x in (P, f"{P}_pub") if x in {y["project"] for y in abi.call("list_projects")["projects"]}])
+
+
+def exact(r: dict, shared: bool = True) -> None:
+    assert r["n"] > 30 and not r["diff"], r["diff"][:3]
+    assert (len(r["names"]) >= 5 and r["sliced"] > r["n"] / 2) is shared and not r["old"] and set(r["names"]) <= set(r["have"]), r
+
+
+def test_every_visual_and_query_is_each_persons_own_after_new_data(brew):
+    """The critical one: four restricted Viewers at once, each visual of the report and each query, with shared
+    partials and without, equal to the cent; again after new data (a new snapshot: new tables, the old ones gone)."""
+    drv = brew["drv"]
+    r = drv("check", queries=QUERIES)
+    exact(r)
+    share = r["rows"]["several q:5"][1]  # the IGNORE expression: shares of the person's own total, never past their rule
+    assert 1 <= len(share) <= 3 and abs(sum(float(x[2]) for x in share) - 1) < 1e-9, share
+    assert r["rows"]["none v:kpi-orders_rows"][1] == [[0]] and r["rows"]["none q:1"][1] == [], "a rule no row passes: nothing"
+    assert r["rows"]["one q:1"][1] != r["rows"]["several q:1"][1]
+    first = set(r["names"])
+    d = brew["dir"]
+    duckdb.sql(f"COPY (SELECT * FROM '{d}/orders.parquet' WHERE order_date < DATE '2025-07-01') TO '{d}/orders2.parquet' (FORMAT parquet)")
+    abi.upload(P, "orders", d / "orders2.parquet")
+    r = drv("check", queries=QUERIES)
+    exact(r)
+    assert not first & set(r["names"]) and not first & set(r["have"]), "the old snapshot's tables are gone"
+
+
+def test_what_doesnt_decompose_and_a_hidden_column_take_the_persons_own_read(brew):
+    drv = brew["drv"]
+    assert drv("plan", who="one", q={"measures": ["revenue"], "dimensions": ["cafes.city"]})["facts"] == ["orders"]
+    assert drv("plan", who="one", q={"measures": ["revenue"], "dimensions": ["cafes.city"], "expressions": [SHARE]})["facts"] == ["orders", "orders"]
+    for m in ("customers", "median_revenue"):  # DISTINCT_COUNT, MEDIAN
+        assert drv("plan", who="one", q={"measures": [m, "revenue"], "dimensions": ["cafes.city"]})["facts"] == [], m
+    r = drv("check", queries=QUERIES, rows=10)  # partials of more than 10 rows: each person's own read
+    assert r["n"] > 50 and not r["diff"] and r["sliced"] == 0, (r["diff"][:3], r["sliced"])
+    sure("set_column_rule", project=P, id="nodiscount", table="orders", columns=["discount"])
+    try:
+        assert drv("plan", who="one", q={"measures": ["revenue"], "dimensions": ["cafes.city"]})["facts"] == []
+        r = drv("check", queries=QUERIES)
+        assert r["n"] > 50 and not r["diff"], r["diff"][:3]
+        assert any(isinstance(v, str) and v.startswith("403") for v in r["rows"].values()), "the discount visual is refused"
+    finally:
+        sure("delete_rls_rule", project=P, id="nodiscount")
+
+
+def test_people_who_see_different_rows_share_one_plan(brew):
+    r = brew["drv"]("plans")
+    assert r == {"same": True, "calls": 1, "after_zone": 2}, r
+
+
+BUNDLE = r"""
+import json, shutil, tempfile
+from pathlib import Path
+from abi.project import bundle
+d = Path(tempfile.mkdtemp())
+for i in range(3000):
+    (d / ".git" / "objects" / f"{i % 30:02x}").mkdir(parents=True, exist_ok=True)
+    (d / ".git" / "objects" / f"{i % 30:02x}" / f"o{i}").write_bytes(bytes([255, 0]))  # not text: read, it would fail
+(d / "model").mkdir()
+(d / "model" / "model.json").write_text('{"a": 1}')
+(d / "docs" / "sub" / ".git").mkdir(parents=True)  # a nested repo
+(d / "docs" / "sub" / ".git" / "HEAD").write_text("x")
+(d / "docs" / "sub" / "a.md").write_text("# a\r\n")
+(d / "tools" / ".git").parent.mkdir()
+(d / "tools" / ".git").write_text("gitdir: elsewhere")  # a worktree's .git file
+seen, rel = [], Path.relative_to
+Path.relative_to = lambda self, *a: seen.append(str(self)) or rel(self, *a)  # each path the walk looked at
+try:
+    out = {"bundle": bundle.bundle(d)}
+finally:
+    Path.relative_to = rel
+out["into_git"] = [p for p in seen if ".git" in Path(p).parts]
+(d / "docs" / "link").symlink_to(d / "model")
+try:
+    bundle.bundle(d)
+except ValueError as e:
+    out["link"] = str(e)
+shutil.rmtree(d)
+print(json.dumps(out))
+"""
+
+
+def test_a_bundle_never_walks_into_git():
+    """M3.6: bundle() walked the repo's objects (327 of 330 ms on a bench project) to skip them; it never enters .git."""
+    r = subprocess.run(["sh", "-c", f'{subprocess.run(["sh", "-c", "scripts/engine.sh env"], cwd=ROOT, capture_output=True, text=True).stdout}'
+                        f'\nexec {PY} -c "$0"', BUNDLE], cwd=ROOT, capture_output=True, text=True, timeout=120)
+    out = json.loads(r.stdout or "null") or r.stderr[-2000:]
+    assert out == {"bundle": {"docs/sub/a.md": "# a\r\n", "model/model.json": {"a": 1}}, "into_git": [], "link": "docs/link: symlinks can't be bundled."}, out
+
+
+def test_a_failed_shared_build_never_reaches_the_person(brew):
+    """A build that fails quoting a café ID (a bad cast): the person gets their own rows, and neither their answer nor
+    their query_log rows hold anything of it; only the system read's row has the error."""
+    q = {"measures": ["revenue"], "dimensions": ["cafes.city"]}
+    r = brew["drv"]("inject", who="one", q=q)
+    assert r["system"] and any(re.search(r"CF\d{3}", e) for e in r["system"]), r["system"]  # the injection did quote one
+    mine = brew["sees"]["one"][0]
+    text = json.dumps([r["got"], r["theirs"]])
+    assert isinstance(r["got"], list) and set(re.findall(r"CF\d{3}", text)) <= {mine}, text[:500]
+    assert r["theirs"] and all(x["error"] is None for x in r["theirs"]), r["theirs"]
+    with abi.as_user(brew["tokens"]["one"]):
+        assert [[c, str(v)] for c, v in abi.call("semantic_query", project=P, **q)["rows"]] == r["got"][1]  # DECIMAL as text
+
+
+def visual(tok: str, v: str) -> list:
+    with abi.as_user(tok):
+        return abi.call("visual_data", project=P, report="overview", page="overview", visual=v)["rows"]
+
+
+def owner_kpi(cafes: list | None) -> list:
+    f = [{"column": "cafes.cafe_id", "op": "in", "value": cafes}] if cafes else []
+    return abi.call("semantic_query", project=P, measures=["orders_rows"], filters=f)["rows"]
+
+
+def test_through_the_engine_each_viewer_gets_only_theirs_and_every_change_at_once(brew):
+    """Through the engine's REST door, Viewers at once: each KPI is the owner's figure for their cafés; restricted SQL
+    can't name a shared table; a rule change, a role change and a column rule are seen on the next read."""
+    t, sees, names = brew["tokens"], brew["sees"], brew["names"]
+    with cf.ThreadPoolExecutor(8) as ex:
+        got = dict(zip(WHO * 2, ex.map(lambda w: visual(t[w], "kpi-orders_rows"), WHO * 2)))
+    for w in ("one", "several"):
+        assert got[w] == owner_kpi(sees[w]), w
+    assert got["none"] in ([[0]], [[None]], []), got["none"]
+    with abi.as_user(t["one"]):
+        for sql in ("SELECT * FROM memory.shared.p_0000000000000000", 'SELECT * FROM "__lake0"'):
+            with pytest.raises(abi.ActionError) as e:
+                abi.call("sql_query", project=P, sql=sql)
+            assert e.value.status == 403, sql
+    before = visual(t["one"], "kpi-orders_rows")
+    rules = {r["id"]: r for r in abi.call("rls_rules", project=P)["rules"]}
+    users = {u["id"]: u["values"] for u in rules["cafe"]["users"]}
+    sure("set_rls_rule", project=P, id="cafe", table="cafes", column="cafe_id",
+         users={**users, brew["uid"]["one"]: [brew["cafes"][2]]})
+    assert visual(t["one"], "kpi-orders_rows") == owner_kpi([brew["cafes"][2]]) != before, "a rule change, at once"
+    abi.call("set_role", project=P, user=names["one"], role="editor")
+    assert visual(t["one"], "kpi-orders_rows") == owner_kpi(None), "an Editor reads every row"
+    abi.call("set_role", project=P, user=names["one"], role="viewer")
+    assert visual(t["one"], "kpi-orders_rows") == owner_kpi([brew["cafes"][2]]), "and a Viewer again only theirs"
+    sure("set_column_rule", project=P, id="noqty", table="orders", columns=["quantity"])
+    try:
+        with pytest.raises(abi.ActionError) as e:
+            visual(t["one"], "kpi-quantity")
+        assert e.value.status == 403
+    finally:
+        sure("delete_rls_rule", project=P, id="noqty")
+    assert visual(t["one"], "kpi-quantity") == abi.call("semantic_query", project=P, measures=["quantity"], filters=[
+        {"column": "cafes.cafe_id", "op": "in", "value": [brew["cafes"][2]]}])["rows"]
+    sure("set_rls_rule", project=P, id="cafe", table="cafes", column="cafe_id", users=users)
+
+
+def test_the_published_copy_is_sliced_the_same(brew):
+    """A Viewer's page (Viewer mode) reads the published copy, a project of its own with the same rules and roles: its
+    shared partials are its own, and every visual and query is each person's own there too."""
+    pub = f"{P}_pub"
+    try:
+        abi.call("commit", project=P, message="rls shared test")
+    except abi.ActionError as e:  # the rules' last change committed already
+        assert e.status == 409, e
+    hubs = set(app.HUBS)
+    s = app.serve(P, 0, open_browser=False)
+    port = s.server_address[1]
+    key = re.search(r"KEY='([^']+)'", urllib.request.urlopen(f"http://127.0.0.1:{port}/").read().decode()).group(1)
+
+    def page(path: str) -> dict:
+        req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", b"{}", {"X-Abi-App": key, "Content-Type": "application/json",
+                                                                             "X-Abi-Client": "rls", "X-Abi-Project": P})
+        return json.loads(urllib.request.urlopen(req, timeout=300).read())
+    try:
+        r = page("/publish")
+        if r.get("confirm"):
+            r = page(f"/confirm/{r['confirm']['id']}")
+        assert "result" in r, r
+        want = abi.call("sql_query", project=P, sql="SELECT count(*) FROM orders")["rows"]
+        end = time.monotonic() + 240
+        while time.monotonic() < end:  # the worker's minute, then the copy's load
+            try:
+                if abi.call("sql_query", project=pub, sql="SELECT count(*) FROM orders")["rows"] == want:
+                    break
+            except abi.ActionError:
+                pass
+            time.sleep(2)
+        r = brew["drv"]("check", project=pub, queries=QUERIES[:3])
+        exact(r)
+    finally:
+        s.shutdown()
+        for k in set(app.HUBS) - hubs:
+            app.HUBS.pop(k, None)
+    shutil.rmtree(brew["dir"], ignore_errors=True)
