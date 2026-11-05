@@ -29,6 +29,8 @@ A request naming several of these gets one task for each, in phase order (data -
 -> export); a build task waits only for the model, so reports, ML, flows and agents can run in parallel (step 3).
 A review is planned whenever the work will be released, published or shown to a board, even if not asked.
 
+0. **A new project.** Create it empty first (`create_project`), so the plan and the brief have a project; the
+   data-engineer's task loads into it.
 1. **Brief.** `abi_brief {project, text}`: goal, conventions (naming, grain, definitions from the vault), open
    questions. Save lasting decisions with `remember` (ABI's project memory) so every agent and chat sees them.
 2. **Plan.** `abi_plan {project, goal, tasks: [{id, agent, area, task, depends_on}]}`. One task per agent per area;

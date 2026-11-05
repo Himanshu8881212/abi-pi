@@ -656,3 +656,15 @@ def test_a_count_grounds_by_the_backed_items_it_lists():
     assert nums("Revenue grew in 3 regions.", q(["regions_up"], [[3]])) == []  # a tool figure, as before
     out = ground.check(built.format("3").replace("Revenue by month", "Atlantis map"), [rep])
     assert out["numbers"] == ["3"] and out["names"] == ["Atlantis"]  # one unbacked item: the count stays masked
+
+
+def test_a_page_read_grounds_each_visuals_figures():
+    """1.2 final rerun: visual_data for a whole page answers {page, visuals: [{columns, rows}, ...]}; the check read only
+    a result's own rows, so a report summary that read the page had every figure masked (10 and 14 in two runs)."""
+    page = {"page": "main", "visuals": [
+        {"id": "kpi", "title": "Total revenue", "columns": ["revenue"], "rows": [["425548.61"]]},
+        {"id": "by_region", "title": "Revenue by region", "columns": ["cafes.region", "revenue"],
+         "rows": [["West", "111213.76"], ["East", "110441.85"]]}]}
+    out = ground.check("Total revenue is 425,548.61. West is highest at 111,213.76, then East at 110,441.85.", [page])
+    assert out["numbers"] == [] and out["names"] == []
+    assert ground.check("Total revenue is 999.99.", [page])["numbers"] == ["999.99"]  # still only what the rows hold

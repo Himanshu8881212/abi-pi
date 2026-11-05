@@ -11,7 +11,7 @@ for café managers with an evaluation set (agent-builder), a review (reviewer), 
 (harness/team.json's agents per task), the subagent calls in order, each handoff and its checks from the team journal,
 the steps waiting for the person's yes, and whether the result is right: the model Ready with revenue by region equal
 to the generator's known answers to the cent, the report's three visuals, the flow saved and switched off. Nothing is
-confirmed for the agent (a step that needs a yes waits, as it would for the person). The project goes at the end."""
+needed from the person: each step that asks for a yes gets it, as the person would give it (the project is a throwaway). The project goes at the end."""
 import argparse
 import json
 import os
@@ -56,9 +56,10 @@ def main(argv=None) -> dict:
             "reviewer", "release-ops", "board-pack"]
     rec = {"bench": "team", "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "project": p, "model": a.model}
     try:
-        r = ask(job, timeout=5400)
+        r = ask(job, confirm=True, timeout=5400)  # the person's yes to each step that asks (a throwaway project)
         plan, journal, pending = team_files(p)
-        subs = [(t[1] or {}) for t in r.called("subagent")]
+        calls = [(t[1] or {}) for t in r.called("subagent")]
+        subs = [x for c in calls for x in ([c] if c.get("agent") else c.get("tasks") or [])]  # one task, or several in parallel
         reports = [x for x in (abi.call("list_reports", project=p).get("reports") or [])] if abi.folder(p) else []
         flows = (abi.call("list_flows", project=p).get("flows") or []) if abi.folder(p) else []
         ml = (abi.call("ml_models", project=p).get("models") or []) if abi.folder(p) else []

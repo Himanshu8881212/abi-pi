@@ -429,6 +429,18 @@ def _commits(x) -> list[str]:
     return out + [c for k, v in x.items() if k != "commit" for c in _commits(v)]
 
 
+def _flat(results: list) -> list:
+    """1.2 final rerun: visual_data for a whole page answers {page, visuals: [{columns, rows}, ...]}, the rows one level
+    down, so a report summary that read them was masked figure by figure (10 and 14 masked). Each visual counts as a
+    result of its own; nothing else changes."""
+    out = []
+    for r in results:
+        out.append(r)
+        if isinstance(r, dict) and isinstance(r.get("visuals"), list):
+            out += [v for v in r["visuals"] if isinstance(v, dict)]
+    return out
+
+
 def check(answer: str, results: list, vocab: set[str] = frozenset(), members: set[str] = frozenset(),
           fields: set[str] = frozenset(), asked: str = "", notes: list = (), pending: list = (), question: str = "",
           spans: bool = False, today: date | None = None, labels: list[str] = ()) -> dict:
@@ -456,6 +468,7 @@ def check(answer: str, results: list, vocab: set[str] = frozenset(), members: se
     GATE-9-fix-4: `spans=True` adds "spans", the (start, end) in `answer` of every flagged occurrence, for `mask`.
     GATE-9-fix-9: `today` = the server's date (`today()`): its year grounds as a figure, exactly; its day and month only
     inside that date written out (ISO, "October 15", "15th of Oct"), never as bare figures; its month and weekday name."""
+    results = _flat(results)
     have, texts, said, cells = [], [], [], []
     # M2 review: nor an expression's MEL (its literals are the model's)
     _walk([{k: v for k, v in r.items() if k not in ("filters", "expressions")} if _query(r) else r for r in results], [], texts)
@@ -751,7 +764,7 @@ def run(req: dict) -> dict:
     if not numbers(req["answer"]):  # ABI checks an answer only when it states numbers (agent._ungrounded)
         return {"numbers": [], "names": []}
     seen: list = []
-    results = _sampled(req.get("results", []), seen) + ([{"columns": ["shown", "omitted", "total"], "rows": seen}] if seen else [])
+    results = _sampled(_flat(req.get("results", [])), seen) + ([{"columns": ["shown", "omitted", "total"], "rows": seen}] if seen else [])
     members, fields, names = set(req.get("members", [])), set(req.get("fields", [])), []
     if (p := req.get("project")) and isinstance(m := req.get("model"), dict) and m.get("tables"):
         try:
