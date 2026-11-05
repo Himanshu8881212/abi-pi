@@ -5,6 +5,7 @@ machine's engine and app, or inside a docker install). Each run prints one JSON 
     .venv/bin/python bench/perf.py project perf_brewline [--scale 0.01]
     .venv/bin/python bench/perf.py pages --project P --sessions 50 [--people N] [--rls TABLE.COLUMN] [--url http://127.0.0.1:8790]
     .venv/bin/python bench/perf.py memory --project P --chats 4 [--hold S] [--url ...] [--app-pid PID]
+    .venv/bin/python bench/perf.py chats --project P --chats 8 [--scale 0.01] [--url ...]
     .venv/bin/python bench/perf.py load --rows 1000000 [--door path|app] [--url ...]
     .venv/bin/python bench/perf.py isolation --rows 2000000 [--queries 30] [--door path|app] [--url ...]
     .venv/bin/python bench/perf.py publish --project P [--url ...]
@@ -27,6 +28,10 @@ machine's engine and app, or inside a docker install). Each run prints one JSON 
              message, so K chats are measured once each has its Pi and, when a model answers, its answer: "answered"
              then, else "started". per_chat_mb only when K Pi processes were measured. --hold keeps them S seconds more
              (another bench beside them) and measures again: "held".
+  chats      N throwaway Viewers, each in their own chat, ask the same data question at the same moment (bench.py's
+             ask: revenue by region in 2025): each answer's seconds, whether it queued for a free agent
+             (ABI_MAX_AGENTS), and whether it is right to the generator's known answers with nothing masked. Needs a
+             model (Settings or ABI_PI_LLM_MODEL); --scale is the project's (perf.py project's, default 0.01).
   load       N generated Brewline orders (bench/brewline.py) into a new project: seconds, rows/s, the project's lake
              bytes, seconds until the model is Ready, and whether revenue by region equals the generator's known answers
              to the cent. --door path (default): the engine's add_data on a server path in its files folder, a door
@@ -51,7 +56,7 @@ machine's engine and app, or inside a docker install). Each run prints one JSON 
              /api/ready answer, does the owner's page load, does the pid file name a running process again. Each change
              of those, and the seconds until all three hold (serving_s, null: not within --wait).
 
-pages, memory, publish and kill sign in to the app (--url or ABI_PERF_URL) as the workspace owner, ABI_USER (default
+pages, memory, chats, publish and kill sign in to the app (--url or ABI_PERF_URL) as the workspace owner, ABI_USER (default
 himanshu), with ABI_PASSWORD (a docker install has both) or the password in data/accounts.txt (scripts/accounts.py):
 never on the command line. They run on a bench project (bench_… or perf_…; --force for another): pages, memory and
 publish commit to it and add and remove accounts, so it may have no uncommitted work, and the run commits only its own
@@ -81,7 +86,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import duckdb
@@ -337,14 +342,18 @@ class Events(threading.Thread):
         super().__init__(daemon=True)
         self.c = http.client.HTTPConnection(s.host, s.port, timeout=WAIT)
         self.c.request("GET", f"/events?k={s.key}&c={cid}&p={s.project}", headers={"Cookie": s.cookie})
-        self.r, self.answer = self.c.getresponse(), None
+        self.r, self.answer, self.text, self.at, self.waited = self.c.getresponse(), None, "", None, False
         self.start()
 
     def run(self) -> None:
         try:
             for line in self.r:
-                if line.startswith(b"data: ") and (e := json.loads(line[6:])).get("type") == "answer":
-                    self.answer = e.get("model") or ""
+                if not line.startswith(b"data: "):
+                    continue
+                e = json.loads(line[6:])
+                self.waited |= e.get("type") == "note" and str(e.get("text", "")).startswith("All ")  # no free agent: queued
+                if e.get("type") == "answer":
+                    self.text, self.at, self.answer = e.get("text") or "", time.perf_counter(), e.get("model") or ""
                     return
         except (OSError, ValueError, http.client.HTTPException):
             pass
@@ -397,21 +406,66 @@ def memory(a) -> dict:
             time.sleep(a.hold)
             rec["held"] = rss(app)
     finally:
-        with contextlib.suppress(OSError, http.client.HTTPException, ValueError):  # the app may be gone (its Pis with it)
-            for s, (cid, chat, ev) in zip(ss, chats):
-                s.post("/chat/delete", {"id": chat}, cid)  # its Pi stops, its files go
-                ev.c.close()
-        signed_out([*ss, o])
-        for n in made:
-            sure("delete_user", name=n)
-            with contextlib.suppress(OSError):  # its chats' folder, empty now
-                (abi.folder(o.project).parent / "_views" / o.project / "chats" / n).rmdir()
-        if made:  # roles.json without the account
-            left = tidy(o.project, f"perf.py {stamp}: memory account removed")
+        left = leave(o, ss, chats, made, stamp)
     # what a chat adds: its Pi and the app's side of it (the engine and Postgres serve everyone, and move with them)
     mine = lambda g: g["app"]["mb"] + g["pi"]["mb"]  # noqa: E731
     rec["per_chat_mb"] = {k: round((mine(rec[k]) - mine(rec["idle"])) / a.chats, 1) for k in ("started", "answered")
                           if k in rec and rec[k]["pi"]["chats"] - rec["idle"]["pi"]["chats"] == a.chats}
+    return rec | ({"uncommitted": left} if left else {})
+
+
+def leave(o: App, ss: list, chats: list, made: list, stamp: str) -> list:
+    """The end of memory and chats: every chat deleted (its Pi stops), everyone signed out, the accounts removed."""
+    with contextlib.suppress(OSError, http.client.HTTPException, ValueError):  # the app may be gone (its Pis with it)
+        for s, (cid, chat, ev) in zip(ss, chats):
+            s.post("/chat/delete", {"id": chat}, cid)  # its Pi stops, its files go
+            ev.c.close()
+    signed_out([*ss, o])
+    for n in made:
+        sure("delete_user", name=n)
+        with contextlib.suppress(OSError):  # its chats' folder, empty now
+            (abi.folder(o.project).parent / "_views" / o.project / "chats" / n).rmdir()
+    return tidy(o.project, f"perf.py {stamp}: accounts removed") if made else []  # roles.json without the accounts
+
+
+def chats(a) -> dict:
+    """N Viewers, each in their own chat, ask the agent bench's ask question at the same moment through the app: each
+    answer's seconds from its question, whether it waited for a free agent (ABI_MAX_AGENTS), and whether it is right
+    (bench.py's ask check against the generator's known answers: every region's 2025 revenue, nothing masked)."""
+    import bench  # noqa: PLC0415 (its checks; it imports the tests' driver, which only this bench needs)
+    model = settings.load()["model"] or os.environ.get("ABI_PI_LLM_MODEL")
+    if not model:
+        raise SystemExit("No model: chats measures answers (Govern > Settings, or ABI_PI_LLM_MODEL).")
+    with tempfile.TemporaryDirectory(prefix="perf_") as d:  # the project's known answers (perf.py project's data)
+        known = brewline.generate(d, a.scale)
+    o, made, cs, stamp, left, ss = owner(a), [], [], time.strftime("%m%d%H%M%S"), [], []
+    q = f"In project {o.project}: what was total revenue by region in 2025? Give the figures."
+    rec = {"chats": a.chats, "model": model, "max_agents": a.max_agents, "load_before": os.getloadavg()[0]}
+    try:
+        pending(o)
+        ss = [App(a.url, *acc, o.project) for acc in accounts(o, ["viewer"] * a.chats, made, stamp)]
+        for i, s in enumerate(ss):
+            s.key = o.key
+            cs.append((f"perf{i}", s.post("/chat/new", {}, f"perf{i}")["id"], Events(s, f"perf{i}")))
+        gate, t0 = threading.Barrier(len(ss)), {}
+
+        def put(i: int) -> None:
+            gate.wait()
+            t0[i] = time.perf_counter()
+            ss[i].post("/chat", {"message": q, "page": "home"}, f"perf{i}")
+
+        with cf.ThreadPoolExecutor(len(ss)) as ex:
+            list(ex.map(put, range(len(ss))))
+        until(lambda: all(ev.answer is not None for _, _, ev in cs), a.wait)
+        runs = [{"s": round(ev.at - t0[i], 1) if ev.at else None, "waited": ev.waited, "model": ev.answer,
+                 "masked": bench.masked(ev.text), "text": ev.text[:600], "ok": bool(ev.text) and bench.clean(ev.text) and bench.ask_ok(ev.text, known)}
+                for i, (_, _, ev) in enumerate(cs)]
+    finally:
+        left = leave(o, ss, cs, made, stamp)
+    s = [r["s"] for r in runs if r["s"] is not None]
+    rec |= {"answered": len(s), "right": sum(r["ok"] for r in runs), "waited": sum(r["waited"] for r in runs),
+            "masked_runs": sum(r["masked"] > 0 for r in runs), **{f"p{x}_s": pct(s, x) for x in (50, 95)}, "max_s": pct(s, 100),
+            "by_model": dict(Counter(r["model"] for r in runs)), "load_after": os.getloadavg()[0], "runs": runs}
     return rec | ({"uncommitted": left} if left else {})
 
 
@@ -752,6 +806,11 @@ def main(argv=None) -> dict:
     x.add_argument("--chats", type=int, default=4)
     x.add_argument("--app-pid", type=int, help="the app's process (default: the scripts/app.py serving --url)")
     x.add_argument("--hold", type=float, default=0, help="seconds to keep the chats open, then measure them again")
+    x = sub.add_parser("chats", parents=[common, web])
+    x.add_argument("--chats", type=int, default=8)
+    x.add_argument("--scale", type=float, default=0.01, help="the project's bench/brewline.py scale (its known answers)")
+    x.add_argument("--max-agents", type=int, default=int(os.environ.get("ABI_MAX_AGENTS", "8")), help="the app's ABI_MAX_AGENTS, recorded")
+    x.add_argument("--wait", type=float, default=1800, help="seconds to wait for every answer")
     via = argparse.ArgumentParser(add_help=False)
     via.add_argument("--door", choices=("path", "app"), default="path", help="the engine's add_data on a server path, or the app's upload")
     via.add_argument("--url", default=os.environ.get("ABI_PERF_URL", "http://127.0.0.1:8790"), help="the app, for --door app")
@@ -769,7 +828,7 @@ def main(argv=None) -> dict:
     x.add_argument("--wait", type=float, default=300, help="seconds to watch for it serving again")
     a = ap.parse_args(argv)
     rec = {"bench": a.bench, "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-           **{"project": project, "pages": pages, "memory": memory, "load": load, "isolation": isolation, "publish": publish,
+           **{"project": project, "pages": pages, "memory": memory, "chats": chats, "load": load, "isolation": isolation, "publish": publish,
               "medallion": medallion, "kill": kill}[a.bench](a)}
     line = json.dumps(rec)
     print(line, flush=True)

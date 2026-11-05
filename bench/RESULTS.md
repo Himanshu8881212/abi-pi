@@ -1277,3 +1277,24 @@ delete_user; test_results, test_sections and test_pages again: 23 passed, 2 fail
 test_jobs' test_publish_loads_only_what_its_import_changed (as at M5 prep, with pyproject at 1.1.0 too), and
 test_pages' pooled-connection and restricted-reads tests with a teardown error (pi_pages_test gone mid-run; both
 passed in the two runs of test_pages after, so 1 of 3).
+
+## 2026-11-05 17:15: parallel chats through the app (Mac), proxy/claude-sonnet-5-5, fallback proxy/claude-opus-5-5
+
+`bench/perf.py chats` on perf_chats (Brewline scale 0.01, 73,941 orders): N throwaway Viewers, each in their own chat,
+ask "what was total revenue by region in 2025?" at the same moment; each answer timed from its question and checked
+against the generator's known answers (bench.py's ask check: every region's figure after its name, nothing masked).
+The app on this Mac (load average 4.3-12.7, the owner's CAD work beside it), Sonnet answered all 141.
+
+| ABI_MAX_AGENTS | chats at once | right | waited for an agent | p50 s | p95 s | max s |
+|---|---|---|---|---|---|---|
+| 8 | 1 | 1/1 | 0 | 8.6 | 8.6 | 8.6 |
+| 8 | 8 | 8/8 | 0 | 8.2 | 21.4 | 21.4 |
+| 8 | 16 | 16/16 | 8 | 12.6 | 24.1 | 24.1 |
+| 8 | 50 | 50/50 | 42 | 29.3 | 53.4 | 61.8 |
+| 50 | 16 | 16/16 | 0 | 10.2 | 14.6 | 14.6 |
+| 50 | 50 | 50/50 | 0 | 22.4 | 28.1 | 56.1 |
+
+Found first: in one of two single-chat runs before this one, the person saw only "I've opened the chart in Explore,
+where you can rerun it.": Sonnet wrote the figures beside its abi_show call, and the app shows (and the harness
+grounds) only the last message without a tool call. .pi/SYSTEM.md now says to call abi_show before the answer. The
+terminal bench (bench.py) can't see this: abi_show there shows nothing.
