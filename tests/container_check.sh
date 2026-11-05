@@ -26,7 +26,11 @@ for f in (\"pdf\", \"pptx\"):
     b = abi.artifact(abi.call(\"report_snapshot\", project=\"pi_app_test\", report=\"overview\", format=f, pages=pages)[\"snapshot\"]); assert b[:2] in (b\"%P\", b\"PK\"), f
 print(abi.call(\"semantic_query\", project=\"pi_app_test\", measures=[\"orders_rows\"], dimensions=[\"orders.region\"])[\"rows\"])"' > "$S/rows" 2>&1 \
   && ok "load, query, PDF, PPTX: $(tail -1 "$S/rows")" || bad "load/exports: $(tail -2 "$S/rows")"
-in_c abi-pi-test 'python3 scripts/video.py pi_app_test overview --seconds 1 --size 320x180 --out /tmp/v.mp4' >/dev/null 2>&1 && ok "video" || bad "video"
+if docker exec abi-pi-test test -d scripts/video/node_modules; then  # the -video image renders; the light one says how to switch
+  in_c abi-pi-test 'python3 scripts/video.py pi_app_test overview --seconds 1 --size 320x180 --out /tmp/v.mp4' >/dev/null 2>&1 && ok "video" || bad "video"
+else
+  in_c abi-pi-test 'python3 scripts/video.py pi_app_test overview' 2>&1 | grep -q "ABI_IMAGE=.*-video" && ok "video: the light image says how to switch" || bad "video message"
+fi
 in_c abi-pi-test 'export ABI_TOKEN=$(python3 scripts/creds.py abi-token) && pi -p "In project pi_app_test: how many orders rows per region? Give the figures."' > "$S/agent" 2>&1 || true
 grep -q "North" "$S/agent" && grep -q "2" "$S/agent" && ok "agent answers inside" || bad "agent: $(tail -3 "$S/agent")"
 docker kill -s KILL abi-pi-test >/dev/null; docker start abi-pi-test >/dev/null; up 8796 && in_c abi-pi-test 'python3 -c "import sys; sys.path.insert(0, \"scripts\"); import abi; print(abi.call(\"semantic_query\", project=\"pi_app_test\", measures=[\"orders_rows\"], dimensions=[\"orders.region\"])[\"rows\"])"' > "$S/after" 2>&1

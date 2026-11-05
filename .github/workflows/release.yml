@@ -1,5 +1,6 @@
 # A tag v1.2.3 publishes ghcr.io/<owner>/abi:1.2.3 and :latest for amd64 and arm64 (docker compose pull uses it),
-# once the offline tests (test.yml) pass on that commit.
+# and the -video image (Remotion added) as :1.2.3-video and :latest-video, once the offline tests (test.yml) pass on
+# that commit.
 name: release
 on:
   push:
@@ -27,12 +28,23 @@ jobs:
         run: |
           echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/abi" >> "$GITHUB_OUTPUT"
           echo "version=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml)" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@v7
+      - uses: docker/build-push-action@v7  # the default (light) image
         with:
           context: .
+          target: default
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.tag.outputs.image }}:${{ steps.tag.outputs.version }},${{ steps.tag.outputs.image }}:latest
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: docker/build-push-action@v7  # the -video image: the default one plus Remotion (its layers from the cache)
+        with:
+          context: .
+          target: video
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tag.outputs.image }}:${{ steps.tag.outputs.version }}-video,${{ steps.tag.outputs.image }}:latest-video
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

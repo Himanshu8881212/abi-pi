@@ -47,6 +47,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import abi  # noqa: E402
 import render  # noqa: E402
+import video  # noqa: E402
 
 KEY_SLOT = "__ABI_APP_KEY__"
 ME_SLOT = "null/*__ABI_ME__*/"
@@ -452,6 +453,7 @@ function dataExportPage(box){const g=h('div','cards'),c=card('A view\'s rows','A
  const q=card('A query\'s rows','every row the query returns, as CSV'),qs=h('select','f');D.datasets.forEach(d=>qs.append(new Option(d.name||d.id,d.id)));q.append(h('label','l','Query'),qs);
  act(q,'Download CSV',async()=>{const d=await api('dataset_data',{dataset:qs.value});d.id=qs.value;csv(d);return 'Downloaded.'},1);g.append(q)}
 function videoPage(box){const c=card('Explainer video','silent, one slide per view, captions from the rows; rendered on this machine');
+ if(ME.novideo){c.append(h('p','empty',ME.novideo));box.append(c);return}
  repPicker(c,(slot,r)=>{const pg=h('div','checks'),th=h('select','f'),sz=h('select','f'),sec=h('input','f');
   r.pages.forEach((p,i)=>{const l=h('label','chk'),x=h('input');x.type='checkbox';x.value=p.id;x.checked=i===0;l.append(x,h('span','',p.name||p.id));pg.append(l)});
   [['paper','Light'],['ink','Dark']].forEach(([v,t])=>th.append(new Option(t,v)));th.value=document.documentElement.dataset.theme==='dark'?'ink':'paper';
@@ -2505,7 +2507,8 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                 return self.reply(200, NO_PROJECT.replace("%NAME%", html.escape(self.sess["name"])).encode(), "text/html; charset=utf-8")
             opening(p)
             me = {"name": self.sess["name"] if self.sess else None, "admin": bool(not self.sess or self.sess["admin"]), "signin": signin,
-                  "role": role_of(self.sess, p), **access(self.sess, p), "source": source_url(), "version": VERSION}
+                  "role": role_of(self.sess, p), **access(self.sess, p), "source": source_url(), "version": VERSION,
+                  "novideo": video.missing()}
             # the page's data as this person (their row-level security, sections and reports); live, never the synced file
             # a person who can't edit reads only the published copy, from the first page on (release run 31 Oct: the first
             # page came from the working project, uncommitted work included, and only later requests went to the copy)
@@ -2737,7 +2740,6 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                     return self.reply(400, json.dumps({"error": (e.body or {}).get("message") if isinstance(e.body, dict) else str(e.body)}).encode())
             if self.path == "/video/export":  # a silent explainer of report views (scripts/video.py: ABI's rows, the app's theme)
                 import tempfile  # noqa: PLC0415
-                import video  # noqa: PLC0415 (sibling script)
                 try:
                     w, ht = (int(x) for x in str(body.get("size") or "1920x1080").split("x"))
                     props = video.build(hub.current(), str(body.get("report")), body.get("pages") or None, body.get("views") or None,

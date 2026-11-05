@@ -172,7 +172,7 @@ people open, so the links come back to ABI.
 | `COMPOSE_PROFILES`, `ABI_DOMAIN`, `ABI_TLS`, `ABI_TLS_CERT`, `ABI_TLS_KEY`, `ABI_HTTP_PORT`, `ABI_HTTPS_PORT` | no | HTTPS in front of ABI (below). |
 | `ABI_SQL_PORT`, `ABI_SQL_BIND`, `ABI_SQL_TLS_CERT`, `ABI_SQL_TLS_KEY` | no | The SQL endpoint for psql, DBeaver and BI tools, off unless `ABI_SQL_PORT` is set (below: Data out). `ABI_SQL_BIND`: the address it is published on, set only with `ABI_SQL_PORT`. Default: as `ABI_BIND`. |
 | `ABI_VOLUME` | no | The data volume's name. Default `abi_abi-data`; an install from 1.0 keeps `abi-pi_abi-pi-data` (`scripts/upgrade.sh` sets it). |
-| `ABI_IMAGE` | no | The image to run. Default `ghcr.io/himanshu8881212/abi:latest` (pulled with `docker compose pull`, else built here). |
+| `ABI_IMAGE` | no | The image to run. Default `ghcr.io/himanshu8881212/abi:latest` (pulled with `docker compose pull`, else built here); `ghcr.io/himanshu8881212/abi:latest-video` for explainer videos (below: The two images). |
 | `ABI_SECRET_KEY` | no | A Fernet key that encrypts the API keys admins save. Default: a key file in the volume. Make one with `python3 -c "import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())"`. |
 | `ABI_DUCKDB_MEMORY_LIMIT` | no | The memory DuckDB may use for one project's queries and loads in each engine process (the engine and each worker); above it, it spills to disk. Default `1500MB`. |
 | `ABI_DUCKDB_THREADS` | no | DuckDB threads for one project's queries and loads in each engine process. Fewer keep other projects' questions quick while one project loads or builds its model; more make one big load or query faster. Default: half the CPUs ABI's process may use (a Docker `--cpus` quota isn't counted: set it then). |
@@ -268,6 +268,27 @@ It backs up the running install to `backups/`, pulls the new image (or builds it
 and waits until it's healthy; Caddy comes along when HTTPS is on (`COMPOSE_PROFILES` in `.env`). An install from 1.0
 moves over too: it keeps its volume and its `.env`. The volume remembers its version (`docker exec abi cat
 /data/VERSION`) and an older image refuses it: to go back, restore a backup into a new volume (below).
+
+### The two images
+
+| Image | What it holds |
+|---|---|
+| `abi:latest` (and `abi:<version>`), the default | Everything except video: the engine, Postgres, the agent, the app, and the headless Chrome for PDF, PNG and PowerPoint exports and report emails. |
+| `abi:latest-video` (and `abi:<version>-video`) | The default image plus Remotion (`scripts/video/`), for explainer videos (MP4) in the app's Video page and in board packs. |
+
+On the default image, the Video page and a board pack's video item say that video needs the -video image. To switch,
+put one line in `.env` and upgrade (`scripts/upgrade.sh` keeps an install on the image it chose, also when it builds
+the image here):
+
+```sh
+ABI_IMAGE=ghcr.io/himanshu8881212/abi:latest-video
+```
+
+Built here: `docker build --target video .` (a plain `docker build .` makes the default image).
+
+<!-- M4 measure step: replace this placeholder with numbers measured on pve1. -->
+**Memory (to be measured):** the default container's idle RSS and the RSS each chat adds are not measured yet; the
+1.2 measure step fills in this sentence.
 
 ### Heavy jobs and the runner
 

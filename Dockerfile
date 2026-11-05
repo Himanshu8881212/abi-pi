@@ -10,13 +10,13 @@ COPY engine/frontend/ ./
 COPY engine/schemas /schemas
 RUN npx vite build --outDir /static --emptyOutDir --logLevel warn
 
-FROM python:3.13-slim
+FROM python:3.13-slim AS base
 # Pi needs Node 22 or newer (Debian's packaged Node is 20)
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
-# postgresql: the engine's database; libgomp1: LightGBM; git: project copies; the rest: the headless Chrome Remotion uses
+# postgresql: the engine's database; libgomp1: LightGBM; git: project copies; the rest: the engine's headless Chrome
 RUN apt-get update && apt-get install -y --no-install-recommends \
       postgresql libgomp1 git ca-certificates curl procps tini \
       libnss3 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
@@ -26,7 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && git config --system user.name ABI-PI && git config --system user.email abi-pi@localhost  # the copies' local harness commits
 ENV PGBIN=/usr/lib/postgresql/17/bin
 
-RUN npm install -g --no-audit --no-fund @earendil-works/pi-coding-agent@1.3.0
+RUN npm install -g --no-audit --no-fund @earendil-works/pi-coding-agent@1.3.0 && rm -rf /root/.npm  # npm's cache: 50 MB
 
 # the engine (as ABI's own Dockerfile builds it): its venv, DuckDB extensions, the calculation-tool sandbox and the
 # Chromium shell its report snapshots use; one root-owned HOME for them, read-only to the runtime user
@@ -41,8 +41,8 @@ RUN .venv/bin/python -I /tmp/sandbox.py --install /opt/abi/sandbox && rm /tmp/sa
 RUN HOME=$ENGINE_HOME .venv/bin/playwright install --with-deps --only-shell chromium && rm -rf /var/lib/apt/lists/* \
     && ln -s "$(ls -d $ENGINE_HOME/.cache/ms-playwright/chromium_headless_shell-*/chrome-*/chrome-headless-shell $ENGINE_HOME/.cache/ms-playwright/chromium_headless_shell-*/chrome-*/headless_shell 2>/dev/null | head -1)" /opt/abi/headless_shell \
     && test -x /opt/abi/headless_shell
-# one Chrome for everything: the video renderer (Remotion) uses the engine's; one Python: ABI-PI's scripts run on the engine's
-ENV REMOTION_BROWSER=/opt/abi/headless_shell PATH=/app/engine/backend/.venv/bin:$PATH
+# one Python: ABI-PI's scripts run on the engine's
+ENV PATH=/app/engine/backend/.venv/bin:$PATH
 
 # an unprivileged user runs everything; it owns only the app's folder and the data volume. abi-run JOB: one heavy job
 # (README: Heavy jobs and the runner)
@@ -50,8 +50,6 @@ RUN useradd --create-home --uid 10001 abi && mkdir -p /app /data && chown abi:ab
     && ln -s /app/scripts/abi-run /usr/local/bin/abi-run
 WORKDIR /app
 USER abi
-COPY --chown=abi:abi scripts/video/package.json scripts/video/package-lock.json* scripts/video/
-RUN cd scripts/video && npm ci --no-audit --no-fund
 COPY --chown=abi:abi . .
 COPY --from=ui --chown=abi:abi /static engine/backend/static
 # Pi loads a project's own extensions only from a trusted folder: the app's folder is this image's own
@@ -64,3 +62,13 @@ EXPOSE 8790
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 CMD ["/app/scripts/engine.sh", "health", "http://127.0.0.1:8790/"]
 # tini as PID 1 reaps the engine's exited children (else a stopped worker stays a zombie that looks alive)
 ENTRYPOINT ["tini", "--", "docker/entrypoint.sh"]
+
+# the -video image (1.2 M4.3): the light image plus Remotion for explainer videos (scripts/video.py); one Chrome for
+# everything: Remotion uses the engine's
+FROM base AS video
+COPY --chown=abi:abi scripts/video/package.json scripts/video/package-lock.json* scripts/video/
+RUN cd scripts/video && npm ci --no-audit --no-fund && rm -rf /home/abi/.npm
+ENV REMOTION_BROWSER=/opt/abi/headless_shell
+
+# the default (light) image: the last stage, so a plain `docker build .` makes it; no Remotion
+FROM base AS default

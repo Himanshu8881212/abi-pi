@@ -44,10 +44,6 @@ import pyarrow as pa
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from jsonschema.exceptions import best_match
-from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import sync_playwright
-from pptx import Presentation
-from pptx.util import Emu, Inches
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field, model_validator
 
@@ -312,6 +308,7 @@ def _deadline(mark: str, late: list) -> threading.Timer:
 
 def _render(user: User, project: str, report: str, pages: list[str], visual: str | None, filters: list[dict],
             fmt: str) -> str:
+    from playwright.sync_api import Error as PlaywrightError, sync_playwright  # noqa: PLC0415 (1.2 M4.3: loaded only to render)
     notes = fmt == "pptx" and _notes(user, project, report, pages, visual, filters)  # before the session exists
     token = secrets.token_urlsafe(32)
     with db.connect() as conn:  # committed now: Chromium's requests use other connections
@@ -387,6 +384,8 @@ def _notes(user: User, project: str, report: str, pages: list[str], visual: str 
 
 def _pptx(path: Path, slides: list[tuple[str, bytes, str]]) -> None:
     """A 16:9 deck: per slide its title, the page picture fitted below it, and its speaker notes."""
+    from pptx import Presentation  # noqa: PLC0415 (1.2 M4.3: loaded only for a deck)
+    from pptx.util import Emu, Inches  # noqa: PLC0415
     deck = Presentation()
     deck.slide_width, deck.slide_height = w, h = Emu(12_192_000), Emu(6_858_000)  # 13.33 x 7.5 in
     margin, top = Inches(0.4), Inches(1.3)
@@ -404,6 +403,7 @@ def _pptx(path: Path, slides: list[tuple[str, bytes, str]]) -> None:
 
 def html_pdf(html: str, path: Path) -> None:
     """A self-contained HTML document (DC-3 docs) as a tagged PDF whose outline follows its headings; scripts off."""
+    from playwright.sync_api import Error as PlaywrightError, sync_playwright  # noqa: PLC0415 (1.2 M4.3: loaded only to render)
     try:
         with sync_playwright() as p:
             pg = p.chromium.launch(args=["--disable-dev-shm-usage"]).new_page(java_script_enabled=False)

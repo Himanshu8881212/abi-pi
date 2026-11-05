@@ -26,6 +26,14 @@ THEMES = {"paper": {"paper": "#f7f7f5", "sheet": "#ffffff", "ink": "#0b0b0b", "m
           "ink": {"paper": "#0b0b0b", "sheet": "#141414", "ink": "#f2f2ef", "mute": "#9b9b96", "faint": "#2a2a28", "accent": "#ff6a3d"}}
 NUM = re.compile(r"-?\d[\d,]*(?:\.\d+)?\s*(?:bn|m|k|%)?", re.I)
 YEAR = re.compile(r"^(19|20)\d\d$")  # a year is a label, not a figure
+# 1.2 M4.3: Remotion is in the -video image only (Dockerfile's video target); the default image is the light one
+NO_VIDEO = ("Video needs ABI's -video image, which adds Remotion; this install runs the light image. To switch, set "
+            "ABI_IMAGE=ghcr.io/himanshu8881212/abi:latest-video in .env, then run scripts/upgrade.sh.")
+
+
+def missing() -> str:
+    """Why this install can't render a video ('' when it can)."""
+    return "" if (HERE / "video" / "node_modules" / "remotion").is_dir() else NO_VIDEO
 
 
 def compact(v) -> str:
@@ -85,6 +93,8 @@ def grounded(text: str, d: dict) -> bool:
 
 
 def build(project: str, report: str, pages=None, views=None, theme="paper", seconds=6, size=(1920, 1080), captions=None) -> dict:
+    if missing():
+        raise SystemExit(missing())
     rep = abi.call("list_reports", project=project)
     spec = next((r for r in rep.get("reports", rep) if isinstance(r, dict) and r.get("id") == report), None)
     if not spec:

@@ -965,3 +965,23 @@ visuals for one restricted Viewer took 1.96 s at once against 1.10 s one after a
 reads wait for one build (1.53 s one after another at that load). Engine: Postgres connections pooled (20), a
 connection out of the pool in 0.23 ms against 3 ms for a new one (200 in a loop). PLAN.md's page target is for pve1
 at 50 sessions (M3's measure step).
+
+## 1.2 M4.3 the light image (pve1, and the MacBook Air)
+
+5 Nov 2026, this branch's tree (M4.1 plus M4.3), built on pve1 from `git archive` as throwaway tags (removed after),
+sized by the method above (`docker image inspect --format '{{.Size}}'`, Docker 26.1.5, linux/amd64):
+
+| image | bytes |
+|---|---|
+| 1.1.0 (Remotion inside) | 2,843,622,285 |
+| default (`--target default`, no Remotion) | 2,476,372,582 |
+| -video (`--target video`) | 2,700,262,250 |
+
+What moved to -video: 223,889,668 bytes (Remotion's node_modules). Target: default <= 2,843,622,285 - 223,889,668 =
+2,619,732,617; it is 143,360,035 under. Without dropping npm's cache (50 MB in /root/.npm, left by Pi's global install
+in 1.1.0 too) the default image was 2,560,595,246, 106,367 bytes over, so both stages now remove npm's cache. In the
+-video image a 320x180 one-slide video rendered (11,821 bytes); in the default one video.py says how to switch.
+
+Idle RSS (ps), a private engine on the Mac, 40 s after start, before and after moving Playwright and python-pptx into
+the functions that render: engine 228,432 KB to 210,624 KB, default worker 225,232 KB to 207,632 KB (about 17.5 MB
+each). numpy stays: pyarrow loads it at start anyway.

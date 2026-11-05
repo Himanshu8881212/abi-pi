@@ -3,7 +3,8 @@
 # (backups/abi-<time>.tar), then the new image (pulled, else built here) on the same data volume, then wait until it
 # is healthy. An install from 1.0 (compose project abi-pi) moves over too: its volume stays where it is (ABI_VOLUME
 # in .env) and its old container goes once the backup is done. Restore a backup: scripts/backup.sh (restore).
-# The profiles .env names (COMPOSE_PROFILES=https: Caddy in front) come along: plain docker compose reads them.
+# The profiles .env names (COMPOSE_PROFILES=https: Caddy in front) come along: plain docker compose reads them, and
+# so does the image it chose (ABI_IMAGE: the light default or the -video one).
 #
 #   git pull && scripts/upgrade.sh
 set -eu
@@ -24,7 +25,11 @@ if [ -n "$OLD" ]; then
   grep -q '^ABI_VOLUME=' .env || printf '\nABI_VOLUME=%s\n' "$V" >> .env
   echo "moving the 1.0 install (volume $V) over"
 fi
-docker compose pull 2>/dev/null || docker compose build
+# an install that chose the -video image (ABI_IMAGE=...:latest-video, or <version>-video) stays on it, also when built here
+IMG=$(sed -n 's/^ABI_IMAGE=//p' .env | tail -1 | tr -d "\"'")
+IMG=${IMG:-ghcr.io/himanshu8881212/abi:latest}
+case $IMG in *-video) T=video ;; *) T=default ;; esac
+docker compose pull 2>/dev/null || docker build --target "$T" -t "$IMG" .
 [ -z "$OLD" ] || docker rm -f "$OLD" > /dev/null
 docker compose up -d
 printf 'waiting for ABI'
