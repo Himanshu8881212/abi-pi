@@ -223,6 +223,9 @@ textarea.f{font:14px/1.5 var(--text)}textarea.f.code,textarea.code{font:13px/1.5
 .card label.l+select.f,.card label.l+input.f:not([type=checkbox]){display:block;width:100%;max-width:520px;margin-top:6px}.card .card{min-width:0}
 .seg{gap:6px}.seg .chip{cursor:pointer;padding:5px 12px;font-size:13px;margin:0}.seg .chip.on{background:var(--ink);color:var(--sheet);border-color:var(--ink)}.seg .chip.add{border-style:dashed}
 #chat .mdt{white-space:normal;width:auto;min-width:60%;margin:6px 0;font-size:13px}#chat .mdt th,#chat .mdt td{padding:6px 10px}
+#chat .mdl{white-space:normal;margin:4px 0;padding-left:22px}#chat .mdl li{margin:2px 0}#chat .mdl .mdl{margin:2px 0}
+#chat .mdh{display:block;font-size:15px;margin:8px 0 2px}#chat .mdc{white-space:pre;overflow-x:auto;background:var(--hover,#f1f1ee);padding:8px 10px;border-radius:6px;font-size:12.5px;margin:6px 0}
+#chat .m a{color:inherit;text-decoration:underline;text-decoration-color:var(--signal)}
 .cvtools{gap:6px;margin:0 0 8px}.cvtools .btn{padding:5px 10px}.cvtools .pct{font:12px var(--mono);color:var(--mute);min-width:44px;text-align:center}
 .canvas .sizer{position:relative}.canvas .stage{position:absolute;left:0;top:0;transform-origin:0 0}
 .node{position:absolute;width:230px;background:var(--sheet);border:1px solid var(--line);border-radius:6px;padding:10px 12px;cursor:grab;user-select:none;z-index:1}.node b{display:block;font:600 13px var(--display)}.node span{display:block;font:11.5px var(--mono);color:var(--mute);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.node .when{font-size:12px;color:var(--signal-ink);margin-top:6px}.node.trig{background:var(--ink);border-color:var(--ink)}.node.trig b,.node.trig span{color:var(--sheet)}.node.ok{border-left:3px solid var(--ok)}.node.failed{border-left:3px solid var(--red)}.node.skipped{opacity:.6}
@@ -1349,11 +1352,23 @@ function toast(t){const x=h('div','toast',t);document.body.append(x);setTimeout(
 function highlight(item){if(!item)return;const want=String(item).toLowerCase();
  const c=[...document.querySelectorAll('main .card')].find(c=>c.textContent.toLowerCase().includes(want));if(c){c.classList.add('hl');c.scrollIntoView({behavior:'smooth',block:'center'});setTimeout(()=>c.classList.remove('hl'),4000)}}
 const chatBox=$('#chat'),log=$('#chat .log'),inp=$('#chat textarea'),busy=$('#chat .busy');
-// an answer's text as HTML: escaped first, then bold, code and markdown tables (a block of |-lines; the --- row is dropped)
-const md=t=>t.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])).replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>')
+// an answer's text as HTML (owner, 5 Nov 2026: "a proper table, bold shown properly"): escaped first, so nothing the
+// model writes becomes markup; then code blocks, tables, lists, headings, bold, italics, inline code and http(s) links
+function md(t){const C=[],I=x=>x.replace(/`([^`\n]+)`/g,'<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g,'<b>$1</b>')
+  .replace(/(^|[^*\w])\*([^*\s](?:[^*\n]*?[^*\s])?)\*(?![*\w])/g,'$1<i>$2</i>').replace(/(^|[^\w])_([^_\s](?:[^_\n]*?[^_\s])?)_(?!\w)/g,'$1<i>$2</i>')
+  .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)"]+)\)/g,'<a href="$2" target=_blank rel="noopener noreferrer">$1</a>');
+ t=t.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])).replace(/```[^\n]*\n([\s\S]*?)```\n?/g,(_,c)=>{C.push(c);return '\u0000'+(C.length-1)+'\u0000'})
  .replace(/(^|\n)((?:[ \t]*\|[^\n]*\|[ \t]*(?:\n|$))+)/g,(all,pre,block)=>{const rows=block.trim().split('\n').map(r=>r.trim().slice(1,-1).split('|').map(c=>c.trim()))
   .filter(r=>!r.every(c=>/^:?-{2,}:?$/.test(c)));if(rows.length<2)return all;const n=c=>/^[-+]?[\d.,]+\s*%?$/.test(c);
-  return pre+'<table class=mdt><tr>'+rows[0].map(c=>'<th>'+c+'</th>').join('')+'</tr>'+rows.slice(1).map(r=>'<tr>'+r.map(c=>'<td'+(n(c)?' class=n':'')+'>'+c+'</td>').join('')+'</tr>').join('')+'</table>'});
+  return pre+'<table class=mdt><tr>'+rows[0].map(c=>'<th>'+I(c)+'</th>').join('')+'</tr>'+rows.slice(1).map(r=>'<tr>'+r.map(c=>'<td'+(n(c)?' class=n':'')+'>'+I(c)+'</td>').join('')+'</tr>').join('')+'</table>'})
+ .replace(/(^|\n)((?:[ \t]*(?:[-*+]|\d+[.)])[ \t]+[^\n]*(?:\n|$))+)/g,(all,pre,block)=>{let out='',st=[];
+  for(const l of block.replace(/\n$/,'').split('\n')){const m=/^([ \t]*)([-*+]|\d+[.)])[ \t]+(.*)$/.exec(l),d=m[1].replace(/\t/g,'  ').length>=2?1:0,tag=/\d/.test(m[2])?'ol':'ul';
+   while(st.length>d+1)out+='</li></'+st.pop()+'>';if(st.length===d+1&&st[d]!==tag)out+='</li></'+st.pop()+'>';
+   if(st.length<d+1){if(st.length<d){st.push('ul');out+='<ul><li>'}out+='<'+tag+' class=mdl><li>';st.push(tag)}else out+='</li><li>';out+=I(m[3])}
+  while(st.length)out+='</li></'+st.pop()+'>';return pre+out})
+ .replace(/(^|\n)#{1,4}[ \t]+([^\n]+)\n?/g,(_,pre,x)=>pre+'<b class=mdh>'+x.replace(/[ \t]+#+[ \t]*$/,'')+'</b>');
+ return I(t.replace(/<table class=mdt>[\s\S]*?<\/table>|<ol class=mdl>[\s\S]*?<\/ol>|<ul class=mdl>[\s\S]*?<\/ul>/g,x=>(C.push(x),'\u0001'+(C.length-1)+'\u0001')))
+  .replace(/\u0001(\d+)\u0001/g,(_,i)=>C[i]).replace(/\u0000(\d+)\u0000/g,(_,i)=>'<pre class=mdc><code>'+C[i]+'</code></pre>')} // md end
 function bubble(cls,text){const b=h('div','m '+cls);if(cls==='ai')b.innerHTML=md(text);else b.textContent=text;log.append(b);log.scrollTop=log.scrollHeight;return b}
 let steps=null;
 // Chat page: the same conversation as the side panel, full width; leaving the page (or the agent showing one) puts it back at the side

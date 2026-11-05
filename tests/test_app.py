@@ -853,12 +853,33 @@ def test_chat_answers_draw_markdown_tables_safely():
     import shutil
     if not shutil.which("node"):
         pytest.skip("no node")
-    src = re.search(r"const md=t=>.*?\}\);", app.JS, re.S).group(0)
-    out = subprocess.run(["node", "-e", src + "\nprocess.stdout.write(md(process.argv[1]))",
-                          "Top:\n| Category | Views |\n|---|---:|\n| <b>Music</b> | 1,200 |\n| **Gaming** | 900 |\nDone."],
-                         capture_output=True, text=True, check=True).stdout
+    src = re.search(r"function md\(t\)\{.*?// md end", app.JS, re.S).group(0)
+    md = lambda t: subprocess.run(["node", "-e", src + "\nprocess.stdout.write(md(process.argv[1]))", t],  # noqa: E731
+                                  capture_output=True, text=True, check=True).stdout
+    out = md("Top:\n| Category | Views |\n|---|---:|\n| <b>Music</b> | 1,200 |\n| **Gaming** | 900 |\nDone.")
     assert "<table class=mdt><tr><th>Category</th><th>Views</th></tr>" in out and "<td class=n>1,200</td>" in out
     assert "&lt;b&gt;Music&lt;/b&gt;" in out and "<td><b>Gaming</b></td>" in out and "|---" not in out
+
+
+def test_chat_answers_draw_lists_headings_emphasis_links_and_code_safely():
+    """Owner, 5 Nov 2026: what the agent writes as markdown shows as it means (lists, headings, bold, italics, links,
+    code), and nothing it writes becomes markup: no script, no javascript: link, no raw HTML."""
+    import shutil
+    if not shutil.which("node"):
+        pytest.skip("no node")
+    src = re.search(r"function md\(t\)\{.*?// md end", app.JS, re.S).group(0)
+    md = lambda t: subprocess.run(["node", "-e", src + "\nprocess.stdout.write(md(process.argv[1]))", t],  # noqa: E731
+                                  capture_output=True, text=True, check=True).stdout
+    out = md("## Why revenue fell\n- **North** fell 51.5%\n  - Hamburg: *most*\n- South held\n1. first\n2. second\nSee [the docs](https://abi.example.com/x).")
+    assert "<b class=mdh>Why revenue fell</b>" in out and "##" not in out
+    assert out.count("<ul class=mdl>") == 2 and "<li><b>North</b> fell 51.5%<ul class=mdl><li>Hamburg: <i>most</i></li></ul></li><li>South held</li></ul>" in out
+    assert "<ol class=mdl><li>first</li><li>second</li></ol>" in out
+    assert '<a href="https://abi.example.com/x" target=_blank rel="noopener noreferrer">the docs</a>' in out
+    code = md("Run:\n```sql\nSELECT a*b*c, x_y_z FROM t -- <b>\n```\nok")
+    assert "<pre class=mdc><code>SELECT a*b*c, x_y_z FROM t -- &lt;b&gt;\n</code></pre>" in code and "<i>" not in code
+    bad = md("<script>alert(1)</script> [x](javascript:alert(1)) <img src=x onerror=alert(1)> **<i>b</i>**")
+    assert "<script" not in bad and "<img" not in bad and "href" not in bad and "&lt;i&gt;b&lt;/i&gt;" in bad
+    assert md("revenue_prev and *_prev/*_change, 3 * 4 * 5, -2,051.40 down") == "revenue_prev and *_prev/*_change, 3 * 4 * 5, -2,051.40 down"
 
 
 def test_every_page_draws_in_a_real_browser(srv):
