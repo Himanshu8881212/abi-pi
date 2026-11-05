@@ -373,15 +373,16 @@ def memory(a) -> dict:
     rec = {"chats": a.chats, "idle": rss(app)}
     if not a.chats:
         return rec
-    o, made, chats, stamp, left = owner(a), [], [], time.strftime("%m%d%H%M%S"), []
-    s = None
+    o, made, chats, stamp, left, ss = owner(a), [], [], time.strftime("%m%d%H%M%S"), [], []
     try:
         pending(o)
         # the model a chat starts with, read as app.py's Hub.chat does: Settings, else the deployment's
         rec["model"] = settings.load()["model"] or os.environ.get("ABI_PI_LLM_MODEL") or None
-        s = App(a.url, *accounts(o, ["editor"], made, stamp)[0], o.project)
-        s.key, before = o.key, len(pis(app))
-        for i in range(a.chats):  # one chat per browser window: each runs its own Pi, started by its first message
+        # one person per chat (1.2 M3: one person runs at most half of ABI_MAX_AGENTS), each in its own browser window
+        ss = [App(a.url, *acc, o.project) for acc in accounts(o, ["editor"] * a.chats, made, stamp)]
+        before = len(pis(app))
+        for i, s in enumerate(ss):  # each chat runs its own Pi, started by its first message
+            s.key = o.key
             ev = Events(s, f"perf{i}")
             chats.append((f"perf{i}", s.post("/chat/new", {}, f"perf{i}")["id"], ev))
             s.post("/chat", {"message": ASK, "page": "home"}, f"perf{i}")
@@ -396,10 +397,10 @@ def memory(a) -> dict:
             rec["held"] = rss(app)
     finally:
         with contextlib.suppress(OSError, http.client.HTTPException, ValueError):  # the app may be gone (its Pis with it)
-            for cid, chat, ev in chats:
+            for s, (cid, chat, ev) in zip(ss, chats):
                 s.post("/chat/delete", {"id": chat}, cid)  # its Pi stops, its files go
                 ev.c.close()
-        signed_out([s, o] if s else [o])
+        signed_out([*ss, o])
         for n in made:
             sure("delete_user", name=n)
             with contextlib.suppress(OSError):  # its chats' folder, empty now

@@ -471,8 +471,48 @@ before the Mac's disk filled); the numbers are the install's logs (/opt/abi-m3/l
 | inside 4 GiB, no swap: 8 idle chats + 50M orders through the app | orders 326.31 s, Ready 364.65 s, exact; memory.peak from the chats on 3,912,454,144 bytes; memory.events oom 0, oom_kill 0, max 0; OOMKilled false, 0 restarts |
 
 Isolation, scored against its own idle as 1.1.0 and round 1 were: x1.52 p95 misses 1.5x by 0.02; with the diag run's
-x1.37 it is borderline (round 2). The 4 GiB target holds on the final code, with 233 MiB to spare (round 1 on ac999af:
+x1.37 it is borderline (round 2). The 4 GiB target holds on 28e5153, with 365 MiB to spare (round 1 on ac999af:
 143 MiB). The no-limit isolation run's container memory.peak was 4,940,763,136 bytes.
+
+## 1.2 M3 round 3 (pve1): c2c7437, the final M3 code
+
+4-5 Nov 2026, 22:36-23:49 UTC: release-1.2 at c2c7437 (M3.1-M3.5, round 2's thread cap and the review fixes),
+`git archive c2c7437` built on LXC 100 as round 1's throwaway install (project, container and volume abi-m3, port
+8796 on the LXC's loopback, the owner's password in a root-only file; image abi-m3:c2c7437, 2,843,797,743 bytes),
+removed afterwards; the live abi and lake containers' start time, restart count and image were the same before and
+after. The 28e5153 install the round above left running was removed first. bench/perf.py ran inside the container
+with round 1's subcommands and scripts, one run at a time, each started at an LXC 1-minute load average of 0.10-1.49
+with no build, no other bench and no container but abi and lake beside it; [a-b] is the load average's range during
+the run. Two changes of method: isolation's idle sample is 200 queries (round 2: a 30-query p95 is its second-highest
+query), and `perf.py memory` opens each chat as its own person (this commit's fix: since c2c7437 one person runs at
+most half of ABI_MAX_AGENTS, so 8 chats of one account started 4 Pis, peak 3,728,089,088 bytes, not counted).
+
+| M3 target (PLAN.md) | 1.1.0 (part 2) | 1.2 M3 round 3 (c2c7437) | |
+|---|---|---|---|
+| 50 sessions right after a commit: page p95 <= 2 s | 87.6 s | 1.44 s [1.20-2.50] | met |
+| the same with `--rls cafes.cafe_id` (50 Viewers, a café each): 3x better, <= 50.9 s | 152.7 s | 25.59 s (6.0x) [1.35-4.14] | met |
+| 100M orders through the app's upload: no client timeout, Ready with a model, exact | build_model out of memory: no model | orders in 733.26 s, Ready at 826.96 s, exact to the cent | met |
+| another project's uncached queries during that load: <= 1.5x idle | x2.26 p50, x2.92 p95 (part 1: 50M, server path) | idle (200) 76.7 / 88.0 ms, during (8,434) 92.4 / 126.2 ms: x1.20 p50, x1.43 p95 [1.23-6.36] | met |
+| measure-only Publish on Brewline 1 (7.4M orders): <= 15 s, no source reloaded | 39.83 s, 4 reloaded | answers in 1.43 s, a Viewer's page shows it at 2.32 s, none reloaded [1.01-3.93] | met |
+| kill -9 of the engine, then a worker: /api/ready and a page again <= 60 s | never (300 s watched each) | 7.1 s; 1.0 s | met |
+| 8 chats (8 people) + 50M orders through the app inside mem_limit 4g, no swap: no OOM kill, exact | no kill, exact, peak 4,259,540,992 bytes | no kill, exact, peak 3,920,732,160 bytes (357 MiB to spare) [0.10-5.52] | met |
+
+Pages: first opening p95 1.73 s without a rule and 27.52 s with it; 0 errors and 0 dropped in all four rounds; page
+261 / 263 KB. Publish on Brewline 0.01: measure-only answers in 0.48 s (page 1.09 s), none reloaded; the first
+Publish's copy tables arrive 27.27 s (0.01) and 82.38 s (7.4M orders) later, all four tables, the behaviour change
+round 1 notes. The isolation load's lake holds 2,303,588,044 bytes (round 1's first run to the byte), container peak
+4,194 MB with no limit. Kills: the supervisor logged "the engine (pid 63) ended with status 137 after 573 s; it starts
+again in 0 s" and the same for the worker; `engine.sh health` said "The engine isn't ready" for 2 samples (about 4 s)
+after the engine's kill and was healthy otherwise, Docker's check healthy at every probe, through both. 4 GiB:
+orders in 329.64 s, Ready at 369.46 s; memory.events oom 0, oom_kill 0, max 0; OOMKilled false, 0 restarts; the 8
+chats' Pi 805.3 MB at their start (112.6 MB a chat with the app's side), 667.5 MB after the 420 s hold.
+
+Open, for the next fix: the heavy worker segfaults when a big project is deleted while the minute's build_copies
+reads it. It died with status 139 twice here, each time inside build_copies, 6-13 s after perf.py deleted the 50M
+project it had just loaded (build_copies started 23:23:00 and 23:48:00; delete_project answered 23:23:13 and
+23:48:08; the kernel: "procrastinate[...]: segfault ... in _duckdb.cpython-313-x86_64-linux-gnu.so"), the same as
+round 1's at 17:49. The supervisor started a new worker in 0 s and every run here ended right, but a heavy job beside
+it would die with it (a load's run is then failed by retry_stalled_runs within about a minute, c2c7437).
 
 ## 1.2 M2 round 1 (MacBook Air, 8 cores, 24 GB; model proxy/claude-sonnet-5-5)
 
