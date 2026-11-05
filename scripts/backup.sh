@@ -9,8 +9,9 @@
 #   scripts/backup.sh restore [keys.tar] < abi-backup.tar   into an empty data folder (a new volume); keys are optional
 #   A restore goes to the same data path the backup came from (the lake catalog records it): always /data in the container.
 #
-# In the container:   docker exec abi scripts/backup.sh backup > abi-backup.tar
-#                     docker exec abi scripts/backup.sh keys > abi-keys.tar
+# In the container:   (umask 077; docker exec abi scripts/backup.sh backup > abi-backup.tar)
+#                     (umask 077; docker exec abi scripts/backup.sh keys > abi-keys.tar)
+#   (the host's shell writes these files: umask 077 keeps them readable by their owner only)
 #   restore (new volume, container stopped):
 #                     docker run --rm -i -v abi_abi-data:/data -v "$PWD/abi-keys.tar:/keys.tar:ro" \
 #                       --entrypoint scripts/backup.sh ghcr.io/himanshu8881212/abi:latest restore /keys.tar < abi-backup.tar

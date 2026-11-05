@@ -68,6 +68,7 @@ echo "$*" >> {tmp_path}/calls
 case "$*" in
   ps*service=abi) echo old ;;
   "exec old scripts/backup.sh backup") echo backup ;;
+  "exec old scripts/backup.sh keys") echo keys ;;
   "compose ps -q abi") echo new ;;
   inspect*) echo healthy ;;
   "exec new cat /data/VERSION") echo 1.2.0 ;;
@@ -80,4 +81,4 @@ esac
     calls = (tmp_path / "calls").read_text().splitlines()
     assert r.returncode == 0 and r.stdout.endswith("ok: 1.2.0\n"), r.stdout + r.stderr
     assert "compose up -d" in calls and not [c for c in calls if re.match(r"(inspect|exec) abi\b", c)]
-    assert [f.read_text() for f in (tmp_path / "backups").iterdir()] == ["backup\n"]
+    assert sorted(f.read_text() for f in (tmp_path / "backups").iterdir()) == ["backup\n", "keys\n"]

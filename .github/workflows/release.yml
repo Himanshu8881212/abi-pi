@@ -27,7 +27,10 @@ jobs:
       - id: tag
         run: |
           echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/abi" >> "$GITHUB_OUTPUT"
-          echo "version=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml)" >> "$GITHUB_OUTPUT"
+          v=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml)
+          # only the tag v<version> publishes :<version> and :latest (a dispatch from a branch publishes nothing)
+          [ "$GITHUB_REF_NAME" = "v$v" ] || { echo "::error::$GITHUB_REF_NAME is not the tag v$v" >&2; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v7  # the default (light) image
         with:
           context: .

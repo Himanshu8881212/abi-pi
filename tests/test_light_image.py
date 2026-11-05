@@ -40,6 +40,19 @@ def test_the_default_image_has_no_remotion_and_the_video_image_adds_it():
     assert ":latest-video" in rel and "version }}-video" in rel and rel.count("linux/amd64,linux/arm64") == 2
 
 
+@pytest.mark.parametrize("ref,ok", [("v1.2.0", True), ("release-1.2", False), ("v1.1.0", False)])
+def test_release_publishes_only_from_the_tag_of_its_version(tmp_path, ref, ok):
+    """Release review: a workflow_dispatch from any branch published :latest and :<pyproject version>. The tag step
+    (run as the workflow runs it, in bash) now stops unless the ref is the tag v<version>."""
+    rel = (ROOT / ".github/workflows/release.yml").read_text()
+    step = re.search(r"- id: tag\n\s+run: \|\n((?:          .*\n)+)", rel)[1].replace("${GITHUB_REPOSITORY_OWNER,,}", "x")  # bash 3.2 here
+    (tmp_path / "pyproject.toml").write_text('[project]\nversion = "1.2.0"\n')
+    r = subprocess.run(["bash", "-eo", "pipefail", "-c", step], cwd=tmp_path, capture_output=True, text=True, env={
+        **os.environ, "GITHUB_REF_NAME": ref, "GITHUB_REPOSITORY_OWNER": "X", "GITHUB_OUTPUT": str(tmp_path / "out")})
+    assert (r.returncode == 0) == ok, r.stderr
+    assert ("version=1.2.0" in (tmp_path / "out").read_text()) == ok
+
+
 def test_video_without_remotion_says_how_to_switch(tmp_path, monkeypatch):
     monkeypatch.setattr(video, "HERE", tmp_path)  # an image without scripts/video/node_modules
     assert video.missing() == video.NO_VIDEO and "ABI_IMAGE=" in video.NO_VIDEO and "-video" in video.NO_VIDEO
@@ -74,6 +87,7 @@ def test_upgrade_builds_the_image_the_install_chose(tmp_path, env, target, image
 echo "$*" >> {tmp_path}/calls
 case "$*" in
   "compose pull") exit 1 ;;
+  "volume inspect"*) exit 1 ;;
   "compose ps -q abi") echo new ;;
   inspect*) echo healthy ;;
   "exec new cat /data/VERSION") echo 1.2.0 ;;
@@ -98,6 +112,7 @@ def test_upgrades_backup_is_readable_by_its_owner_only(tmp_path):
 case "$*" in
   ps*service=abi) echo old ;;
   "exec old scripts/backup.sh backup") echo the dump ;;
+  "exec old scripts/backup.sh keys") echo the keys ;;
   "compose ps -q abi") echo new ;;
   inspect*) echo healthy ;;
   "exec new cat /data/VERSION") echo 1.2.0 ;;
@@ -106,9 +121,37 @@ esac
     (tmp_path / "bin/docker").chmod(0o755)
     r = subprocess.run(["sh", "-c", "umask 022 && sh scripts/upgrade.sh"], cwd=tmp_path, capture_output=True, text=True, timeout=60,
                        env={**os.environ, "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}"})
-    [f] = (tmp_path / "backups").glob("abi-*.tar")
-    assert r.returncode == 0 and f.read_text() == "the dump\n", r.stdout + r.stderr
-    assert f.stat().st_mode & 0o077 == 0, oct(f.stat().st_mode)
+    [k] = (tmp_path / "backups").glob("abi-*-keys.tar")  # release review: without the keys a restore loses every stored secret
+    [f] = set((tmp_path / "backups").glob("abi-*.tar")) - {k}
+    assert r.returncode == 0 and f.read_text() == "the dump\n" and k.read_text() == "the keys\n", r.stdout + r.stderr
+    assert f.stat().st_mode & 0o077 == 0 and k.stat().st_mode & 0o077 == 0, oct(f.stat().st_mode)
+
+
+@pytest.mark.parametrize("skip", ["", "1"])
+def test_upgrade_refuses_a_stopped_install_it_cant_back_up(tmp_path, skip):
+    """Release review: with no container running (ABI stopped, Docker not up yet after a reboot) upgrade.sh skipped the
+    backup without a word and migrated the volume for good. Now it stops while the volume exists, unless ABI_NO_BACKUP=1."""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts/upgrade.sh").write_bytes((ROOT / "scripts/upgrade.sh").read_bytes())
+    (tmp_path / ".env").write_text("ABI_VOLUME=abi-pi_abi-pi-data\n")
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin/docker").write_text(f"""#!/bin/sh
+echo "$*" >> {tmp_path}/calls
+case "$*" in
+  "compose ps -q abi") echo new ;;
+  inspect*) echo healthy ;;
+  "exec new cat /data/VERSION") echo 1.2.0 ;;
+esac
+""")
+    (tmp_path / "bin/docker").chmod(0o755)
+    r = subprocess.run(["sh", tmp_path / "scripts/upgrade.sh"], capture_output=True, text=True, timeout=60,
+                       env={**os.environ, "ABI_NO_BACKUP": skip, "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}"})
+    calls = (tmp_path / "calls").read_text().splitlines()
+    if skip:
+        assert r.returncode == 0 and "compose up -d" in calls, r.stdout + r.stderr
+    else:
+        assert r.returncode == 1 and "isn't running" in r.stderr and "volume inspect abi-pi_abi-pi-data" in calls, r.stderr
+        assert "compose up -d" not in calls and "compose pull" not in calls, calls
 
 
 def test_the_engine_and_the_worker_start_without_playwright_or_pptx(tmp_path):
