@@ -124,3 +124,13 @@ def test_every_task_passes_on_the_right_work_and_fails_on_the_wrong(tmp_path, mo
     made = "bench_" + log.stem.removeprefix("bench-")
     assert not [x for x in abi.call("list_projects")["projects"] if x["project"].startswith(made)]  # the shared one and the loaded one
     assert not (ROOT / "scratch" / made).exists() and not list(abi.WORKSPACES.glob(f"*/{made}*"))
+
+
+def test_a_negation_names_no_driver_in_its_own_clause_only():
+    """1.2 final rerun: 7 of 20 correct why answers failed because "North caused most of it, and the cause was fewer
+    orders, not smaller ones" holds a "not"; the M2 review's guard ("North fell, but it is not the main driver") holds."""
+    import bench
+    regions = ["North", "South", "East", "West"]
+    assert bench.drivers("The North region caused most of it, and the cause was fewer orders, not smaller ones.", regions) == {"North"}
+    assert bench.drivers("North fell from 3,271.28 to 1,586.08, but it is not the main driver.", regions) == set()
+    assert bench.drivers("Most of the fall is in North, while East held.", regions) == {"North"}

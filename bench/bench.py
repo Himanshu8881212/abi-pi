@@ -92,7 +92,9 @@ def drivers(text: str, members) -> set:
     the fall is in North, while East ...", not "most of it came from East"). M2 review: a sentence with not, n't, never
     or rather than names none ("North fell from A to B, but it is not the main driver")."""
     names, out = re.compile(r"\b(" + "|".join(map(re.escape, members)) + r")\b"), set()
-    for s in re.split(r"(?<=[.!?;])\s+|\n", text):
+    # 1.2 final rerun: a negation counts in its own clause only: "North caused most of it, and the cause was fewer
+    # orders, not smaller ones" names North (7 of 20 correct answers failed on the whole sentence's "not")
+    for s in re.split(r"(?<=[.!?;])\s+|\n|,\s+(?:and|but|while|so)\s+", text):
         if (named := list(names.finditer(s))) and not NOT.search(s):
             out |= {min(named, key=lambda m: max(m.start() - d.end(), d.start() - m.end()))[1] for d in DRIVER.finditer(s)}
     return out

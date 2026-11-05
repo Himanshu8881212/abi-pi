@@ -344,14 +344,15 @@ export default async function abi(pi: ExtensionAPI) {
 			label: "Team plan",
 			description: "The Lead's plan for a job bigger than a few steps: tasks {id, agent, area, task, depends_on}, one per specialist and area. Agents and areas (harness/team.json): data-engineer (sources, transform), analytics-engineer (model, measures), analyst (reports, analysis), ml-engineer (ml), automation-engineer (flows), agent-builder (agents), reviewer (review), release-ops (release). Phases data -> model -> build -> review -> release: a later task depends on every earlier-phase task. The harness refuses a plan that breaks this and says why; a revised plan keeps tasks that passed. Then delegate each task with subagent, its text starting 'Plan task <id>:'.",
 			parameters: Type.Object({ project: Type.String(), goal: Type.String(), tasks: Type.Array(Type.Object({ id: Type.String(), agent: Type.String(), area: Type.String(), task: Type.String(), depends_on: Type.Optional(Type.Array(Type.String())) })) }),
-			async execute(_id, p) { return text(await runTeam(["plan", p.project], JSON.stringify({ goal: p.goal, tasks: p.tasks }))); },
+			// 1.2 team job: a new project's plan comes before any ABI read of it, so the plan names the Lead's project
+			async execute(_id, p) { state.project = p.project; return text(await runTeam(["plan", p.project], JSON.stringify({ goal: p.goal, tasks: p.tasks }))); },
 		});
 		pi.registerTool({
 			name: "abi_brief",
 			label: "Team brief",
 			description: "Set the team's project brief: goal, phases, conventions (naming, grain, definitions), open questions. Every specialist is briefed with it. Lasting decisions also go to ABI's project memory (remember).",
 			parameters: Type.Object({ project: Type.String(), text: Type.String() }),
-			async execute(_id, p) { return text(await runTeam(["brief-set", p.project], p.text)); },
+			async execute(_id, p) { state.project = p.project; return text(await runTeam(["brief-set", p.project], p.text)); },
 		});
 		pi.registerTool({
 			name: "abi_team",
