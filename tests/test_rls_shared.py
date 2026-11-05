@@ -471,15 +471,22 @@ def test_the_published_copy_is_sliced_the_same(brew):
         if r.get("confirm"):
             r = page(f"/confirm/{r['confirm']['id']}")
         assert "result" in r, r
-        want = abi.call("sql_query", project=P, sql="SELECT count(*) FROM orders")["rows"]
+        # every table, not only orders: the worker loads the copy's tables one snapshot each in no set order (a set
+        # of sources), so orders can land while cafes is still missing, and a person's own read then rightly sees no
+        # rows (their filter goes through cafes); the check below compares two reads, so the data must not move
+        count = lambda p: [abi.call("sql_query", project=p, sql=f"SELECT count(*) FROM {t}")["rows"]  # noqa: E731
+                           for t in ("cafes", "customers", "products", "orders")]
+        want = count(P)
         end = time.monotonic() + 240
         while time.monotonic() < end:  # the worker's minute, then the copy's load
             try:
-                if abi.call("sql_query", project=pub, sql="SELECT count(*) FROM orders")["rows"] == want:
+                if count(pub) == want:
                     break
             except abi.ActionError:
                 pass
             time.sleep(2)
+        else:
+            pytest.fail("the published copy's tables didn't load")
         r = brew["drv"]("check", project=pub, queries=QUERIES[:3])
         exact(r)
     finally:
