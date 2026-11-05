@@ -108,7 +108,13 @@ The milestones' own measurements are in [bench/RESULTS.md](bench/RESULTS.md), ea
 The release run fills this in with measured numbers only.
 
 - Offline tests: _to be measured_
-- Live agent tests: _to be measured_
+- Live agent tests (MacBook Air, 5 Nov; proxy/claude-sonnet-5-5, fallback proxy/claude-opus-5-5): 18 of 18 after
+  test_results stopped leaving accounts behind (the first full run: 16 of 18, test_sections' RLS test and its tab check
+  failing on 50 leftover test accounts; bench/RESULTS.md, "1.2.0 release candidate (Mac)").
+- Agent bench (the same Mac and model, load average 3.1-7.2): why 18 of 20 on the two planted datasets with no run
+  masked, median 7.9 s in 2 turns; ask 10 of 10 with no run masked, 4.8 s; report 3 of 5 (2 masked, each a count of
+  the visuals), 17.6 s; load 3 of 3, 15.1 s. Targets: why 18 of 20 with no masks and 30 s, ask 9 of 10 and 12 s, report
+  35 s: met.
 - Container check on pve1 (5 Nov; 8c266ce built there from `git archive`, linux/amd64): `ABI_IMAGE=abi-rc:1.2.0
   tests/container_check.sh` 15 of 15 in 150 s (fresh volume up in 13 s, the engine and the worker killed with -9
   serving again in 8 s, `docker stop` in 2 s, no secret in the logs, the volume, the image or the backup; video says

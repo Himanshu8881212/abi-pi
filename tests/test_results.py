@@ -166,9 +166,11 @@ def w(tmp_path_factory):
         srv.shutdown()
         sink.terminate()
         abi.call("set_account_mail", smtp=before and {**before, **({"password": "${secret:SMTP_PASSWORD}"} if before.get("username") else {})})
-        drop([p for p in (P, app.pub_id(P)) if p in projects()])
-        for x in (ann, bob):
-            sure("delete_user", name=x)
+        try:
+            drop([p for p in (P, app.pub_id(P)) if p in projects()])
+        finally:  # a drop refused while its runs retry left 50 accounts behind, past SC-5's 20 that rls_rules lists
+            for x in (ann, bob):
+                sure("delete_user", name=x)
 
 
 def test_email_this_report_is_a_schedule_and_the_first_send_to_a_domain_asks_once(w):

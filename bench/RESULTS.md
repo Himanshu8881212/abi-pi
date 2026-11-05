@@ -1232,3 +1232,48 @@ never printed.
 - After the Viewer revoked the token in the app, psql got "password authentication failed ... use a personal token
   from the app", and MCP returned 401.
 - No file in /data/logs held a personal token (no `abi_pt_` anywhere).
+
+## 1.2.0 release candidate (Mac)
+
+5 Nov 2026 15:59-16:09, MacBook Air (8 cores, 24 GB), release-1.2 at 8c266ce (the 1.2.0 code; d2f1a08, committed during
+the runs, changes no engine or harness file; the engine the one running since 13:20, no engine code changed after it).
+bench/bench.py at scale 0.01, --model proxy/claude-sonnet-5-5 --fallback proxy/claude-opus-5-5, through the bench lock:
+`--runs ask=10,why=10,report=5,load=3 --plant north`, then `--runs why=10 --plant retail` (seed 42 and the first
+wording, both plants as M2 added them). Sonnet answered all 38 runs; no run was asked again. Load average 3.1-7.2 over
+the runs (3.3 at the start). The records: logs/bench-1105155920.jsonl and logs/bench-1105160534.jsonl, on this Mac only.
+
+| task | data | pass | runs masked | median s | turns | tools | tool errors | masked | input tok | cached tok | output tok | orders stated |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| ask | north | 10/10 | 0 | 4.8 | 2 | 1 | 0 | 0 | 304.5 | 51340 | 330 | - |
+| why | north | 9/10 | 0 | 7.6 | 2 | 2 | 0 | 0 | 4 | 58369 | 680 | 10/10 |
+| why | retail | 9/10 | 0 | 8.2 | 2 | 2 | 0 | 0 | 4 | 58715 | 790 | 10/10 |
+| why | both | 18/20 | 0 | 7.9 | 2 | 2 | 0 | 0 | - | - | - | 20/20 |
+| report | north | 3/5 | 2 | 17.6 | 5 | 6 | 0 | 0 | 54957 | 135722 | 1690 | - |
+| load | north | 3/3 | 0 | 15.1 | 5 | 5 | 0 | 0 | 21402 | 150557 | 824 | - |
+
+Against the 1.2 targets (PLAN.md): met. why 18 of 20 with no run masked, median 7.9 s (30 s or less) in 2 turns; ask
+10 of 10 with no run masked, 4.8 s (12 s or less); report 17.6 s (35 s or less). Against M2 round 3 (why 19/20, 1
+masked, 13.4 s, 3 turns; ask 7.4 s; report 4/5, 23.3 s): faster everywhere, no why run masked.
+
+The two why misses are unmasked and right in substance; the bench's driver check found no driver sentence. North 3:
+"The North region accounts for most of it, and the cause is fewer orders, not smaller ones." (a sentence with "not"
+names no driver, M2 review) and nothing else names North with a driver word; retail 1: "The drop sits almost entirely
+in Retail." ("almost entirely" isn't one of the driver words). The check was left as it is: these runs judge the code,
+not the check. Why times 6.2-13.3 s but one, north 9 at 47.6 s (3 turns, the same two explain_change calls). Both
+report misses are masked once, each a count of the visuals ("All [not verified] visuals use the existing Revenue
+measure", "All [not verified] use the existing `revenue` measure"): the masked count words RELEASE.md's Known limits
+name. Report 0 took 38.2 s (6 turns, 7 tools); the
+others 16.0-17.7 s. No question changed the project.
+
+Tests, all of them, offline and live (`ABI_PI_LIVE=1`, the same model and fallback), through the lock, from a load
+average of 3.4: 218 passed, 10 failed, 7 skipped, 2 errors in 1482.98 s. Of the 18 live tests 16 passed; the 2 failures
+were test_sections' RLS test and its tab check after it, from 50 accounts test_results had left behind over 25 runs
+(its teardown deleted its accounts only after dropping its project, and that drop is refused while its email runs
+retry without Chromium), so rls_rules' account list, cut to SC-5's 20, no longer held staff and the agent said so and
+asked for the ID. Fixed in test_results (the accounts go in a `finally`), the 50 accounts deleted through
+delete_user; test_results, test_sections and test_pages again: 23 passed, 2 failed, 1 skipped, 1 error (test_results'
+2 Chromium failures and its teardown error), with no account left behind. The other failures: Playwright's Chromium isn't on this Mac
+(test_app's PDF, test_e2e's exports, test_results' inbox and scheduled report), test_parallel's leftover pi_lock_a2,
+test_jobs' test_publish_loads_only_what_its_import_changed (as at M5 prep, with pyproject at 1.1.0 too), and
+test_pages' pooled-connection and restricted-reads tests with a teardown error (pi_pages_test gone mid-run; both
+passed in the two runs of test_pages after, so 1 of 3).
