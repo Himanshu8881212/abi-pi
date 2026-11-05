@@ -384,7 +384,7 @@ export default async function abi(pi: ExtensionAPI) {
 		pi.registerTool({
 			name: "abi_handoff",
 			label: "Hand off to the Lead",
-			description: "Finish your task with exactly one handoff. The harness checks your work against ABI (per your role) and tells you what failed; fix it and hand off again. done: every object your task covers, made, changed or reused as it was, as {kind, id, what} (kind: table, measure, glossary, relationship, report, dataset, ml, flow, tool, agent, commit, doc, other).",
+			description: "Finish your task with exactly one handoff. The harness checks your work against ABI (per your role) and tells you what failed; fix it and hand off again. done: every object your task covers, made, changed or reused as it was, as {kind, id, what} (kind: table, measure, glossary, relationship, report, dataset, ml, flow, tool, agent, commit, doc, pack (a board pack's ID), other).",
 			parameters: Type.Object({
 				project: Type.String(), task_id: Type.String(), status: Type.String({ enum: ["done", "partial", "blocked"] }), summary: Type.String(),
 				done: Type.Optional(Type.Array(Type.Object({ kind: Type.String(), id: Type.String(), what: Type.Optional(Type.String()) }))),

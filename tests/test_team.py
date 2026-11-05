@@ -82,3 +82,16 @@ def test_specialists_run_on_the_leads_model():
     src = (root / ".pi/extensions/subagent/index.ts").read_text()
     assert "process.env.ABI_PI_MODEL || dispatchDefaults.model || agent.model" in src
     assert "MODEL" not in (root / "scripts/gen_agents.py").read_text().split("def main")[0]
+
+
+def test_every_check_kind_is_one_the_handoff_offers():
+    """1.2 live team job: board-pack's check reads done items of kind "pack", which the handoff's kinds didn't list, so
+    the specialist reported its pack as "other" twice and its task failed with the pack made. Every kind a check reads
+    is in the list the handoff tool gives the specialists."""
+    import re
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    ext = (root / ".pi/extensions/abi/index.ts").read_text()
+    offered = set(re.findall(r"\b(\w+)\b", re.search(r"kind: (table, [^)]*)\)", ext)[1]))
+    used = set(re.findall(r'ids\("(\w+)"\)', (root / "scripts/team.py").read_text()))
+    assert used <= offered, used - offered
