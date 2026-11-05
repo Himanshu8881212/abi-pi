@@ -153,6 +153,24 @@ def test_the_engines_grounding_takes_the_harness_rules_of_the_m2_review():
     assert json.loads(r.stdout.strip().splitlines()[-1]) == [want for _, _, want in test_ground.REVIEW], r.stderr[-500:]
 
 
+@pytest.mark.skipif(not PY.exists(), reason="no engine venv")
+def test_the_engines_grounding_takes_the_harness_count_rule_of_1_2():
+    """1.2 (owner, 5 Nov 2026): a count grounds when it names that many backed items, in both copies: "3 visuals: A, B
+    and C" with the visual titles in a result passes; a bare count, or one with fewer names, stays masked."""
+    import ground
+    rep = {"report": {"id": "sales", "pages": [{"id": "main", "visuals": [{"id": "kpi", "title": "Revenue KPI"},
+           {"id": "by_region", "title": "Revenue by region"}, {"id": "by_month", "title": "Revenue by month"}]}]}}
+    cases = [("I built a report with 3 visuals: Revenue KPI, Revenue by region and Revenue by month.", []),
+             ("I built three visuals:\n\n1. Revenue KPI\n2. Revenue by region\n3. Revenue by month", []),
+             ("I built a report with 3 visuals.", ["3"]),
+             ("I built 3 visuals: Revenue KPI and Revenue by region.", ["3"])]
+    r = engine("import json, sys\nfrom abi.agents import grounding as g\nrep, cases = json.load(sys.stdin)\n"
+               "print(json.dumps([g.check(a, [rep])['numbers'] for a, _ in cases]))", stdin=json.dumps([rep, cases]))
+    want = [w for _, w in cases]
+    assert [ground.check(a, [rep])["numbers"] for a, _ in cases] == want
+    assert json.loads(r.stdout.strip().splitlines()[-1]) == want, r.stderr[-500:]
+
+
 @pytest.mark.skipif(not PY.exists() or engine("from abi import db; db.connect().close()").returncode, reason="engine's Postgres not running")
 def test_a_lake_on_an_object_store_keeps_its_url_through_rename_delete_and_purge(tmp_path):
     """M4.4: pathlib turned "s3://b/lake/p/" into "s3:/b/lake/…": connect spilled into a local "s3:" folder, lake_exists
