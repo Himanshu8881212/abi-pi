@@ -560,17 +560,22 @@ def isolation(a) -> dict:
             t = time.perf_counter()
             try:
                 if put:  # the whole load, as load --door app measures it: four tables through the app, the model, Ready
-                    box["load"] = build(pa, da, put)
+                    box["load"] = build(pa, da, put, box.setdefault("took", {}))
                 else:
                     add(pa, "orders", f"{da.relative_to(FILES)}/orders/*.parquet")
             except (OSError, http.client.HTTPException, SystemExit, abi.ActionError) as e:
                 box["error"] = f"{type(e).__name__}: {e}"
             box["s"] = round(time.perf_counter() - t, 2)
-        th = threading.Thread(target=big)
+        th, t0, at = threading.Thread(target=big), time.perf_counter(), []
         th.start()
         while not during or th.is_alive():  # at least one query sent while the load runs
+            at.append(time.perf_counter() - t0)
             during.append(asked(pb, a.queries + 1 + len(during)))
         th.join()
+        if box.get("took", {}).get("orders") is not None:  # 1.2 M4: which part of the load the slow queries came in
+            cut = sum(box["took"].values())  # the four tables arrived; then build_model and Ready
+            ph = {"tables": [x for t, x in zip(at, during) if t < cut], "model": [x for t, x in zip(at, during) if t >= cut]}
+            rec["phases"] = {k: {"n": len(v), "p50": pct(v, 50), "p95": pct(v, 95)} for k, v in ph.items() if v}
         if "load" in box:
             box["load"]["exact"] = exact(pa, "cafes.region", known)
         rec |= {"load_s": box["s"], **{("load_error" if k == "error" else k): box[k] for k in ("load", "error") if k in box},

@@ -46,6 +46,10 @@ heavy() {  # "todo doing": heavy jobs due now, and heavy jobs a live worker runs
     count(*) FILTER (WHERE status = 'doing' AND worker_id IN (SELECT id FROM procrastinate_workers
     WHERE last_heartbeat > now() - interval '30 seconds')) FROM procrastinate_jobs WHERE queue_name = 'heavy'" 2>/dev/null || echo "0 0"
 }
+ended() {  # when the heavy queue emptied: its last job's end (procrastinate_events), not when the supervisor saw it
+  "$PGBIN/psql" -Atqc "SELECT floor(extract(epoch FROM coalesce(max(e.at), now())))::bigint FROM procrastinate_events e
+    JOIN procrastinate_jobs j ON j.id = e.job_id WHERE j.queue_name = 'heavy'" 2>/dev/null || date +%s
+}
 log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$D/logs/$SV.log"; }
 up() {  # up NAME: the engine (app) or a worker in the background, its output added to its log, its pid in run/NAME.pid
   case $1 in
@@ -88,8 +92,10 @@ supervise() {
         if [ -n "$lazy" ] && [ -z "$quit" ]; then  # one TERM only: procrastinate stops a running job at the second
           if [ "$held" = runner ] || { [ -n "$held" ] && [ $ROLE = runner ]; }; then quit=held  # else engine.sh pause stops it
           elif [ $((todo + doing)) -gt 0 ]; then idle=
-          elif [ -z "$idle" ]; then idle=$now
-          elif [ $((now - idle)) -ge "$IDLE" ]; then quit=idle
+          else
+            [ -n "$idle" ] || idle=$(ended)
+            # TERM 3 s early, so it is gone IDLE s after the last job's end: its stop, and this loop seeing it, take that
+            [ $((now + 3 - idle)) -lt "$IDLE" ] || quit=idle
           fi
           [ -z "$quit" ] || kill "$(cat "$D/run/$p.pid")"
         fi

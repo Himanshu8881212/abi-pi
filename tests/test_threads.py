@@ -16,7 +16,7 @@ print(con.execute("SELECT current_setting('threads')").fetchone()[0], os.process
 
 def test_a_lake_runs_half_the_cpus_this_process_may_use_or_the_threads_it_is_given(tmp_path):
     def threads(**env) -> list[int]:
-        base = {k: v for k, v in os.environ.items() if k != "ABI_DUCKDB_THREADS"}
+        base = {k: v for k, v in os.environ.items() if k not in ("ABI_DUCKDB_THREADS", "ABI_ROLE")}
         r = subprocess.run([PY, "-c", THREADS, str(tmp_path / "catalog.ducklake"), str(tmp_path / "lake")], cwd=ROOT / "engine/backend",
                            env=base | env, capture_output=True, text=True, timeout=120)
         assert r.returncode == 0, r.stderr
@@ -26,3 +26,5 @@ def test_a_lake_runs_half_the_cpus_this_process_may_use_or_the_threads_it_is_giv
     assert threads(ABI_DUCKDB_THREADS="3")[0] == 3
     assert threads(ABI_DUCKDB_THREADS="")[0] == have  # compose's empty default
     assert threads(ABI_DUCKDB_THREADS="0")[0] == 1  # DuckDB refuses 0 threads: every lake failed to attach
+    # 1.2 M4: the runner a third (pve1, 20M orders: another project's p95 x1.45-1.49 with 3 of 6, x1.30-1.36 with 2)
+    assert threads(ABI_ROLE="runner")[0] == max(1, cpus // 3) and threads(ABI_ROLE="runner", ABI_DUCKDB_THREADS="3")[0] == 3

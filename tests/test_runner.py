@@ -102,6 +102,9 @@ def test_heavy_jobs_start_the_runner_and_it_goes_away(tmp_path):
             assert until(lambda: status(a) == "done", 60) and exact("a") == [[5000, 5 * 499_500]], abi.call("load_runs", project=P)
             started = time.time() - t0
             assert until(lambda: not alive("worker_heavy"), IDLE + 15), log()
+            gone, end = time.time(), float(sql("SELECT extract(epoch FROM max(e.at)) FROM procrastinate_events e JOIN procrastinate_jobs j"
+                                                " ON j.id = e.job_id WHERE j.queue_name = 'heavy'"))
+            assert gone - end <= IDLE + 0.6, (gone - end, log())  # gone IDLE s after the job's end (M4: IDLE + the 2 s poll + its stop)
             assert until(lambda: f"the heavy queue was empty {IDLE} s" in log(), 5) and started < 15, (started, log())
 
             # a runner elsewhere beats (here this test, as a launcher would): the main role starts no heavy worker, and

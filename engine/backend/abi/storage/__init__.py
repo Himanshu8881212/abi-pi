@@ -40,7 +40,8 @@ _project: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # connection 
 _locks: dict[tuple[str, str | None], threading.Lock] = {}
 _locks_lock = threading.Lock()  # held only to look a lock up in `_locks`: never during I/O, an ATTACH or a query
 RETRIES = 5
-THREADS = max(1, int(os.environ.get("ABI_DUCKDB_THREADS") or (os.process_cpu_count() or 2) // 2))  # per lake (0: 1)
+# per lake (0: 1): half the CPUs, a third in the runner (M4: its load's threads share the cores people's queries run on)
+THREADS = max(1, int(os.environ.get("ABI_DUCKDB_THREADS") or (os.process_cpu_count() or 2) // (3 if os.environ.get("ABI_ROLE") == "runner" else 2)))
 
 
 def project_lock(kind: str, project: str | None) -> threading.Lock:
