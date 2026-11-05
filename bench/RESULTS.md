@@ -569,6 +569,8 @@ and after.
 | 50 sessions right after a commit with `--rls cafes.cafe_id` (50 distinct restricted Viewers): page p95 <= 5 s | 25.59 s | 9.14 s | 4.06 s [1.33-2.76]; again last, 4.10 s [1.14-2.06] | met |
 | 50 sessions right after a commit, no rule: no worse than M3 | 1.44 s | 1.30 s | 1.15 s [1.20-1.95] | met |
 | memory peak within M3's mem_limit 4g | | 2,217,697,280 bytes | 2,270,244,864 bytes (2,349,699,072 the largest run), no OOM event | met |
+| first opening, 50 café Viewers (cold: every RLS context and shared partials built), not the formal target | | | 7.02 s | missed against 5 s |
+| 7.4M orders right after a refresh (the cold morning case the shared partials are for) | | | not measured | open |
 
 | pages, Brewline 0.01 | first p50 / p95 s | right after a commit p50 / p95 / max s | errors | peak bytes |
 |---|---|---|---|---|
@@ -593,6 +595,8 @@ action's memo (now one at a time per action, so a page's visuals at once read ea
 check with the same known names isn't parsed again. HEAD (c6b5006) and this tree before the memo's lock interleaved on the Mac (load 8-12),
 p95 right after a commit: 50 café Viewers 6.02 / 5.65 s against 2.81 / 2.80 s (engine CPU 7.4-7.7 s against 4.3 s);
 no rule 0.76 / 1.47 s against 0.81 / 0.70 s. Not measured here: a 7.4M-order project right after a refresh.
+
+What was built: the uncommitted working tree that became d48ea72; no commit or tree hash of it was recorded, so nothing ties these pve1 numbers to d48ea72's exact bytes (the Mac comparison above ran on an earlier tree, before the memo's lock). The M3.6 review fixes after d48ea72 change the shared partials (AVG reads each person's own rows; the partials held at once are capped) and the RLS context cache, so M3.6 is measured again from a commit built with git archive; it isn't closed until the cold case above is measured.
 
 ## 1.2 M2 round 1 (MacBook Air, 8 cores, 24 GB; model proxy/claude-sonnet-5-5)
 

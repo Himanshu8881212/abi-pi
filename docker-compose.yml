@@ -28,7 +28,7 @@ services:
       ABI_HEAVY_CONCURRENCY: ${ABI_HEAVY_CONCURRENCY:-1}  # loads, query copies and ML trainings at a time: 1 or 2
       ABI_MAX_AGENTS: ${ABI_MAX_AGENTS:-8}  # chats whose agent runs at once; the next question waits its turn
       ABI_QUERY_TIMEOUT: ${ABI_QUERY_TIMEOUT:-60}  # seconds a question's or a page visual's read may run
-      ABI_RLS_SHARED_ROWS: ${ABI_RLS_SHARED_ROWS:-1000000}  # rows a read shared by people with row-level security may hold (0: off)
+      ABI_RLS_SHARED_ROWS: ${ABI_RLS_SHARED_ROWS:-1000000}  # rows all reads shared by people with row-level security hold together (0: off)
       ABI_PG_POOL: ${ABI_PG_POOL:-20}  # Postgres connections each engine process keeps open for reuse
       ABI_DUCKDB_MEMORY_LIMIT: ${ABI_DUCKDB_MEMORY_LIMIT:-1500MB}  # DuckDB's memory per project in each engine process; it spills to disk above it
       ABI_DUCKDB_THREADS: ${ABI_DUCKDB_THREADS:-}  # DuckDB threads per project in each engine process; empty: half the CPUs

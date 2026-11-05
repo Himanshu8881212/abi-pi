@@ -30,7 +30,7 @@ totals: [[dimension, ...]]}. Semantics are the ones the golden suite fixes (work
   D-02.3: a time context reads those partials per day (grouped by the fact's date column too) and DuckDB applies the
   date windows; a DISTINCT_COUNT/MEDIAN context runs whole in ClickHouse (uniqExact, quantileExactInclusive) and may
   use only the live fact's own columns (D-8).
-- Shared partials (M3.6, `partials`): a context over a listed lake fact with no DISTINCT_COUNT, MEDIAN or CONVERT reads
+- Shared partials (M3.6, `partials`): a context over a listed lake fact with no DISTINCT_COUNT, MEDIAN, AVG or CONVERT reads
   the fact as a live fact's context does (its partials grouped by every fact column it reads), grouped also by the
   listed columns, as DuckDB table `__lake<n>` named in `shared`; the planned SQL then regroups them the same way.
 - Refused (DECISIONS D-8): time intelligence without a date-table dimension, and a filter or grouping on a table a
@@ -400,8 +400,10 @@ def _aggregate(c: Ctx, aggs: dict, m: str, dims: list, sets: list, totals: bool,
         raise PlanError(f"Measure '{m}' converts amounts with CONVERT over the live ClickHouse table '{c.fact}'; "
                         "conversion reads imported tables only (DECISIONS D-8).")
     whole = c.fact in live and next((a.fn for _, a in aggs if a.fn in HOLISTIC), None)
-    # M3.6: shared partials, read as a live fact's are (none for a holistic or converted aggregate)
-    lake = c.fact in (partials or {}) and c.fact not in live and not convs and all(a.fn not in HOLISTIC for _, a in aggs)
+    # M3.6: shared partials, read as a live fact's are (none for a holistic or converted aggregate, nor AVG: DuckDB's
+    # own AVG of a DECIMAL or DOUBLE, or of a BIGINT's HUGEINT sum in long double on x86, isn't SUM/COUNT to the bit)
+    lake = c.fact in (partials or {}) and c.fact not in live and not convs and all(
+        a.fn not in (*HOLISTIC, "AVG") for _, a in aggs)
     if whole and (other := [x for x in [*(d for _, d in kept), *(x for fs, _ in aggs for f in fs for x in sorted(_cols(f)))]
                             if _col(x).table != c.fact]):
         raise PlanError(f"Measure '{m}' uses {whole} over the live ClickHouse table '{c.fact}', so it can be grouped "

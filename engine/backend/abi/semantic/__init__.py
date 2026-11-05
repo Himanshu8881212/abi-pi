@@ -60,8 +60,9 @@ SHARED_ROWS = int(os.environ.get("ABI_RLS_SHARED_ROWS", "1000000"))  # 0: off, e
 
 
 def _snapshot(con) -> int:
-    """`storage.snapshot_id` (a catalog connection each), once per read action (`actions.memo`): a page's visuals read
-    one snapshot. Read before the action's queries, so a cached result is still never older than its key."""
+    """`storage.snapshot_id` (a catalog connection each), once per read action (`actions.memo`): a page's visuals take
+    one snapshot ID for their keys (the data each reads isn't pinned to it). Read before the action's queries, so a
+    cached result is still never older than its key."""
     return actions.memo(("snapshot", con), lambda: storage.snapshot_id(con))
 
 
@@ -238,6 +239,14 @@ def _rls(project: str, user_id: int | None, con, snap: int, sql: str | None,
     return ctx
 
 
+def _held(con, snap: int) -> int:
+    """Rows of every partials table kept now (under _cache_lock), in every project, but `con`'s older snapshots' (they
+    go): all of them together hold at most SHARED_ROWS (the first ones kept stay; a later one that doesn't fit is each
+    person's own read until the next snapshot frees room).
+    ponytail: first come keeps; evict by age if a project's later reads should take a page's place"""
+    return sum(v[1] for c, b in list(_parts.items()) for k, v in b.items() if v and (c is not con or k[0] >= snap))
+
+
 class _Unshared(Exception):  # noqa: N818 - not an error: the read takes the person's own path (M3.6)
     pass
 
@@ -245,9 +254,10 @@ class _Unshared(Exception):  # noqa: N818 - not an error: the read takes the per
 def _partials(project: str, con, snap: int, fact: str, sql: str) -> str | None:
     """M3.6: the memory.shared table of partials `sql` (planner `shared`: `fact` grouped by every column a context and
     any user's filter of the fact read) at this snapshot, built once (single flight) as a system read with no user's
-    filter; None when it failed, ran past TIMEOUT, or holds more than SHARED_ROWS rows or half the fact's (remembered,
-    so it is built once per snapshot). No person ever reads it but through their own filter (`_shared`); restricted
-    SQL can't name it (`rls.check` refuses qualified names). Older snapshots' tables go."""
+    filter; None when it failed, ran past TIMEOUT, or holds more than half the fact's rows or than SHARED_ROWS less the
+    rows every kept partials table holds (remembered, so it is built once per snapshot; a grouping never materializes
+    more than that bound). No person ever reads it but through their own filter (`_shared`); restricted SQL can't name
+    it (`rls.check` refuses qualified names). Older snapshots' tables go."""
     name = "p_" + actions.sha(f"{snap}\0{sql}")[:16]
     # ponytail: a lock per table name is kept for good (as per user for rls); a striped lock if processes run for months
     with storage.project_lock(f"shared {name}", project):
@@ -255,27 +265,31 @@ def _partials(project: str, con, snap: int, fact: str, sql: str) -> str | None:
             built = _parts.setdefault(con, {})
         if (snap, sql) in built:
             return (hit := built[snap, sql]) and hit[1] <= SHARED_ROWS and hit[0] or None
-        start, rows, error, ok, scanned, cur = time.perf_counter(), None, None, False, None, con.cursor()
+        start, rows, error, scanned, cur = time.perf_counter(), None, None, None, con.cursor()
         try:
             _effective(cur, con, snap)
             with storage.project_lock("rls", project):  # one catalog write of the schema at a time
                 cur.execute("CREATE SCHEMA IF NOT EXISTS memory.shared")
+            [(facts,)] = cur.execute(f"SELECT count(*) FROM {storage._q(fact)}").fetchall()
+            with _cache_lock:  # more than half the fact's rows is no cheaper than each person's own read
+                bound = int(min(SHARED_ROWS - _held(con, snap), facts / 2))
             _profile(cur)
             with limited(cur, TIMEOUT):
-                cur.execute(f"CREATE OR REPLACE TABLE memory.shared.{name} AS {sql}")
+                cur.execute(f"CREATE OR REPLACE TABLE memory.shared.{name} AS SELECT * FROM ({sql}) LIMIT {max(bound, 0) + 1}")
             scanned = _scanned(cur)
             [(rows,)] = cur.execute(f"SELECT count(*) FROM memory.shared.{name}").fetchall()
-            [(facts,)] = cur.execute(f"SELECT count(*) FROM {storage._q(fact)}").fetchall()
-            ok = rows <= min(SHARED_ROWS, facts / 2)  # finer, and it is no cheaper than each person's own read
         except duckdb.Error as e:  # never shown: the person's own read runs instead
             error = str(e)
-        finally:
-            _log(None, project, {"rls": "partials", "table": fact}, sql, snap, False, rows, start, error, scanned)
+        finally:  # D-32 as `_logged`: a filter pushed into the partials may be an inbound message's text
+            logged = actions.redacted(sql) if actions.inbound() else sql
+            error = error and f"<sha256:{actions.sha(error)}>" if actions.inbound() else error
+            _log(None, project, {"rls": "partials", "table": fact}, logged, snap, False, rows, start, error, scanned)
         with _cache_lock:
             for k in [k for k in built if k[0] < snap]:  # older snapshots never come back
                 if old := built.pop(k):
                     with contextlib.suppress(duckdb.Error):
                         con.cursor().execute(f"DROP TABLE IF EXISTS memory.shared.{old[0]}")
+            ok = error is None and rows <= min(SHARED_ROWS - _held(con, snap), facts / 2)  # others kept meanwhile count
             if not ok:
                 with contextlib.suppress(duckdb.Error):
                     cur.execute(f"DROP TABLE IF EXISTS memory.shared.{name}")
@@ -514,16 +528,20 @@ def plan(project: str, q: dict, user_id: int | None = None, expressions: list[di
     is never taken from here), so people who see different rows share one plan."""
     if not rls.restricted(project, user_id):
         return _plan(project, q, user_id, expressions, strict)
-    key = json.dumps([project, rls.digest(project), _snapshot(storage.lake(project)), q, list(expressions), strict,
+    key = json.dumps([project, d := rls.digest(project), _snapshot(storage.lake(project)), q, list(expressions), strict,
                       shared is not None and SHARED_ROWS > 0, sorted((t, sorted(c)) for t, c in rls.hidden(project, user_id).items()),
                       locale(project)], sort_keys=True, default=str)
     with _plans_lock:
         hit = _plans.pop(key, None)
-    if hit is None:
+    keep = True
+    if hit is None:  # kept under the action's digest only if the files _plan read are still that version
         made: dict | None = {} if shared is not None and SHARED_ROWS > 0 else None
+        keep = rls._digest(project) == d
         hit = (*_plan(project, q, user_id, expressions, strict, made), made)
+        keep = keep and rls._digest(project) == d
     with _plans_lock:
-        _plans[key] = hit
+        if keep:
+            _plans[key] = hit
         while len(_plans) > 1024:
             del _plans[next(iter(_plans))]
     *out, made = copy.deepcopy(hit)

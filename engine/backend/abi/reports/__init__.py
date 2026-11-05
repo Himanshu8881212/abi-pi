@@ -19,7 +19,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from abi import semantic, storage
+from abi import actions, db, semantic, storage
 from abi.actions import ActionFailed, action
 from abi.project import ID, SCHEMA, git, imports
 from abi.project.bundle import bundle
@@ -187,7 +187,11 @@ def visual_data(conn, user: User, args: VisualRef) -> dict:
     def one(pv: tuple[dict, dict]) -> dict:  # M3.6 round 2: one read action per page, not per visual
         try:
             return _visual(conn, user, args, r, *pv)
-        except ActionFailed as e:
+        except ActionFailed as e:  # audited as the visual's own call would be (`actions.run`), on its own connection
+            detail = f"<sha256:{actions.sha(str(e))}>" if actions.inbound() else str(e)
+            with db.connect() as c:
+                actions.audit(c, user, actions.VIA.get(), "visual_data", args.project, actions._audited(
+                    "visual_data", {**json.loads(actions._call.get()[2]), "visual": pv[1]["id"]}), e.status, detail)
             return {"id": pv[1]["id"], "title": pv[1].get("title"), "error": e.body["message"], "status": e.status}
     # each visual in a copy of this action's context: its memo (role, rules, snapshot), call and caller
     runs = [(contextvars.copy_context(), pv) for pv in pvs]

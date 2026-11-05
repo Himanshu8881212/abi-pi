@@ -61,14 +61,16 @@ def row_rules(project: str) -> list[dict]:
 def digest(project: str) -> str:
     """M3.6: sha256 of the definition files a restricted user's filters and plans are made from (rules, model,
     measures, datasets, ML models, sources, tables, project.json), once per read action."""
-    def sha() -> str:
-        root, h = git.path(project), hashlib.sha256()
-        for f in [root / RLS, root / "project.json", *sorted(root.glob("model/*.json")), *sorted(root.glob("ml/*.json")),
-                  *sorted(root.glob("sources/*.json")), *sorted(root.glob("tables/*.json"))]:
-            if f.is_file():
-                h.update(f"{f.relative_to(root)}\0".encode() + f.read_bytes() + b"\0")
-        return h.hexdigest()
-    return actions.memo(("rls.digest", project), sha)
+    return actions.memo(("rls.digest", project), lambda: _digest(project))
+
+
+def _digest(project: str) -> str:
+    root, h = git.path(project), hashlib.sha256()
+    for f in [root / RLS, root / "project.json", *sorted(root.glob("model/*.json")), *sorted(root.glob("ml/*.json")),
+              *sorted(root.glob("sources/*.json")), *sorted(root.glob("tables/*.json"))]:
+        if f.is_file():
+            h.update(f"{f.relative_to(root)}\0".encode() + f.read_bytes() + b"\0")
+    return h.hexdigest()
 
 
 def hidden(project: str, user_id: int | None) -> dict[str, set[str]]:
@@ -363,8 +365,11 @@ def _context(project: str, user_id: int, con, snap: int, edited: frozenset, mode
         hit = None if fresh else _ctx.setdefault(con, {}).get(key)
     if hit:
         return hit
+    # built from the files as they are now, kept under the action's digest only if that is still theirs (a rule
+    # committed since the action began, or during this build, would put one version's views under another's key)
+    fresh = fresh or _digest(project) != key[2]
     conds = conditions(project, user_id, read, {t: c for t, c in model_columns.items() if t not in edited})
-    hid = hidden(project, user_id)
+    hid = _hidden(project, user_id)
 
     def drop(t: str, cols) -> tuple[str | None, list[str]]:
         """D-110: (t's row filter, its columns to leave out); a table whose every column is hidden shows no rows
@@ -398,7 +403,7 @@ def _context(project: str, user_id: int, con, snap: int, edited: frozenset, mode
         cache = _ctx.setdefault(con, {})
         for k in [k for k in cache if k[1] < snap]:  # older snapshots never come back
             del cache[k]
-        if not fresh:
+        if not fresh and _digest(project) == key[2]:
             cache[key] = out
     return out
 

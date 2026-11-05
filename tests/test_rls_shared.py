@@ -49,7 +49,7 @@ QUERIES = [  # beside every visual of the report: totals, filters, time, AVG, MI
 DRIVER = r"""
 import concurrent.futures as cf, json, sys, time
 from abi import actions, db, security, semantic, storage
-import abi.reports  # noqa: F401 - registers visual_data
+import abi.reports, abi.semantic.sql, abi.semantic.rls  # noqa: F401 - registers visual_data, sql_query, set_column_rule
 from abi.project import imports
 from abi.semantic import rls
 
@@ -152,6 +152,62 @@ for line in sys.stdin:
         except actions.ActionFailed as e:
             refused = e.status
         out = {"runs": runs, "refused": refused}
+    elif a["cmd"] == "audit":  # the person's audit rows since `since`
+        with db.connect() as c:
+            out = {"rows": [[r["action"], r["status"], (r["input"] or {}).get("visual"), r["detail"]] for r in c.execute(
+                "SELECT action, status, input, detail FROM audit_log WHERE user_id = %s AND at >= to_timestamp(%s) ORDER BY id",
+                [users[a["who"]].id, a["since"]]).fetchall()]}
+    elif a["cmd"] == "inbound":  # a filter value an inbound message may carry, pushed into a shared build
+        start = time.time()
+        r = actions.run("semantic_query", {"project": p, "measures": ["revenue"], "dimensions": ["cafes.city"], "filters": [
+            {"column": "orders.customer_id", "op": "<>", "value": a["marker"]}]}, users[a["who"]], "inbound")
+        with db.connect() as c:
+            log = c.execute("SELECT user_id, query, sql, error FROM query_log WHERE project = %s AND at >= to_timestamp(%s)",
+                            [p, start]).fetchall()
+        out = {"rows": len(r["rows"]), "built": sum(r_["user_id"] is None and (r_["query"] or {}).get("rls") == "partials" for r_ in log),
+               "clear": [r_["sql"][:200] for r_ in log if a["marker"] in (r_["sql"] or "") + (r_["error"] or "")]}
+    elif a["cmd"] == "budget":  # every kept partials table counts against SHARED_ROWS; one that doesn't fit isn't built past it
+        con = storage.lake(p)
+        snap = storage.snapshot_id(con)
+        q = lambda k, n: f'SELECT "{k}", count(*) AS "__n{n}" FROM "orders" GROUP BY 1'
+        held = semantic._held(con, snap)
+        try:
+            semantic.SHARED_ROWS = held + a["rows"]
+            first = semantic._partials(p, con, snap, "orders", q("cafe_id", a["n"]))
+            n = semantic._parts[con][snap, q("cafe_id", a["n"])][1]
+            semantic.SHARED_ROWS = held + n + a["more"]
+            start = time.time()
+            second = semantic._partials(p, con, snap, "orders", q("customer_id", a["n"]))
+            with db.connect() as c:
+                logged = c.execute("SELECT rows FROM query_log WHERE project = %s AND user_id IS NULL AND at >= to_timestamp(%s)"
+                                   " AND query->>'rls' = 'partials'", [p, start]).fetchall()
+        finally:
+            semantic.SHARED_ROWS = 1_000_000
+        out = {"first": bool(first), "second": second, "logged": [r["rows"] for r in logged], "more": a["more"]}
+    elif a["cmd"] == "race":  # a column rule committed after this action read hidden() and before its first digest()
+        with db.connect() as c:
+            owner = security.user(c, c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"])
+        dig, fired, who = rls.digest, [], users[a["who"]]
+
+        def digest(p_):
+            if not fired:
+                fired.append(rls.hidden(p_, who.id))  # the action's hidden columns, before the rule
+                rule = {"project": p_, "id": "racedisc", "table": "orders", "columns": ["discount"]}
+                try:
+                    actions.run("set_column_rule", rule, owner, "rest")
+                except actions.ActionFailed as e:
+                    actions.run("set_column_rule", rule, owner, "rest", e.body["confirm_token"])
+            return dig(p_)
+        rls.digest = digest
+        try:
+            one(p, who, ("q", {"measures": ["revenue"], "dimensions": ["cafes.city"]}))
+        finally:
+            rls.digest = dig
+        try:  # a later action: the column is hidden from them
+            got = actions.run("sql_query", {"project": p, "sql": 'SELECT order_id, discount FROM "orders" LIMIT 3'}, who, "rest")["rows"]
+        except actions.ActionFailed as e:
+            got = e.status
+        out = {"fired": [sorted(x) for x in fired], "hidden": {t: sorted(c) for t, c in rls.hidden(p, who.id).items()}, "sql": got}
     print(json.dumps(out, default=str), flush=True)
 """
 
@@ -241,7 +297,7 @@ def test_what_doesnt_decompose_and_a_hidden_column_take_the_persons_own_read(bre
     drv = brew["drv"]
     assert drv("plan", who="one", q={"measures": ["revenue"], "dimensions": ["cafes.city"]})["facts"] == ["orders"]
     assert drv("plan", who="one", q={"measures": ["revenue"], "dimensions": ["cafes.city"], "expressions": [SHARE]})["facts"] == ["orders", "orders"]
-    for m in ("customers", "median_revenue"):  # DISTINCT_COUNT, MEDIAN
+    for m in ("customers", "median_revenue", "avg_revenue"):  # DISTINCT_COUNT, MEDIAN; AVG isn't SUM/COUNT to the bit
         assert drv("plan", who="one", q={"measures": [m, "revenue"], "dimensions": ["cafes.city"]})["facts"] == [], m
     r = drv("check", queries=QUERIES, rows=10)  # partials of more than 10 rows: each person's own read
     assert r["n"] > 50 and not r["diff"] and r["sliced"] == 0, (r["diff"][:3], r["sliced"])
@@ -382,6 +438,13 @@ def test_a_page_is_one_read_with_each_visual_as_its_own(brew):
             got = {v["id"]: v for v in page()["visuals"]}
         assert got["kpi-quantity"]["status"] == 403 and "rows" not in got["kpi-quantity"], got["kpi-quantity"]
         assert got["kpi-orders_rows"]["rows"] == visual(t["one"], "kpi-orders_rows")
+        since = time.time()
+        with abi.as_user(t["one"]):
+            page()
+        rows = brew["drv"]("audit", who="one", since=since)["rows"]  # the refusal is audited as the visual's own call was
+        refused = [r for r in rows if r[1] == 403]
+        assert ["visual_data", 403, "kpi-quantity"] in [r[:3] for r in refused] and rows[-1][:3] == ["visual_data", 200, None], rows
+        assert all(r[2] and "Column-level security" in r[3] for r in refused), rows
     finally:
         sure("delete_rls_rule", project=P, id="noqty")
 
@@ -424,3 +487,25 @@ def test_the_published_copy_is_sliced_the_same(brew):
         for k in set(app.HUBS) - hubs:
             app.HUBS.pop(k, None)
     shutil.rmtree(brew["dir"], ignore_errors=True)
+
+
+def test_a_rule_committed_inside_a_read_never_leaves_its_views_unhidden(brew):
+    """A column rule committed between a Viewer's first hidden() and first digest() inside one action: the RLS views
+    cached for the new rules hide the column, so a later sql_query of it fails (it returned the column before)."""
+    try:
+        r = brew["drv"]("race", who="one")
+        assert r["fired"] == [[]] and r["hidden"] == {"orders": ["discount"]}, r
+        assert r["sql"] in (400, 403), r
+    finally:
+        sure("delete_rls_rule", project=P, id="racedisc")
+
+
+def test_shared_builds_log_inbound_text_redacted_and_stay_within_their_budget(brew):
+    """D-32: a shared build for an inbound message's read logs its SQL with the literal hashed, as the person's own
+    rows are. ABI_RLS_SHARED_ROWS bounds every kept partials table together, and one that doesn't fit is never built
+    past what is left (its system read holds at most that plus one row)."""
+    marker = f"message-text-{secrets.token_hex(4)}"
+    r = brew["drv"]("inbound", who="one", marker=marker)
+    assert r["rows"] and r["built"] >= 1 and r["clear"] == [], r
+    r = brew["drv"]("budget", who="one", rows=10_000, more=5, n=secrets.token_hex(3))
+    assert r == {"first": True, "second": None, "logged": [6], "more": 5}, r
