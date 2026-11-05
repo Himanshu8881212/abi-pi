@@ -9,7 +9,8 @@ Sources are project files (D-9): `add_data` writes `sources/<table>.json`, and t
 source ID a `source` step names. Every load reads the definition from the repo (`_source`); the
 Postgres `sources` table keeps only runtime state per loaded table (the files' fingerprint). A table
 with steps (tables/<t>.json, `set_steps`) loads its source's location into raw.<t> and builds
-model.<t> with `transform.compile`. Every load refreshes what reads the table, in dependency order
+model.<t> with `transform.compile`; steps that start from a table the project builds (M4.2) build model.<t> from that
+table's model.<table> (`_build`), so silver feeds gold without the source read again. Every load refreshes what reads the table, in dependency order
 (`refresh`, TR-4).
 
 M3.2: a load past ABI_INLINE_ROWS rows (`_big`, checked as the load checks its source) answers at once with a run ID;
@@ -29,7 +30,7 @@ import time
 import uuid
 from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
-from graphlib import TopologicalSorter
+from graphlib import CycleError, TopologicalSorter
 from pathlib import Path as FsPath
 from typing import Annotated, Literal
 
@@ -225,8 +226,8 @@ def add_data(conn, user: User, args: Source) -> dict:
     except ValueError as e:
         raise ActionFailed(400, str(e))
     if steps and steps[0].source != args.table:
-        raise ActionFailed(409, f"Table '{args.table}' is built by steps from source '{steps[0].source}';"
-                                " add data to that source or change the table's source step.")
+        raise ActionFailed(409, f"Table '{args.table}' is built by steps from {'table' if steps[0].table else 'source'}"
+                                f" '{steps[0].reads}'; add data to that source or change the table's source step.")
     readable(conn, user, args.project, args.location)
     if actions.needs_click() and (targets := hosts(args.spec())):  # §5 #3: the load (and every refresh) connects there
         from abi.tools import builtin  # not at top: builtin imports this module
@@ -249,16 +250,24 @@ class TableSteps(storage.ProjectRef):
 
 @action(Role.editor, definition=True)
 def set_steps(conn, user: User, args: TableSteps) -> dict:
-    """Saves a table's transform steps (the first one names a loaded source), loads the table through them, then refreshes the tables that read it. On an input table (schema-first, declared columns) the steps map a source onto it: they must output exactly its declared column names with values that cast to the declared types; its hand-entered rows stay as edits. A big table answers at once with a run ID and loads in the background (load_runs)."""
-    t = args.table
+    """Saves a table's transform steps (the first one names a loaded `source`, or a `table` the project builds: silver reads bronze's table and gold silver's, with no source read again), loads the table through them, then refreshes the tables that read it. On an input table (schema-first, declared columns) the steps map a source onto it: they must output exactly its declared column names with values that cast to the declared types; its hand-entered rows stay as edits. A big table answers at once with a run ID and loads in the background (load_runs)."""
+    t, first = args.table, args.steps[0]
     try:
         transform.compile(t, args.steps)
-        TopologicalSorter(_graph({**transform.tables(args.project), t: args.steps}, {})).prepare()  # CycleError is a ValueError
+        graph = _graph({**transform.tables(args.project), t: args.steps}, {f.stem for f in (git.path(args.project) / "sources").glob("*.json")})
+        TopologicalSorter(graph).prepare()
+    except CycleError as e:  # nothing written yet: Git stays as it was
+        raise ActionFailed(400, "Tables would read each other in a cycle: " + " reads ".join(reversed(e.args[1])) + ". Start"
+                                " one of them from a source, or from a table outside the cycle.")
     except ValueError as e:
         raise ActionFailed(400, str(e))
+    if first.table and (first.table == t or first.table not in graph):  # M4.2: a loaded or stepped table, never itself
+        raise ActionFailed(400, f"Table '{t}' can't start from table '{first.table}': " + (
+            "a table can't read itself." if first.table == t else "the project builds no such table (a loaded source or"
+                                                                   f" a table with steps: {', '.join(sorted(graph.keys() - {t}))})."))
     for x in {t} | transform.reads(args.steps):  # IN-3: steps run in DuckDB over loaded data
         live.refuse(args.project, x)
-    src = _source(args.project, args.steps[0].source, t)
+    src = None if first.table else _source(args.project, first.source, t)
     f = git.path(args.project) / "tables" / f"{t}.json"
     old = json.loads(f.read_text()) if f.exists() else {}
     steps = args.steps
@@ -274,10 +283,10 @@ def set_steps(conn, user: User, args: TableSteps) -> dict:
     # ponytail: the load and downstream refresh run inside git.change's repo lock, so a long load blocks the project's
     # other definition actions; refresh after the change (and roll back the file on failure) if that starts to hurt
     _lock(conn, args.project, t)  # as add_data
-    if rows := _big(conn, src):
+    if rows := _big(conn, src) if src else _big_built(args.project, first.table):
         return queue(conn, user, "set_steps", args, rows)
     write(old.get("columns", []))  # _load builds model.<t> from the file's steps
-    snap = _load(conn, src, user.name, declared=declared)
+    snap = _load(conn, src, user.name, declared=declared) if src else _build(conn, args.project, t, user.name, declared=declared)
     write(semantic.columns(args.project, t))
     conn.commit()  # as in add_data
     refresh(conn, args.project, {t}, user.name)
@@ -431,13 +440,14 @@ def refresh(conn, project: str, after: set[str] | None, author: str, reload: set
         forced = bool(up & done) or t in reload
         if after is not None and not forced:
             continue
+        built = steps[t][0].table if t in steps else None  # M4.2: from another table's model, no source read
         source = steps[t][0].source if t in steps else t
-        spec = {"project": project, "table": t, "source": source}  # audited; the definition itself is in Git
+        spec = {"project": project, "table": t, **({"from": built} if built else {"source": source})}  # audited; the definition itself is in Git
         used: dict = {}  # the secrets this load resolved, to scrub the log (SC-4)
         is_db, key, now = False, (project, t), datetime.now(UTC).timestamp()
         try:
-            src = _source(project, source, t)
-            is_db = src.database is not None or src.api is not None
+            src = None if built else _source(project, source, t)
+            is_db = src is not None and (src.database is not None or src.api is not None)
             if is_db and not forced and now < BACKOFF.get(key, (0, 0))[1]:
                 continue  # IN-6: a failing database load waits, so a wrong login doesn't hit the source every minute
             with db.connect() as c:
@@ -446,7 +456,8 @@ def refresh(conn, project: str, after: set[str] | None, author: str, reload: set
                         continue
                     prints[t] = (c.execute("SELECT fingerprint FROM sources WHERE project = %s AND table_name = %s",
                                            [project, t]).fetchone() or {}).get("fingerprint")
-                snap = _load(c, src, author, unless=None if forced else prints.get(t), used=used)
+                unless = None if forced else prints.get(t)
+                snap = _build(c, project, t, author, unless) if built else _load(c, src, author, unless=unless, used=used)
                 # replayed (legacy secrets bound in `allow`, same transaction): drop the pre-M-10 spec, the file holds it now
                 c.execute("UPDATE sources SET spec = NULL WHERE project = %s AND table_name = %s", [project, t])
                 BACKOFF.pop(key, None)
@@ -488,6 +499,17 @@ def _big(conn, src: Source) -> int | None:
         return None
     rows = _load(conn, src, "probe", probe=True)
     return rows if rows and rows > INLINE_ROWS else None
+
+
+def _big_built(project: str, table: str) -> int | None:
+    """M4.2: as `_big`, for steps that start from `table`: its rows (DuckLake's count) when more than ABI_INLINE_ROWS.
+    Not built yet: None, and the build says so."""
+    if RUN.get() or flows.IN_FLOW.get():
+        return None
+    with contextlib.suppress(duckdb.Error):
+        rows = storage.lake(project).cursor().execute(f"SELECT count(*) FROM lake.model.{_q(table)}").fetchone()[0]
+        return rows if rows > INLINE_ROWS else None
+    return None
 
 
 def queue(conn, user: User, name: str, args: storage.ProjectRef, rows: int) -> dict:
@@ -744,8 +766,10 @@ def _load(conn, src: Source, author: str, unless: str | None = None, used: dict 
             return None if src.api else _file_rows(con, fmt, loc)
         if (box := RUN.get()) and box["table"] == src.table:  # a load job reports this load's progress
             hook = functools.partial(_watched, box, hook)
-        snap = raw_sql and storage.refresh(con, src.table, raw_sql, author=author, append=append, hook=hook,
-                                           model_sql=lambda cur: _model_sql(cur, src.project, src.table, declared))
+        once = not (steps or declared or src.database or src.api)  # M4.2: files with no steps are stored once (no raw copy)
+        snap = raw_sql and storage.refresh(con, src.table, raw_sql, author=author, append=append, hook=hook, once=once,
+                                           model_sql=lambda cur: _model_sql(cur, src.project, src.table, declared,
+                                                                            "model" if once else "raw"))
     except duckdb.OutOfMemoryException:  # actions.run says so (503); the worker's `refresh` logs it like any load error
         raise
     except (duckdb.Error, pa.ArrowException) as e:  # T-03.5: DuckDB's text holds server paths and SQL; server log only
@@ -761,27 +785,58 @@ def _load(conn, src: Source, author: str, unless: str | None = None, used: dict 
             con.execute(f"DETACH DATABASE IF EXISTS {name}")
         if opts:
             con.execute(f"DROP SECRET IF EXISTS {name}")
-    if not (git._root() / src.project / ".git").is_dir():  # deleted while it loaded (the worker's IN-6): no row brings it back
-        raise ActionFailed(404, f"Project '{src.project}' does not exist.")
-    conn.execute(
-        "INSERT INTO sources (project, table_name, fingerprint) VALUES (%s, %s, %s) ON CONFLICT (project, table_name)"
-        " DO UPDATE SET fingerprint = excluded.fingerprint",
-        [src.project, src.table, fingerprint],
-    )
     if src.api:  # API-SRC.2: a load cut off at max_pages says so once (D-10), and once when it is whole again
         notify_change("refresh", src.project, f"API source of table '{src.table}': ", truncated and (
             f"the load stopped at max_pages ({src.api.pagination.max_pages}) with pages left, so the table is partial."),
             "loads every page again.", src.table)
-    notify_change("refresh", src.project, f"Refreshing table '{src.table}': ", None, "works again.", src.table)  # D-10 recovery
-    if snap is None:  # incremental, nothing new: a successful load for IN-8 freshness, no snapshot, not metered
-        quality.capture(src.project, src.table)
+    return _landed(conn, src.project, src.table, author, fingerprint, snap)
+
+
+def _build(conn, project: str, table: str, author: str, unless: str | None = None,
+           declared: list[dict] | None = None) -> int | None:
+    """M4.2: model.<table> from the model.<t> its steps start from (`transform.Source.table`), in one snapshot: no
+    source read, no raw.<table> (gone if it had one). Its fingerprint is its steps (an undo or edit rebuilds it); what
+    it reads changing forces it (`refresh`). Skipped (None) when the fingerprint equals `unless`."""
+    _lock(conn, project, table)
+    steps = transform.tables(project)[table]
+    fingerprint = json.dumps({"steps": [s.model_dump(mode="json") for s in steps]}, sort_keys=True)
+    if unless is not None and fingerprint == unless:
         return None
-    usage.record(None, "refresh", src.project)  # SC-11: one committed load (own connection: the snapshot is committed)
-    model.extend_calendar(src.project, src.table, author)  # IN-5: new dates get calendar rows
-    writeback.review(src.project, src.table)  # WB-6: the refresh may orphan edits or conflict with them
-    flows.after_refresh(src.project, src.table, snap)  # FL-2
-    ml.after_refresh(src.project, src.table, snap)  # ML-6: score the models reading it
-    quality.capture(src.project, src.table)  # IN-8: this load's stats (never raises)
+    box = RUN.get()  # a load job reports this build's progress
+    try:
+        snap = storage.refresh(storage.lake(project), table, None, author=author,
+                               hook=functools.partial(_watched, box, None) if box and box["table"] == table else None,
+                               model_sql=lambda cur: _model_sql(cur, project, table, declared))
+    except duckdb.OutOfMemoryException:
+        raise
+    except duckdb.Error as e:  # T-03.5: server log only
+        logging.getLogger(__name__).warning("Building %s/%s from table %s failed: %s", project, table, steps[0].table, e)
+        raise ActionFailed(400, f"Building '{table}' from table '{steps[0].table}' failed ({type(e).__name__}); the details"
+                                " are in the server log. Is that table loaded?") from None
+    except ValueError as e:  # the steps don't compile (TR-1)
+        raise ActionFailed(400, f"Building '{table}' failed: {e}")
+    return _landed(conn, project, table, author, fingerprint, snap)
+
+
+def _landed(conn, project: str, table: str, author: str, fingerprint: str, snap: int | None) -> int | None:
+    """A load or build is in: its fingerprint, then what follows a new snapshot of `table`."""
+    if not (git._root() / project / ".git").is_dir():  # deleted while it loaded (the worker's IN-6): no row brings it back
+        raise ActionFailed(404, f"Project '{project}' does not exist.")
+    conn.execute(
+        "INSERT INTO sources (project, table_name, fingerprint) VALUES (%s, %s, %s) ON CONFLICT (project, table_name)"
+        " DO UPDATE SET fingerprint = excluded.fingerprint",
+        [project, table, fingerprint],
+    )
+    notify_change("refresh", project, f"Refreshing table '{table}': ", None, "works again.", table)  # D-10 recovery
+    if snap is None:  # incremental, nothing new: a successful load for IN-8 freshness, no snapshot, not metered
+        quality.capture(project, table)
+        return None
+    usage.record(None, "refresh", project)  # SC-11: one committed load (own connection: the snapshot is committed)
+    model.extend_calendar(project, table, author)  # IN-5: new dates get calendar rows
+    writeback.review(project, table)  # WB-6: the refresh may orphan edits or conflict with them
+    flows.after_refresh(project, table, snap)  # FL-2
+    ml.after_refresh(project, table, snap)  # ML-6: score the models reading it
+    quality.capture(project, table)  # IN-8: this load's stats (never raises)
     return snap
 
 
@@ -920,13 +975,13 @@ def _api(con, src: Source, loc: str, request: tuple, tmp: str, since: tuple | No
     return raw_sql, lambda _cur: new, truncated
 
 
-def _model_sql(cur, project: str, table: str, declared: list[dict] | None = None) -> str:
+def _model_sql(cur, project: str, table: str, declared: list[dict] | None = None, layer: str = "raw") -> str:
     """model.<table>: the IN-5 typed raw (text dates), through the table's steps (TR-2) when it has any.
     `declared` (PC-15 mapping onto an input table; set_steps added a final set_type to them): the steps before it must
     output exactly these column names, with every value castable to its declared type; else 400, and the load's
     transaction rolls back."""
-    typed = detect.typed_sql(cur, table)
     steps = transform.tables(project).get(table)
+    typed = None if steps and steps[0].table else detect.typed_sql(cur, table, layer=layer)  # M4.2: that table's model is typed
     if declared:
         sql = transform.compile(table, steps[:-1], source_sql=typed)
         have, want = [r[0] for r in cur.execute(f"DESCRIBE {sql}").fetchall()], [c["name"] for c in declared]

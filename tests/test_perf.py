@@ -40,11 +40,13 @@ def test_load_and_isolation_measure_and_leave_nothing(capsys, monkeypatch):
     monkeypatch.setattr(perf, "copies", lambda p: None)  # no wait for the worker's minute
     r = run(capsys, "isolation", "--rows", "37000", "--queries", "5")
     assert r["idle"]["n"] == 5 and r["during_load"]["n"] >= 1 and "load_error" not in r and r["x_p50"] > 0, r
-    r = run(capsys, "medallion", "--rows", "37000")  # 1.1: silver and gold each load the orders source again
+    r = run(capsys, "medallion", "--rows", "37000")  # 1.2: silver starts from bronze_orders, gold from silver_orders
     assert r["exact"] and set(r["build_s"]) == {"bronze_cafes", "bronze_products", "bronze_orders", "silver_orders", "gold_revenue"}, r
     rebuilt = [x for x in r["rebuild"] if x.startswith("refresh ")]  # a query copy the worker writes meanwhile isn't one
     assert rebuilt[0] == "refresh bronze_orders" and sorted(rebuilt[1:]) == ["refresh gold_revenue", "refresh silver_orders"], r
-    assert r["rebuild_bytes"]["raw"] > 0 and r["rebuild_bytes"]["model"] > 0 and r["lake"]["raw"] > 100_000 and r["rebuild_s"] > 0, r
+    # 1.2 M4.2: no raw copies (bronze has no steps: stored once; silver and gold read the layer below)
+    assert r["way"] == "1.2" and not r["rebuild_bytes"].get("raw") and r["rebuild_bytes"]["model"] > 0 and r["lake"]["model"] > 100_000, r
+    assert r["rebuild_s"] > 0, r
     assert projects() == before and set(perf.FILES.iterdir()) == files
 
 

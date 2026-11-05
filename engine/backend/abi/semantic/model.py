@@ -88,7 +88,7 @@ def _staging(project: str) -> set[str]:
         steps = transform.tables(project)
     except ValueError:  # a broken tables/<id>.json: the import checks report it; hide nothing
         return set()
-    return {x for t, s in steps.items() for x in {s[0].source} | {a for st in s if st.type == "append" for a in st.tables}
+    return {x for t, s in steps.items() for x in {s[0].reads} | {a for st in s if st.type == "append" for a in st.tables}
             if x != t}
 
 
@@ -124,8 +124,9 @@ def extend_calendar(project: str, table: str, author: str) -> None:
     The calendar lives in the lake, not the repo: when a pull, import or revert brings a model naming a calendar this
     lake never generated, it is generated here over every linked loaded table (X-04-fix-1)."""
     m, types = load(project), lake_columns(project)
-    if (m["date_table"] or {}).get("table") != CALENDAR or CALENDAR in lake_columns(project, "raw"):
-        return  # another date table, or 'calendar' is a loaded table (raw.<t> exists)
+    if (m["date_table"] or {}).get("table") != CALENDAR or CALENDAR in lake_columns(project, "raw") or any(
+            (git.path(project) / d / f"{CALENDAR}.json").is_file() for d in ("sources", "tables")):
+        return  # another date table, or 'calendar' is a loaded or built table (M4.2: one with no steps keeps no raw.<t>)
     have = CALENDAR in types
     cols = {}
     for r in m["relationships"]:

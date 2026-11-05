@@ -728,8 +728,9 @@ def refresh(conn, user: User, args: TableRef) -> dict:
     if args.table not in (steps := transform.tables(args.project)) and not (git.path(args.project) / "sources" / f"{args.table}.json").exists():
         raise ActionFailed(404, f"No table '{args.table}' with a source or steps in project '{args.project}'.")
     try:  # M3.2: a source that fails the probe fails below, as in 1.1 (502, the feed says why)
-        rows = ingest._big(conn, ingest._source(args.project, steps[args.table][0].source if args.table in steps else args.table,
-                                                args.table))
+        first = steps[args.table][0] if args.table in steps else None
+        rows = ingest._big_built(args.project, first.table) if first and first.table else ingest._big(
+            conn, ingest._source(args.project, first.source if first else args.table, args.table))
     except ActionFailed:
         rows = None
     if rows:

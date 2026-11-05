@@ -165,14 +165,17 @@ def made(snap: int | None, **extra) -> dict:
     return {**extra, "snapshot": snap, "columns": ["snapshot"], "rows": [[snap]]}
 
 
-def refresh(con, table: str, raw_sql: str, *, author: str, model_sql: str | Callable | None = None,
-            append: Callable | None = None, hook: Callable | None = None) -> int:
+def refresh(con, table: str, raw_sql: str | None, *, author: str, model_sql: str | Callable | None = None,
+            append: Callable | None = None, hook: Callable | None = None, once: bool = False) -> int:
     """ST-2: replace raw.<table> and model.<table> in one snapshot. Never touches edits.<table>.
 
     `raw_sql`/`model_sql` are built by our own ingest/transform code, never taken from users. A callable
     `model_sql(cursor)` is called once raw.<table> exists, in the same transaction (type detection, IN-5).
     `append(cursor)` (IN-6 incremental) returns a SELECT of rows to add to raw.<table> instead, or None to replace it.
     `hook(cursor)` runs first in the same transaction (WB-10: marking synced edits).
+    `raw_sql` None (M4.2: steps that start from another table's model): no raw.<table>, and a previous one goes.
+    `once` (M4.2: a table with no steps loaded from files): the table is stored once, as model.<table>: the landed rows,
+    or the typed ones when `model_sql(cursor)` (over lake.model.<table>) casts; no raw.<table>, which was a copy of it.
     On any error the transaction rolls back and the previous snapshot stays live.
     """
     t = _q(table)
@@ -181,9 +184,18 @@ def refresh(con, table: str, raw_sql: str, *, author: str, model_sql: str | Call
     def run(cur):
         if hook:
             hook(cur)
+        if once:
+            cur.execute(f"DROP TABLE IF EXISTS lake.raw.{t}")
+            cur.execute(f"CREATE OR REPLACE TABLE lake.model.{t} AS {_ordered(raw_sql)}")
+            if (sql := model_sql(cur)) != f"SELECT * FROM lake.model.{t}":  # IN-5 casts replace the landed rows
+                typed = _q(f"{table}__abi_typed")  # a table can't be replaced by a query over itself
+                cur.execute(f"CREATE OR REPLACE TABLE lake.model.{typed} AS {_ordered(sql)}")
+                cur.execute(f"DROP TABLE lake.model.{t}")
+                cur.execute(f"ALTER TABLE lake.model.{typed} RENAME TO {t}")
+            return
         rows = append(cur) if append else None
-        cur.execute(f"INSERT INTO lake.raw.{t} {_ordered(rows)}" if rows
-                    else f"CREATE OR REPLACE TABLE lake.raw.{t} AS {_ordered(raw_sql)}")
+        cur.execute(f"INSERT INTO lake.raw.{t} {_ordered(rows)}" if rows else f"DROP TABLE IF EXISTS lake.raw.{t}"
+                    if raw_sql is None else f"CREATE OR REPLACE TABLE lake.raw.{t} AS {_ordered(raw_sql)}")
         cur.execute(f"CREATE OR REPLACE TABLE lake.model.{t} AS {_ordered(model_sql(cur) if callable(model_sql) else model_sql)}")
 
     return _commit(con, run, author, f"refresh {table}")  # failures reach the feed via the caller (ingest scrubs secrets)

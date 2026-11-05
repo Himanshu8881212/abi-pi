@@ -109,7 +109,7 @@ def history(hist: list[dict]) -> tuple[list | None, list[list]]:
 
 def _schedule(project: str, t: str, steps: dict) -> tuple[str, int | None]:
     """The refresh of `t`'s source and its freshness limit in hours (None: no schedule)."""
-    f = git.path(project) / "sources" / f"{steps[t][0].source if t in steps else t}.json"
+    f = git.path(project) / "sources" / f"{steps[t][0].reads if t in steps else t}.json"  # M4.2: built from a table: its source file, if any
     doc = loads(f.read_text()) if f.is_file() else {}
     refresh = doc.get("refresh", "on_change")
     if hours := (doc.get("api") or {}).get("every_hours"):  # API-SRC.2: plus the 1 h back-off, and slack

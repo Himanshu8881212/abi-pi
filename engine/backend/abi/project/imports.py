@@ -212,7 +212,11 @@ def _references(conn, project: str, files: dict) -> list[dict]:
             errs.append(_err(rel, "$.steps", str(e), "Fix the step so it compiles (TR-1); the first step must be the only `source` step."))
             continue
         graph[t] = transform.reads(steps) - {t}
-        if steps[0].source not in sources:
+        if steps[0].table:  # M4.2: steps that start from a table the project builds
+            if steps[0].table not in tables - {t}:
+                errs.append(_err(rel, "$.steps[0].table", f"Unknown table '{steps[0].table}'.",
+                                 f"Name a loaded or stepped table other than '{t}': {', '.join(sorted(tables - {t})) or 'none yet'}."))
+        elif steps[0].source not in sources:
             errs.append(_err(rel, "$.steps[0].source", f"Unknown source '{steps[0].source}'.",
                              f"Add sources/{steps[0].source}.json or use one of: {', '.join(sorted(sources)) or 'none yet'}."))
         refs = []

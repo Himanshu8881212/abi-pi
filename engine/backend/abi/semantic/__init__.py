@@ -824,13 +824,14 @@ def preview_steps(conn, user: User, args: Preview) -> dict:
     steps = args.steps[:None if args.step is None else args.step + 1]
     if steps[0].type != "source":
         raise ActionFailed(400, "A table's steps start with exactly one `source` step.")
-    source = steps[0].source
+    source = steps[0].reads
     if not conn.execute("SELECT 1 FROM sources WHERE project = %s AND table_name = %s", [args.project, source]).fetchone():
-        raise ActionFailed(404, f"No loaded source '{source}' in project '{args.project}'.")
+        raise ActionFailed(404, f"No loaded {'table' if steps[0].table else 'source'} '{source}' in project '{args.project}'.")
     asked = {"preview": args.model_dump(mode="json", exclude={"project"})}
     try:  # raw.<source> holds the source's files, as raw.<table> will after set_steps; same IN-5 typing as the refresh
-        q = transform.compile(source, steps, source_sql=detect.typed_sql(
-            storage.lake(args.project).cursor(), source, lambda sql: execute(args.project, sql, asked, user.id)[0]))
+        cur = storage.lake(args.project).cursor()  # M4.2: steps from a table read its model; a table with no steps has no raw
+        q = transform.compile(source, steps, source_sql=None if steps[0].table else detect.typed_sql(
+            cur, source, lambda sql: execute(args.project, sql, asked, user.id)[0], "raw" if detect._columns(cur, "raw", source) else "model"))
         cols = execute(args.project, f"DESCRIBE {q}", asked, user.id)
         rows = execute(args.project, f"SELECT COLUMNS(*)::VARCHAR FROM ({q}) LIMIT {PREVIEW}", asked, user.id)
     except (ValueError, duckdb.Error) as e:

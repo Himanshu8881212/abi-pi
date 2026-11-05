@@ -3,7 +3,8 @@
 `compile(table, steps)` turns a table's step list (tables/<t>.json `steps`, schema in
 schemas/v1/table.json) into ONE DuckDB query: a CTE per step, each reading the previous one, so
 DuckDB runs the whole pipeline in one pass (`storage.refresh(..., model_sql=compile(t, steps))`).
-`source` reads lake.raw.<t>, where loading the step's source puts the data (ST-1); `merge` and
+`source` reads lake.raw.<t>, where loading the step's source puts the data (ST-1), or with `table` (M4.2: silver
+feeds gold) lake.model.<that table>, which the project builds first, so no source is read again; `merge` and
 `append` read other tables' lake.model.<t>, never their effective tables (W-01): edits are the last layer over the
 table they were made on (§11 #9), and nothing refreshes this table when that one is edited. Row expressions (filter, add_column) and the `sql`
 step are DuckDB SQL (V-02 C-23), parsed and checked by SQLGlot: they may only see the previous
@@ -16,7 +17,7 @@ from typing import Annotated, Literal
 
 import duckdb
 import sqlglot
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_serializer, model_validator
 from sqlglot import exp
 
 from abi.project import git
@@ -35,7 +36,22 @@ class _Step(BaseModel):
 
 class Source(_Step):
     type: Literal["source"]
-    source: Name  # sources/<id>.json; its load lands in raw.<this table>
+    source: Name | None = None  # sources/<id>.json; its load lands in raw.<this table>
+    table: Name | None = None  # M4.2: or a table the project builds: its model.<table>, no raw copy, no source read
+
+    @model_validator(mode="after")
+    def _one(self):
+        if (self.source is None) == (self.table is None):
+            raise ValueError("A `source` step names either a `source` (sources/<id>.json) or a `table` the project builds.")
+        return self
+
+    @model_serializer(mode="wrap")
+    def _dump(self, handler):  # the one it names only: a 1.1 step's file and fingerprint stay byte for byte
+        return {k: v for k, v in handler(self).items() if v is not None}
+
+    @property
+    def reads(self) -> str:
+        return self.source or self.table
 
 
 class Select(_Step):
@@ -158,7 +174,7 @@ def _step_sql(s, prev: str, table: str, source_sql: str | None) -> str:
     frm = f"FROM {prev}"
     match s.type:
         case "source":
-            return source_sql or f"SELECT * FROM lake.raw.{q(table)}"
+            return source_sql or f"SELECT * FROM lake.{'model' if s.table else 'raw'}.{q(s.table or table)}"
         case "select":
             return f"SELECT {', '.join(map(q, s.columns))} {frm}"
         case "rename":
@@ -235,8 +251,8 @@ def inputs(project: str) -> set[str]:
 
 
 def reads(steps: list) -> set[str]:
-    """TR-4 DAG edges: the source a table's steps load, and the tables they merge or append."""
-    return {steps[0].source} | {s.table for s in steps if s.type == "merge"} | {t for s in steps if s.type == "append" for t in s.tables}
+    """TR-4 DAG edges: the source a table's steps load (or the table they start from), and the tables they merge or append."""
+    return {steps[0].reads} | {s.table for s in steps if s.type == "merge"} | {t for s in steps if s.type == "append" for t in s.tables}
 
 
 def _agg(function: str, column: str | None) -> str:

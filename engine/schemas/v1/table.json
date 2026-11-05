@@ -637,12 +637,30 @@
         "source": {
           "minLength": 1,
           "title": "Source",
-          "type": "string"
+          "type": "string",
+          "description": "sources/<id>.json, loaded into raw.<this table>"
+        },
+        "table": {
+          "minLength": 1,
+          "title": "Table",
+          "type": "string",
+          "description": "or a table the project builds: its model.<table>, with no source read again (silver feeds gold)"
         }
       },
       "required": [
-        "type",
-        "source"
+        "type"
+      ],
+      "oneOf": [
+        {
+          "required": [
+            "source"
+          ]
+        },
+        {
+          "required": [
+            "table"
+          ]
+        }
       ],
       "title": "Source",
       "type": "object"

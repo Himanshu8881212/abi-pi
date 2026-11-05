@@ -33,13 +33,14 @@ def _columns(cur, schema: str, table: str | None = None) -> list[tuple[str, str,
         " ORDER BY table_name, column_index", [schema, table, table]).fetchall()
 
 
-def typed_sql(cur, table: str, read=None) -> str:
-    """IN-5 "dates stored as text": SELECT over raw.<table> that casts text date/timestamp columns. `read(sql)` returns
-    the one result row: `semantic.execute` for committed data; ingest's default reads its uncommitted raw.<table>."""
+def typed_sql(cur, table: str, read=None, layer: str = "raw") -> str:
+    """IN-5 "dates stored as text": SELECT over raw.<table> (or `layer`.<table>) that casts text date/timestamp columns.
+    `read(sql)` returns the one result row: `semantic.execute` for committed data; ingest's default reads its
+    uncommitted raw.<table>."""
     read = read or (lambda sql: cur.execute(sql).fetchone())
-    src = f"lake.raw.{_q(table)}"
+    src = f"lake.{layer}.{_q(table)}"
     casts = []
-    for _, col, data_type in _columns(cur, "raw", table):
+    for _, col, data_type in _columns(cur, layer, table):
         if data_type != "VARCHAR":
             continue
         c = _q(col)

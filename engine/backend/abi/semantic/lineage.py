@@ -35,7 +35,7 @@ def _tables(files: dict):
     for t, c in tables.items():
         yield f"table:{t}", None, None
         for s in c.get("steps") or []:
-            ups = {"source": [f"source:{s.get('source')}"], "merge": [f"table:{s.get('table')}"],
+            ups = {"source": [f"table:{s['table']}" if s.get("table") else f"source:{s.get('source')}"], "merge": [f"table:{s.get('table')}"],
                    "append": [f"table:{x}" for x in s.get("tables", [])]}.get(s.get("type"), [])
             for up in ups:
                 if up != f"table:{t}":

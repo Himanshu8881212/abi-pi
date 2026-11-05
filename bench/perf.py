@@ -8,7 +8,7 @@ machine's engine and app, or inside a docker install). Each run prints one JSON 
     .venv/bin/python bench/perf.py load --rows 1000000 [--door path|app] [--url ...]
     .venv/bin/python bench/perf.py isolation --rows 2000000 [--queries 30] [--door path|app] [--url ...]
     .venv/bin/python bench/perf.py publish --project P [--url ...]
-    .venv/bin/python bench/perf.py medallion --rows 1000000
+    .venv/bin/python bench/perf.py medallion --rows 1000000 [--way 1.2|1.1]
     .venv/bin/python bench/perf.py kill --part engine|worker --project P [--wait 300] [--url ...]
 
   project    a bench project for pages and memory, made as the baselines' was: Brewline (bench/brewline.py, the
@@ -41,10 +41,11 @@ machine's engine and app, or inside a docker install). Each run prints one JSON 
              answers and until a Viewer's page shows the published copy with the change, and the tables the copy
              reloaded meanwhile (its "refresh <table>" snapshots). The project may have no published copy; the copy, the
              Viewer and the description go at the end.
-  medallion  bronze, silver and gold as 1.1's steps can build them from N generated orders (a table's steps start from
-             a loaded source, so gold repeats silver's steps): silver is the orders cleaned and joined with cafés and
-             products, gold revenue by region and month. Then one rebuild, the orders source reloaded with everything
-             that reads it: its seconds, the lake bytes it wrote by schema (raw/ and model/ its loads', query/ the
+  medallion  bronze, silver and gold from N generated orders: silver is the orders cleaned and joined with cafés and
+             products, gold revenue by region and month. --way 1.2 (default): silver starts from bronze's table and gold
+             from silver's, so the orders source is read once; --way 1.1: as 1.1's steps can (a table's steps start from
+             a loaded source, so silver and gold each read the orders source and gold repeats silver's steps). Then one
+             rebuild, the orders source reloaded with everything that reads it: its seconds, the lake bytes it wrote by schema (raw/ and model/ its loads', query/ the
              worker's query copies, on its own minute), its snapshots, and revenue by region from gold exact.
   kill       kill -9 the engine or the worker (their pid files), then every second until --wait: does the engine's
              /api/ready answer, does the owner's page load, does the pid file name a running process again. Each change
@@ -665,12 +666,15 @@ def medallion(a) -> dict:
         abi.call("create_project", project=p, name=f"perf {p}")
         for t in ("cafes", "products", "orders"):  # bronze: the files as they landed
             took[f"bronze_{t}"] = timed(add, p, f"bronze_{t}", f"{d.relative_to(FILES)}/{t}/*.parquet")
-        for t, steps in (("silver_orders", SILVER), ("gold_revenue", SILVER + GOLD)):  # 1.1: gold can't start from silver
+        layers = ((("silver_orders", SILVER), ("gold_revenue", SILVER + GOLD)) if a.way == "1.1"  # 1.1: gold can't start from silver
+                  else (("silver_orders", [{"type": "source", "table": "bronze_orders"}, *SILVER[1:]]),
+                        ("gold_revenue", [{"type": "source", "table": "silver_orders"}, *GOLD])))
+        for t, steps in layers:
             took[t] = timed(lambda: abi.finished(p, abi.call("set_steps", project=p, table=t, steps=steps)))  # noqa: B023
         abi.call("build_model", project=p)
         abi.call("set_measure", project=p, id="revenue", name="Revenue", expression="SUM(gold_revenue.revenue)")
         size = lambda: {s.name: lake_bytes(f"{p}/{s.name}") for s in (LAKE / p).iterdir()}  # noqa: E731 (raw/, model/, query/)
-        rec = {"rows": known["rows"]["orders"], "build_s": took, "copies": copies(p), "lake": size()}
+        rec = {"way": a.way, "rows": known["rows"]["orders"], "build_s": took, "copies": copies(p), "lake": size()}
         since, before, t = snapshot(p), size(), time.perf_counter()
         abi.finished(p, abi.call("refresh", project=p, table="bronze_orders"))  # new orders landed: bronze reloads, then its readers
         rec |= {"rebuild_s": round(time.perf_counter() - t, 2), "rebuild_bytes": {k: v - before.get(k, 0) for k, v in size().items()},
@@ -754,6 +758,7 @@ def main(argv=None) -> dict:
     sub.add_parser("publish", parents=[common, web])
     x = sub.add_parser("medallion", parents=[common])
     x.add_argument("--rows", type=int, default=1_000_000)
+    x.add_argument("--way", choices=("1.2", "1.1"), default="1.2", help="silver and gold from the layer below (1.2) or each from the source (1.1)")
     x = sub.add_parser("kill", parents=[common, web])
     x.add_argument("--part", choices=("engine", "worker"), required=True)
     x.add_argument("--wait", type=float, default=300, help="seconds to watch for it serving again")

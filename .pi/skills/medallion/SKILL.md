@@ -6,25 +6,27 @@ description: Build bronze, silver and gold layers in ABI (raw sources, cleaned a
 Layers are table names and the `hidden` flag; the work is `add_data` (bronze) and `set_steps` (silver, gold).
 
 ## The rule that shapes everything
-A table's steps must **start with `{"type": "source", "source": "<a loaded source>"}`**: a source is something
-`add_data` loaded (a bronze table). A table built by steps is not a source, so **no table can start from a silver
-table**. Other tables can only be pulled in with `append` (same columns, stacked) or `merge` (a join).
-So each gold table runs its own chain from bronze: `[source bronze_x, <silver's steps>, <gold's steps>]`. Keep the
-silver steps as one list and reuse it inline; build the silver table too (hidden) as the inspectable cleaned layer.
+A table's steps **start with exactly one `source` step**, in one of two forms:
+- `{"type": "source", "source": "<a loaded source>"}` reads the source's files again (into the table's own raw copy).
+- `{"type": "source", "table": "<a table the project builds>"}` starts from that table's built rows: no source is read
+  again and no raw copy is made. **Silver starts from its bronze table and gold from its silver table.** ABI builds
+  them in that order, and a refresh of bronze rebuilds silver, then gold, once each. Tables that would read each other
+  in a circle are refused.
+Other tables come in with `append` (same columns, stacked) or `merge` (a join).
 
 ## Recipe
 1. **Bronze**: one `add_data` per folder, exactly as landed, named `bronze_<report>`; stream folders as
    `bronze_<report>_stream`; reference lists as `ref_<name>` (load-data skill).
 2. **Silver** (cleaned, combined; hidden): for a fact with a stream:
-   `[{"type":"source","source":"bronze_x"}, {"type":"append","tables":["bronze_x_stream"]},
+   `[{"type":"source","table":"bronze_x"}, {"type":"append","tables":["bronze_x_stream"]},
      {"type":"deduplicate","columns":[<the grain columns, e.g. date, video_id, country_code>]}]`
    Typing and derived columns: `{"type":"set_type","columns":{"col":"DATE"}}`,
    `{"type":"add_column","name":"format","expression":"CASE WHEN video_length <= 60 THEN 'Shorts' ELSE 'Long-form' END"}`
    (DuckDB SQL expression over the row), `{"type":"rename","columns":{"old":"new"}}`, `{"type":"filter","condition":"…"}`.
 3. **Gold** (business grain; in the model):
-   - facts: `[...silver steps, {"type":"group","by":[...grain],"aggregations":[{"name":"views","function":"sum","column":"views"}, …]}]`
+   - facts: `[{"type":"source","table":"silver_x"}, {"type":"group","by":[...grain],"aggregations":[{"name":"views","function":"sum","column":"views"}, …]}]`
      (functions: sum, avg, min, max, count, median, count_distinct; `count` takes `"column": null`).
-   - dimensions: `[...steps, {"type":"select","columns":[key, attributes…]}]` or a `group` by the key for a
+   - dimensions: `[{"type":"source","table":"silver_x"}, {"type":"select","columns":[key, attributes…]}]` or a `group` by the key for a
      dimension derived from a fact (e.g. channels from videos), plus `deduplicate` on the key.
    - Small facts with no stream can start from bronze directly.
 4. Each `set_steps` loads the table; a 25M-row dedupe or group takes two to four minutes. Wait; don't retry.
