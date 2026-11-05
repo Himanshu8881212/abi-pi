@@ -90,8 +90,8 @@ function nice(lo,hi,n){const r=hi-lo||Math.abs(hi)||1,e=10**Math.floor(Math.log1
  return {lo:a,hi:b,t:Array.from({length:Math.round((b-a)/s)+1},(_,i)=>a+i*s)}}
 function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;const ms=d.columns.slice(nd);const type=d.type;
  if(type==='kpi'||(nd===0&&d.rows.length===1)){box.innerHTML='';ms.forEach(m=>{const k=document.createElement('div');k.className='kpi';k.innerHTML=`<div class="v">${E(fmt(d.rows[0]?.[d.columns.indexOf(m)],d.format[m]))}</div><div class="l">${E(d.measures[m]||m)}</div>`;box.appendChild(k)});return}
- // RP-8 as the PDF export draws them: a second dimension's members are the series (bars stack here, the export groups
- // them), a (month or quarter, year) pair is one time axis; a type or shape not drawn here says so over its rows
+ // RP-8 as the PDF export draws them: a second dimension's members are the series (bars stack, here and in the
+ // export), a (month or quarter, year) pair is one time axis; a type or shape not drawn here says so over its rows
  const c=d.columns,two=nd===2&&!c.includes('grouping_id'),yi=+!c[0].endsWith('.year'),
   per=two&&['bar','line','combo'].includes(type)&&c[0].split('.')[0]===c[1].split('.')[0]&&c[yi].endsWith('.year')&&/\.(month|quarter)$/.test(c[1-yi])&&d.rows.every(r=>typeof r[0]==='number'&&typeof r[1]==='number');
  if(!(nd===1&&['bar','line','combo','pie','funnel','waterfall','treemap','scatter'].includes(type)||two&&['bar','line','combo','treemap','scatter'].includes(type))){

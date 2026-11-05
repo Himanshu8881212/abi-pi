@@ -43,6 +43,7 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npx vite build --outDir ../backend/static --emptyOutDir --logLevel warn
+          npx vitest run src/charts.test.ts  # the export's charts (engine/frontend/src/charts.ts)
       - name: DuckDB extensions and Chromium, as the Dockerfile installs them
         run: |
           engine/backend/.venv/bin/python -c "import duckdb; [duckdb.install_extension(e) for e in ('ducklake', 'postgres', 'mysql', 'httpfs', 'excel', 'delta', 'iceberg', 'avro', 'sqlite')]; duckdb.install_extension('nanoarrow', repository='community')"

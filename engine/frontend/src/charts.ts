@@ -324,7 +324,9 @@ function drawn(v: VisualData, c: Viz, world?: World, selected: Value[] = [], wid
     yAxis: across ? { type: "category", data: names, inverse: true, axisLabel: { interval: 0, width: 140, overflow: "truncate" } } // every bar labelled
       : combo && series[1] ? [{ type: "value", ...value(m0) }, { type: "value", ...value(series[1].measure), splitLine: { show: false } }]
       : { type: "value", ...value(m0) },
+    // owner, 5 Nov 2026: the export looks as the report does: a second dimension's members stack (render.py's chart)
     series: series.map((s, i) => ({ type: combo ? (i ? "line" : "bar") : v.type, ...(combo && i > 0 ? { yAxisIndex: 1 } : {}),
+      ...(v.type === "bar" && members ? { stack: "members" } : {}),
       name: s.name, data: s.data, itemStyle: { color: fill[i % fill.length] }, lineStyle: { color: fill[i % fill.length] }, tooltip: { valueFormatter: fmt(s.measure) } })),
   };
 }
