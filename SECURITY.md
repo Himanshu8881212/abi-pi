@@ -13,7 +13,8 @@ version (`docker exec abi cat /data/VERSION`). You get an answer within a week.
   same-site cookies; the app refuses other Host headers (DNS rebinding) and framing.
 - **Personal tokens** (for MCP and SQL clients): stored hashed and shown once; they only read, as their person
   (row-level security and column rules hold), expire (at most 365 days), end with a password change and are audited
-  per call.
+  per call. The SQL endpoint takes them only over TLS from another machine; `/mcp` takes them on whatever port ABI
+  serves, so without HTTPS a token crosses the network in plain text: use `/mcp` over HTTPS (or from this machine).
 - **The agent:** reads data only through the semantic engine as the signed-in person (their row-level security),
   changes the project only through ABI's actions, and never confirms a destructive or outward-facing step itself.
 

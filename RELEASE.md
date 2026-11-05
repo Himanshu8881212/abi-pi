@@ -44,17 +44,27 @@ The milestones' own measurements are in [bench/RESULTS.md](bench/RESULTS.md), ea
 - **Silver feeds gold** (M4): a table's `source` step may start from a table the project builds, so a bronze, silver,
   gold rebuild reads the source once and stores less.
 - **A lighter image** (M4): `:latest` no longer carries Remotion; `:latest-video` adds it for explainer videos.
+- **Answers keep their figures** (M5): an answer the agent wrote beside opening a chart reached the person without
+  its figures; the agent now opens the chart first and writes the whole answer after it.
 - **Data out** (M4): mint a **personal token** (click your name › Personal tokens) and read ABI as yourself from an
   MCP client at `/mcp` (13 read tools) or, with `ABI_SQL_PORT`, from psql, DBeaver or a BI tool over TLS; row-level
   security and column rules hold, nothing can be changed, every call is audited.
 
 ### Upgrade notes
 
-`git pull && scripts/upgrade.sh` backs up the install, then upgrades it in place (README › Update). Before you do:
+`git pull && scripts/upgrade.sh` backs up the install, then upgrades it in place (README › Update). Update this way,
+not with `docker compose pull`: a pull of `:latest` starts 1.2.0 without a backup, and the schema change below can't
+be undone without one. `scripts/upgrade.sh` stops if ABI isn't running (it can't back it up then); start it first.
+Before you do:
 
 - **No way back without the backup.** The engine's database schema goes from 2 to 5 on the first start, and the
   volume records 1.2.0: a 1.1 engine refuses the upgraded database and a 1.1 image refuses the volume. To go back,
   restore the backup `scripts/upgrade.sh` made into a new volume (README › Back up and restore).
+- **Going back to 1.1**: `scripts/upgrade.sh` saves `backups/abi-<time>.tar` and its key files,
+  `backups/abi-<time>-keys.tar` (without them stored source logins and saved API keys are lost). Set
+  `ABI_IMAGE=ghcr.io/himanshu8881212/abi:1.1.0` in `.env` (`:latest` is 1.2.0 and would migrate the data again), run
+  `git checkout v1.1.0 -- docker-compose.yml scripts`, restore both files into a new volume with that image (README ›
+  Back up and restore), then `docker compose up -d`.
 - **Videos need the `-video` image.** An install that makes explainer videos sets
   `ABI_IMAGE=ghcr.io/himanshu8881212/abi:latest-video` in `.env` first; without it the Video page says so, and PDF,
   PNG and PowerPoint exports work as before.
@@ -93,9 +103,20 @@ The milestones' own measurements are in [bench/RESULTS.md](bench/RESULTS.md), ea
   its review fixes; the misses were masked count words ("two Retail products"). Counts never ground, so a sentence
   that counts is masked rather than trusted.
 - While a big load builds its model, other projects' uncached questions slow down more than during the rest of the
-  load (bench/RESULTS.md, M4 round 3: p95 x3.30 during build_model, x1.39 over the whole load).
-- After a heavy job the runner container's memory stays above idle in reclaimable kernel cache (its processes' own
-  memory goes back).
+  load (bench/RESULTS.md, 1.2.0 release candidate: p95 x2.53 during build_model, x1.41 over the whole load; the 1.5x
+  target is missed while the model builds).
+- After a heavy job the runner container's memory stays above idle in reclaimable kernel cache (memory.current x2.62
+  of idle in the release candidate: that target is missed; its processes' own memory goes back).
+- 8 chats and a 50M-row load fill a 4 GB memory limit: the release candidate stayed exact with no process killed,
+  but the container reached its limit and the kernel reclaimed memory there (1.2 M3 had 357 MiB to spare). Give
+  ABI 8 GB for big loads with many chats, or use the runner profile.
+- In a workspace with more than 20 accounts the agent sees only 20 of them when it sets a row-level rule, so it may
+  not find a person by name: give their name exactly as Users & access shows it, or set the rule there.
+- `/mcp` takes a personal token on whatever port ABI serves; without HTTPS the token crosses the network in plain
+  text (the SQL endpoint requires TLS from other machines). Use `/mcp` over HTTPS or from the same machine.
+- The app's own files in the image belong to the user it runs as. The agent has no tool that writes files (1.2.0
+  refuses write and edit everywhere; 1.1 allowed them outside data, key and project folders, so it could change
+  the harness itself).
 - Row-level and column rules go on the gold tables; a bronze or silver table left visible (not hidden) reads the same
   for everyone with a role over every door. Hide staging tables.
 - AVG visuals read each restricted person's own rows (no shared read).
@@ -107,11 +128,14 @@ The milestones' own measurements are in [bench/RESULTS.md](bench/RESULTS.md), ea
 
 The release run fills this in with measured numbers only.
 
-- Offline tests: _to be measured_
-- Live agent tests (MacBook Air, 5 Nov; proxy/claude-sonnet-5-5, fallback proxy/claude-opus-5-5): 18 of 18 after
-  test_results stopped leaving accounts behind (the first full run: 16 of 18, test_sections' RLS test and its tab check
-  failing on 50 leftover test accounts; bench/RESULTS.md, "1.2.0 release candidate (Mac)").
-- Agent bench (the same Mac and model, load average 3.1-7.2): why 18 of 20 on the two planted datasets with no run
+- Offline tests: from CI (test.yml) on the tag commit; no commit after dc32a9f (217 passed, 18 skipped) has been through CI yet. Mac runs fail where Chromium is missing (test_app PDF, test_e2e exports, test_results inbox and schedule) and on test_parallel's leftover pi_lock_a2: environment failures, not passes.
+- Live agent tests (MacBook Air, 5 Nov, on 8c266ce; proxy/claude-sonnet-5-5, fallback proxy/claude-opus-5-5): 16 of
+  18 in the full run; the 2 failures (test_sections' RLS test and its tab check, on 50 accounts test_results had left
+  behind) passed in a re-run of test_results, test_sections and test_pages after test_results stopped leaving them
+  (bench/RESULTS.md, "1.2.0 release candidate (Mac)").
+- Agent bench (the same Mac and model, load average 3.1-7.2, on 8c266ce, before 509d742 changed the system prompt to
+  open a chart before the answer; that change was checked by 141 of 141 parallel chat answers right, none masked):
+  why 18 of 20 on the two planted datasets with no run
   masked, median 7.9 s in 2 turns; ask 10 of 10 with no run masked, 4.8 s; report 3 of 5 (2 masked, each a count of
   the visuals), 17.6 s; load 3 of 3, 15.1 s. Targets: why 18 of 20 with no masks and 30 s, ask 9 of 10 and 12 s, report
   35 s: met.
@@ -157,14 +181,16 @@ The release run fills this in with measured numbers only.
   one run at a time; bench/RESULTS.md, "1.2.0 release candidate"): 50 sessions right after a commit, page p95 1.12 s
   (1.1.0: 87.6 s), and 4.34 s with 50 Viewers each limited to their own café (1.1.0: 152.7 s); 100M orders through
   the app's upload with the runner profile Ready with a model at 1,070 s, no timeout, revenue by region exact to the
-  cent (1.1.0: no model, out of memory), another project's queries meanwhile x1.15 p50 / x1.41 p95 of idle (x2.5 p95
-  while the model builds); the runner's worker gone 178 s after the queue emptied, its anon memory back to idle; a
+  cent (1.1.0: no model, out of memory), another project's queries meanwhile x1.15 p50 / x1.41 p95 of idle (target
+  1.5x: met overall, missed while the model builds, x2.53 p95); the runner's worker gone 178 s after the queue
+  emptied, its anon memory back to idle (memory.current x2.62 of idle, reclaimable slab: target missed); a
   measure-only Publish of 7.4M orders 0.92 s with no reload (1.1.0: 39.8 s, 4 reloads); the engine killed with -9
   serving again in 7.1 s, the worker in 1.0 s (1.1.0: never); 8 chats and a 50M upload inside `mem_limit: 4g`
   exact with no OOM kill, though the cgroup reached its limit (the kernel reclaimed, nothing was killed); the
-  medallion rebuild at 10M wrote 40.7% of 1.1's lake bytes in 72 s (1.1.0: 148 s); 464 MB idle, about 105 MB a chat
-  (1.1.0: 620 MB, 106 MB).
-- The arm64 image started (`.github/workflows/image.yml`): _to be measured_
+  medallion rebuild at 10M wrote 40.7% of 1.1's lake bytes in 72 s (1.1.0: 148 s); 464 MB idle, about 156 MB for
+  the first chat after a start and 105 MB for each next one (1.1.0: 620 MB, 106 MB).
+- The arm64 image: built by the release workflow, not yet started anywhere (`.github/workflows/image.yml` not
+  dispatched).
 
 ## What is in it
 

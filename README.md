@@ -83,7 +83,7 @@ flowchart LR
 
 You need [Docker](https://docs.docker.com/get-docker/) with Compose (Docker Desktop on macOS or Windows), **4 GB of
 memory** (8 GB is comfortable), **about 6 GB of free disk** to build, and a model: an API key for OpenAI, Anthropic,
-OpenRouter or Gemini, or a local Ollama. It builds on x86-64 and ARM (Apple Silicon).
+OpenRouter or Gemini, or a local Ollama. It builds on x86-64 and ARM (Apple Silicon; the 1.2.0 ARM image is built but not yet started in a check).
 
 **1. Get the code**
 
@@ -266,7 +266,8 @@ git pull
 scripts/upgrade.sh
 ```
 
-It backs up the running install to `backups/`, pulls the new image (or builds it here), starts it on the same volume
+It backs up the running install to `backups/` (the database and files, and the two key files apart), and refuses
+to go on while ABI is stopped (start it first; `ABI_NO_BACKUP=1` skips the backup). Then it pulls the new image (or builds it here), starts it on the same volume
 and waits until it's healthy; Caddy comes along when HTTPS is on (`COMPOSE_PROFILES` in `.env`). An install from 1.0
 moves over too: it keeps its volume and its `.env`. The volume remembers its version (`docker exec abi cat
 /data/VERSION`) and an older image refuses it: to go back, restore a backup into a new volume (below).
@@ -290,9 +291,9 @@ Built here: `docker build --target video .` (a plain `docker build .` makes the 
 builds the default image too when it can't pull `ABI_IMAGE`: for a `-video` tag it can't pull, build it first with
 `docker build --target video -t "$ABI_IMAGE" .` (`scripts/upgrade.sh` does this for you).
 
-**Memory** (measured on 5 Nov 2026, pve1, the default image, no model): an idle container uses about 477 MB, against
-1.1.0's 620 MB. The heavy worker runs only while there is work. Each open chat adds about 104 MB (its agent), up to
-155 MB for the first chats after a start.
+**Memory** (measured on 5 Nov 2026, pve1, the default image, no model; bench/RESULTS.md, 1.2.0 release candidate):
+an idle container uses about 464 MB, against 1.1.0's 620 MB. The heavy worker runs only while there is work. Each
+open chat adds about 105 MB (its agent), about 156 MB for the first chat after a start.
 
 ### Heavy jobs and the runner
 
@@ -342,9 +343,12 @@ Everything lives in one volume: the database, the lake, projects, the vault, cha
 Caddy's certificates in a second one: below).
 
 ```sh
-docker exec abi scripts/backup.sh backup > abi-backup.tar   # database dump + all files, checksummed
-docker exec abi scripts/backup.sh keys   > abi-keys.tar     # the two key files: store them somewhere else
+(umask 077; docker exec abi scripts/backup.sh backup > abi-backup.tar)   # database dump + all files, checksummed
+(umask 077; docker exec abi scripts/backup.sh keys   > abi-keys.tar)     # the two key files: store them somewhere else
 ```
+
+Keep both files readable by you only (`umask 077` above): the backup holds every login and table, and the keys tar
+opens every stored secret (database logins, mail server, API keys).
 
 ABI keeps serving during a backup; queued jobs (scheduled flows, refreshes, trainings) wait until it's done. To
 restore into a new, empty volume:
@@ -356,6 +360,11 @@ docker run --rm -i -v abi_abi-data:/data -v "$PWD/abi-keys.tar:/keys.tar:ro" \
   --entrypoint scripts/backup.sh ghcr.io/himanshu8881212/abi:latest restore /keys.tar < abi-backup.tar   # or your ABI_IMAGE
 docker compose up -d
 ```
+
+To go back to an older version, restore with that version's image and start that version: for 1.1,
+`ABI_IMAGE=ghcr.io/himanshu8881212/abi:1.1.0` in `.env`, `git checkout v1.1.0 -- docker-compose.yml scripts`, the
+restore above with that image and the backup and keys `scripts/upgrade.sh` saved in `backups/`, then
+`docker compose up -d` (`:latest` would migrate the restored data again).
 
 Without the keys, your data, reports, history and logins come back, but stored source secrets and saved API keys
 have to be entered again.
