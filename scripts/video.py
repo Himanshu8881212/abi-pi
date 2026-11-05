@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import abi
+from render import FONTS
 
 HERE = Path(__file__).resolve().parent
 PY = HERE.parent / "engine/backend/.venv/bin/python"  # the engine's, which has Playwright
@@ -36,6 +37,7 @@ with sync_playwright() as p:
     b = p.chromium.launch(args=['--disable-dev-shm-usage'])
     pg = b.new_page(viewport={'width': w, 'height': h})
     pg.goto('file://' + page)
+    pg.evaluate("document.fonts.load('600 56px Inter Tight')")  # the bundled font before the first frame
     png = b''
     for i in range(n):
         if pg.evaluate(f'draw({i} / {fps})') or not png:
@@ -173,7 +175,8 @@ def render(props: dict, out: Path) -> Path:
     limit = float(os.environ.get("ABI_VIDEO_TIMEOUT", "900"))  # 1.2 M3.2: s; 1.1 waited for ever
     with tempfile.TemporaryDirectory() as d:
         page = Path(d) / "deck.html"
-        page.write_text((HERE / "video.html").read_text().replace("/*PROPS*/null", json.dumps(props).replace("</", "<\\/")))
+        page.write_text((HERE / "video.html").read_text().replace("/*FONTS*/", FONTS)  # the app's fonts, no network
+                        .replace("/*PROPS*/null", json.dumps(props).replace("</", "<\\/")))
         shoot = subprocess.Popen([*SHOOT, str(page), str(FPS), str(n), str(w), str(h)], stdout=subprocess.PIPE,
                                  env={**os.environ, "HOME": home()})
         enc = subprocess.Popen([FFMPEG, "-y", "-loglevel", "error", "-f", "image2pipe", "-c:v", "png", "-framerate", str(FPS), "-i", "-",

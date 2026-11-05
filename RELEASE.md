@@ -159,9 +159,9 @@ The release run fills this in with measured numbers only.
   on the candidate's two images then: the one without the earlier video framework 15 of 15 in 150 s, the one with it
   15 of 15 in 176 s with a video rendered). `docker image inspect --format '{{.Size}}'`: with that framework
   2,695,718,474 bytes (without it 2,471,828,806; 1.1.0: 2,843,622,285). Videos with Chromium and ffmpeg instead (5 Nov,
-  pve1, the tree built there as abi-vid:test): 2,678,106,304 bytes, 19,029,594 under the candidate before it
+  pve1, the tree built there as abi-vid:test): 2,678,107,714 bytes, 19,028,184 under the candidate before it
   (abi-rc:final, 2,697,135,898); the container check's video (1 s a slide, 320x180, 3 views: 150 frames, 5 s) in
-  4.8 s, and 3 views at 6 s a slide, 1920x1080 (900 frames, 30 s) in 31 s, both H.264 High, yuv420p, 30 fps
+  7.1 s, and 3 views at 6 s a slide, 1920x1080 (900 frames, 30 s) in 30.1 s, both H.264 High, yuv420p, 30 fps
   (ffprobe); a render stopped at ABI_VIDEO_TIMEOUT left no Chromium or ffmpeg behind. On the upgraded test
   install below, each profile on test ports:
   - https with `ABI_TLS=internal`: a certificate for the name from Caddy's own authority (verified against its

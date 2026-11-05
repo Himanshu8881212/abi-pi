@@ -2,9 +2,9 @@
 <html><head><meta charset="utf-8">
 <!-- The explainer video's frames (scripts/video.py): a title card, one slide per report view (its numbers as ABI
 returned them, animated in) with a caption that says what to see, and an end card. The look is the app's Swiss
-signal: hairlines, one signal colour. frame(P, t) is a pure function of the props and the time (s); draw(t) puts it on
+signal: hairlines, one signal colour, the app's own Inter Tight (scripts/fonts, put in by video.py). frame(P, t) is a pure function of the props and the time (s); draw(t) puts it on
 the page, so video frame n is draw(n / FPS). No network: everything is in this file. -->
-<style>*{box-sizing:border-box}body{margin:0;overflow:hidden}#v{position:absolute;inset:0;overflow:hidden}</style>
+<style>/*FONTS*/*{box-sizing:border-box}body{margin:0;overflow:hidden}#v{position:absolute;inset:0;overflow:hidden}</style>
 </head><body><div id="v"></div>
 <script>
 const P = /*PROPS*/null;

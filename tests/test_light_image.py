@@ -129,6 +129,7 @@ def test_render_pipes_the_frames_to_ffmpeg_as_an_h264_mp4(tmp_path, monkeypatch)
     assert (tmp_path / "shoot").read_text() == "30 180 320 180"
     page = (tmp_path / "page.html").read_text()
     assert "const P = {" in page and "f <\\/script>" in page and "/*PROPS*/" not in page  # the props in, the page not broken by them
+    assert "font-family:'Inter Tight'" in page and "/*FONTS*/" not in page and "http" not in page.replace(video.FONTS, "")
 
 
 @pytest.mark.parametrize("env,image", [
