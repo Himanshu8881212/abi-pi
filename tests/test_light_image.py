@@ -35,8 +35,11 @@ def test_the_one_image_has_video_and_release_publishes_it_for_both_architectures
     assert "playwright install" in img and "headless_shell" in img  # PDF, PNG, PPTX and report emails need it
     assert "scripts/video/package.json" in img and "cd scripts/video && npm ci" in img and "REMOTION_BROWSER=" in img
     rel = (ROOT / ".github/workflows/release.yml").read_text()
-    assert rel.count("docker/build-push-action") == 1 and "target: default" in rel and "needs: tests" in rel
+    assert rel.count("docker/build-push-action") == 2 and "target: default" in rel and "needs: tests" in rel
     assert "-video" not in rel and rel.count("linux/amd64,linux/arm64") == 1
+    # release review: the image is started and checked (tests/image_check.sh) before anything is pushed
+    assert rel.index("load: true") < rel.index("bash tests/image_check.sh") < rel.index("push: true")
+    assert "bash tests/image_check.sh" in (ROOT / ".github/workflows/image.yml").read_text()
 
 
 @pytest.mark.parametrize("ref,ok", [("v1.2.0", True), ("release-1.2", False), ("v1.1.0", False)])

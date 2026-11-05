@@ -30,7 +30,20 @@ jobs:
           # only the tag v<version> publishes :<version> and :latest (a dispatch from a branch publishes nothing)
           [ "$GITHUB_REF_NAME" = "v$v" ] || { echo "::error::$GITHUB_REF_NAME is not the tag v$v" >&2; exit 1; }
           echo "version=$v" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@v7  # the image
+      - uses: docker/build-push-action@v7  # the image for this runner, loaded, to start before anything is published
+        with:
+          context: .
+          target: default
+          load: true
+          tags: abi:check
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Start it and check it (nothing is published if this fails)
+        run: bash tests/image_check.sh
+        env: { IMAGE: "abi:check", C: abi-check, PORT: "8790" }
+      - if: failure()
+        run: docker logs abi-check 2>&1 | tail -200 || true
+      - uses: docker/build-push-action@v7  # the image, both architectures (amd64's layers from the cache)
         with:
           context: .
           target: default
