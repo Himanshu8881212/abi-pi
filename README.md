@@ -83,7 +83,7 @@ flowchart LR
 
 You need [Docker](https://docs.docker.com/get-docker/) with Compose (Docker Desktop on macOS or Windows), **4 GB of
 memory** (8 GB is comfortable), **about 6 GB of free disk** to build, and a model: an API key for OpenAI, Anthropic,
-OpenRouter or Gemini, or a local Ollama. It builds on x86-64 and ARM (Apple Silicon; the 1.2.0 ARM image is built but not yet started in a check).
+OpenRouter or Gemini, or a local Ollama. It runs on x86-64 and ARM (Apple Silicon, Graviton, Ampere; the arm64 image is started and checked on GitHub's ARM runners).
 
 **1. Get the code**
 

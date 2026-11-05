@@ -1,12 +1,12 @@
-# ABI-PI 1.2.0
+# ABI-PI 1.2.0 Beta
 
 A self-hosted agentic BI app in one container: ABI-PI's own copy of ABI's engine (Postgres, semantic engine, flows,
 ML, custom agents), the Pi agent with a team of specialists, and a one-page app. Install: see [README.md](README.md)
 (`.env` with the owner account, `docker compose up -d`).
 
-## 1.2.0
+## 1.2.0 (Beta)
 
-The milestones' own measurements are in [bench/RESULTS.md](bench/RESULTS.md), each beside 1.1.0's.
+1.2.0 is a beta: ready for pilots of about 50 people, with the limits listed below. The milestones' own measurements are in [bench/RESULTS.md](bench/RESULTS.md), each beside 1.1.0's.
 
 ### What is new
 
@@ -142,7 +142,21 @@ Before you do:
 
 The release run fills this in with measured numbers only.
 
-- Offline tests: from CI (test.yml) on the tag commit; no commit after dc32a9f (217 passed, 18 skipped) has been through CI yet. Mac runs fail where Chromium is missing (test_app PDF, test_e2e exports, test_results inbox and schedule) and on test_parallel's leftover pi_lock_a2: environment failures, not passes.
+- Offline tests (GitHub CI, test.yml, on d29db2d): 237 passed, 18 skipped (the live LLM tests), 0 failed, with the
+  export charts' tests (vitest) 2 passed.
+- On the 6-core pve1 server, Sonnet (proxy/claude-sonnet-5-5, fallback Opus), on the final code:
+  - agent bench: why 19 of 20 (20 answers of the 6b97144 run re-scored after bench.py read a negation per clause;
+    the other is masked), report 5 of 5 with nothing masked (2bf4ddf, after grounding read a page read's visuals),
+    ask 10 of 10;
+  - the agent team: one job given to the Lead (load, model, measures, report, forecast, a flow saved off, a custom
+    agent, a review, a commit, a board pack) planned for and delegated to all nine specialists in phase order, every
+    handoff's checks passed, revenue by region exact to the cent (afd6b47, bench/team_live.py);
+  - parallel chats through the app (bench/perf.py chats), all 141 answers right and none masked: 8 at once median
+    13.5 s; 50 at once p95 70.6 s with ABI_MAX_AGENTS=8 (42 queued), 49.1 s with 50 (CPU-bound on 6 cores).
+- Container check of the final image (pve1, d29db2d, linux/amd64): 15 of 15, a video rendered with Chromium and
+  ffmpeg; 2,678,107,714 bytes (1.1.0: 2,843,622,285).
+- The arm64 image (GitHub's ARM runner, image.yml, on 2e7bb80 and earlier commits): healthy, PID 1 tini as abi,
+  sign-in, a CSV read back exact, a PDF and a video, all on aarch64.
 - Live agent tests (MacBook Air, 5 Nov, on 8c266ce; proxy/claude-sonnet-5-5, fallback proxy/claude-opus-5-5): 16 of
   18 in the full run; the 2 failures (test_sections' RLS test and its tab check, on 50 accounts test_results had left
   behind) passed in a re-run of test_results, test_sections and test_pages after test_results stopped leaving them
@@ -208,8 +222,6 @@ The release run fills this in with measured numbers only.
   exact with no OOM kill, though the cgroup reached its limit (the kernel reclaimed, nothing was killed); the
   medallion rebuild at 10M wrote 40.7% of 1.1's lake bytes in 72 s (1.1.0: 148 s); 464 MB idle, about 156 MB for
   the first chat after a start and 105 MB for each next one (1.1.0: 620 MB, 106 MB).
-- The arm64 image: built by the release workflow, not yet started anywhere (`.github/workflows/image.yml` not
-  dispatched).
 
 ## What is in it
 
