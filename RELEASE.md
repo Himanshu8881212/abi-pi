@@ -48,6 +48,11 @@ The milestones' own measurements are in [bench/RESULTS.md](bench/RESULTS.md), ea
   only took a code and sent them to ABI's own screens).
 - **One image for amd64 and arm64**: `:latest` and `:1.2.0` carry everything, explainer videos included, for both
   architectures (M4 split video into a -video image; the owner kept it in the one image).
+- **Videos with free software only** (owner, 5 Nov 2026): explainer videos are drawn frame by frame by the engine's
+  headless Chromium (the one PDF and PowerPoint exports use) and encoded by ffmpeg (Debian's package) to an H.264 MP4
+  (yuv420p, 30 fps) that plays everywhere, PowerPoint included. The earlier video framework, whose licence asked
+  companies of more than three people to pay, is removed with its Node packages: no third-party licence is needed for
+  video. Same slides, numbers, captions and themes; an install from source needs ffmpeg and Playwright's Chromium.
 - **Answers keep their figures** (M5): an answer the agent wrote beside opening a chart reached the person without
   its figures; the agent now opens the chart first and writes the whole answer after it.
 - **Counts that name what they count**: "I built 3 visuals: Revenue KPI, Revenue by region and Revenue by month" is
@@ -151,9 +156,13 @@ The release run fills this in with measured numbers only.
 - Container check on pve1 (5 Nov; 8c266ce built there from `git archive`, linux/amd64): `ABI_IMAGE=abi-rc:1.2.0
   tests/container_check.sh` 15 of 15 in 150 s (fresh volume up in 13 s, the engine and the worker killed with -9
   serving again in 8 s, `docker stop` in 2 s, no secret in the logs, the volume, the image or the backup; measured
-  on the candidate's two images then: the one without Remotion 15 of 15 in 150 s, the one with it 15 of 15 in 176 s with
-  a video rendered). `docker image inspect --format '{{.Size}}'`: with Remotion, as 1.2.0 ships, 2,695,718,474 bytes
-  (without it 2,471,828,806; 1.1.0: 2,843,622,285). On the upgraded test
+  on the candidate's two images then: the one without the earlier video framework 15 of 15 in 150 s, the one with it
+  15 of 15 in 176 s with a video rendered). `docker image inspect --format '{{.Size}}'`: with that framework
+  2,695,718,474 bytes (without it 2,471,828,806; 1.1.0: 2,843,622,285). Videos with Chromium and ffmpeg instead (5 Nov,
+  pve1, the tree built there as abi-vid:test): 2,678,106,304 bytes, 19,029,594 under the candidate before it
+  (abi-rc:final, 2,697,135,898); the container check's video (1 s a slide, 320x180, 3 views: 150 frames, 5 s) in
+  4.8 s, and 3 views at 6 s a slide, 1920x1080 (900 frames, 30 s) in 31 s, both H.264 High, yuv420p, 30 fps
+  (ffprobe); a render stopped at ABI_VIDEO_TIMEOUT left no Chromium or ffmpeg behind. On the upgraded test
   install below, each profile on test ports:
   - https with `ABI_TLS=internal`: a certificate for the name from Caddy's own authority (verified against its
     `root.crt`), http answered 308 to https, sign-in 303 over https, and `/events` streams through Caddy (an event

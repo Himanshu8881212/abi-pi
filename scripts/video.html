@@ -53,8 +53,9 @@ function line(s, t, f) {
     + `<line x1="60" x2="${W - 160}" y1="${H - 60}" y2="${H - 60}" stroke="${t.faint}" stroke-width="2"/>`
     + series.map((sr, j) => {
       const pts = sr.values.map((v, i) => (v === null ? null : [x(i), y(v), v])).filter(Boolean);
-      const d = pts.map((p, i) => `${i ? "L" : "M"}${p[0]},${p[1]}`).join(" "), len = pts.length * 260, last = pts[pts.length - 1];
-      return `<g><path d="${d}" fill="none" stroke="${cols[j % 3]}" stroke-width="8" stroke-dasharray="${len}" stroke-dashoffset="${len * (1 - g)}"/>`
+      const d = pts.map((p, i) => `${i ? "L" : "M"}${p[0]},${p[1]}`).join(" "), last = pts[pts.length - 1];
+      // drawn from left to right: the dash is the whole path (pathLength 1), so a long line also ends at its last point
+      return `<g><path d="${d}" fill="none" stroke="${cols[j % 3]}" stroke-width="8" pathLength="1" stroke-dasharray="1" stroke-dashoffset="${1 - g}"/>`
         + (last ? `<text x="${last[0] + 16}" y="${last[1] + 10}" font-size="34" fill="${cols[j % 3]}" ${font} opacity="${g}">${compact(last[2])}</text>` : "") + `</g>`;
     }).join("")
     + labels.map((l, i) => (i % step === 0 || i === labels.length - 1
