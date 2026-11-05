@@ -122,10 +122,11 @@ def test_pages_and_memory_through_an_app_here(capsys, monkeypatch, tmp_path):
         # 1.2: ABI names no model, so the app starts an agent only for a named one: the stand-in's; it never answers, so
         # the bench's wait for answers is cut to 20 s (its first wait, for the agents to start, ends when they have)
         monkeypatch.setenv("ABI_PI_LLM_MODEL", "standin")
-        until = perf.until
-        monkeypatch.setattr(perf, "until", lambda ok, wait=perf.WAIT: until(ok, min(wait, 20)))
         monkeypatch.setattr(app, "MAX_AGENTS", 2)  # one Pi a person (half of it): two chats are two people's, as 8 chats are 8 people's
-        r = run(capsys, "memory", "--url", url, "--project", P, "--chats", "2", "--app-pid", str(os.getpid()), "--hold", "0.5")
+        until = perf.until
+        with monkeypatch.context() as m:  # the 20 s wait for this run only: the publish run after it waits as it should
+            m.setattr(perf, "until", lambda ok, wait=perf.WAIT: until(ok, min(wait, 20)))
+            r = run(capsys, "memory", "--url", url, "--project", P, "--chats", "2", "--app-pid", str(os.getpid()), "--hold", "0.5")
         # the app here is this pytest process, whose memory moves by itself (once -65 MB between samples): Pi's own counts
         assert r["started"]["pi"]["chats"] == 2 and r["started"]["pi"]["mb"] > 0 and "started" in r["per_chat_mb"] and "answered" not in r, r
         assert r["held"]["pi"]["chats"] == 2, "the chats stay open while held"
