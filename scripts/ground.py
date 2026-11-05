@@ -735,11 +735,12 @@ def retry(bad: dict, results: list) -> str:
     return (f"Your answer above has {MARK} where it stated what no tool row backs: {', '.join(bad['numbers'] + bad['names'])}."
             " Rewrite the answer to the person's question from the rows below: every figure a value of these rows, as"
             " it is or rounded for display, never a sum, difference, share, percentage, bound (\"less than 200\") or"
-            " range you work out yourself, and every name one the rows hold. Write no number in words (no \"two\","
-            " \"three\", ...) and count nothing the rows list: name them, or say \"both\", \"each\", \"they\" or"
-            " \"these\". For a change or a share, quote a change"
-            " measure's or an expression's rows (call semantic_query), or state both values the rows give; leave out"
-            " what the rows can't back. Don't mention this check, an earlier answer or a correction.\n\n"
+            " range you work out yourself, and every name one the rows hold. Count only with the items named right after"
+            " the count (\"3 visuals: A, B and C\"); a group you summarise (\"the other cities\") gets no number,"
+            " only its rows' figures; else name them, or say \"both\", \"each\" or \"these\". For a change or a share,"
+            " quote a change measure's or an expression's rows (call semantic_query), or state both values the rows"
+            " give. For a report you built, read each visual's rows with visual_data and quote those, or describe"
+            " each visual by its title without figures. Leave out what the rows can't back. Don't mention this check, an earlier answer or a correction.\n\n"
             + (f"Rows you may quote (each result's columns, then its rows):\n{rows}" if rows else "No tool rows back this answer yet."))
 
 

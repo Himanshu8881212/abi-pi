@@ -470,7 +470,9 @@ def test_the_retry_names_what_failed_and_lists_the_rows_to_rewrite_from(monkeypa
     r = out["retry"]
     assert "14.6%, Atlantis" in r and "Rewrite the answer" in r and "[not verified]" in r
     # round 2: 3 of 4 masked why runs were a rewrite that counted what the rows listed ("all three fell")
-    assert 'Write no number in words (no "two", "three", ...) and count nothing the rows list' in r
+    assert 'Count only with the items named right after the count' in r and '"the other cities") gets no number' in r
+    # 1.2 final rerun: a report summary quoted its visuals' figures without reading them (10 and 12 masked)
+    assert "read each visual's rows with visual_data" in r
     assert '["cafes.region", "calendar.month", "revenue", "orders_rows"]' in r and '["North", 12, "1586.08", 280]' in r
     assert r.index("cafes.region") < r.index('"quantity"')  # the newest result first
     assert out["final"] == ground.mask(out["masked"], {"spans": []}) and "14.6%" not in out["final"]
