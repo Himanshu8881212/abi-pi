@@ -365,12 +365,12 @@ function report(box,rep){let flt=PENDING.filters||[];PENDING.filters=null;
   try{const r=await api('semantic_query',{measures:[D.measures[0]?.id],dimensions:[col.value],order_by:[{field:col.value}],limit:500});
    r.rows.forEach(x=>val.append(new Option(String(x[0]),JSON.stringify(x[0]))));val.size=Math.min(8,r.rows.length);val.hidden=add.hidden=false}catch(e){say(msg,e.message,1)}};
  add.onclick=()=>{const v=[...val.selectedOptions].map(o=>JSON.parse(o.value));if(v.length){flt=flt.filter(f=>f.column!==col.value);flt.push({column:col.value,op:'in',value:v});draw()}};
- const cross=(dim,value)=>{flt=flt.filter(f=>f.column!==dim);flt.push({column:dim,op:'=',value});draw()};
+ const cross=(dim,value)=>{const on=flt.some(f=>f.column===dim&&f.op==='='&&f.value===value);flt=flt.filter(f=>f.column!==dim);if(!on)flt.push({column:dim,op:'=',value});draw()};  // a second click on the same value clears it
  let cur=rep.pages[0];
  async function draw(){chips.innerHTML='';msg.textContent='';
   flt.forEach(f=>{const c=h('span','chip x',`${f.column} ${f.op} ${Array.isArray(f.value)?f.value.join(', '):f.value}`);c.onclick=()=>{flt=flt.filter(x=>x!==f);draw()};chips.append(c)});
   for(const p of rep.pages)for(const v of p.visuals){delete v.live;if(flt.length&&v.text===undefined)
-   try{v.live=await api('visual_data',{report:rep.id,page:p.id,visual:v.id,interaction:flt});v.live.id=v.id}catch(e){v.live={error:e.message}}}
+   try{v.live=await api('visual_data',{report:rep.id,page:p.id,visual:v.id,interaction:v.data?.type==='slicer'?flt.filter(f=>f.column!==v.dim):flt});v.live.id=v.id}catch(e){v.live={error:e.message}}}
   page(cur)}
  function page(p){cur=p;grid.dataset.page=p.id;[...tabs.children].forEach(b=>b.classList.toggle('on',b.dataset.id===p.id));grid.innerHTML='';
   p.visuals.slice().sort((a,b)=>(a.layout.y-b.layout.y)||(a.layout.x-b.layout.x)).forEach(v=>{const c=h('div','card');c.style.gridColumn=`span ${Math.min(12,v.layout.w||6)}`;c.dataset.lk=v.id;c.dataset.w=Math.min(12,v.layout.w||6);if(v.layout.h)c.dataset.h=v.layout.h*70-10;
@@ -380,7 +380,7 @@ function report(box,rep){let flt=PENDING.filters||[];PENDING.filters=null;
    if(!d||d.error||v.error){body.append(h('div','bad',d?.error||v.error||'no data'));return}
    if(flt.length&&(!d.rows.length||d.rows.every(r=>r.every(x=>x===null||typeof x!=='number')))){body.append(h('p','empty','No rows for these filters: they fall outside what this visual covers (the report\'s period or population). Remove a filter to see it again.'));return}
    let asTable=false;const dr=()=>{body.innerHTML='';asTable?table(body,d):chart(body,d)};
-   if(v.dim){body.classList.add('pick');body.onclick=e=>{const r=d.rows[e.target.dataset?.r];if(r)cross(v.dim,r[0])}}  // a mark knows its row (render.mark)
+   if(v.dim){body.classList.add('pick');body.onclick=e=>{const r=d.rows[e.target.closest?.('[data-r]')?.dataset.r];if(r)cross(v.dim,r[0])}}  // a mark knows its row (render.mark)
    requestAnimationFrame(dr);$('[data-a=t]',c).onclick=()=>{asTable=!asTable;dr()};$('[data-a=c]',c).onclick=()=>csv(d);
    $('[data-a=h]',c).onclick=()=>{const x=$('.how',c);x.hidden=!x.hidden;x.textContent=v.how+(flt.length?`\nfilters ${JSON.stringify(flt)}`:'')}})}
  rep.pages.forEach(p=>{const b=h('button','',p.name||p.id);b.dataset.id=p.id;b.onclick=()=>page(p);tabs.append(b)});flt.length?draw():page(cur)}

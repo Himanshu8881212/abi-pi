@@ -67,7 +67,7 @@ const COL=['var(--ink)','var(--c2)','var(--c3)','var(--c4)','var(--mute)','var(-
 function table(box,d){const t=document.createElement('table');const cols=d.columns;let sort=null,desc=false;
  function draw(){t.innerHTML='';const h=t.insertRow();cols.forEach((c,i)=>{const th=document.createElement('th');th.textContent=(d.measures[c]||c)+(sort===i?(desc?' ▼':' ▲'):'');th.onclick=()=>{desc=sort===i?!desc:true;sort=i;draw()};h.appendChild(th)});
   let rows=d.rows.slice();if(sort!==null)rows.sort((a,b)=>((a[sort]>b[sort])-(a[sort]<b[sort]))*(desc?-1:1));
-  rows.forEach(r=>{const tr=t.insertRow();r.forEach((v,i)=>{const td=tr.insertCell();td.textContent=fmt(v,d.format[cols[i]]);if(typeof v==='number')td.className='n'})})}
+  rows.forEach(r=>{const tr=t.insertRow();tr.dataset.r=d.rows.indexOf(r);r.forEach((v,i)=>{const td=tr.insertCell();td.textContent=fmt(v,d.format[cols[i]]);if(typeof v==='number')td.className='n'})})}
  draw();const s=document.createElement('div');s.className='scroll';s.appendChild(t);box.appendChild(s)}
 const cut=(s,n)=>{s=String(s??'—');return s.length>n?s.slice(0,Math.max(1,n-1))+'…':s};
 // a mark is one visual_data row: data-r is the row (a click cross-filters on its first dimension), the tooltip its values

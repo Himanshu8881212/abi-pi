@@ -781,7 +781,7 @@ spec = json.load(open(sys.argv[1]))
 probe = '''([d, w, h]) => {
   const card = document.getElementById('card'), box = document.getElementById('box'), tip = document.querySelector('.tip');
   card.classList.toggle('sized', !!h); box.style.height = h ? h + 'px' : ''; box.style.width = w + 'px'; box.innerHTML = ''; chart(box, d);
-  const svg = box.querySelector('svg'), marks = [...box.querySelectorAll('[data-r]')].map(e => {
+  const svg = box.querySelector('svg'), marks = [...box.querySelectorAll('svg [data-r]')].map(e => {
     e.dispatchEvent(new MouseEvent('mousemove', {bubbles: true})); const b = e.getBBox();
     return {r: +e.dataset.r, tag: e.tagName, tip: tip.textContent, x: b.x, y: b.y, w: b.width, h: b.height, fill: getComputedStyle(e).fill}});
   const share = {};
@@ -920,6 +920,40 @@ print(json.dumps(out))
     tips = {f"{r[0]} · {d['measures'][amt]}: {r[1]:,.0f}": r[0] for r in d["rows"]}
     assert out["tip"] in tips and out["chips"] == [f"orders.region = {tips[out['tip']]}"], (out, tips)
     assert "isn't drawn on this page yet" in out["map"], out
+
+
+def test_a_click_on_a_slicer_row_filters_the_report_and_a_second_clears_it(srv):
+    """A slicer was drawn as a plain table whose rows carried no row, so picking a member filtered nothing (owner, 5 Nov).
+    A row is its visual_data row as a mark is; the slicer keeps listing every member; the same row again clears it."""
+    port, key, _ = srv
+    amt = next(m["id"] for m in abi.call("semantic_model", project=P)["measures"] if m["expression"] == "SUM(orders.amount)")
+    q = {"measures": [amt], "dimensions": ["orders.region"]}
+    rep = {"id": "slicing", "name": "Slicing", "pages": [{"id": "all", "name": "All", "visuals": [
+        {"id": "pick", "type": "slicer", "title": "Region", "query": q, "layout": {"x": 0, "y": 0, "w": 4, "h": 4}},
+        {"id": "bars", "type": "bar", "title": "Bars", "query": q, "layout": {"x": 4, "y": 0, "w": 8, "h": 4}}]}]}
+    code, r = post(port, "/api/save_report", {"project": P, "report": rep}, key)
+    assert code == 200, r
+    out = _chromium("""
+import json, sys
+from playwright.sync_api import sync_playwright
+with sync_playwright() as p:
+    b = p.chromium.launch(); pg = b.new_page(locale="en-US", viewport={"width": 1440, "height": 900})
+    pg.goto(sys.argv[1]); pg.wait_for_selector("aside button.it"); pg.evaluate("show('rep:slicing')")
+    pg.wait_for_selector("[data-lk=bars] rect[data-r]")
+    n = lambda: pg.evaluate("[document.querySelectorAll('[data-lk=pick] tr[data-r]').length, document.querySelectorAll('[data-lk=bars] rect[data-r]').length]")
+    before = n()
+    row = pg.wait_for_selector("[data-lk=pick] tr[data-r] td")
+    name = row.inner_text(); row.click()
+    pg.wait_for_function("document.querySelectorAll('[data-lk=bars] rect[data-r]').length === 1")
+    after, chips = n(), pg.eval_on_selector_all(".chip.x", "cs => cs.map(c => c.textContent)")
+    pg.click(f"[data-lk=pick] tr[data-r]:has-text('{name}') td")
+    pg.wait_for_function(f"document.querySelectorAll('[data-lk=bars] rect[data-r]').length === {before[1]}")
+    out = {"before": before, "after": after, "chips": chips, "name": name, "cleared": pg.eval_on_selector_all(".chip.x", "cs => cs.length")}
+    b.close()
+print(json.dumps(out))
+""", f"http://127.0.0.1:{port}/")
+    assert out["before"] == [2, 2] and out["after"] == [2, 1], out
+    assert out["chips"] == [f"orders.region = {out['name']}"] and out["cleared"] == 0, out
 
 
 def test_page_layouts_are_a_draft_until_publish(srv):
