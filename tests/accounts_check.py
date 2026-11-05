@@ -38,7 +38,7 @@ import app  # noqa: E402
 from conftest import parquet  # noqa: E402
 
 acc = (ROOT / "data/accounts.txt").read_text()
-OWNER_PW = next(x.split()[-1] for x in acc.splitlines() if re.match(r"\s*himanshu\b", x))
+OWNER_PW = next(x.split()[-1] for x in acc.splitlines() if re.match(r"\s*admin\b", x))
 results = []
 
 
@@ -119,7 +119,7 @@ try:
         (d / "orders.csv").write_text("order_id,region,amount\n1,North,3\n2,South,4\n")
         abi.load("demo", PROJ, parquet(d / "orders.csv"))
     s = app.serve(PROJ, PORT, open_browser=False, signin=True)
-    osid, okey = sign("himanshu", OWNER_PW)
+    osid, okey = sign("admin", OWNER_PW)
     ok("the owner signs in", osid and okey)
     r = admin(osid, okey, "mail", {"host": "127.0.0.1", "port": 2525, "security": "none", "from": "abi@example.test"})
     ok("the owner sets the account mail server", "result" in r)
@@ -164,11 +164,11 @@ try:
     ok("someone else's company account stays out", oidc(sub="sub-stranger")[0] == "unknown")
 finally:
     try:
-        osid, okey = sign("himanshu", OWNER_PW)
+        osid, okey = sign("admin", OWNER_PW)
         if osid:
             admin(osid, okey, "sso/remove", {"id": "mock"})
             admin(osid, okey, "mail", {"off": True})
-        with abi.as_user(abi.login("himanshu", OWNER_PW)[1]["token"]):
+        with abi.as_user(abi.login("admin", OWNER_PW)[1]["token"]):
             for n in (email,):
                 try:
                     abi.call("delete_user", name=n)

@@ -57,7 +57,7 @@ machine's engine and app, or inside a docker install). Each run prints one JSON 
              of those, and the seconds until all three hold (serving_s, null: not within --wait).
 
 pages, memory, chats, publish and kill sign in to the app (--url or ABI_PERF_URL) as the workspace owner, ABI_USER (default
-himanshu), with ABI_PASSWORD (a docker install has both) or the password in data/accounts.txt (scripts/accounts.py):
+admin), with ABI_PASSWORD (a docker install has both) or the password in data/accounts.txt (scripts/accounts.py):
 never on the command line. They run on a bench project (bench_… or perf_…; --force for another): pages, memory and
 publish commit to it and add and remove accounts, so it may have no uncommitted work, and the run commits only its own
 changes back (the probe's and the accounts' removal: security/roles.json then lists none of them); anything else
@@ -153,7 +153,7 @@ def password(user: str) -> str | None:
 
 def owner(a, project: str = "") -> App:
     """The workspace owner in the app (Users & access, Commit), on a bench project (--project's by default)."""
-    user, project = os.environ.get("ABI_USER", "himanshu"), project or a.project
+    user, project = os.environ.get("ABI_USER") or "admin", project or a.project
     if not BENCH.fullmatch(project) and not getattr(a, "force", False):
         raise SystemExit(f"{project} isn't a bench project (bench_… or perf_…): the run commits to it and adds and removes"
                          " accounts. Use a bench project, or --force.")

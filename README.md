@@ -171,7 +171,7 @@ people open, so the links come back to ABI.
 | `ABI_BIND` | no | The address that port listens on: `127.0.0.1` for this machine only (your own proxy in front). Default: every address; with HTTPS on (below), `127.0.0.1`. |
 | `ABI_PROJECT` | no | The project to open first; created if missing. Default `main`. |
 | `ABI_WORKSPACE` | no | Its workspace. Default `main`. |
-| `ABI_LLM_BASE`, `ABI_LLM_KEY`, `ABI_LLM_MODEL` | no | One OpenAI-compatible model endpoint, its key and the model's id there (e.g. `https://api.openai.com/v1`, `gpt-5`), instead of Settings. |
+| `ABI_LLM_BASE`, `ABI_LLM_KEY`, `ABI_LLM_MODEL` | no | One OpenAI-compatible model endpoint, its key and the model's id there (e.g. `https://api.openai.com/v1`, `gpt-5`), instead of Settings. With `ABI_LLM_BASE`, `ABI_LLM_MODEL` is needed: ABI names no model of its own. |
 | `ABI_LLM_API` | no | `openai-completions` (the default with a model) or `openai-responses`. |
 | `ABI_PUBLIC_URL` | no | The address people open, e.g. `https://abi.example.com`: emailed links and single sign-on return there. With HTTPS on (below), `https://ABI_DOMAIN` by itself. |
 | `ABI_SOURCE_URL` | no | You changed ABI and run it for others: where its source is published. The sign-in page and every page link it (AGPL-3.0 §13). Default: this repository. |

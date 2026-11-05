@@ -1,7 +1,7 @@
 /**
  * ABI on Pi: the extension that makes Pi the ABI agent harness.
  *
- *  - provider    GPT-6.1 Sol through the local CLIProxyAPI (key read at request time, never stored)
+ *  - provider    the deployment's model endpoint (ABI_LLM_BASE/MODEL) and the providers in Settings (keys read at request time, never stored)
  *  - tool groups ABI's MCP tools stay deferred except the core reads; `abi_tools` activates a group and returns its
  *                notes (harness/notes/<group>.md), the way ABI's `more_tools` widens the Main Agent's tool list
  *  - confirm     MCP never hands out a confirm token ("do it in the app"); the harness asks the person here, then
@@ -53,7 +53,7 @@ function groupNotes(a: string): string {
 // abi.actions.PERSON_CLICK: access and where the project goes change only on a click in ABI's own UI (H-01.3)
 const PERSON_CLICK = new Set(["set_role", "set_tenant_admin", "set_user_tenant", "map_sender", "invite_user", "set_tenant", "set_remote"]);
 const DATA_FILE = /\.(csv|tsv|parquet|xlsx?|avro|arrow|feather|jsonl|ndjson|db|duckdb|sqlite|ducklake)$/i;
-const PREFS = path.join(os.homedir(), ".abi-pi", `prefs-${process.env.ABI_USER ?? "himanshu"}.json`);
+const PREFS = path.join(os.homedir(), ".abi-pi", `prefs-${process.env.ABI_USER || "admin"}.json`);
 const LOG = path.join(ROOT, "logs", `harness-${new Date().toISOString().slice(0, 10)}.jsonl`);
 const WITHHELD = "I couldn't back the numbers and names in my answer with a tool result, so I won't state it.";
 
@@ -115,15 +115,17 @@ export default async function abi(pi: ExtensionAPI) {
 	// ---------- the built-in model endpoint: ABI_PI_LLM_BASE/KEY/MODEL at deployment (else the proxy credentials file) ----------
 	try {
 		const baseUrl = execFileSync("python3", [CREDS, "llm-base"], { encoding: "utf8" }).trim();
-		const model = process.env.ABI_PI_LLM_MODEL || "gpt-6.1-sol";
-		pi.registerProvider("cliproxy", {
-			name: "Built-in endpoint",
+		// 1.2: no model ID of our own: the deployment names it (ABI_LLM_MODEL), else the endpoint isn't offered
+		const model = process.env.ABI_PI_LLM_MODEL;
+		if (!model) throw new Error("ABI_LLM_MODEL isn't set: the server endpoint needs the model's ID");
+		pi.registerProvider("server", {  // the endpoint .env names (ABI_LLM_*), a provider like any other
+			name: "Server endpoint (.env)",
 			baseUrl,
 			apiKey: `!python3 ${CREDS} llm-key`,
-			// chat completions when a model is named (OpenAI, OpenRouter, Ollama, vLLM, Gemini…); the original proxy speaks responses
-			api: (process.env.ABI_PI_LLM_API || (process.env.ABI_PI_LLM_MODEL ? "openai-completions" : "openai-responses")) as any,
-			models: [{ id: model, name: `${model} (built-in endpoint)`, reasoning: true, input: ["text", "image"],
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, ...(process.env.ABI_PI_LLM_MODEL ? { contextWindow: 200000, maxTokens: 32000 } : { contextWindow: 272000, maxTokens: 128000 }) }],
+			// chat completions (OpenAI, OpenRouter, Ollama, vLLM, Gemini…), or ABI_LLM_API=openai-responses for a responses endpoint
+			api: (process.env.ABI_PI_LLM_API || "openai-completions") as any,
+			models: [{ id: model, name: `${model} (server endpoint)`, reasoning: true, input: ["text", "image"],
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 200000, maxTokens: 32000 }],
 		});
 	} catch (e) {
 		log({ event: "provider_unavailable", error: String(e).slice(0, 200) });
@@ -223,7 +225,7 @@ export default async function abi(pi: ExtensionAPI) {
 				filters: Type.Optional(Type.Array(Type.Any())), theme: Type.Optional(Type.String({ enum: ["paper", "ink"] })),
 				captions: Type.Optional(Type.Record(Type.String(), Type.String())) }), { minItems: 1 }) }) }),
 		(p) => ["pack", "make", p.project, JSON.stringify(p.spec)]);
-	py("abi_health", "ABI health", "Checks ABI is up, the person is signed in, MCP answers and GPT-6.1 Sol is reachable.", Type.Object({}), () => ["health"]);
+	py("abi_health", "ABI health", "Checks ABI is up, the person is signed in, MCP answers and the model endpoint is reachable.", Type.Object({}), () => ["health"]);
 	py("abi_cli", "ABI CLI", "ABI's own CLI on the project folder: validate or diff (dry runs) or apply (import the folder's hand edits through ABI's checks).",
 		Type.Object({ command: Type.String({ enum: ["validate", "diff"] }), project: Type.String() }), (p) => ["cli", p.command, p.project]);
 

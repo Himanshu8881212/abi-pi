@@ -69,9 +69,9 @@ def test_a_bench_project_is_made_as_the_baselines_were(capsys):
 
 
 def test_pages_and_memory_through_an_app_here(capsys, monkeypatch, tmp_path):
-    monkeypatch.setenv("ABI_USER", "himanshu")
+    monkeypatch.setenv("ABI_USER", "admin")
     monkeypatch.delenv("ABI_PASSWORD", raising=False)  # the bench reads data/accounts.txt, as scripts/creds.py does
-    if not perf.password("himanshu"):
+    if not perf.password("admin"):
         pytest.skip("no accounts file")
     with pytest.raises(SystemExit, match="isn't a bench project"):  # someone's project gets no bench commits or accounts
         perf.main(["pages", "--url", "http://127.0.0.1:9", "--project", "main"])

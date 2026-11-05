@@ -548,9 +548,10 @@ async function usersPage(box){
   setTimeout(()=>show(CUR),1500);return x.mfa_required?'No longer required in '+x.name+'.':`Required in ${x.name}: ${y.result.signed_out} password session(s) ended; they set it up at their next sign-in.`}));
  const note=card('What this controls','and what it does not');note.append(h('p','','Role, sign-in and row-level security are ABI\'s: they decide what data a person can read or change, everywhere. Sections and reports decide what this app shows them and the app\'s own routes refuse the rest. Row and column rules are on the Security page.'));g.append(note)}
 // Settings (admins): the agent's model and reasoning, and the providers (API keys go in, never come out)
-const PRESETS={openai:['OpenAI','openai-responses','https://api.openai.com/v1','gpt-5'],anthropic:['Anthropic','anthropic-messages','https://api.anthropic.com','claude-sonnet-4-5'],
- openrouter:['OpenRouter','openai-completions','https://openrouter.ai/api/v1','anthropic/claude-sonnet-4.5'],ollama:['Ollama (local)','openai-completions','http://host.docker.internal:11434/v1','llama3.1'],
- gemini:['Google Gemini','google-generative-ai','https://generativelanguage.googleapis.com/v1beta','gemini-2.5-pro'],custom:['OpenAI-compatible','openai-completions','https://','model-id']};
+// a provider's model IDs always come from the provider itself (Fetch models): ABI names none of its own
+const PRESETS={openai:['OpenAI','openai-responses','https://api.openai.com/v1'],anthropic:['Anthropic','anthropic-messages','https://api.anthropic.com'],
+ openrouter:['OpenRouter','openai-completions','https://openrouter.ai/api/v1'],ollama:['Ollama (local)','openai-completions','http://host.docker.internal:11434/v1'],
+ gemini:['Google Gemini','google-generative-ai','https://generativelanguage.googleapis.com/v1beta'],custom:['OpenAI-compatible','openai-completions','https://']};
 // Pi computes a cost only for a model with prices: the rest is counted in tokens, never shown as $0
 const money=r=>r.cost?(r.cost<0.01?'< $0.01':'$'+r.cost.toFixed(2))+(r.unpriced?' (part tokens only)':''):'tokens only';
 async function settingsPage(box){
@@ -1789,8 +1790,14 @@ class Hub:
             session = str(self.chats_dir / f"{self.chat_id}.session.jsonl")  # Pi's own transcript: this chat's context
             import settings  # noqa: PLC0415 (sibling script): the admin's model and reasoning, also for the specialists
             conf = settings.load()
-            model = conf["model"] or (f"cliproxy/{os.environ['ABI_PI_LLM_MODEL']}" if os.environ.get("ABI_PI_LLM_MODEL") else None)  # Settings, else the deployment's
-            flags = (["--model", model] if model else []) + ["--thinking", conf["thinking"]]
+            model = conf["model"] or (f"server/{os.environ['ABI_PI_LLM_MODEL']}" if os.environ.get("ABI_PI_LLM_MODEL") else None)  # Settings, else the deployment's
+            if not model:  # 1.2: no model ID of ABI's own; say where to set one rather than start an agent with none
+                self.chat_note("me", message)
+                self.emit({"type": "said", "text": message}, here=False)
+                self.emit({"type": "answer", "text": NO_MODEL})
+                self.chat_note("ai", NO_MODEL)
+                return
+            flags = ["--model", model, "--thinking", conf["thinking"]]
             env |= {"ABI_PI_MODEL": conf["model"] or "", "ABI_PI_THINKING": conf["thinking"]}
             (abi.ROOT / "logs").mkdir(exist_ok=True)  # a source checkout has none until now (Docker links it to /data/logs)
             self.pi = subprocess.Popen(["pi", "--mode", "rpc", "--session", session, *flags], cwd=abi.ROOT, env=env, text=True, bufsize=1,
@@ -1895,6 +1902,8 @@ class Hub:
 
 HUBS: dict[str, Hub] = {}
 USAGE_LOCK = threading.Lock()
+NO_MODEL = ("No AI model is set up yet. An admin picks one in Govern › Settings › Models (a provider and its default"
+            " model), or the server sets ABI_LLM_BASE, ABI_LLM_KEY and ABI_LLM_MODEL in its .env.")
 MAX_AGENTS = int(os.environ.get("ABI_MAX_AGENTS", "8"))  # the chats' Pi processes running at once (M3.3)
 AGENTS = threading.Lock()  # a slot is taken or given only under it
 WAITING: list[tuple] = []  # (hub, chat ID, message, page): questions waiting for a slot, first asked first

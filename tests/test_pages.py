@@ -72,7 +72,7 @@ def people(tmp_path_factory):
         sure("set_rls_rule", project=P, id="region", table="orders", column="region", users={uid[w]: v for w, v in values.items()})
         sure("set_column_rule", project=P, id="channel", table="orders", columns=["channel"])
         port = s.server_address[1]
-        owner = Browser(port, "himanshu", OWNER)
+        owner = Browser(port, "admin", OWNER)
         yield {"port": port, "owner": owner, "people": {w: Browser(port, *made[w]) for w in made}, "uid": uid, "measure": m}
     finally:
         s.shutdown()

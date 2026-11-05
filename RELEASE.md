@@ -71,6 +71,11 @@ Before you do:
   `ABI_IMAGE=ghcr.io/himanshu8881212/abi:1.1.0` in `.env` (`:latest` is 1.2.0 and would migrate the data again), run
   `git checkout v1.1.0 -- docker-compose.yml scripts`, restore both files into a new volume with that image (README ›
   Back up and restore), then `docker compose up -d`.
+- **No default model.** 1.2 names no model of its own: the model is always the one picked in Govern › Settings ›
+  Models, or the one `.env` names (`ABI_LLM_MODEL`, with `ABI_LLM_API=openai-responses` for a responses endpoint). An
+  install whose `ABI_LLM_BASE` named no `ABI_LLM_MODEL` ran a model 1.1 chose: before or right after the upgrade, pick
+  one in Settings or name it in `.env`; until then a chat says where to set one. The first account of a
+  source checkout is `admin` (or `$ABI_USER`), not a person's name.
 - **Profiles.** HTTPS is `COMPOSE_PROFILES=https`, the runner container `COMPOSE_PROFILES=runner`, both
   `COMPOSE_PROFILES=https,runner`; `scripts/upgrade.sh` and a plain `docker compose up -d` keep what `.env` says.
 - **`ABI_DOMAIN` alone closes port 8790 to the network**: with HTTPS on, ABI's own port listens on this machine only

@@ -1,6 +1,7 @@
 """The image: one image with everything, video included (owner, 5 Nov 2026; 1.2 M4.3's -video split is gone), for
 amd64 and arm64; a source install without Remotion says how to add it; upgrade.sh builds the image the install chose;
 and the engine loads Playwright and python-pptx only when it renders."""
+import json
 import os
 import re
 import subprocess
@@ -170,3 +171,15 @@ def test_the_engine_and_the_worker_start_without_playwright_or_pptx(tmp_path):
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
+
+
+def test_abi_names_no_model_of_its_own():
+    """The model comes from Settings or the deployment's ABI_LLM_MODEL, never from ABI itself."""
+    pi = json.loads((ROOT / ".pi/settings.json").read_text())
+    assert not {"defaultModel", "defaultProvider", "enabledModels"} & set(pi)
+    ext = (ROOT / ".pi/extensions/abi/index.ts").read_text()
+    assert "gpt-6.1-sol" not in ext and "const model = process.env.ABI_PI_LLM_MODEL;" in ext
+    for f in ("scripts/settings.py", "scripts/abi.py", "scripts/upgrade.sh", "scripts/app.py", ".pi/extensions/subagent/index.ts"):
+        assert "gpt-6.1-sol" not in (ROOT / f).read_text(), f
+    assert "NO_MODEL" in (ROOT / "scripts/app.py").read_text()
+    assert not any("model:" in f.read_text().split("---")[1] for f in (ROOT / ".pi/agents").glob("*.md"))

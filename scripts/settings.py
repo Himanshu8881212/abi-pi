@@ -168,8 +168,8 @@ def next_model(failed: str, tried: list) -> str | None:
 
 
 def _builtin(base: str) -> str:
-    """The built-in connection's key, only for its own address (creds.py: the container's environment, else the proxy
-    credentials file): a provider saved for that address without a key of its own uses it; any other address never
+    """The built-in connection's key, only for its own address (creds.py: the deployment's environment, its .env; no
+    file of anyone's own): a provider saved for that address without a key of its own uses it; any other address never
     sees it."""
     import creds  # noqa: PLC0415 (sibling script)
     try:
@@ -199,8 +199,8 @@ def engine_sync() -> str:
             base, key = creds.proxy("API base URL").rstrip("/"), creds.proxy("API key")
         except (OSError, SystemExit):
             return "skipped: no model connected"
-        mid = os.environ.get("ABI_PI_LLM_MODEL") or json.loads((Path(__file__).resolve().parent.parent / ".pi/settings.json").read_text())["defaultModel"]
-    if not base:
+        mid = os.environ.get("ABI_PI_LLM_MODEL")  # 1.2: the deployment names it; no model ID of ABI's own
+    if not base or not mid:
         return "skipped: no model connected"
     args = {"id": "abi-pi", "base_url": base, "models": {"small": mid, "large": mid}}
     if key and key != "none":

@@ -1,11 +1,6 @@
 {
   "$schema": "https://pi.dev/schemas/settings.schema.json",
-  "defaultProvider": "cliproxy",
-  "defaultModel": "gpt-6.1-sol",
   "defaultThinkingLevel": "medium",
-  "enabledModels": [
-    "cliproxy/gpt-6.1-sol"
-  ],
   "defaultTools": [
     "read",
     "ls",

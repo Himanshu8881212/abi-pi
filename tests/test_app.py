@@ -264,7 +264,7 @@ def _account(name):
 
 def test_people_sign_in_with_their_abi_account_and_get_only_their_access():
     import http.client
-    if not _account("himanshu"):
+    if not _account("admin"):
         pytest.skip("no accounts file")
     s = app.serve(P, 0, open_browser=False, signin=True)
     port = s.server_address[1]
@@ -284,16 +284,16 @@ def test_people_sign_in_with_their_abi_account_and_get_only_their_access():
         t0 = time.time()  # another name's first miss waits 2 s, not the 4 s of this address's second: behind HTTPS every
         st, cookie, body = sign("nobody-else", "wrong-" + "x" * 12)  # browser comes from Caddy's address, one count for all
         assert st == 200 and not cookie and time.time() - t0 < 3.5, time.time() - t0
-        st, cookie, _ = sign("himanshu", _account("himanshu"))
+        st, cookie, _ = sign("admin", _account("admin"))
         assert st == 303 and "abi_u=" in cookie and "HttpOnly" in cookie
         sid = cookie.split(";")[0]
         page = urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{port}/", headers={"Cookie": sid})).read().decode()
         key = re.search(r"KEY='([^']+)'", page).group(1)
-        assert '"name": "himanshu"' in page and '"admin": true' in page
+        assert '"name": "admin"' in page and '"admin": true' in page
         req = urllib.request.Request(f"http://127.0.0.1:{port}/admin/users", b"{}", {"Cookie": sid, "X-Abi-App": key, "Content-Type": "application/json"})
         users = json.loads(urllib.request.urlopen(req).read())["result"]["users"]
-        assert any(u["name"] == "himanshu" for u in users)
-        tok = next(x.token for x in s.hubs.values() if x.user == "himanshu")
+        assert any(u["name"] == "admin" for u in users)
+        tok = next(x.token for x in s.hubs.values() if x.user == "admin")
         c = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
         c.request("POST", "/signout", "", {"Cookie": sid})
         assert c.getresponse().status == 303
@@ -319,7 +319,7 @@ def test_an_owner_adds_a_person_without_email_and_they_change_their_own_password
     """No mail server needed: the owner adds an account with a starting password; its owner changes it in the app."""
     import http.client
     import secrets as _s
-    if not _account("himanshu"):
+    if not _account("admin"):
         pytest.skip("no accounts file")
     s = app.serve(P, 0, open_browser=False, signin=True)
     port, name = s.server_address[1], "probe_" + _s.token_hex(4)
@@ -343,7 +343,7 @@ def test_an_owner_adds_a_person_without_email_and_they_change_their_own_password
         except urllib.error.HTTPError as e:
             return e.code, json.loads(e.read() or b"{}")
     try:
-        osid, okey = sign("himanshu", _account("himanshu"))
+        osid, okey = sign("admin", _account("admin"))
         code, r = post(osid, okey, "/admin/adduser", {"name": name, "password": "short"})
         assert code == 400 and "short" not in json.dumps(r), "a short password is refused here, never echoed"
         code, r = post(osid, okey, "/admin/adduser", {"name": name, "password": pw1})
@@ -383,7 +383,7 @@ def test_an_owner_adds_a_person_without_email_and_they_change_their_own_password
         r = c.getresponse()
         assert r.status == 303 and r.getheader("Location").startswith("/?signin="), "back to this app only"
     finally:
-        with abi.as_user(abi.login("himanshu", _account("himanshu"))[1]["token"]):
+        with abi.as_user(abi.login("admin", _account("admin"))[1]["token"]):
             with contextlib.suppress(abi.ActionError):
                 try:
                     abi.call("delete_user", name=name)
@@ -437,12 +437,12 @@ def test_two_step_sign_in_is_turned_on_off_and_reset_in_the_app(capfd):
     codes once) and off (password and a code) by clicking their name, and a workspace owner resets someone's (ABI asks
     first); a person who isn't an owner can't; the key and the codes never reach the app's log."""
     import secrets as _s
-    if not _account("himanshu"):
+    if not _account("admin"):
         pytest.skip("no accounts file")
     s = app.serve(P, 0, open_browser=False, signin=True)
     sign, post = _app_session(s.server_address[1])
     name, pw = "probe_" + _s.token_hex(4), _s.token_urlsafe(12)
-    owner = abi.login("himanshu", _account("himanshu"))[1]["token"]
+    owner = abi.login("admin", _account("admin"))[1]["token"]
     try:
         with abi.as_user(owner):
             abi.call("create_user", name=name, password=pw)
@@ -470,7 +470,7 @@ def test_two_step_sign_in_is_turned_on_off_and_reset_in_the_app(capfd):
         assert "result" in post(sid, "/mfa", {"op": "confirm", "code": _totp(key2)})[1]
         assert post(sid, "/admin/mfa/reset", {"user": name})[0] == 403, "only workspace owners reset someone's"
         assert post(sid, "/admin/mfa/require", {"tenant": "x", "on": True})[0] == 403, "or require it"
-        st, osid, _ = sign("himanshu", _account("himanshu"))
+        st, osid, _ = sign("admin", _account("admin"))
         code, r = post(osid, "/admin/mfa/reset", {"user": name})
         assert code == 200 and "confirm" in r and "token" not in json.dumps(r).lower(), r
         assert post(sid, "/mfa", {"op": "status"})[1]["result"]["on"], "nothing changes before the owner's yes"
@@ -490,12 +490,12 @@ def test_a_tenant_that_requires_two_step_enrols_people_at_sign_in(capfd):
     could not get in through the app. Now the owner requires it on Users & access (their password sessions end) and the
     sign-in page shows the key; the code signs in and shows the recovery codes once."""
     import secrets as _s
-    if not _account("himanshu"):
+    if not _account("admin"):
         pytest.skip("no accounts file")
     s = app.serve(P, 0, open_browser=False, signin=True)
     sign, post = _app_session(s.server_address[1])
     name, pw, tid = "probe_" + _s.token_hex(4), _s.token_urlsafe(12), "tprobe_" + _s.token_hex(4)
-    owner = abi.login("himanshu", _account("himanshu"))[1]["token"]
+    owner = abi.login("admin", _account("admin"))[1]["token"]
     try:
         with abi.as_user(owner):
             abi.call("create_tenant", id=tid, name="Probe tenant")
@@ -503,7 +503,7 @@ def test_a_tenant_that_requires_two_step_enrols_people_at_sign_in(capfd):
         st, sid, _ = sign(name, pw)
         assert st == 303 and sid, "not required yet: the password signs in"
         assert post(sid, "/admin/mfa/require", {"tenant": tid, "on": True})[0] == 403, "only workspace owners require it"
-        st, osid, _ = sign("himanshu", _account("himanshu"))
+        st, osid, _ = sign("admin", _account("admin"))
         users = post(osid, "/admin/users", {})[1]["result"]
         assert {"id": tid, "name": "Probe tenant", "mfa_required": False} in users["tenants"]
         code, r = post(osid, "/admin/mfa/require", {"tenant": tid, "on": True})
@@ -686,8 +686,8 @@ def test_a_model_that_refuses_is_told_not_silent(tmp_path, monkeypatch):
     import types
     monkeypatch.setattr(app.abi, "ROOT", tmp_path)
     (tmp_path / "logs").mkdir()
-    err = {"role": "assistant", "content": [], "stopReason": "error", "provider": "cliproxy", "model": "gpt-6.1-sol",
-           "errorMessage": 'cliproxy API error (429): {"code":"model_cooldown","message":"All credentials are cooling down"}'}
+    err = {"role": "assistant", "content": [], "stopReason": "error", "provider": "server", "model": "model-a",
+           "errorMessage": 'server API error (429): {"code":"model_cooldown","message":"All credentials are cooling down"}'}
     lines = [json.dumps({"type": "message_end", "message": err}), json.dumps({"type": "agent_settled", "aborted": False})]
     h = app.Hub.__new__(app.Hub)
     out = []
@@ -696,7 +696,7 @@ def test_a_model_that_refuses_is_told_not_silent(tmp_path, monkeypatch):
     answers = [e["text"] for e in out if e["type"] == "answer"]
     assert answers and "429" in answers[0] and "Settings" in answers[0], out
     assert "credentials" not in answers[0], "the provider's own text stays in the log"
-    assert [json.loads(x)["model"] for x in (tmp_path / "logs/usage.jsonl").read_text().splitlines()] == ["cliproxy/gpt-6.1-sol"]
+    assert [json.loads(x)["model"] for x in (tmp_path / "logs/usage.jsonl").read_text().splitlines()] == ["server/model-a"]
 
 
 def test_a_failing_model_hands_the_question_to_the_next_fallback(tmp_path, monkeypatch):

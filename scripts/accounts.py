@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""The own engine's accounts for this machine: the first run makes `himanshu` the workspace owner (ABI's /api/setup),
+"""The own engine's accounts for this machine: the first run makes `admin` (or $ABI_USER) the workspace owner (ABI's /api/setup),
 then creates the others. Random passwords go to data/accounts.txt (0600, git-ignored; `name password` lines, as
 creds.py reads them) and are never printed. Re-running only adds missing names.
 
-    scripts/accounts.py [name ...]     default: himanshu staff lena omar etl sara ken tom ivy
+    scripts/accounts.py [name ...]     default: admin staff lena omar etl sara ken tom ivy
 """
 import json
 import os
@@ -15,7 +15,7 @@ from pathlib import Path
 
 URL = os.environ.get("ABI_URL", "http://127.0.0.1:8780")
 FILE = Path(os.environ.get("ABI_ACCOUNTS", Path(__file__).resolve().parent.parent / "data/accounts.txt"))
-NAMES = sys.argv[1:] or "himanshu staff lena omar etl sara ken tom ivy".split()
+NAMES = sys.argv[1:] or [os.environ.get("ABI_USER") or "admin", *"staff lena omar etl sara ken tom ivy".split()]
 
 
 def post(path: str, body: dict, token: str | None = None) -> dict:

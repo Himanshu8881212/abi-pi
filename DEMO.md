@@ -4,7 +4,7 @@
 
 ```sh
 cd ~/Work/Working/abi-pi
-.venv/bin/python scripts/abi.py health      # abi ok, signed_in true, mcp_tools 160, model_gpt_6_1_sol true
+.venv/bin/python scripts/abi.py health      # abi ok, signed_in true, mcp_tools 160, model true (ABI_LLM_MODEL served)
 bin/abi                                     # Pi starts on cliproxy/gpt-6.1-sol; footer: "ABI (no project) · … · grounding ok"
 ```
 

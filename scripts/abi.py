@@ -499,9 +499,11 @@ def health() -> dict:
         base = subprocess.run([sys.executable, str(HERE / "creds.py"), "llm-base"], capture_output=True, text=True).stdout.strip()
         key = subprocess.run([sys.executable, str(HERE / "creds.py"), "llm-key"], capture_output=True, text=True).stdout.strip()
         with urllib.request.urlopen(urllib.request.Request(base + "/models", headers={"Authorization": f"Bearer {key}"}), timeout=10) as r:
-            out["model_gpt_6_1_sol"] = any(m["id"] == "gpt-6.1-sol" for m in json.load(r)["data"])
+            ids = [m["id"] for m in json.load(r)["data"]]
+        want = os.environ.get("ABI_PI_LLM_MODEL")  # the model the deployment names; ABI names none of its own
+        out["model"] = (want in ids) if want else f"none named; the endpoint serves {len(ids)}"
     except Exception as e:  # noqa: BLE001
-        out["model_gpt_6_1_sol"] = f"unreachable: {type(e).__name__}"
+        out["model"] = f"unreachable: {type(e).__name__}"
     return out
 
 

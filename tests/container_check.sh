@@ -11,10 +11,11 @@ up() { for _ in $(seq 1 90); do curl -fs -o /dev/null "127.0.0.1:$1/" && return 
 in_c() { docker exec "$1" sh -c "cd /app && eval \"\$(scripts/engine.sh env)\" && $2"; }
 docker rm -f abi-pi-test >/dev/null 2>&1 || true; docker volume rm abi-pi-e2e >/dev/null 2>&1 || true
 export ABI_PASSWORD; ABI_PASSWORD=$(openssl rand -hex 12)
-export ABI_PI_LLM_BASE ABI_PI_LLM_KEY  # given in the environment (another machine), else from scripts/creds.py
+export ABI_PI_LLM_BASE ABI_PI_LLM_KEY ABI_PI_LLM_MODEL ABI_PI_LLM_API  # given in the environment (another machine), else from scripts/creds.py
+: "${ABI_PI_LLM_MODEL:?the model ID at that endpoint (ABI names none of its own)}"
 ABI_PI_LLM_BASE=${ABI_PI_LLM_BASE:-$(python3 scripts/creds.py llm-base)}; ABI_PI_LLM_KEY=${ABI_PI_LLM_KEY:-$(python3 scripts/creds.py llm-key)}
 run() { docker run -d --name "$1" -p "127.0.0.1:$2:8790" -v "$3:/data" -e ABI_USER=admin -e ABI_PASSWORD -e ABI_PI_LLM_BASE \
-  -e ABI_PI_LLM_KEY -e ABI_PI_PROJECT=pi_app_test -e ABI_PI_WORKSPACE=demo "$ABI_IMAGE" >/dev/null; }
+  -e ABI_PI_LLM_KEY -e ABI_PI_LLM_MODEL -e ABI_PI_LLM_API -e ABI_PI_PROJECT=pi_app_test -e ABI_PI_WORKSPACE=demo "$ABI_IMAGE" >/dev/null; }
 t=$(date +%s); run abi-pi-test 8796 abi-pi-e2e; up 8796 && ok "fresh volume up in $(( $(date +%s) - t )) s" || bad "fresh start"
 [ "$(docker exec abi-pi-test ps -o comm= -p 1)" = tini ] && ok "tini is PID 1" || bad "PID 1"
 [ "$(docker exec abi-pi-test id -un)" = abi ] && ok "runs as abi" || bad "user"
@@ -28,7 +29,7 @@ for f in (\"pdf\", \"pptx\"):
 print(abi.call(\"semantic_query\", project=\"pi_app_test\", measures=[\"orders_rows\"], dimensions=[\"orders.region\"])[\"rows\"])"' > "$S/rows" 2>&1 \
   && ok "load, query, PDF, PPTX: $(tail -1 "$S/rows")" || bad "load/exports: $(tail -2 "$S/rows")"
 in_c abi-pi-test 'python3 scripts/video.py pi_app_test overview --seconds 1 --size 320x180 --out /tmp/v.mp4' >/dev/null 2>&1 && ok "video" || bad "video"
-in_c abi-pi-test 'export ABI_TOKEN=$(python3 scripts/creds.py abi-token) && pi -p "In project pi_app_test: how many orders rows per region? Give the figures."' > "$S/agent" 2>&1 || true
+in_c abi-pi-test 'export ABI_TOKEN=$(python3 scripts/creds.py abi-token) && pi --model "server/$ABI_PI_LLM_MODEL" -p "In project pi_app_test: how many orders rows per region? Give the figures."' > "$S/agent" 2>&1 || true
 grep -q "North" "$S/agent" && grep -q "2" "$S/agent" && ok "agent answers inside" || bad "agent: $(tail -3 "$S/agent")"
 docker kill -s KILL abi-pi-test >/dev/null; docker start abi-pi-test >/dev/null; up 8796 && in_c abi-pi-test 'python3 -c "import sys; sys.path.insert(0, \"scripts\"); import abi; print(abi.call(\"semantic_query\", project=\"pi_app_test\", measures=[\"orders_rows\"], dimensions=[\"orders.region\"])[\"rows\"])"' > "$S/after" 2>&1
 cmp -s "$S/after" "$(printf '%s' "$S/rows")" 2>/dev/null; [ "$(tail -1 "$S/after")" = "$(tail -1 "$S/rows")" ] && ok "hard kill keeps data" || bad "after kill: $(tail -1 "$S/after")"
