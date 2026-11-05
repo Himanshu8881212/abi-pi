@@ -913,18 +913,20 @@ with sync_playwright() as p:
     tip = s.evaluate("e => (e.dispatchEvent(new MouseEvent('mousemove', {bubbles: true})), document.querySelector('.tip').textContent)")
     s.evaluate("e => e.dispatchEvent(new MouseEvent('click', {bubbles: true}))")
     pg.wait_for_function("document.querySelectorAll('.card path[data-r]').length === 1")  # the report again, for that member
-    out = {"tip": tip, "chips": pg.eval_on_selector_all(".chip.x", "cs => cs.map(c => c.textContent)"), "map": pg.inner_text(".card:has(p.empty)")}
+    out = {"tip": tip, "chips": pg.eval_on_selector_all(".fchip", "cs => cs.map(c => c.querySelector('b').textContent + ': ' + c.querySelector('span').textContent)"), "map": pg.inner_text(".card:has(p.empty)")}
     b.close()
 print(json.dumps(out))
 """, f"http://127.0.0.1:{port}/")
     tips = {f"{r[0]} · {d['measures'][amt]}: {r[1]:,.0f}": r[0] for r in d["rows"]}
-    assert out["tip"] in tips and out["chips"] == [f"orders.region = {tips[out['tip']]}"], (out, tips)
+    assert out["tip"] in tips and out["chips"] == [f"Region: {tips[out['tip']]}"], (out, tips)
     assert "isn't drawn on this page yet" in out["map"], out
 
 
-def test_a_click_on_a_slicer_row_filters_the_report_and_a_second_clears_it(srv):
-    """A slicer was drawn as a plain table whose rows carried no row, so picking a member filtered nothing (owner, 5 Nov).
-    A row is its visual_data row as a mark is; the slicer keeps listing every member; the same row again clears it."""
+def test_a_slicer_filters_the_report_and_the_filter_bar_shows_and_edits_it(srv):
+    """A slicer was drawn as a plain table whose rows did nothing, so picking a member filtered nothing (owner, 5 Nov).
+    Now its members are toggles: one picked filters every visual and shows as a chip in the filter bar, the slicer
+    keeps listing every member, a second member adds to the same filter, its × clears it, and the bar's own
+    "+ Filter" sets one from a column's members."""
     port, key, _ = srv
     amt = next(m["id"] for m in abi.call("semantic_model", project=P)["measures"] if m["expression"] == "SUM(orders.amount)")
     q = {"measures": [amt], "dimensions": ["orders.region"]}
@@ -940,20 +942,23 @@ with sync_playwright() as p:
     b = p.chromium.launch(); pg = b.new_page(locale="en-US", viewport={"width": 1440, "height": 900})
     pg.goto(sys.argv[1]); pg.wait_for_selector("aside button.it"); pg.evaluate("show('rep:slicing')")
     pg.wait_for_selector("[data-lk=bars] rect[data-r]")
-    n = lambda: pg.evaluate("[document.querySelectorAll('[data-lk=pick] tr[data-r]').length, document.querySelectorAll('[data-lk=bars] rect[data-r]').length]")
-    before = n()
-    row = pg.wait_for_selector("[data-lk=pick] tr[data-r] td")
-    name = row.inner_text(); row.click()
-    pg.wait_for_function("document.querySelectorAll('[data-lk=bars] rect[data-r]').length === 1")
-    after, chips = n(), pg.eval_on_selector_all(".chip.x", "cs => cs.map(c => c.textContent)")
-    pg.click(f"[data-lk=pick] tr[data-r]:has-text('{name}') td")
-    pg.wait_for_function(f"document.querySelectorAll('[data-lk=bars] rect[data-r]').length === {before[1]}")
-    out = {"before": before, "after": after, "chips": chips, "name": name, "cleared": pg.eval_on_selector_all(".chip.x", "cs => cs.length")}
+    bars = lambda k: pg.wait_for_function(f"document.querySelectorAll('[data-lk=bars] rect[data-r]').length === {k}")
+    st = lambda: pg.evaluate("({opts: [...document.querySelectorAll('[data-lk=pick] .sl')].map(b => [b.querySelector('span').textContent, b.classList.contains('on')]),"
+                             " chips: [...document.querySelectorAll('.fchip')].map(c => c.querySelector('b').textContent + ': ' + c.querySelector('span').textContent)})")
+    out = {"before": st()}
+    pg.click("[data-lk=pick] .sl:has-text('North')"); bars(1); out["one"] = st()
+    pg.click("[data-lk=pick] .sl:has-text('South')"); bars(2); out["two"] = st()
+    pg.click(".fchip button"); bars(2); pg.wait_for_function("!document.querySelector('.fchip')"); out["cleared"] = st()
+    pg.click(".fadd"); pg.select_option(".fpop select", "orders.region"); pg.wait_for_selector(".fpop .fopt")
+    pg.check(".fpop .fopt:has-text('South') input"); pg.click(".fpop .btn.pri"); bars(1); out["bar"] = st()
     b.close()
 print(json.dumps(out))
 """, f"http://127.0.0.1:{port}/")
-    assert out["before"] == [2, 2] and out["after"] == [2, 1], out
-    assert out["chips"] == [f"orders.region = {out['name']}"] and out["cleared"] == 0, out
+    assert out["before"] == {"opts": [["North", False], ["South", False]], "chips": []}, out
+    assert out["one"] == {"opts": [["North", True], ["South", False]], "chips": ["Region: North"]}, out
+    assert out["two"] == {"opts": [["North", True], ["South", True]], "chips": ["Region: North, South"]}, out
+    assert out["cleared"] == out["before"], out
+    assert out["bar"] == {"opts": [["South", True], ["North", False]], "chips": ["Region: South"]}, out
 
 
 def test_page_layouts_are_a_draft_until_publish(srv):

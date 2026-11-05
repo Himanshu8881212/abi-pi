@@ -112,6 +112,22 @@ input.f:focus,textarea.f:focus,select.f:focus{outline:none;border-color:var(--in
 label.l{display:block;font:500 12px var(--text);color:var(--mute);margin:16px 0 0}.card>label.l:first-of-type{margin-top:0}
 .msg{font-size:13px;margin:8px 0;white-space:pre-wrap;color:var(--mute)}.msg:empty{display:none}.out{margin-top:16px}.out:empty{display:none}
 .chip.x{cursor:pointer;background:var(--ink);border-color:var(--ink);color:var(--sheet)}.chip.x:after{content:'  \00d7'}
+.fbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;position:relative;margin:0 0 16px}.fchips{display:contents}
+.fchip{display:inline-flex;align-items:center;gap:6px;max-width:380px;padding:3px 3px 3px 12px;border:1px solid var(--ink);border-radius:999px;background:var(--sheet);font-size:13px;cursor:pointer}
+.fchip b{font-weight:500;color:var(--mute);white-space:nowrap}.fchip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fchip button{flex:none;border:0;background:none;color:var(--mute);width:24px;height:24px;border-radius:50%;cursor:pointer;font-size:16px;line-height:1}
+.fchip button:hover{background:color-mix(in srgb,var(--ink) 10%,transparent);color:var(--ink)}
+.btn.fadd{border-style:dashed;padding:5px 12px;border-radius:999px}.flink{border:0;background:none;padding:2px 0;color:var(--mute);font:inherit;font-size:13px;cursor:pointer;text-decoration:underline;text-underline-offset:3px;align-self:flex-start}.flink:hover{color:var(--ink)}.flink[hidden]{display:none}
+.fpop{position:absolute;top:calc(100% + 6px);left:0;z-index:30;width:min(340px,calc(100vw - 32px));display:flex;flex-direction:column;gap:8px;padding:12px;background:var(--sheet);border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 32px color-mix(in srgb,#000 18%,transparent)}
+.fpop .list{max-height:280px;overflow:auto;display:flex;flex-direction:column;margin:0 -4px}.fpop .list:empty{display:none}
+.fopt{display:flex;gap:10px;align-items:center;padding:6px 8px;border-radius:4px;font-size:13px;cursor:pointer}.fopt:hover{background:color-mix(in srgb,var(--ink) 6%,transparent)}.fopt input{accent-color:var(--ink);margin:0}
+.slicer{display:flex;flex-direction:column;gap:8px;min-height:0;max-height:100%}.slicer>input.f{padding:6px 10px;font-size:13px}
+.slicer .opts{display:flex;flex-wrap:wrap;gap:6px;align-content:flex-start;overflow:auto;min-height:0;padding-bottom:10px;mask-image:linear-gradient(to bottom,#000 calc(100% - 18px),transparent)}
+.sl{display:inline-flex;align-items:baseline;gap:6px;padding:5px 12px;border:1px solid var(--line);border-radius:999px;background:var(--sheet);color:var(--ink);font:13px/1.2 var(--text);cursor:pointer;transition:background .12s,border-color .12s}
+.sl:hover{border-color:var(--ink)}.sl small{color:var(--mute);font-size:11px;font-variant-numeric:tabular-nums}.sl[hidden]{display:none}
+.sl.on{background:var(--ink);border-color:var(--ink);color:var(--sheet)}.sl.on small{color:color-mix(in srgb,var(--sheet) 70%,transparent)}
+.sl:focus-visible,.fchip button:focus-visible,.flink:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+.grid.busy{opacity:.55;transition:opacity .15s;pointer-events:none}
 dialog{border:1px solid var(--line);border-radius:8px;background:var(--sheet);color:var(--ink);max-width:640px;padding:28px}
 dialog h3{margin:0 0 12px;font:600 18px var(--display)}dialog .row{margin-top:20px;justify-content:flex-end}dialog pre{white-space:pre-wrap;max-height:40vh}dialog::backdrop{background:color-mix(in srgb,#000 45%,transparent);backdrop-filter:blur(2px)}
 .trace{margin:12px 0 0;padding-left:20px}.trace li{margin:3px 0}.trace:empty{display:none}
@@ -358,20 +374,39 @@ function report(box,rep){let flt=PENDING.filters||[];PENDING.filters=null;
   btn('New report',()=>{const c=editor('report',KIND.report.tpl,true);box.querySelector('.pghead').after(c)}),
   btn('Delete report',async()=>{try{await KIND.report.del({id:rep.id});toast('Deleted.')}catch(e){toast(e.message)}}));box.append(tb)}
  {const tb=box.querySelector(':scope>.bar.top');let ex=null;const eb=h('button','btn pri','Export');eb.onclick=()=>{if(ex){ex.remove();ex=null;return}ex=exportCard(rep,()=>flt,()=>cur);box.querySelector('.pghead').after(ex)};tb.prepend(eb)
-  let mc=null;tb.append(btn('Email this report',()=>{if(mc){mc.remove();mc=null;return}mc=mailCard(rep);box.querySelector('.pghead').after(mc)}))}const top=h('div','row bar lead'),col=h('select','f');col.append(new Option('filter by…',''));D.dims.forEach(c=>col.append(new Option(c,c)));
- const val=h('select','f');val.multiple=true;val.hidden=true;const add=h('button','btn','add filter');add.hidden=true;const chips=h('span');
- top.append(col,val,add,chips);const tabs=h('nav','tabs'),grid=h('div','grid'),msg=h('div','msg');box.append(top,msg,tabs,grid);
- col.onchange=async()=>{val.innerHTML='';if(!col.value){val.hidden=add.hidden=true;return}
-  try{const r=await api('semantic_query',{measures:[D.measures[0]?.id],dimensions:[col.value],order_by:[{field:col.value}],limit:500});
-   r.rows.forEach(x=>val.append(new Option(String(x[0]),JSON.stringify(x[0]))));val.size=Math.min(8,r.rows.length);val.hidden=add.hidden=false}catch(e){say(msg,e.message,1)}};
- add.onclick=()=>{const v=[...val.selectedOptions].map(o=>JSON.parse(o.value));if(v.length){flt=flt.filter(f=>f.column!==col.value);flt.push({column:col.value,op:'in',value:v});draw()}};
- const cross=(dim,value)=>{const on=flt.some(f=>f.column===dim&&f.op==='='&&f.value===value);flt=flt.filter(f=>f.column!==dim);if(!on)flt.push({column:dim,op:'=',value});draw()};  // a second click on the same value clears it
+  let mc=null;tb.append(btn('Email this report',()=>{if(mc){mc.remove();mc=null;return}mc=mailCard(rep);box.querySelector('.pghead').after(mc)}))}const top=h('div','fbar'),chips=h('span','fchips'),addb=h('button','btn fadd','+ Filter'),clr=h('button','flink','Clear all');clr.hidden=!flt.length;
+ top.append(chips,addb,clr);const tabs=h('nav','tabs'),grid=h('div','grid'),msg=h('div','msg');box.append(top,msg,tabs,grid);
+ // filters: one per column, a list of members ("in"); a chart click or a slicer sets it, the bar shows and edits it
+ const vals=c=>{const f=flt.find(f=>f.column===c);return f?[].concat(f.value):[]};
+ const setVals=(c,vs)=>{flt=flt.filter(f=>f.column!==c);if(vs.length)flt.push({column:c,op:'in',value:vs});draw()};
+ const cross=(dim,value)=>{const v=vals(dim);setVals(dim,v.length===1&&v[0]===value?[]:[value])};  // a second click on the same member clears it
+ clr.onclick=()=>{flt=[];draw()};let pop=null;
+ const close=()=>{pop?.remove();pop=null};document.addEventListener('keydown',e=>{if(e.key==='Escape')close()});
+ document.addEventListener('mousedown',e=>{if(pop&&!pop.contains(e.target)&&!addb.contains(e.target)&&!e.target.closest?.('.fchip'))close()});
+ // the members of a column, counted by a measure of this report (one of a visual by that column first): the model's
+ // first measure may be filtered to a few of them
+ const qs=(rep.spec?.pages||[]).flatMap(p=>p.visuals||[]).map(v=>v.query).filter(q=>q?.measures?.length);
+ const measFor=c=>(qs.find(q=>(q.dimensions||[]).includes(c))||qs[0])?.measures[0]||D.measures[0]?.id;
+ function open(c0){close();pop=h('div','fpop');const col=h('select','f'),q=h('input','f'),list=h('div','list'),ft=h('div','row'),ok=h('button','btn pri','Apply'),no=h('button','btn','Cancel');
+  col.append(new Option('Choose a column…',''));D.dims.forEach(c=>col.append(new Option(`${colName(c)} · ${c.split('.')[0]}`,c)));col.value=c0||'';q.placeholder='Search';q.hidden=true;
+  ft.append(ok,no);ft.style.justifyContent='flex-end';pop.append(col,q,list,ft);top.append(pop);no.onclick=close;
+  ok.onclick=()=>{if(col.value)setVals(col.value,[...list.querySelectorAll('input:checked')].map(i=>JSON.parse(i.value)));close()};
+  q.oninput=()=>{const t=q.value.toLowerCase();list.querySelectorAll('label').forEach(l=>l.hidden=!l.textContent.toLowerCase().includes(t))};
+  col.onchange=async()=>{list.textContent='';q.hidden=true;if(!col.value)return;list.append(h('p','msg','Loading…'));
+   try{const r=await api('semantic_query',{measures:[measFor(col.value)],dimensions:[col.value],order_by:[{field:col.value}],limit:500}),on=vals(col.value);list.textContent='';
+    r.rows.forEach(x=>{const l=h('label','fopt'),i=h('input');i.type='checkbox';i.value=JSON.stringify(x[0]);i.checked=on.includes(x[0]);l.append(i,h('span','',x[0]===null?'(blank)':String(x[0])));list.append(l)});
+    q.hidden=r.rows.length<8;if(!q.hidden)q.focus()}catch(e){list.textContent='';list.append(h('p','msg',e.message))}};
+  if(c0)col.onchange();else col.focus()}
+ addb.onclick=()=>pop?close():open();
  let cur=rep.pages[0];
- async function draw(){chips.innerHTML='';msg.textContent='';
-  flt.forEach(f=>{const c=h('span','chip x',`${f.column} ${f.op} ${Array.isArray(f.value)?f.value.join(', '):f.value}`);c.onclick=()=>{flt=flt.filter(x=>x!==f);draw()};chips.append(c)});
-  for(const p of rep.pages)for(const v of p.visuals){delete v.live;if(flt.length&&v.text===undefined)
-   try{v.live=await api('visual_data',{report:rep.id,page:p.id,visual:v.id,interaction:v.data?.type==='slicer'?flt.filter(f=>f.column!==v.dim):flt});v.live.id=v.id}catch(e){v.live={error:e.message}}}
-  page(cur)}
+ async function draw(){chips.innerHTML='';msg.textContent='';clr.hidden=flt.length<2;addb.textContent=flt.length?'+ Add filter':'+ Filter';
+  flt.forEach(f=>{const vs=[].concat(f.value),c=h('span','fchip'),x=h('button','','×');x.title='Remove this filter';x.setAttribute('aria-label','Remove filter on '+colName(f.column));
+   const t=f.op==='in'||f.op==='='?vs.slice(0,3).join(', ')+(vs.length>3?` +${vs.length-3}`:''):`${f.op} ${vs.join(', ')}`;
+   c.append(h('b','',colName(f.column)),h('span','',t),x);c.title=`${f.column}: ${vs.join(', ')}`;x.onclick=e=>{e.stopPropagation();setVals(f.column,[])};c.onclick=()=>open(f.column);chips.append(c)});
+  grid.classList.add('busy');
+  await Promise.all(rep.pages.flatMap(p=>p.visuals.map(async v=>{delete v.live;if(flt.length&&v.text===undefined)
+   try{v.live=await api('visual_data',{report:rep.id,page:p.id,visual:v.id,interaction:v.data?.type==='slicer'?flt.filter(f=>f.column!==v.dim):flt});v.live.id=v.id}catch(e){v.live={error:e.message}}})));
+  grid.classList.remove('busy');page(cur)}
  function page(p){cur=p;grid.dataset.page=p.id;[...tabs.children].forEach(b=>b.classList.toggle('on',b.dataset.id===p.id));grid.innerHTML='';
   p.visuals.slice().sort((a,b)=>(a.layout.y-b.layout.y)||(a.layout.x-b.layout.x)).forEach(v=>{const c=h('div','card');c.style.gridColumn=`span ${Math.min(12,v.layout.w||6)}`;c.dataset.lk=v.id;c.dataset.w=Math.min(12,v.layout.w||6);if(v.layout.h)c.dataset.h=v.layout.h*70-10;
    c.innerHTML=`<h3><span></span><span class="tools"><button data-a="t">table</button><button data-a="c">csv</button><button data-a="h">how</button></span></h3><div class="body"></div><pre class="how" hidden></pre>`;
@@ -379,11 +414,21 @@ function report(box,rep){let flt=PENDING.filters||[];PENDING.filters=null;
    if(v.text!==undefined){$('.tools',c).remove();body.textContent=v.text;body.style.whiteSpace='pre-wrap';return}
    if(!d||d.error||v.error){body.append(h('div','bad',d?.error||v.error||'no data'));return}
    if(flt.length&&(!d.rows.length||d.rows.every(r=>r.every(x=>x===null||typeof x!=='number')))){body.append(h('p','empty','No rows for these filters: they fall outside what this visual covers (the report\'s period or population). Remove a filter to see it again.'));return}
+   if(d.type==='slicer'&&v.dim){$('[data-a=t]',c).remove();slicer(body,d,vals(v.dim),vs=>setVals(v.dim,vs));$('[data-a=c]',c).onclick=()=>csv(d);
+    $('[data-a=h]',c).onclick=()=>{const x=$('.how',c);x.hidden=!x.hidden;x.textContent=v.how};return}
    let asTable=false;const dr=()=>{body.innerHTML='';asTable?table(body,d):chart(body,d)};
    if(v.dim){body.classList.add('pick');body.onclick=e=>{const r=d.rows[e.target.closest?.('[data-r]')?.dataset.r];if(r)cross(v.dim,r[0])}}  // a mark knows its row (render.mark)
    requestAnimationFrame(dr);$('[data-a=t]',c).onclick=()=>{asTable=!asTable;dr()};$('[data-a=c]',c).onclick=()=>csv(d);
    $('[data-a=h]',c).onclick=()=>{const x=$('.how',c);x.hidden=!x.hidden;x.textContent=v.how+(flt.length?`\nfilters ${JSON.stringify(flt)}`:'')}})}
  rep.pages.forEach(p=>{const b=h('button','',p.name||p.id);b.dataset.id=p.id;b.onclick=()=>page(p);tabs.append(b)});flt.length?draw():page(cur)}
+const colName=c=>{const k=String(c).split('.').pop().replace(/_/g,' ');return k.charAt(0).toUpperCase()+k.slice(1)};
+// a slicer: its members as toggles (with the measure beside each), several at once; a search over a long list
+function slicer(box,d,on,set){const ms=d.columns.slice(1),w=h('div','slicer'),opts=h('div','opts');let sel=on.slice();
+ if(d.rows.length>12){const q=h('input','f');q.placeholder=`Search ${d.rows.length}`;q.oninput=()=>{const t=q.value.toLowerCase();opts.querySelectorAll('.sl').forEach(b=>b.hidden=!b.dataset.k.includes(t))};w.append(q)}
+ [...d.rows].sort((a,b)=>sel.includes(b[0])-sel.includes(a[0])).forEach(r=>{const k=r[0]===null?'(blank)':String(r[0]),b=h('button','sl'+(sel.includes(r[0])?' on':''));b.dataset.k=k.toLowerCase();b.setAttribute('aria-pressed',sel.includes(r[0]));
+  b.append(h('span','',k));if(ms[0])b.append(h('small','',fmt(r[1],{...d.format[ms[0]],compact:true})));
+  b.onclick=()=>{sel=sel.includes(r[0])?sel.filter(x=>x!==r[0]):[...sel,r[0]];set(sel)};opts.append(b)});
+ w.append(opts);if(sel.length){const x=h('button','flink',`Clear (${sel.length})`);x.onclick=()=>set([]);w.append(x)}box.append(w)}
 function multi(opts,sel){const m=h('select','f ed');m.multiple=true;m.size=Math.min(8,Math.max(3,opts.length));opts.forEach(o=>{const op=new Option(o,o);op.selected=(sel||[]).includes(o);m.append(op)});return m}
 const ALLCOLS=()=>Object.entries(D.columns||{}).flatMap(([t,cols])=>Object.keys(cols).map(c=>`${t}.${c}`)).sort();
 function dsForm(d,isNew){const c=card(isNew?'New query':(d.name||d.id),isNew?'':`model/datasets.json · ${d.id}`),id=h('input','f ed'),nm=h('input','f ed'),de=h('input','f ed');
