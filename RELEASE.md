@@ -47,6 +47,8 @@ The milestones' own measurements are in [bench/RESULTS.md](bench/RESULTS.md), ea
   architectures (M4 split video into a -video image; the owner kept it in the one image).
 - **Answers keep their figures** (M5): an answer the agent wrote beside opening a chart reached the person without
   its figures; the agent now opens the chart first and writes the whole answer after it.
+- **Counts that name what they count**: "I built 3 visuals: Revenue KPI, Revenue by region and Revenue by month" is
+  no longer masked when those names come from ABI; a count with no names, or the wrong number of them, still is.
 - **Data out** (M4): mint a **personal token** (click your name › Personal tokens) and read ABI as yourself from an
   MCP client at `/mcp` (13 read tools) or, with `ABI_SQL_PORT`, from psql, DBeaver or a BI tool over TLS; row-level
   security and column rules hold, nothing can be changed, every call is audited.
@@ -98,8 +100,9 @@ Before you do:
 ### Known limits in 1.2
 
 - A "why" answer is masked at times: M2's round 3 passed 19 of 20 "why" runs, and 8 of 10 in a small sample after
-  its review fixes; the misses were masked count words ("two Retail products"). Counts never ground, so a sentence
-  that counts is masked rather than trusted.
+  its review fixes; the misses were masked count words ("two Retail products"). A count grounds only when the same
+  sentence, or the list or table under it, names that many backed items ("3 visuals: A, B and C"); a bare count
+  ("all three use revenue") is still masked rather than trusted.
 - While a big load builds its model, other projects' uncached questions slow down more than during the rest of the
   load (bench/RESULTS.md, 1.2.0 release candidate: p95 x2.53 during build_model, x1.41 over the whole load; the 1.5x
   target is missed while the model builds).

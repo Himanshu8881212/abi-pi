@@ -624,3 +624,28 @@ def test_what_the_model_wrote_never_grounds_and_why_words_pass():
     "MoM", "Christmas Eve", "Boxing Day", "New Year's Eve" and "between 44 and 61%" are ordinary words."""
     got = [(lambda o: o["numbers"] + o["names"])(ground.check(a, rs, fields={"day"})) for a, rs, _ in REVIEW]  # "Day": the calendar.day of every Brewline model
     assert got == [want for _, _, want in REVIEW]
+
+
+def test_a_count_grounds_by_the_backed_items_it_lists():
+    """1.2 (owner, 5 Nov 2026): bench's report task passed 3 of 5, both misses a masked count of the visuals the agent
+    built. A whole-number count before a plural noun and ":" grounds when its sentence, or the list or table under it,
+    names exactly that many distinct items, each backed by a result; a bare count, a short list, an unbacked item or a
+    percentage stays masked. The count is all it grounds: an unbacked name is still flagged."""
+    rep = {"report": {"id": "sales", "pages": [{"id": "main", "title": "Overview", "visuals": [
+        {"id": "kpi", "title": "Revenue KPI"}, {"id": "by_region", "title": "Revenue by region"},
+        {"id": "by_month", "title": "Revenue by month"}]}]}}
+    reg = q(["cafes.region", "revenue"], [["North", "1586.08"], ["South", "3447.20"], ["East", "3586.63"]])
+    nums = lambda a, *rs: ground.check(a, list(rs))["numbers"]  # noqa: E731
+    built = "I built a report with {} visuals: Revenue KPI, Revenue by region and Revenue by month."
+    assert nums(built.format("3"), rep) == [] == nums(built.format("three"), rep)
+    assert nums("I built 3 visuals:\n\n1. Revenue KPI\n2. Revenue by region\n3. Revenue by month", rep) == []
+    assert nums("Three visuals:\n- **Revenue KPI**: the total\n- **Revenue by region**\n- **Revenue by month**", rep) == []
+    assert nums("Revenue fell in 3 regions:\n\n| Region | Revenue |\n|---|---:|\n| North | 1,586.08 |\n| South | 3,447.20 |\n"
+                "| East | 3,586.63 |", reg) == []
+    assert nums("Revenue grew in 3 regions: North, South and East.", reg) == []
+    assert nums("Revenue grew in 3 regions.", reg) == ["3"]  # no names
+    assert nums("Revenue grew in 3 regions: North and South.", reg) == ["3"]  # 3 is not 2
+    assert nums("Revenue grew 3% in 3 regions: North, South and East.", reg) == ["3%"]  # a percentage is never a count
+    assert nums("Revenue grew in 3 regions.", q(["regions_up"], [[3]])) == []  # a tool figure, as before
+    out = ground.check(built.format("3").replace("Revenue by month", "Atlantis map"), [rep])
+    assert out["numbers"] == ["3"] and out["names"] == ["Atlantis"]  # one unbacked item: the count stays masked

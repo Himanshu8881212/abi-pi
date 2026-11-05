@@ -118,6 +118,10 @@ ID_END = re.compile(r"$|[\s`'\"’”)\]>*|!?]|[.,;:](?!\w)")
 # GATE-9-fix-10 (d): a whole IANA time zone name ("Europe/Berlin"), checked against the stdlib's own list
 ZONE = re.compile(r"(?<![\w/])[A-Z][A-Za-z_]+(?:/[A-Za-z_]+)+(?![\w/])")
 QUOTED = re.compile(r"\"([^\"\n]{2,100})\"|“([^”\n]{2,100})”|(?<!\w)'([^'\n]{2,100})'(?!\w)|‘([^’\n]{2,100})’")
+# 1.2 (owner, 5 Nov 2026): after a count, up to two words and a plural noun, then ":" or "(" opening what it counts
+COUNTED = re.compile(r"(?:\s+[A-Za-z][\w-]*){0,2}?\s+[A-Za-z][\w-]*[A-Za-z](?<![sS])s[*_]*\s*[:(]")
+NOT_NOUN = {"has", "was", "does", "this", "its", "thus", "plus", "yes", "goes"}
+BULLET = re.compile(r"(\s*)(?:[-*•+]|\d+[.)])\s+(.*)")
 
 
 def _words(s: str) -> float:
@@ -269,6 +273,51 @@ def _cells(line: str) -> list[tuple[int, int, str]]:
     bars = [i for i, ch in enumerate(line) if ch == "|"]
     cuts = ([-1] if line.strip()[:1] != "|" else []) + bars + ([len(line)] if line.strip()[-1:] != "|" else [])
     return [(a + 1, b, line[a + 1:b].strip()) for a, b in itertools.pairwise(cuts)]
+
+
+def _item(s: str) -> str:
+    """A listed item's name: its leading bold or code span, else its text before a "(", ": " or dash aside."""
+    s = s.strip()
+    s = b[2] if (b := re.match(r"(\*\*|__|`)(.+?)\1", s)) else re.split(r"\s+\(|:\s|\s[—–-]\s", s)[0]
+    return s.strip(" *_`\"'“”‘’.,;:")
+
+
+def _listed(answer: str, span: tuple[int, int], tok: str, named) -> bool:
+    """1.2 (owner, 5 Nov 2026): a whole-number count ("3", "three") before a plural noun and ":" or "(" ("3 visuals:")
+    grounds when the rest of its sentence, or else the bullet/numbered list or table right under it, names exactly that
+    many distinct items and `named` backs every one. It grounds the count only: the names are still checked as names.
+    Refused: a count without a list ("in 3 regions"), a list before the count ("A, B and C: all three"), decimals,
+    currency, percentages, scales."""
+    if not re.fullmatch(r"\d+|[A-Za-z]+(?:-[A-Za-z]+)?", tok) or not (m := COUNTED.match(answer, span[1])) \
+            or re.findall(r"[A-Za-z][\w-]*", m[0])[-1].lower() in NOT_NOUN:
+        return False
+    n, rest = int(tok) if tok.isdigit() else _words(tok), answer[m.end():]
+    line, _, below = rest.partition("\n")
+    if m[0].endswith("("):
+        text = line.partition(")")[0] if ")" in line else ""
+    else:
+        text = re.split(r"[.!?](?=\s|$)", line)[0]
+    if text.strip(" *_"):
+        items = re.split(r",\s*(?:and|or)\s+|,|;|\s+(?:and|or)\s+", text)
+    elif m[0].endswith("("):
+        return False
+    else:  # the list or table under it
+        lines = below.split("\n")
+        i = next((i for i, x in enumerate(lines) if x.strip()), len(lines))
+        if i + 1 < len(lines) and "|" in lines[i] and SEP.fullmatch(lines[i + 1]):
+            items = [c for x in itertools.takewhile(lambda x: "|" in x, lines[i + 2:])
+                     if (c := _cells(x)[0][2]).strip("*_` ").lower() not in ("total", "grand total")]
+        else:
+            items, indent = [], None
+            for x in lines[i:]:
+                if not x.strip():
+                    continue
+                if not (b := BULLET.fullmatch(x)) or indent is not None and len(b[1]) < indent:
+                    break
+                indent = len(b[1]) if indent is None else indent
+                items += [b[2]] if len(b[1]) == indent else []  # a sub-item is part of its item
+    items = [_item(x) for x in items]
+    return len(items) == n == len({x.lower() for x in items}) and all(x and named(x) for x in items)
 
 
 def _headers(answer: str) -> str:
@@ -486,6 +535,8 @@ def check(answer: str, results: list, vocab: set[str] = frozenset(), members: se
     bad_names = [(at, n) for n, vocab_ok, at in cands if not ok(n, vocab_ok)
                  and not (vocab_ok and (core(n) != n and ok(core(n), True) or cal(n.split())))
                  and not ("-" in n and all(ok(p, vocab_ok) for p in n.split("-") if p[:1].isupper()))]
+    # 1.2: a count of the items it lists, each backed as a result's own text (never by vocab)
+    bad_nums = [(at, t) for at, t in bad_nums if not _listed(answer, at, t, lambda n: ok(n, False))]
     out = {"numbers": list(dict.fromkeys(t for _, t in bad_nums)), "names": list(dict.fromkeys(n for _, n in bad_names))}
     if not spans:
         return out
