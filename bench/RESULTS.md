@@ -1157,3 +1157,78 @@ never printed.
 - set_measure and delete_project returned isError, "isn't available with a personal token".
 - After the Viewer revoked the token in the app, psql's password authentication failed and MCP returned 401.
 - No file in /data/logs held the token.
+
+## 1.2 M4 round 3 (pve1)
+
+5 Nov 2026, 12:39-13:55 UTC: release-1.2 at 91fa98d (M4.1-M4.5, the M4 tune b3746c9 and the M4 review fixes), built
+with `git archive 91fa98d` into /opt/abi-m4 on LXC 100. Both targets were built there (tags abi-m4:default and
+abi-m4:video; default took 142 s, part of it from the build cache, video 16 s). The throwaway install was the same
+as in rounds 1 and 2: project abi-m4, containers abi-m4 and abi-m4-runner, volume abi-m4-data, app 8797 and SQL 15497
+at the LXC's address, a self-signed certificate, and the owner's password in a root-only file. It used the compose
+defaults and no model. The same scripts ran the same perf.py subcommands, one run at a time. Each run started at a
+1-minute load average of 0.44-0.92; [a-b] is the range from a run's start to its end. New in mon.sh: Postgres
+connections (pg_stat_activity) every 2 s. Afterwards the install was removed with its images, volume, network,
+folder and files, and so were the host's psql folder and token file. The live abi and lake containers' start time,
+restart count and image were the same before and after.
+
+| M4 target (PLAN.md) | round 2 (b3746c9's tree) | round 3 (91fa98d) | |
+|---|---|---|---|
+| default image without Remotion, <= 2,843,622,285 - (video - default) | default 2,476,373,331, 143,359,286 under | default 2,471,807,683, video 2,695,697,351: moved 223,889,668, limit 2,619,732,617, 147,924,934 under; the -video image rendered a one-slide video (11,821 bytes), the default one says how to switch | met |
+| runner profile: a 10M-order load runs in the runner, exact | orders 94.86 s, Ready 103.36 s | orders 94.97 s, Ready 103.92 s (1.1.0 in one container: 47.56 / 54.82 s), exact to the cent; the job ran in abi-m4-runner (peak 274,182,144 bytes), abi-m4 ran no heavy worker in any sample [0.33-2.41] | met |
+| the runner's worker gone <= 3 min after the heavy queue empties | 177.1 s | 177.0 s (the job ended 12:50:21.0, the worker stopped 12:53:18) | met |
+| the runner container's memory back within 10% of its idle | anon x1.00, memory.current x2.60 | anon 0.397 to 0.402 MB (x1.013); memory.current minus file and slab_reclaimable 1.443 to 1.438 MB (x0.997); memory.current 2.29 to 5.30 MB (x2.31; slab_reclaimable 0.28 to 3.16 MB) | met for anon and unreclaimable memory; missed for memory.current (reclaimable slab, as round 2 showed) |
+| the same in one container (no profile) | gone 177.8 s, memory +1.8% | orders 68.69 s, Ready 77.55 s, exact; worker gone 177.3 s after its job (13:23:56.7 to 13:26:54); container 819.0 to 891.2 MB (+8.8%; anon 675.8 to 744.3 MB, +10.1%) [0.38-2.78] | met (memory.current +8.8%; anon just over 10%) |
+| 100M orders through the app with the runner profile: Ready with a model, exact, no client timeout | Ready at 1,055.10 s | orders in 954.34 s, Ready at 1,058.33 s, exact to the cent, no timeout; runner peak 734,015,488 bytes of its 4 GiB; abi-m4 ran no heavy worker in any sample | met |
+| another project's uncached queries during it <= 1.5x idle | x1.15 p50, x1.41 p95; build_model p95 x3.14 | idle (200) 71.0 / 80.8 ms, during (11,958) 82.7 / 112.2 ms: x1.16 p50, x1.39 p95 [0.74-7.70]; tables phase (11,123) 82.3 / 103.9 ms, p95 x1.29; build_model and Ready (835) 104.0 / 266.7 ms, p95 x3.30 | met overall and while the tables arrive; missed during build_model (x3.3) |
+| medallion at 10M, the 1.2 way: each source read once, raw/ + model/ <= 417,189,763 bytes, gold exact | 282,925,507 bytes, 74.44 s | 282,925,850 bytes (40.7%), all in model/, none in raw/; rebuild 74.39 s (1.1.0: 147.52 s); bronze_orders 68.38 s, silver_orders 12.15 s, gold_revenue 2.10 s, refreshed once each (only bronze reads the files); no query-copy bytes in the rebuild; exact to the cent | met |
+| idle container RSS and RSS per chat (README) | 476.4 MB; 155.3 then 104.6 MB | 477.5 MB idle (a fresh start); 155.2 then 103.9 MB a chat | recorded |
+| data out from the Proxmox host | met | all four, below | met |
+
+Runner (item 2). The runner's supervisor started its heavy worker at 12:48:49 and logged "stopped after 269 s: the
+heavy queue was empty 180 s". As in round 2, anon memory came back to its idle value, and so did memory.current minus
+reclaimable memory. memory.current stayed 3 MB higher, all of it slab_reclaimable: the kernel's dentry and inode
+cache, freed only under memory pressure. Without the profile, the heavy worker ran in abi-m4 and stopped 177.3 s
+after its job. That container's idle was taken after the runner-profile runs (819 MB, against round 2's 754 MB), and it
+came back within 8.8%.
+
+100M and isolation (item 3). The load ran in the runner, which used 2 of the 6 CPUs, so it took as long as in round 2
+(954.34 s). The other project's numbers are round 2's again. Overall and while the tables arrived they are within
+target. During build_model, which runs in abi-m4, p95 was x3.3, the tail rounds 1 and 2 already traced there.
+abi-m4 peaked at 4,610,646,016 bytes, mostly perf.py's own generation and one-file copy of 100M orders. The lake held
+1,451,855,263 bytes. Postgres connections, which neither earlier round measured: at most 38 of max_connections 100
+during the 100M run with the runner profile, 33 during the 10M runner load, and 29 during the memory runs with 8 chats
+(one container). No run had a 100M load and 8 chats at the same time.
+
+Changed since rounds 1 and 2: the segfault is still there, but its job no longer stays stuck. 10 s after perf.py's run
+ended and the 100M project was deleted, the runner's heavy worker died with status 139 inside the minute's
+build_copies job for that project (job 328, started 13:18:01.8, died 13:18:36). retry_stalled_runs, from the review
+fixes, ended job 328 as failed at 13:19:00.6. In rounds 1 and 2 it stayed "doing" until the install was removed.
+After that no heavy job was todo or doing, the runner stayed idle and healthy, and the next 10M load in one container
+ran normally. The crash itself, DuckDB inside build_copies for a project being deleted, is still open.
+
+Medallion (item 4). silver_orders starts from bronze_orders' table and gold_revenue from silver's. The rebuild ran
+"refresh bronze_orders", "refresh silver_orders", "refresh gold_revenue", once each. The lake has no raw/ at all.
+The query copies (432,089,065 bytes) were written before the rebuild and not again within it. The heavy worker stopped
+177.5 s after the rebuild's job ended.
+
+Memory (item 5). `perf.py memory --chats 8`, twice, after `docker restart abi-m4` and 4 minutes idle with no heavy
+worker. Idle: memory.current 477.5 MB (1.1.0: 620 MB). RSS sums: app 32.6, engine 227.9, default worker 279.9 and
+Postgres 342.2 MB in 22 processes. Per chat (app + Pi): 155.2 MB, then 103.9 MB. The first run's 8 Pi processes
+held 1,240.3 MB, the second run's 830.1 MB.
+
+Data out (item 6), from the Proxmox host, outside LXC 100. psql 17.11 came from Debian 13's packages (`apt-get
+download`, `dpkg -x` into a throwaway folder, removed afterwards). The MCP client was the stdlib JSON-RPC one over http
+to /mcp. A Viewer of perf_brewline (120 cafés, 73,941 orders) was limited by a rule to CF001 (542 orders), signed in
+to the app and minted a personal token in its Personal tokens dialog. The token stayed in root-only files and was
+never printed.
+- verify-full gave TLSv1.3 (TLS_AES_256_GCM_SHA384).
+- `GROUP BY cafe_id` gave only `CF001|542`, and `count(*)` gave 542.
+- The self cross join counted 293,764.
+- `LIMIT 150000` was refused with 54000 "More than 100,000 rows; add a LIMIT or use the Arrow/Parquet export (SE-9)".
+- `DELETE` was refused with 42501.
+- MCP tools/list returned exactly the 13 reads, and semantic_query returned one row, CF001 2888.56.
+- set_measure and delete_project returned isError: "isn't available with a personal token: it only reads. Do it in
+  the app."
+- After the Viewer revoked the token in the app, psql got "password authentication failed ... use a personal token
+  from the app", and MCP returned 401.
+- No file in /data/logs held a personal token (no `abi_pt_` anywhere).
