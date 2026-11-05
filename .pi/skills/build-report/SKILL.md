@@ -22,4 +22,5 @@ description: Build or change an ABI report (pages, KPIs, charts, filters) and sh
 3. Only measure IDs and dimensions from semantic_model; ABI rejects others with a fix: apply it.
 4. In one step, `abi_show {page: "report", report: <id>}` so the person sees it and `visual_data {report, page, visual}`
    for each visual: its rows are the figures you may quote (save_report's result names the pages and visuals).
-5. Describe what each visual shows by its title and rows; name the visuals, never count them.
+5. Describe what each visual shows by its title and the rows you read for it; name the visuals (a count only with
+   their names right after it: "3 visuals: A, B and C"). No visual_data rows read: describe it without figures.
