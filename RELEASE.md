@@ -153,8 +153,17 @@ The release run fills this in with measured numbers only.
   `/data/VERSION` set back by hand its engine refuses the database (schema 5 over 2) and the container exits; the
   upgrade's own backup restored with the 1.1.0 image gives the same 16 items. Fixed on the way: that backup was
   world-readable (`-rw-r--r--`); `scripts/upgrade.sh` now writes it readable by its owner only.
-- 50 sessions after a commit, page p95 (without and with `--rls`); a 100M-row upload; Brewline revenue by region to
-  the cent, on the release image: _to be measured_
+- Server benches on the release image (pve1, 5 Nov; abi-rc:1.2.0 above on a fresh test install, `bench/perf.py`
+  one run at a time; bench/RESULTS.md, "1.2.0 release candidate"): 50 sessions right after a commit, page p95 1.12 s
+  (1.1.0: 87.6 s), and 4.34 s with 50 Viewers each limited to their own café (1.1.0: 152.7 s); 100M orders through
+  the app's upload with the runner profile Ready with a model at 1,070 s, no timeout, revenue by region exact to the
+  cent (1.1.0: no model, out of memory), another project's queries meanwhile x1.15 p50 / x1.41 p95 of idle (x2.5 p95
+  while the model builds); the runner's worker gone 178 s after the queue emptied, its anon memory back to idle; a
+  measure-only Publish of 7.4M orders 0.92 s with no reload (1.1.0: 39.8 s, 4 reloads); the engine killed with -9
+  serving again in 7.1 s, the worker in 1.0 s (1.1.0: never); 8 chats and a 50M upload inside `mem_limit: 4g`
+  exact with no OOM kill, though the cgroup reached its limit (the kernel reclaimed, nothing was killed); the
+  medallion rebuild at 10M wrote 40.7% of 1.1's lake bytes in 72 s (1.1.0: 148 s); 464 MB idle, about 105 MB a chat
+  (1.1.0: 620 MB, 106 MB).
 - The arm64 image started (`.github/workflows/image.yml`): _to be measured_
 
 ## What is in it

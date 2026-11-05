@@ -1298,3 +1298,65 @@ Found first: in one of two single-chat runs before this one, the person saw only
 where you can rerun it.": Sonnet wrote the figures beside its abi_show call, and the app shows (and the harness
 grounds) only the last message without a tool call. .pi/SYSTEM.md now says to call abi_show before the answer. The
 terminal bench (bench.py) can't see this: abi_show there shows nothing.
+
+## 1.2.0 release candidate (pve1)
+
+5 Nov 2026, 15:41-17:15 UTC: the release candidate itself, abi-rc:1.2.0 (sha256:9a41b80201f8..., 2,471,828,806 bytes),
+which the M5 upgrade run built from `git archive 8c266ce` in /opt/abi-m5 on LXC 100; not rebuilt here. A fresh throwaway
+install of that folder's docker-compose.yml with an override for the container names: project abi-m5b, containers
+abi-m5b and abi-m5b-runner, volume abi-m5b-data, the app on 8793 at the LXC's loopback, the owner's password in a
+root-only file. Compose defaults, no model. bench/perf.py of 8c266ce (the same SHA-256 as d2f1a08's) ran inside abi-m5b
+(`docker cp bench`, `docker exec`) with M3 round 3's and M4 round 3's subcommands and scripts (run.sh, mon.sh, kill.sh,
+both.sh), one run at a time, each started at an LXC 1-minute load average of 0.13-0.93 with no build, no other bench
+and no container but abi and lake beside it; [a-b] is the load average's range from a run's start to its end. Order:
+one container with no limit (Brewline 0.01, pages, Publish, kills, Brewline 1 and its Publish, medallion, memory after
+a restart and 4 minutes idle), then the runner profile (10M, then 100M with isolation), then the runner removed and
+abi-m5b recreated with `mem_limit: 4g` and `memswap_limit: 4g` (8 chats + 50M). Afterwards the install was removed
+with its volumes and network, and so were /opt/abi-m5, abi-rc:1.2.0 and abi-rc:1.2.0-video. The live abi and lake
+containers' start time, restart count and image were the same before and after.
+
+| 1.2 target (PLAN.md) | 1.1.0 | 1.2.0 release candidate (8c266ce) | |
+|---|---|---|---|
+| 50 sessions right after a commit: page p95 <= 2 s | 87.6 s | 1.12 s [0.42-2.04] | met |
+| the same with `--rls cafes.cafe_id`, 50 distinct café Viewers: p95 <= 5 s | 152.7 s | 4.34 s [0.63-4.75]; again, 4.43 s [0.77-1.81] | met |
+| 100M orders through the app's upload: no timeout, Ready with a model, exact (runner profile) | build_model out of memory: no model | orders in 970.20 s, Ready at 1,070.43 s, exact to the cent, no timeout; runner peak 399,466,496 bytes of its 4 GiB | met |
+| another project's uncached queries during it <= 1.5x idle | x2.26 p50, x2.92 p95 | idle (200) 70.2 / 78.9 ms, during (12,434) 80.7 / 111.6 ms: x1.15 p50, x1.41 p95 [0.87-5.86]; tables phase (11,571) 80.4 / 101.1 ms, p95 x1.28; build_model and Ready (863) 104.0 / 200.0 ms, p95 x2.53 | met overall and while the tables arrive; missed during build_model (x2.5) |
+| the runner's worker gone <= 3 min after the heavy queue empties | never stops | 177.9 s after the 10M job's end, 177.7 s after the 100M job's | met |
+| the runner's memory back within 10% of its idle | | anon 0.388 to 0.384 MB (x0.99); memory.current minus file and slab_reclaimable 1.405 to 1.359 MB (x0.97); memory.current 1.67 to 4.36 MB (x2.62; slab_reclaimable 0.26 to 3.00 MB) | met for anon and unreclaimable memory; missed for memory.current (reclaimable slab, as M4) |
+| 8 chats (8 people) + 50M orders through the app inside mem_limit 4g, no swap: no OOM, exact | no kill, exact, peak 4,259,540,992 bytes | no kill, exact; memory.peak 4,294,967,296 bytes (the limit), memory.events max 279, oom 0, oom_kill 0 [0.20-4.74] | met, with no headroom (M3 round 3: 357 MiB spare) |
+| medallion rebuild at 10M: raw/ + model/ <= 417,189,763 bytes, gold exact | 695,316,271 bytes in 147.52 s | 282,925,722 bytes (40.7%), all in model/; rebuild 72.39 s; each layer refreshed once; exact to the cent [0.83-3.96] | met |
+| measure-only Publish on Brewline 1 (7.4M orders): <= 15 s, no reload | 39.83 s, 4 reloaded | answers in 0.92 s, a Viewer's page shows it at 1.33 s, none reloaded [0.26-2.04] | met |
+| kill -9 of the engine, then a worker: serving again <= 60 s | never (300 s watched) | 7.1 s; 1.0 s | met |
+| idle container memory and per chat (recorded) | 620 MB idle; 106.4 / 105.8 MB a chat | 463.5 MB idle (a fresh start); 156.3 then 105.5 MB a chat | recorded |
+
+Pages (Brewline 0.01, 73,941 orders, a 270-272 KB page): without a rule, first opening p95 1.68 s and 1.12 s right
+after a commit; with the café rule the first opening (every RLS context and the shared partials built cold) p95 7.13
+s, then 4.34 s after the commit; the repeat 4.70 s first, 4.43 s after. 0 errors and 0 dropped in every round; peak
+1,935,810,560 bytes without a rule, 1,981,308,928 and 2,008,834,048 with it, no OOM event. These are M3.6 round 3's
+numbers again (1.13 s, 4.24 / 4.26 s).
+
+Publish: on Brewline 0.01 the first Publish's copy tables are in 19.16 s and a measure-only one answers in 0.43 s
+(page 0.74 s); on Brewline 1 the first Publish's copy tables are in 71.95 s (all four, as since M3). Kills: the
+supervisor logged "the engine (pid 66) ended with status 137 after 973 s; it starts again in 0 s" and the same for
+the worker; `engine.sh health` said "The engine isn't ready" for 3 samples (about 6 s) after the engine's kill, and
+Docker's check was healthy at every probe through both.
+
+Runner: the 10M load through the app took orders 94.91 s, Ready 103.73 s, exact (M4 round 3: 94.97 / 103.92 s), in
+abi-m5b-runner (peak 281,935,872 bytes). The 100M load's lake holds 1,151,802,821 bytes; abi-m5b peaked at
+4,151,259,136 bytes, mostly perf.py's own generation and one-file copy of 100M orders. Postgres connections: at most
+40 of 100 during the 10M runner load and 43 during the 100M one. The build_model phase's p95 (x2.53) is the tail
+M4 traced there; it is a known limit in RELEASE.md.
+
+4 GiB: once the upload's first piece reached the app (102 s in) 8 chats opened as 8 people and stayed 420 s. Orders
+in 315.04 s, Ready at 355.57 s, exact; memory.events oom 0, oom_kill 0, max 279; OOMKilled false, 0 restarts. The
+2 s samples peak at 3,902.9 MB (3,814.6 MB anon) at the load's end steps; memory.peak, reset when the chats started,
+reached the limit itself, so the kernel reclaimed at the limit 279 times and nothing was killed. That meets "without
+OOM" but with less room than M3 round 3 on c2c7437 (3,920,732,160 bytes, max 0) and about 1.1.0's. The 8 Pi processes
+took 1,241.4 MB at their start (165.7 MB a chat with the app's side) and 911.1 MB after the hold. 12 s after the run
+deleted the 50M project, the heavy worker died with status 139 inside that minute's build_copies for it (the
+segfault M3 and M4 report); the supervisor started a new one and retry_stalled_runs ended job 861 as failed 59 s
+later.
+
+Memory: after `docker restart abi-m5b` and 4 minutes idle with no heavy worker: memory.current 463.5 MB (M4 round 3:
+477.5 MB); RSS sums app 34.3, engine 228.4, default worker 289.5 and Postgres 355.7 MB in 23 processes. Per chat
+(app + Pi): 156.3 MB, then 105.5 MB (the first run after a long idle is the high one, as in every round).
