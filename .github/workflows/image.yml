@@ -1,9 +1,13 @@
 # The image built for linux/arm64 on an arm64 machine and started as a stranger would: healthy, sign-in, a small
 # CSV uploaded through the app loads exact, a PDF export and a video render, PID 1 is tini and the user is abi. release.yml
-# publishes arm64 too; this is the only place one is started. Run it by hand (Actions › image › Run workflow).
+# publishes arm64 too; this is the only place one is started. Run it by hand (Actions › image › Run workflow), and it
+# runs on a release branch's push that changes the image.
 name: image
 on:
   workflow_dispatch:
+  push:  # a release branch that changes the image (a dispatch works only from the default branch)
+    branches: ["release-*"]
+    paths: [Dockerfile, .dockerignore, .github/workflows/image.yml, scripts/video/package*.json, engine/backend/uv.lock]
 permissions:
   contents: read
 jobs:
