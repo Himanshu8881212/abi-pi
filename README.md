@@ -177,6 +177,8 @@ people open, so the links come back to ABI.
 | `ABI_DUCKDB_MEMORY_LIMIT` | no | The memory DuckDB may use for one project's queries and loads in each engine process (the engine and each worker); above it, it spills to disk. Default `1500MB`. |
 | `ABI_DUCKDB_THREADS` | no | DuckDB threads for one project's queries and loads in each engine process. Fewer keep other projects' questions quick while one project loads or builds its model; more make one big load or query faster. Default: half the CPUs ABI's process may use (a Docker `--cpus` quota isn't counted: set it then). |
 | `ABI_HEAVY_CONCURRENCY` | no | Big loads, query copies and ML trainings run at a time in the heavy worker: `1` or `2` (any other value stops ABI from starting); `2` needs memory for both. Default `1`. |
+| `ABI_RUNNER_IDLE` | no | Seconds the heavy queue stays empty before the heavy worker stops and its memory goes back; the next heavy job starts it again within seconds. Default `180`. |
+| `ABI_RUNNER_MEMORY`, `ABI_RUNNER_DUCKDB_MEMORY_LIMIT` | no | With the runner profile (below: Heavy jobs and the runner): the runner container's memory limit, default `4g`, and DuckDB's memory per project in it, default `2GB`. |
 | `ABI_QUERY_CACHE_MB` | no | Query results kept for reuse, in megabytes per project in each engine process. Default `256`. |
 | `ABI_MAX_AGENTS` | no | Chats whose agent runs at once (each a Node process of about 100 MB). One more stops the agent idle longest; with every one busy, the next question waits its turn with a note in its chat. One person runs at most half of them, however many tabs they open. Default `8`. |
 | `ABI_QUERY_TIMEOUT` | no | Seconds a question's or a page visual's read may run before it is stopped with a plain error. Default `60`. |
@@ -266,6 +268,36 @@ It backs up the running install to `backups/`, pulls the new image (or builds it
 and waits until it's healthy; Caddy comes along when HTTPS is on (`COMPOSE_PROFILES` in `.env`). An install from 1.0
 moves over too: it keeps its volume and its `.env`. The volume remembers its version (`docker exec abi cat
 /data/VERSION`) and an older image refuses it: to go back, restore a backup into a new volume (below).
+
+### Heavy jobs and the runner
+
+Big loads, query copies, flow runs with a load, ML or export step, ML trainings and scorings, and the nightly
+clean-up are heavy jobs: they wait on the heavy queue and a heavy worker runs them, `ABI_HEAVY_CONCURRENCY` at a time.
+That worker runs only while there is work: it starts within seconds of a job being queued and stops after the queue has
+been empty `ABI_RUNNER_IDLE` seconds (3 minutes), so the memory a big load took goes back. A check every minute in
+the always-on worker finds changed files, daily database reloads and query copies to write, and queues their job.
+
+To give heavy jobs a memory budget of their own, so a load that runs out ends only that load, add to `.env`:
+
+```ini
+COMPOSE_PROFILES=runner      # or https,runner
+ABI_RUNNER_MEMORY=4g         # the runner container's limit (swap included)
+```
+
+then `docker compose up -d`. A second container, `abi-runner`, runs the same image with `ABI_ROLE=runner`: no app,
+no engine, no Postgres of its own and no agent, only a shell loop that looks at the heavy queue every 2 seconds and
+starts the heavy worker when there is work. It shares the data volume and reaches Postgres through its socket there
+(Postgres has no port). While it runs, the main container runs no heavy job. `scripts/backup.sh` pauses it too: a job
+it runs finishes first, the next waits for the backup. `docker logs abi-runner` and `/data/logs/runner*.log` show
+what it did.
+
+**abi-run.** `abi-run <job id>` runs one queued heavy job to its end and exits: the command a launcher (in 1.3, a
+Kubernetes Job) calls. It runs as the person the job is for, as the heavy worker would, and reads what the heavy worker
+reads: the engine's Postgres (the job in `procrastinate_jobs`, queue `heavy`) and the data folder. It needs the
+image's environment (`ABI_PI_DATA`, by default `/data`, with Postgres's socket in `/data/pg`); in the container:
+`docker exec abi abi-run 42`. Exit codes: `0` the job succeeded; `1` it failed, with its error on stderr (the load,
+training or flow run says why, as in the app); `2` no heavy job with that id is queued now; `75` a backup holds the
+workers: run it again after.
 
 ### If something goes wrong
 

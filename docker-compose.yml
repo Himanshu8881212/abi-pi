@@ -2,6 +2,7 @@
 # Put the settings in a .env file next to this one (never committed): see .env.example.
 # Prebuilt image: docker compose pull && docker compose up -d   (else `up` builds it here). Upgrade: scripts/upgrade.sh
 # HTTPS: COMPOSE_PROFILES=https and ABI_DOMAIN in .env put Caddy in front (docker/Caddyfile; README: Use it from other devices).
+# Heavy jobs in their own container and memory: COMPOSE_PROFILES=runner (or https,runner; README: Heavy jobs and the runner).
 # 1.0's .env names (ABI_PI_PROJECT, ABI_PI_LLM_BASE, ...) still work.
 name: abi
 services:
@@ -29,6 +30,7 @@ services:
       ABI_PUBLIC_URL: ${ABI_PUBLIC_URL:-${ABI_DOMAIN:+https://${ABI_DOMAIN:-}${ABI_HTTPS_PORT:+:${ABI_HTTPS_PORT:-}}}}
       ABI_SOURCE_URL: ${ABI_SOURCE_URL:-}  # AGPL §13: where a changed build's source is published; empty: this repo
       ABI_HEAVY_CONCURRENCY: ${ABI_HEAVY_CONCURRENCY:-1}  # loads, query copies and ML trainings at a time: 1 or 2
+      ABI_RUNNER_IDLE: ${ABI_RUNNER_IDLE:-180}  # seconds with no heavy job before the heavy worker stops (its memory goes back)
       ABI_MAX_AGENTS: ${ABI_MAX_AGENTS:-8}  # chats whose agent runs at once; the next question waits its turn
       ABI_QUERY_TIMEOUT: ${ABI_QUERY_TIMEOUT:-60}  # seconds a question's or a page visual's read may run
       ABI_RLS_SHARED_ROWS: ${ABI_RLS_SHARED_ROWS:-1000000}  # rows all reads shared by people with row-level security hold together (0: off)
@@ -66,6 +68,31 @@ services:
       - ${ABI_TLS_CERT:-./docker/Caddyfile}:/certs/cert.pem:ro  # your own certificate and key when .env names them, else a stand-in
       - ${ABI_TLS_KEY:-./docker/Caddyfile}:/certs/key.pem:ro
       - caddy:/data                                             # its certificates, keys and certificate authority
+    restart: unless-stopped
+  runner:  # the runner profile: the heavy jobs (loads, query copies, heavy flow runs, ML) in their own memory, the main
+    # container then runs none; the same image and data volume, Postgres through its socket there (no port), no app
+    build: .  # the same image as abi's (built once)
+    image: ${ABI_IMAGE:-ghcr.io/himanshu8881212/abi:latest}
+    container_name: abi-runner
+    profiles: [runner]
+    depends_on: [abi]
+    mem_limit: ${ABI_RUNNER_MEMORY:-4g}  # the jobs' memory: one past it ends that job only (it fails), not ABI
+    memswap_limit: ${ABI_RUNNER_MEMORY:-4g}  # no swap beyond it
+    environment:
+      ABI_ROLE: runner
+      ABI_RUNNER_IDLE: ${ABI_RUNNER_IDLE:-180}  # seconds with no heavy job before its worker stops; the container stays
+      ABI_HEAVY_CONCURRENCY: ${ABI_HEAVY_CONCURRENCY:-1}
+      ABI_DUCKDB_MEMORY_LIMIT: ${ABI_RUNNER_DUCKDB_MEMORY_LIMIT:-2GB}  # DuckDB's memory per project in the runner (it spills above)
+      ABI_DUCKDB_THREADS: ${ABI_DUCKDB_THREADS:-}
+      ABI_QUERY_CACHE_MB: ${ABI_QUERY_CACHE_MB:-256}
+      ABI_QUERY_TIMEOUT: ${ABI_QUERY_TIMEOUT:-60}
+      ABI_RLS_SHARED_ROWS: ${ABI_RLS_SHARED_ROWS:-1000000}
+      ABI_PG_POOL: ${ABI_PG_POOL:-20}
+      ABI_INLINE_ROWS: ${ABI_INLINE_ROWS:-4400000}
+      ABI_RENDER_TIMEOUT: ${ABI_RENDER_TIMEOUT:-120}
+      ABI_PUBLIC_URL: ${ABI_PUBLIC_URL:-${ABI_DOMAIN:+https://${ABI_DOMAIN:-}${ABI_HTTPS_PORT:+:${ABI_HTTPS_PORT:-}}}}  # links in what a flow sends
+    volumes:
+      - abi-data:/data
     restart: unless-stopped
 volumes:
   abi-data:

@@ -5,10 +5,11 @@
 #   ABI_PI_PROJECT            the project to open first (created if missing; default main)
 #   ABI_PI_WORKSPACE          its workspace (default main)
 #   ABI_PI_LLM_BASE/ABI_PI_LLM_KEY  optional: one OpenAI-compatible model endpoint (or connect one in Settings)
+#   ABI_ROLE=runner           only the heavy jobs, on the main container's Postgres and data (compose's runner profile)
 # Secrets come from the environment only; nothing is written to the image or logged.
 set -eu
 cd /app
-if [ -z "${ABI_USER:-}" ] || [ -z "${ABI_PASSWORD:-}" ]; then
+if [ "${ABI_ROLE:-all}" != runner ] && { [ -z "${ABI_USER:-}" ] || [ -z "${ABI_PASSWORD:-}" ]; }; then
   echo "Set ABI_USER and ABI_PASSWORD (at least 8 characters): the workspace owner, created on the first start." >&2
   exit 1
 fi
@@ -19,9 +20,12 @@ if [ -f /data/VERSION ] && [ "$(printf '%s\n%s\n' "$V" "$(cat /data/VERSION)" | 
   echo "This volume holds data of ABI $(cat /data/VERSION); this image is ABI $V. Run $(cat /data/VERSION) or newer (no downgrades: restore a backup into a new volume instead)." >&2
   exit 1
 fi
+[ "${ABI_ROLE:-all}" != runner ] || exec scripts/engine.sh runner  # its own pid file; Postgres is the main container's
 P="${ABI_PI_PROJECT:-main}"
 WS="${ABI_PI_WORKSPACE:-main}"
-rm -f /data/run/*.pid  # a new container: pids from before a restart mean nothing (and may be reused)
+for f in /data/run/*.pid; do  # a new container: pids from before a restart mean nothing (and may be reused); a runner's
+  [ "$f" = /data/run/runner.pid ] || rm -f "$f"  # is its container's
+done
 scripts/engine.sh start
 eval "$(scripts/engine.sh env)"
 mkdir -p "$ABI_PI_WORKSPACES" /data/logs

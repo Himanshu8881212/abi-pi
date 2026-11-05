@@ -107,12 +107,13 @@ def test_a_killed_engine_or_worker_serves_again_and_a_backup_holds_the_workers()
             for p in workers), log
 
         # a backup killed with SIGKILL leaves run/pause.pid; a process that later has its PID (here the supervisor's)
-        # doesn't hold the workers: the pause names the backup's start time too
+        # doesn't hold the workers: the pause names the backup's start time too, and the supervisor removes it (M4.1: a
+        # runner in another container can't check the PID, so it goes by the file)
         (d / "run/pause.pid").write_text(f"{pid('supervisor')} Thu Jan  1 00:00:00 1970\n")
         stale = pid(workers[0])
         os.kill(stale, signal.SIGKILL)
         assert until(lambda: alive(workers[0]) and pid(workers[0]) != stale), sh("status").stdout
-        (d / "run/pause.pid").unlink()
+        assert until(lambda: not (d / "run/pause.pid").exists(), 10) and "removed a stale pause" in (d / "logs/supervisor.log").read_text()
 
         # the supervisor itself gone: health says so; start gives a new one that keeps what runs and restarts it too
         running = {p: pid(p) for p in parts}

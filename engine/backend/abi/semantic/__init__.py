@@ -169,8 +169,9 @@ def _pairs(copies: dict[str, str], ms: list[dict], dt: dict) -> dict[str, dict[s
     return out
 
 
-def build_copies(project: str) -> None:
-    """Write the query copies the model calls for that don't exist yet, and drop outdated ones (worker, every minute).
+def build_copies(project: str, check: bool = False) -> bool:
+    """Write the query copies the model calls for that don't exist yet, and drop outdated ones (heavy worker). `check`
+    (M4.1, the default worker's minute check): write nothing; whether there is something to write or drop.
     A copy holds the fact's columns plus its dimensions' low-cardinality columns (<= COPY_DISTINCT values); a query
     that uses another dimension column, or runs before its copy is written, joins the dimensions (same rows, slower)."""
     from abi.semantic import model  # not at top: model imports this package
@@ -199,6 +200,8 @@ def build_copies(project: str) -> None:
             if p not in have and c in copied.get(names[fact], ()) and (
                     sql := planner.pairs_sql(names[fact], c, copied[names[fact]], m.get("date_table") or {})):
                 write[p] = sql
+    if check:
+        return bool(drop or write)
 
     def run(cur):
         cur.execute("CREATE SCHEMA IF NOT EXISTS lake.query")
@@ -211,6 +214,7 @@ def build_copies(project: str) -> None:
     if drop or write:  # no empty snapshot: that would end every cached result (SE-7)
         # ponytail: rewrites a whole fact on any change to it or a dimension; incremental copies if refreshes get slow
         storage._commit(con, run, "worker", "build query copies")
+    return bool(drop or write)
 
 
 def _bytes(sql: str, rows: list[tuple]) -> int:

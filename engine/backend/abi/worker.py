@@ -4,17 +4,22 @@ Connection comes from the standard libpq env vars (PGHOST, PGUSER, PGPASSWORD, P
 M3.1: two queues, a worker each (scripts/engine.sh): "default" (ticks, answers, light flow runs; 4 jobs at a time) and
 "heavy" (loads, query copies, ML, heavy flow runs, nightly maintenance; ABI_HEAVY_CONCURRENCY, 1 or 2), so a long
 training or load never holds up a schedule or an answer. 1.1 queued everything on "default", so its jobs still run.
+M4.1: the heavy worker runs only while its queue has work (engine.sh starts and stops it, or a runner container does),
+so the minute checks that find work for it (check_changed) run in the default worker; `run` is abi-run's one job.
 Run: procrastinate --app=abi.worker.app worker --queues=default --concurrency=4 (and --queues=heavy)
 """
 
 import asyncio
+import contextlib
 import functools
 import logging
+import sys
 import threading
+import time
 from datetime import UTC, datetime
 
 from procrastinate import App, JobContext, PsycopgConnector, RetryStrategy
-from procrastinate.exceptions import AppNotOpen
+from procrastinate.exceptions import AlreadyEnqueued, AppNotOpen
 from procrastinate.jobs import Status
 
 import abi.app  # noqa: F401  registers every action a flow step may run
@@ -41,6 +46,27 @@ def defer(task, **args) -> None:
 
 
 RETRIES = 3
+WAKE: dict = {}  # check_changed's (kind, project) -> (what was due, times woken, when to wake again)
+
+
+def _wake(key, due) -> bool:
+    """M4.1: a minute check found `due` (what there is to do): True when it is new, then again after 1, 2, 4 ... 60
+    minutes while the same stays due (a load that keeps failing doesn't keep the runner up); nothing due forgets it."""
+    if not due:
+        WAKE.pop(key, None)
+        return False
+    was, n, at = WAKE.get(key, (None, 0, 0.0))
+    if was == due and time.time() < at:
+        return False
+    n = n + 1 if was == due else 1
+    WAKE[key] = (due, n, time.time() + min(60 * 2 ** (n - 1), 3600))
+    return True
+
+
+def _heavy(task, project: str) -> None:
+    """M4.1: `task` for `project` on the heavy queue, one at a time per project; one already queued is that one."""
+    with contextlib.suppress(AlreadyEnqueued):
+        defer(task.configure(lock=f"{task.name}:{project}", queueing_lock=f"{task.name}:{project}"), project=project)
 
 
 def _alone(tick):
@@ -155,11 +181,31 @@ def check_subscriptions(timestamp: int) -> None:
 
 
 @app.periodic(cron="* * * * *")
-@app.task(queue="heavy", queueing_lock="refresh_changed")
+@app.task(queueing_lock="check_changed")
 @_alone
-def refresh_changed(timestamp: int) -> None:
-    """IN-6: files on change, databases daily, checked every minute."""
-    ingest.refresh_changed()
+def check_changed(timestamp: int) -> None:
+    """M4.1: IN-6's and S-09-fix-3's minute checks, in the default worker, loading and writing nothing: a project with a
+    table to reload (files on change, databases daily) or a query copy to write gets its heavy job, so the heavy worker
+    starts only when there is work. A check's own error (a bad zone, a missing file) is posted here, as before."""
+    for p, due in ingest.refresh_changed(check=True).items():
+        if _wake(("refresh", p), due):
+            _heavy(refresh_changed, p)
+    for p in git.projects():
+        try:
+            due = semantic.build_copies(p, check=True)
+        except ActionFailed as e:  # SE-13: a pulled project.json zone that isn't one; queries answer 400 until fixed
+            notify_change("readiness", p, "Query copies ", f"are not built: {e}", "are built again.")
+            continue
+        if _wake(("copies", p), due):
+            _heavy(build_copies, p)
+        elif not due:
+            notify_change("readiness", p, "Query copies ", None, "are built again.")
+
+
+@app.task(queue="heavy", queueing_lock="refresh_changed")
+def refresh_changed(timestamp: int = 0, project: str | None = None) -> None:
+    """IN-6: reload what changed in `project` (check_changed found it), or in every project (a job queued before M4.1)."""
+    ingest.refresh_changed(only=project)
 
 
 @app.periodic(cron="* * * * *")
@@ -171,12 +217,13 @@ def check_quality(timestamp: int) -> None:
         ingest.quality.watch(p)
 
 
-@app.periodic(cron="* * * * *")
 @app.task(queue="heavy", queueing_lock="build_copies")
-@_alone
-def build_copies(timestamp: int) -> None:
-    """S-09-fix-3: (re)write the query copies after a refresh or model change; queries join dimensions until then."""
+def build_copies(timestamp: int = 0, project: str | None = None) -> None:
+    """S-09-fix-3: (re)write the query copies after a refresh or model change; queries join dimensions until then.
+    `project`'s (check_changed found work), or every project's (a job queued before M4.1)."""
     for p in git.projects():
+        if project and p != project:
+            continue
         try:
             semantic.build_copies(p)
         except ActionFailed as e:  # SE-13: a pulled project.json zone that isn't one; queries answer 400 until fixed
@@ -221,3 +268,35 @@ def purge_archive(timestamp: int) -> None:
         storage.expire_snapshots(storage.lake(p), author="worker")
     with db.connect() as conn:  # last: a project it can't read stops only this
         ingest.purge_uploads(conn)  # M3.5: and the uploads only deleted projects read
+
+
+OUTCOME = {load.name: ("load_runs", "run"), train_model.name: ("ml_runs", "run_id"), score_model.name: ("ml_runs", "run_id"),
+           run_flow.name: ("flow_runs", "run_id")}  # where a job keeps its own outcome: (table, the argument naming the row)
+
+
+def run(job: int) -> int:
+    """M4.1 abi-run, the contract 1.3's launchers call: queued heavy job `job` to its end in this process, as the heavy
+    worker runs it (so as the person it runs for), then 0, or 1 with its error on stderr; 2: no such job is queued now.
+    The job moves to a queue of its own while it runs, so no worker takes it meanwhile, and back after."""
+    queue = f"abi-run-{job}"
+    with db.connect() as conn:
+        if not conn.execute("UPDATE procrastinate_jobs SET queue_name = %s WHERE id = %s AND queue_name = 'heavy' AND status = 'todo'"
+                            " AND coalesce(scheduled_at, now()) <= now()", [queue, job]).rowcount:
+            print(f"abi-run: no heavy job {job} is queued now.", file=sys.stderr)
+            return 2
+    try:
+        app.run_worker(queues=[queue], wait=False, concurrency=1)
+    finally:
+        with db.connect() as conn:  # a retry procrastinate scheduled runs as any other heavy job
+            j = conn.execute("UPDATE procrastinate_jobs SET queue_name = 'heavy' WHERE id = %s RETURNING status::text, task_name, args",
+                             [job]).fetchone()
+    error = {"todo": "it failed; it runs again later (a retry)", "failed": "it failed; the details are in the log above",
+             "succeeded": None}.get(j["status"], f"it ended {j['status']}")
+    if error is None and (where := OUTCOME.get(j["task_name"])):
+        with db.connect() as conn:
+            r = conn.execute(f"SELECT status, error FROM {where[0]} WHERE id = %s", [j["args"].get(where[1])]).fetchone()
+        if r and r["status"] == "failed":
+            error = r["error"] or "it failed"
+    if error:
+        print(f"abi-run: job {job} ({j['task_name']}): {error}", file=sys.stderr)
+    return 1 if error else 0

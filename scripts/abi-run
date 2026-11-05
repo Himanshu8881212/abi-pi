@@ -1,0 +1,15 @@
+#!/bin/sh
+# abi-run JOB_ID: run one queued heavy job (a load, a query copy, a heavy flow run, an ML training or scoring) to its
+# end in this process, as the person it runs for, then exit: the contract a launcher calls (README: Heavy jobs and the
+# runner). It reads the job from the engine's Postgres (procrastinate_jobs, queue "heavy") and the data folder, as the
+# heavy worker does. Exit 0: the job succeeded; 1: it failed (its error on stderr); 2: no such heavy job is queued now;
+# 75: a backup holds the workers, run it again after.
+set -eu
+ROOT=$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.." && pwd -P)
+D=${ABI_PI_DATA:-$ROOT/data}
+case ${1:-} in ''|*[!0-9]*) echo "usage: abi-run JOB_ID (the id of a queued heavy job)" >&2; exit 2 ;; esac
+[ ! -s "$D/run/pause.pid" ] || { echo "abi-run: a backup holds the workers; run job $1 again after it." >&2; exit 75; }
+eval "$("$ROOT/scripts/engine.sh" env)"
+cd "$ROOT/engine/backend"
+HOME=${ENGINE_HOME:-$HOME} exec "$ROOT/engine/backend/.venv/bin/python" -c \
+  'import sys; from abi import worker; sys.exit(worker.run(int(sys.argv[1])))' "$1"

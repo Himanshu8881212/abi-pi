@@ -44,8 +44,10 @@ RUN HOME=$ENGINE_HOME .venv/bin/playwright install --with-deps --only-shell chro
 # one Chrome for everything: the video renderer (Remotion) uses the engine's; one Python: ABI-PI's scripts run on the engine's
 ENV REMOTION_BROWSER=/opt/abi/headless_shell PATH=/app/engine/backend/.venv/bin:$PATH
 
-# an unprivileged user runs everything; it owns only the app's folder and the data volume
-RUN useradd --create-home --uid 10001 abi && mkdir -p /app /data && chown abi:abi /app /data
+# an unprivileged user runs everything; it owns only the app's folder and the data volume. abi-run JOB: one heavy job
+# (README: Heavy jobs and the runner)
+RUN useradd --create-home --uid 10001 abi && mkdir -p /app /data && chown abi:abi /app /data \
+    && ln -s /app/scripts/abi-run /usr/local/bin/abi-run
 WORKDIR /app
 USER abi
 COPY --chown=abi:abi scripts/video/package.json scripts/video/package-lock.json* scripts/video/

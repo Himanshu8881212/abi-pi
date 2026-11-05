@@ -415,6 +415,12 @@ def _migrate(conn, project: str, steps: dict) -> None:
 
 # ponytail: per process, so a worker restart retries at once; keep it in the `sources` row if several workers refresh
 BACKOFF: dict[tuple[str, str], tuple[int, float]] = {}  # (project, table) -> (failures in a row, next try, unix time)
+CHECK: ContextVar[bool] = ContextVar("check_only", default=False)  # M4.1: refresh_changed(check=True) loads nothing
+DUE = "due"  # refresh's word for a table the check found to load
+
+
+class Due(Exception):  # noqa: N818 - not an error: `_load` under CHECK reached a load that would run
+    pass
 
 
 def refresh(conn, project: str, after: set[str] | None, author: str, reload: set[str] = frozenset()) -> dict[str, str]:
@@ -476,6 +482,8 @@ def refresh(conn, project: str, after: set[str] | None, author: str, reload: set
                 audit(c, None, "worker", "refresh_source", project, spec, getattr(e, "status", 500), str(e))
             notify_change("refresh", project, f"Refreshing table '{t}': ", f"{e} The previous snapshot stays live.",
                           "works again.", t)  # §5, MA-7, D-10: once per distinct error
+        except Due:  # M4.1: refresh_changed(check=True): this one loads in the heavy worker
+            failed[t] = DUE
     return failed
 
 
@@ -732,6 +740,8 @@ def _load(conn, src: Source, author: str, unless: str | None = None, used: dict 
             # ponytail: size + Last-Modified; an HTTP server without Last-Modified that keeps the size hides a change
             if unless is not None and fingerprint == unless:
                 return None
+        if CHECK.get():  # M4.1: what changed is all the minute's check wants; the heavy worker loads it
+            raise Due
         append = truncated = None
         if src.api:  # pages go to files in this lake's own temp folder (LOAD-MEMORY), read in one snapshot below
             tmp = f"{con.execute("SELECT current_setting('temp_directory')").fetchone()[0]}/api-{uuid.uuid4().hex}"
@@ -802,6 +812,8 @@ def _build(conn, project: str, table: str, author: str, unless: str | None = Non
     fingerprint = json.dumps({"steps": [s.model_dump(mode="json") for s in steps]}, sort_keys=True)
     if unless is not None and fingerprint == unless:
         return None
+    if CHECK.get():  # M4.1: as `_load`'s
+        raise Due
     box = RUN.get()  # a load job reports this build's progress
     try:
         snap = storage.refresh(storage.lake(project), table, None, author=author,
@@ -998,21 +1010,27 @@ def _model_sql(cur, project: str, table: str, declared: list[dict] | None = None
     return transform.compile(table, steps, source_sql=typed) if steps else typed
 
 
-def refresh_changed() -> None:
+def refresh_changed(only: str | None = None, check: bool = False) -> dict[str, frozenset[str]]:
     """IN-6: reload every table whose files changed or whose database source last loaded before today (UTC; incremental
-    past a monotonic column when there is one), and what reads it (TR-4). Run by the worker every minute."""
-    with db.connect() as conn:
-        projects = {r["project"] for r in conn.execute("SELECT DISTINCT project FROM sources")}
-        for p in sorted(projects | {g.parent.name for g in git._root().glob("*/.git")}):  # D-9: files never loaded yet too
-            if not (git._root() / p / ".git").is_dir():  # deleted since the list was read: a load would bring it back
-                continue
-            error = None
-            try:
-                _migrate(conn, p, transform.tables(p))
-                refresh(conn, p, None, "worker")
-            except (ValueError, ActionFailed) as e:  # invalid tables/*.json, a cycle, legacy rows without a repo
-                error = f"{e} The previous snapshots stay live."
-            notify_change("refresh", p, "Refreshing tables: ", error, "works again.")  # D-10
+    past a monotonic column when there is one), and what reads it (TR-4); `only`: that project's. M4.1: the default
+    worker checks every minute (`check`: nothing loads; each project's tables that would) and the heavy worker loads."""
+    due, held = {}, CHECK.set(check)
+    try:
+        with db.connect() as conn:
+            projects = {r["project"] for r in conn.execute("SELECT DISTINCT project FROM sources")}
+            for p in sorted(projects | {g.parent.name for g in git._root().glob("*/.git")}):  # D-9: never loaded yet too
+                if not (git._root() / p / ".git").is_dir() or only and p != only:  # deleted since: a load would bring it back
+                    continue
+                error = None
+                try:
+                    _migrate(conn, p, transform.tables(p))
+                    due[p] = frozenset(t for t, e in refresh(conn, p, None, "worker").items() if e is DUE)
+                except (ValueError, ActionFailed) as e:  # invalid tables/*.json, a cycle, legacy rows without a repo
+                    error = f"{e} The previous snapshots stay live."
+                notify_change("refresh", p, "Refreshing tables: ", error, "works again.")  # D-10
+    finally:
+        CHECK.reset(held)
+    return due
 
 
 router = APIRouter(prefix="/api")
