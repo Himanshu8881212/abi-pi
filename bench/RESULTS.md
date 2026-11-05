@@ -598,6 +598,45 @@ no rule 0.76 / 1.47 s against 0.81 / 0.70 s. Not measured here: a 7.4M-order pro
 
 What was built: the uncommitted working tree that became d48ea72; no commit or tree hash of it was recorded, so nothing ties these pve1 numbers to d48ea72's exact bytes (the Mac comparison above ran on an earlier tree, before the memo's lock). The M3.6 review fixes after d48ea72 change the shared partials (AVG reads each person's own rows; the partials held at once are capped) and the RLS context cache, so M3.6 is measured again from a commit built with git archive; it isn't closed until the cold case above is measured.
 
+## 1.2 M3.6 round 3 (pve1)
+
+5 Nov 2026, 04:17-04:23 UTC: release-1.2 at 45c33fa (round 2's one read a page plus the review fixes: AVG contexts read
+each person's own rows, ABI_RLS_SHARED_ROWS bounds all shared partials together, the RLS context and plan caches keyed
+by what they were built from) measured on pve1 with round 2's method. `git archive 45c33fa` built on LXC 100 as the
+throwaway compose install (project, container and volume abi-m36, port 8798 on the LXC's loopback, the owner's password
+in a root-only file; image abi-m36:45c33fa, sha256:06384ddd2106..., 2,843,818,970 bytes; the container's rls.py,
+semantic/__init__.py and bench/perf.py have 45c33fa's SHA-256), no memory limit as in M3's pages runs, this commit's
+docker-compose.yml defaults (ABI_RLS_SHARED_ROWS 1,000,000). bench/perf.py of 45c33fa ran inside it (`docker cp bench`,
+`docker exec`): `perf.py project perf_brewline --scale 0.01` (73,941 orders, its Overview report, a 261-264 KB page),
+then each `pages` run, one at a time, each started at an LXC 1-minute load average of 1.06-1.33 with no build, no
+other bench and no container but abi and lake beside it; [a-b] is the load average's range during the run, peak is
+the cgroup's memory.peak reset at each run's start. Removed afterwards with its image, volume, folder and env file; the
+live abi and lake containers' start time, restart count and image were the same before and after.
+
+| M3.6 target (PLAN.md) | 1.1.0 (part 2) | M3 round 3 (c2c7437) | M3.6 round 2 | M3.6 round 3 (45c33fa) | |
+|---|---|---|---|---|---|
+| 50 sessions right after a commit with `--rls cafes.cafe_id` (50 distinct restricted Viewers): page p95 <= 5 s | 152.7 s | 25.59 s | 4.06 s | 4.24 s [1.04-2.30]; again last, 4.26 s [1.29-2.44] (6.0x M3, 36x 1.1.0) | met |
+| 50 sessions right after a commit, no rule: no worse than M3 | 87.6 s | 1.44 s | 1.15 s | 1.13 s [1.21-1.91] | met |
+| run 1's memory peak within M3's mem_limit 4g | | | 2,270,244,864 bytes | 2,261,565,440 bytes (2.11 GiB; 2,347,585,536 the largest run), no OOM event | met |
+| first opening, 50 café Viewers (cold: every RLS context and shared partials built), not the formal target | | | 7.02 s | 7.12 s (4.71 s in the repeat, contexts warm) | missed against 5 s |
+| 7.4M orders right after a refresh (the cold morning case the shared partials are for) | | | not measured | not measured | open |
+
+| pages, Brewline 0.01 | first p50 / p95 s | right after a commit p50 / p95 / max s | errors | peak bytes |
+|---|---|---|---|---|
+| `--rls cafes.cafe_id`, 10 Viewers | 1.26 / 1.46 | 1.31 / 1.41 / 1.41 | 0 | 2,322,702,336 |
+| `--rls cafes.cafe_id`, 25 Viewers | 1.90 / 2.65 | 2.23 / 2.69 / 2.74 | 0 | 2,255,392,768 |
+| `--rls cafes.cafe_id`, 50 Viewers | 4.47 / 7.12 | 2.84 / 4.24 / 4.32 | 0 | 2,261,565,440 |
+| `--rls cafes.cafe_id`, 50 Viewers, repeated last | 3.42 / 4.71 | 2.89 / 4.26 / 4.34 | 0 | 2,347,585,536 |
+| `--rls cafes.region` (4 values, people share), 50 Viewers | 2.04 / 2.10 | 1.59 / 1.65 / 1.66 | 0 | 2,341,822,464 |
+| no rule, 50 people (Viewers and Developers) | 1.39 / 1.44 | 1.02 / 1.13 / 1.13 | 0 | 2,343,522,304 |
+
+0 dropped in every run; the lake snapshot was the same at each round's start and end. Every target is met on a
+commit built with git archive, so round 2's numbers now have a tree behind them: 50 café Viewers 4.24 / 4.26 s
+against round 2's 4.06 / 4.10 s, within run-to-run noise (0.2 s, about 0.74 s to spare); 10, 25 and 50 Viewers give
+1.41, 2.69 and 4.24 s, about 0.06-0.09 s a person (round 1: 0.15-0.2 s). The review fixes (AVG contexts read per
+person, the global partials budget, the extra digest on cache misses) didn't move it measurably at this scale. Still
+open, so M3.6 isn't closed: the cold first opening (7.12 s) and a 7.4M-order project right after a refresh.
+
 ## 1.2 M2 round 1 (MacBook Air, 8 cores, 24 GB; model proxy/claude-sonnet-5-5)
 
 4 Nov 2026 08:57-09:13, release-1.2 at 7e68c71: M2.3's change measures (2c55e2d), M2.1's expressions (377a868), M2.2's
