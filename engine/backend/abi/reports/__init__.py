@@ -7,9 +7,11 @@ A report is `reports/<id>.json` (schemas/v1/report.json): pages of visuals, each
 chosen by the deterministic rules below (RP-3, principle 5: automatic, overridable in the spec).
 """
 
+import contextvars
 import functools
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -163,19 +165,37 @@ class _Inline(storage.ProjectRef):
 
 class VisualRef(_Inline):
     page: str | None = Field(None, pattern=ID)
-    visual: str | None = Field(None, pattern=ID)
+    visual: str | None = Field(None, pattern=ID, description="omit for every visual of the page")
 
     @model_validator(mode="after")
     def _both(self):
-        if self.report and not (self.page and self.visual):
-            raise ValueError("A report visual needs page and visual.")
+        if self.report and not self.page:
+            raise ValueError("A report visual needs page and visual (or page alone: every visual of the page).")
         return self
+
+
+AT_ONCE = 6  # a page's visuals read at once (M3.3's app asked as many)
 
 
 @action(Role.viewer)
 def visual_data(conn, user: User, args: VisualRef) -> dict:
-    """Data of one report visual (or `query`: a chat answer's visual) through the semantic engine: its type (automatic unless set), number format per measure, the columns (dimensions, then measure IDs), measure display names and rows, with report, page, visual and interaction filters applied, and the time zone and display currency they are in."""
-    r, ((p, v),) = args.load(conn, user)
+    """Data of one report visual (or `query`: a chat answer's visual) through the semantic engine: its type (automatic unless set), number format per measure, the columns (dimensions, then measure IDs), measure display names and rows, with report, page, visual and interaction filters applied, and the time zone and display currency they are in. With page and no visual: {page, visuals: that for each visual of the page, or {id, error, status}}."""
+    r, pvs = args.load(conn, user)
+    if args.query or args.visual:
+        return _visual(conn, user, args, r, *pvs[0])
+
+    def one(pv: tuple[dict, dict]) -> dict:  # M3.6 round 2: one read action per page, not per visual
+        try:
+            return _visual(conn, user, args, r, *pv)
+        except ActionFailed as e:
+            return {"id": pv[1]["id"], "title": pv[1].get("title"), "error": e.body["message"], "status": e.status}
+    # each visual in a copy of this action's context: its memo (role, rules, snapshot), call and caller
+    runs = [(contextvars.copy_context(), pv) for pv in pvs]
+    with ThreadPoolExecutor(min(AT_ONCE, len(runs))) as ex:
+        return {"page": args.page, "visuals": list(ex.map(lambda c: c[0].run(one, c[1]), runs))}
+
+
+def _visual(conn, user: User, args: VisualRef, r: dict, p: dict, v: dict) -> dict:
     if "query" not in v:
         return {"id": v["id"], "type": "text", "title": v.get("title"), "text": v["text"]}
     q, _, off = _query(args.project, r, p, v, [f.model_dump(mode="json") for f in args.interaction])

@@ -553,6 +553,47 @@ a catalog connection for the snapshot), which is what step 1's L4 removes (one e
 visual, and the snapshot read once per action), not built in b378753. Not measured here: a 7.4M-order project right
 after a refresh, the cold morning case the shared partials are for.
 
+## 1.2 M3.6 round 2 (pve1)
+
+5 Nov 2026, 03:16-03:24 UTC: release-1.2 at c6b5006 plus round 2's change (one read action per report page; the
+snapshot and the definition reads once per action; a planned SQL's RLS check once) built on LXC 100 as round 1's
+throwaway install (abi-m36, port 8798 on the LXC's loopback, its own volume, the owner's password in a root-only file,
+image abi-m36:r2, no memory limit), the same method and data (`perf.py project perf_brewline --scale 0.01`, 73,941
+orders), one run at a time, each started at an LXC 1-minute load average of 1.18-1.42 with no build, no other bench and
+no container but abi and lake beside it; [a-b] is the load average's range during the run. Removed afterwards with its
+images, folder and env file; the live abi and lake containers' start time, restart count and image were the same before
+and after.
+
+| M3.6 target (PLAN.md) | M3 round 3 (c2c7437) | M3.6 round 1 (b378753) | M3.6 round 2 | |
+|---|---|---|---|---|
+| 50 sessions right after a commit with `--rls cafes.cafe_id` (50 distinct restricted Viewers): page p95 <= 5 s | 25.59 s | 9.14 s | 4.06 s [1.33-2.76]; again last, 4.10 s [1.14-2.06] | met |
+| 50 sessions right after a commit, no rule: no worse than M3 | 1.44 s | 1.30 s | 1.15 s [1.20-1.95] | met |
+| memory peak within M3's mem_limit 4g | | 2,217,697,280 bytes | 2,270,244,864 bytes (2,349,699,072 the largest run), no OOM event | met |
+
+| pages, Brewline 0.01 | first p50 / p95 s | right after a commit p50 / p95 / max s | errors | peak bytes |
+|---|---|---|---|---|
+| `--rls cafes.cafe_id`, 25 Viewers | 2.13 / 2.63 | 1.81 / 2.36 / 2.38 | 0 | 2,324,115,456 |
+| `--rls cafes.cafe_id`, 50 Viewers | 4.52 / 7.02 | 2.72 / 4.06 / 4.11 | 0 | 2,270,244,864 |
+| `--rls cafes.cafe_id`, 50 Viewers, repeated last | 2.99 / 4.40 | 2.71 / 4.10 / 4.19 | 0 | 2,346,016,768 |
+| `--rls cafes.region` (4 values, people share), 50 Viewers | 1.96 / 2.00 | 1.64 / 1.69 / 1.70 | 0 | 2,337,062,912 |
+| no rule, 50 people (Viewers and Developers) | 1.26 / 1.32 | 1.09 / 1.15 / 1.16 | 0 | 2,349,699,072 |
+
+0 dropped in every run; the lake snapshot was the same at each round's start and end. The first opening of the run
+right after the install (7.02 s) builds every person's RLS context and the shared partials; it isn't the target's
+round. Root cause of round 1's miss, measured on the Mac (perf_m36, the same data; per-process CPU around each burst,
+per-thread CPU per action, cProfile of one person's page; 50 café Viewers right after a commit, load 9-12): the engine
+spent 7.4-7.7 CPU seconds a burst in one process (about 150 ms a person), which is the wall time, since nearly every
+read is an SE-7 hit and all of it holds the GIL. One person's page was ten engine calls (6 visual_data, /me and
+rls_rules twice) and each visual_data paid again what doesn't change between visuals: auth, role, audit, a new DuckLake
+catalog connection for the snapshot per read (9 a page, about 3 ms CPU each), the definition files globbed, read and
+parsed (189 file opens a page), the live sources, and a sqlglot parse of the same planned SQL for the RLS check. Round
+2: the app asks a page in one visual_data call (page without visual: every visual of the page, each as its own call
+gives it or {id, error, status}), so those are paid once a page; the snapshot read and the live sources go through the
+action's memo (now one at a time per action, so a page's visuals at once read each once), and SQL that passed the RLS
+check with the same known names isn't parsed again. HEAD (c6b5006) and this tree before the memo's lock interleaved on the Mac (load 8-12),
+p95 right after a commit: 50 café Viewers 6.02 / 5.65 s against 2.81 / 2.80 s (engine CPU 7.4-7.7 s against 4.3 s);
+no rule 0.76 / 1.47 s against 0.81 / 0.70 s. Not measured here: a 7.4M-order project right after a refresh.
+
 ## 1.2 M2 round 1 (MacBook Air, 8 cores, 24 GB; model proxy/claude-sonnet-5-5)
 
 4 Nov 2026 08:57-09:13, release-1.2 at 7e68c71: M2.3's change measures (2c55e2d), M2.1's expressions (377a868), M2.2's

@@ -171,19 +171,26 @@ def shell(title: str, sub: str, body: str, script: str = "") -> str:
 
 
 def report_pages(project: str, rid: str, rep: dict, measures: dict, ex=None) -> list[dict]:
-    """Each page's visuals with ABI's visual_data rows (or the text, or ABI's error) and a "how" note; the visuals
-    asked at once through `ex` (an executor asking as the person: app.Reads); without one, no rows."""
+    """Each page's visuals with ABI's visual_data rows (or the text, or ABI's error) and a "how" note; the pages
+    asked at once through `ex` (an executor asking as the person: app.Reads), each page in one call (M3.6 round 2:
+    a page's visuals in one read action); without one, no rows."""
     import abi  # noqa: PLC0415 (sibling; REST as the signed-in person)
 
-    def fetch(item: dict, page: str) -> None:
+    def fetch(items: list[dict], page: str) -> None:
         try:
-            item["data"] = abi.call("visual_data", project=project, report=rid, page=page, visual=item["id"])
+            got = {d["id"]: d for d in abi.call("visual_data", project=project, report=rid, page=page)["visuals"]}
         except abi.ActionError as e:
-            item["error"] = str(e.body.get("message"))
+            got = {i["id"]: {"error": e.body.get("message")} for i in items}
+        for item in items:
+            d = got.get(item["id"]) or {"error": f"No visual '{item['id']}' on page '{page}' now."}
+            if "error" in d:
+                item["error"] = str(d["error"])
+            else:
+                item["data"] = d
 
     pages, todo = [], []
     for p in rep.get("pages", []):
-        vs = []
+        vs, mine = [], []
         for v in p.get("visuals", []):
             q = v.get("query") or {}
             how = "\n".join(f"{m} = {measures.get(m, {}).get('expression', '?')}" for m in q.get("measures", []))
@@ -194,8 +201,10 @@ def report_pages(project: str, rid: str, rep: dict, measures: dict, ex=None) -> 
                 item["text"] = v.get("text") or ""
                 vs.append(item)
                 continue
-            todo.append((item, p["id"]))
+            mine.append(item)
             vs.append(item)
+        if mine:
+            todo.append((mine, p["id"]))
         pages.append({"id": p["id"], "name": p.get("name"), "visuals": vs})
     if ex:
         list(ex.map(lambda t: fetch(*t), todo))  # all in (another error than ABI's raises here)

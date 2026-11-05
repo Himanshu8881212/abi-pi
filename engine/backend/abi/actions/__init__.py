@@ -13,6 +13,7 @@ import hmac
 import json
 import re
 import secrets
+import threading
 import time
 from collections.abc import Callable
 from contextlib import nullcontext
@@ -90,13 +91,15 @@ _memo: ContextVar[dict | None] = ContextVar("abi_memo", default=None)
 def memo(key: tuple, fn: Callable):
     """M3.6: fn() once per read action (a Viewer's action that changes nothing, as `run` marks it): a role, a rule
     file or a locale read again inside one visual_data call gives the same answer. Never across actions, so a
-    demotion or a rule change applies at the next one; outside a read action, fn() every time."""
+    demotion or a rule change applies at the next one; outside a read action, fn() every time. One at a time per
+    action, so threads of one action (a page's visuals) read each once."""
     m = _memo.get()
     if m is None:
         return fn()
-    if key not in m:
-        m[key] = fn()
-    return m[key]
+    with m.setdefault(None, threading.RLock()):  # an fn may ask memo again
+        if key not in m:
+            m[key] = fn()
+        return m[key]
 
 
 def require_confirmation(why: str, preview: dict | None = None) -> None:

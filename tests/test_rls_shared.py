@@ -4,6 +4,7 @@ through the person's own filter in the engine. Every visual of the report and a 
 what their own read gives (ABI_RLS_SHARED_ROWS=0, 1.2's path), after new data and after a rule change; what doesn't
 decompose takes their own read; nothing shared reaches anyone but through their own filter."""
 import concurrent.futures as cf
+import contextlib
 import json
 import re
 import secrets
@@ -50,6 +51,7 @@ import concurrent.futures as cf, json, sys, time
 from abi import actions, db, security, semantic, storage
 import abi.reports  # noqa: F401 - registers visual_data
 from abi.project import imports
+from abi.semantic import rls
 
 def same(a, b):
     if isinstance(a, float) and isinstance(b, float):
@@ -130,6 +132,26 @@ for line in sys.stdin:
                             [p, start]).fetchall()
         out = {"got": got, "theirs": [r for r in log if r["user_id"] == users[a["who"]].id],
                "system": [r["error"] for r in log if r["user_id"] is None and r["error"]]}
+    elif a["cmd"] == "page":  # one read action for a page: the snapshot read once, SQL checked once for good
+        n, sid, rc = {}, storage.snapshot_id, rls.refused_calls
+        storage.snapshot_id = lambda con: n.__setitem__("snap", n["snap"] + 1) or sid(con)
+        rls.refused_calls = lambda *x: n.__setitem__("check", n["check"] + 1) or rc(*x)
+        try:
+            runs = []
+            for _ in range(2):
+                n.update(snap=0, check=0)
+                r = actions.run("visual_data", {"project": p, "report": "overview", "page": "overview"}, users[a["who"]], "rest")
+                runs.append({"visuals": len(r["visuals"]), "rows": sum("rows" in v for v in r["visuals"]), **n})
+        finally:
+            storage.snapshot_id, rls.refused_calls = sid, rc
+        sql, uid = 'SELECT count(*) FROM "orders"', users[a["who"]].id
+        rls.check(p, uid, sql, {"orders"})
+        try:
+            rls.check(p, uid, sql, {"cafes"})  # the same SQL, without orders among the names it may read
+            refused = None
+        except actions.ActionFailed as e:
+            refused = e.status
+        out = {"runs": runs, "refused": refused}
     print(json.dumps(out, default=str), flush=True)
 """
 
@@ -336,6 +358,32 @@ def test_through_the_engine_each_viewer_gets_only_theirs_and_every_change_at_onc
     assert visual(t["one"], "kpi-quantity") == abi.call("semantic_query", project=P, measures=["quantity"], filters=[
         {"column": "cafes.cafe_id", "op": "in", "value": [brew["cafes"][2]]}])["rows"]
     sure("set_rls_rule", project=P, id="cafe", table="cafes", column="cafe_id", users=users)
+
+
+def test_a_page_is_one_read_with_each_visual_as_its_own(brew):
+    """M3.6 round 2: a page's visuals in one visual_data call (the app's page) are each what their own call gives,
+    for each Viewer and the owner, a refused visual (a column rule) among them as its own error; inside it the
+    snapshot is read once and a planned SQL checked once (each was paid per visual by 50 people on pve1)."""
+    t = brew["tokens"]
+    page = lambda: abi.call("visual_data", project=P, report="overview", page="overview")  # noqa: E731
+    vs = abi.call("list_reports", project=P)["reports"][0]["pages"][0]["visuals"]
+    ids, n = [v["id"] for v in vs], sum("query" in v for v in vs)
+    for w in (*WHO, None):
+        with abi.as_user(t[w]) if w else contextlib.nullcontext():
+            got = page()
+            one = [abi.call("visual_data", project=P, report="overview", page="overview", visual=v) for v in ids]
+        assert got["page"] == "overview" and json.dumps(got["visuals"], sort_keys=True) == json.dumps(one, sort_keys=True), w
+    r = brew["drv"]("page", who="several")
+    assert r == {"runs": [{"visuals": len(ids), "rows": n, "snap": 1, "check": r["runs"][0]["check"]},
+                          {"visuals": len(ids), "rows": n, "snap": 1, "check": 0}], "refused": 403}, r
+    sure("set_column_rule", project=P, id="noqty", table="orders", columns=["quantity"])
+    try:
+        with abi.as_user(t["one"]):
+            got = {v["id"]: v for v in page()["visuals"]}
+        assert got["kpi-quantity"]["status"] == 403 and "rows" not in got["kpi-quantity"], got["kpi-quantity"]
+        assert got["kpi-orders_rows"]["rows"] == visual(t["one"], "kpi-orders_rows")
+    finally:
+        sure("delete_rls_rule", project=P, id="noqty")
 
 
 def test_the_published_copy_is_sliced_the_same(brew):

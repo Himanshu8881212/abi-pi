@@ -40,6 +40,7 @@ _ctx: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # lake connection
 _where: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # lake connection -> {schema: {table: its row filter}}
 _outputs: dict = {}  # (project, bundle sha) -> unfiltered_outputs
 _outputs_lock = threading.Lock()
+_passed: dict = {}  # (SQL, its known table names) that `check` let through: the same pair always passes
 
 
 def _file(project: str) -> dict:
@@ -442,7 +443,11 @@ def check(project: str, user_id: int, sql: str, known: set[str]) -> None:
     """Refuse (403, audited) a restricted user's DuckDB SQL unless it is one SELECT or DESCRIBE that names only
     unqualified known tables or CTEs visible in its scope: a qualified name (lake.model.t, lake.query copies,
     lake.edits, raw), a table function (read_csv, query_table, duckdb_tables) or a file name ('x.csv', replacement
-    scan) would read around the views."""
+    scan) would read around the views. M3.6 round 2: the answer depends on `sql` and `known` only, so SQL that passed
+    once with those names passes again unparsed (a planned visual's SQL is the same for every person)."""
+    key = (sql, frozenset(k.lower() for k in known))
+    if key in _passed:
+        return
     try:
         [tree] = sqlglot.parse(sql, read="duckdb")
         if not isinstance(tree, exp.Query | exp.Describe):
@@ -456,6 +461,10 @@ def check(project: str, user_id: int, sql: str, known: set[str]) -> None:
                 raise ValueError(f"reads {t.sql('duckdb')}")
         if bad := refused_calls(sql, tree):
             raise ValueError(f"calls {', '.join(sorted(bad))}")
+        with _outputs_lock:
+            _passed[key] = None
+            while len(_passed) > 4096:  # oldest first
+                del _passed[next(iter(_passed))]
     except Exception as e:  # noqa: BLE001 anything we can't prove safe is refused
         with db.connect() as conn:
             reason = f"<sha256:{actions.sha(str(e))}>" if actions.inbound() else str(e)

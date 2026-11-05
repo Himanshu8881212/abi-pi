@@ -59,6 +59,12 @@ _parts: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 SHARED_ROWS = int(os.environ.get("ABI_RLS_SHARED_ROWS", "1000000"))  # 0: off, every restricted read is its own
 
 
+def _snapshot(con) -> int:
+    """`storage.snapshot_id` (a catalog connection each), once per read action (`actions.memo`): a page's visuals read
+    one snapshot. Read before the action's queries, so a cached result is still never older than its key."""
+    return actions.memo(("snapshot", con), lambda: storage.snapshot_id(con))
+
+
 def _edited(con, snap: int) -> frozenset[str]:
     """WB-4: the tables with active edits. Once per snapshot it rebuilds memory.effective (the lake connection's
     in-memory database): one view per such table, its effective table (writeback.effective_sql). One rebuild at a time
@@ -127,7 +133,7 @@ def _copies(project: str, m: dict) -> tuple[dict[str, str], dict[str, dict[str, 
     hashes the copy's definition and the DuckLake table IDs of the fact and its dimensions; a refresh or restore
     replaces a table (new ID) and a model change changes the definition, so an outdated copy is never read."""
     con = storage.lake(project)
-    cur, edited = con.cursor(), _edited(con, storage.snapshot_id(con))
+    cur, edited = con.cursor(), _edited(con, _snapshot(con))
     cols = _columns_of(cur, "model")
     loc, types = locale(project), cols | _live.columns(project)
     days = planner.local(m, types, loc["time_zone"])
@@ -308,7 +314,7 @@ def execute(project: str, sql: str, asked: dict, user_id: int | None = None, liv
     view of the shared partials through the user's own filter (`_shared`); raises _Unshared, unlogged, when they
     can't be read (the caller plans the person's own read)."""
     con, start, rows, error = storage.lake(project), time.perf_counter(), None, None
-    snap = storage.snapshot_id(con)  # read before the query, so a cached result is never older than its key
+    snap = _snapshot(con)  # read before the query, so a cached result is never older than its key
     with _cache_lock:  # per lake connection: a recreated lake restarts its snapshot IDs
         cache = _caches.setdefault(con, {})
     rows, cached, ctx, scanned, views, key = None, False, None, 0, {}, sql
@@ -508,7 +514,7 @@ def plan(project: str, q: dict, user_id: int | None = None, expressions: list[di
     is never taken from here), so people who see different rows share one plan."""
     if not rls.restricted(project, user_id):
         return _plan(project, q, user_id, expressions, strict)
-    key = json.dumps([project, rls.digest(project), storage.snapshot_id(storage.lake(project)), q, list(expressions), strict,
+    key = json.dumps([project, rls.digest(project), _snapshot(storage.lake(project)), q, list(expressions), strict,
                       shared is not None and SHARED_ROWS > 0, sorted((t, sorted(c)) for t, c in rls.hidden(project, user_id).items()),
                       locale(project)], sort_keys=True, default=str)
     with _plans_lock:

@@ -18,7 +18,7 @@ from clickhouse_connect.driver.exceptions import ClickHouseError
 from sqlglot import exp
 
 from abi import db, storage
-from abi.actions import ActionFailed
+from abi.actions import ActionFailed, memo
 from abi.project import SCHEMA, git
 from abi.security import credentials
 
@@ -30,6 +30,11 @@ STAMP_TIMEOUT = 5  # s, connect and read: a hung server must not hold a project'
 
 
 def _sources(project: str) -> dict[str, dict]:
+    """{live table: its source file}; M3.6 round 2: read once per read action (`actions.memo`)."""
+    return memo(("live.sources", project), lambda: _read_sources(project))
+
+
+def _read_sources(project: str) -> dict[str, dict]:
     out = {}
     for f in (git.path(project) / "sources").glob("*.json"):
         try:
