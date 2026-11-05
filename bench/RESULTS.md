@@ -985,3 +985,87 @@ in 1.1.0 too) the default image was 2,560,595,246, 106,367 bytes over, so both s
 Idle RSS (ps), a private engine on the Mac, 40 s after start, before and after moving Playwright and python-pptx into
 the functions that render: engine 228,432 KB to 210,624 KB, default worker 225,232 KB to 207,632 KB (about 17.5 MB
 each). numpy stays: pyarrow loads it at start anyway.
+
+## 1.2 M4 (pve1)
+
+5 Nov 2026, 07:55-09:10 UTC: release-1.2 at 7c6db7a (M4.1-M4.5) measured on pve1. `git archive 7c6db7a` in
+/opt/abi-m4 on LXC 100, both targets built there (`docker build --target default|video`, tags abi-m4:default and
+abi-m4:video; every layer came from the build cache of M4.3's builds of the same tree), run as a throwaway install of
+the repo's own docker-compose.yml with an override for the container names: project abi-m4, containers abi-m4 and
+abi-m4-runner, volume abi-m4-data, the app on 8797 and the SQL endpoint on 15497 at the LXC's address (so the Proxmox
+host could reach them), a self-signed certificate for the SQL endpoint, the owner's password in a root-only file.
+This commit's compose defaults (ABI_RUNNER_IDLE 180, ABI_RUNNER_MEMORY 4g, ABI_RUNNER_DUCKDB_MEMORY_LIMIT 2GB in the
+runner, 1500MB in the main container, ABI_INLINE_ROWS 4,400,000), no model. bench/perf.py of 7c6db7a ran inside
+abi-m4 (`docker cp bench`, `docker exec`) with M3's subcommands, one run at a time, each started at an LXC 1-minute
+load average of 0.08-0.40 with no build, no other bench and no container but abi and lake beside it; [a-b] is the
+load average's range from the start to the run's end. Memory is each container's cgroup memory.current (and anon),
+sampled every 2 s from 60 s before a run until its heavy worker had stopped; "gone" is the supervisor's log line,
+counted from the heavy job's end in procrastinate_events. Removed afterwards with its images, volume, network, folder
+and files; the live abi and lake containers' start time, restart count and image were the same before and after.
+
+| M4 target (PLAN.md) | 1.1.0 | 1.2 M4 (7c6db7a) | |
+|---|---|---|---|
+| default image without Remotion, <= 2,843,622,285 - (video - default) | 2,843,622,285 bytes | default 2,476,372,582, video 2,700,262,250 bytes: limit 2,619,732,617, 143,360,035 under; the -video image renders a one-slide video (11,821 bytes), the default one says how to switch | met |
+| runner profile: a 10M-order load runs in the runner, exact | | through the app's upload: orders 70.81 s, Ready 79.96 s, exact to the cent; the job ran in abi-m4-runner, abi-m4 started no heavy worker [0.40-2.61] | met |
+| the runner's worker gone <= 3 min after the heavy queue empties | never stops (M3: always on) | 182.6 s (the job ended 08:05:55.4, the worker stopped 08:08:58) | missed by 2.6 s |
+| the runner container's memory back within 10% of its idle | | anon 0.40 MB idle, 0.43 MB after; memory.current 1.90 MB idle, 4.65 MB after (+2.75 MB of page cache) | met for anon, missed for memory.current |
+| the same in one container (no profile) | | orders 70.68 s, Ready 79.24 s, exact; worker gone 181.6 s after its job; container 773.5 MB idle, 788.2 MB after (+1.9%; anon 647.1 to 659.1 MB) [0.34-2.24] | gone missed by 1.6 s; memory met |
+| 100M orders through the app with the runner profile: Ready with a model, exact, no client timeout | build_model out of memory | orders in 698.60 s, Ready at 795.54 s, exact to the cent, no timeout; runner peak 854,118,400 bytes of its 4 GiB | met |
+| another project's uncached queries during it <= 1.5x idle | x2.26 / x2.92 | idle (200) 71.0 / 79.1 ms, during (8,849) 83.2 / 120.8 ms: x1.17 p50, x1.53 p95 [0.40-6.83] | p50 met, p95 missed by 0.03 |
+| medallion at 10M, the 1.2 way: each source read once, raw/ + model/ <= 417,189,763 bytes, gold exact | 695,316,271 bytes in 147.52 s, orders read 3 times | 282,925,126 bytes (40.7%), all in model/, none in raw/; rebuild 72.42 s; snapshots refresh bronze_orders, silver_orders, gold_revenue, once each; exact to the cent | met |
+| idle container RSS and RSS per chat (README) | 620 MB idle; 106.4 / 105.8 MB a chat | 476 MB idle (a fresh start); 104.7 / 103.8 MB a chat | recorded |
+| data out from the Proxmox host: TLS psql sees only the Viewer's café, 150,000 rows capped, a revoked token refused, MCP lists only reads and refuses a write | | all four, below | met |
+
+Runner (item 2). The runner's supervisor started its heavy worker 29 s after the load began (the orders' last piece
+queued it) and stopped it with "the heavy queue was empty 180 s". The supervisor checks the queue every 2 s and then
+waits ABI_RUNNER_IDLE, so with the default of 180 the worker always goes a second or three after 3 minutes: both
+runs miss "<= 3 min" by 1.6 and 2.6 s. An idle of 175 or less would meet it. The runner's anon memory returns to
+its idle value. memory.current stays 2.75 MB higher because of the page cache its reads left behind, which the
+kernel can reclaim. The runner peaked at 264,183,808 bytes for 10M. The main container's own memory grew from 503.8
+to 632.5 MB over the same run: the upload's pieces, build_model and perf.py's generator all ran there, not in the
+runner. Without the profile, the heavy worker ran inside abi-m4 and the container came back within 2% of its idle.
+
+100M (item 3). The load job ran in the runner: abi-m4 had no heavy worker at any sample, and the runner peaked at
+854 MB. Its lake holds 1,151,802,821 bytes, half of M3's 2,303,588,044, because M4.2 stores a table with no steps
+once. Isolation stays borderline, as in M3 (c2c7437 x1.43, 28e5153 x1.52). The p95 ratio comes from a 200-query idle
+sample. The main container peaked at 4,280,426,496 bytes, almost all perf.py's own generation and one-file copy of
+100M orders, which a person's upload doesn't have.
+
+Open from this run: 17 s after perf.py deleted the 100M project, the runner's worker died with status 139 inside
+the minute's build_copies job for it. This is the same segfault M3 round 3 reports for the main container, now in
+the runner. The supervisor logged "it starts again in 0 s" but started none, because no job was due. The
+build_copies job (for a project that no longer exists) stayed "doing" with no live worker until the install was
+removed: in M4.1 a worker that is down never retries a stalled job. No job was lost: the 10M load in one container
+ran 3 minutes later.
+
+Medallion (item 4). The 1.2 way: silver_orders starts from bronze_orders' table and gold_revenue from silver's.
+Only bronze reads the orders files, and no table has a raw copy (raw/ is absent from the lake). The build took 68.48 s
+for bronze_orders, 12.23 s for silver_orders and 2.10 s for gold_revenue. The worker's query copies (432,081,277
+bytes) were written before the rebuild and not again within it. The rebuild took 72.42 s, against 1.1.0's 147.52 s.
+
+Memory (item 5). `perf.py memory --chats 8` (no model: each chat's Pi up and idle), twice. The container was
+restarted first, then left idle 4 minutes, with no heavy worker running (it starts only for work). Idle:
+memory.current 476.0 MB (1.1.0 part 1: 620 MB with the pages project loaded); RSS sums: app 33.2, engine 229.1,
+default worker 280.0 and Postgres 349.4 MB in 22 processes. Per chat (app + Pi): 104.7 MB, then 103.8 MB (1.1.0:
+106.4, 105.8). The same runs before the restart, after an hour of benches, gave 865 MB idle (Postgres 615 MB in 27
+processes) and 154.6 / 96.9 MB per chat, the first run after a long idle being the high one, as in 1.1.0.
+
+Data out (item 6). Run from the Proxmox host, outside LXC 100. psql 17.11 came from Debian's packages, unpacked into a
+throwaway folder and removed afterwards. The MCP client was a stdlib JSON-RPC client over http to /mcp. A Viewer of
+perf_brewline (Brewline 0.01: 120 cafés, 73,941 orders) was limited by a row-level security rule to café CF001, with
+542 orders. They signed in to the app and minted a personal token in its Personal tokens dialog. The token stayed in
+root-only files and was never printed.
+- psql `sslmode=verify-full` against the certificate: "SSL connection (protocol: TLSv1.3, cipher: TLS_AES_256_GCM_SHA384)".
+- `SELECT cafe_id, count(*) FROM orders GROUP BY 1` gave `CF001|542` and nothing else.
+- `SELECT count(*) FROM orders a, orders b` gave 293,764 (542 squared).
+- `... LIMIT 150000` was refused with "ERROR: 54000: More than 100,000 rows; add a LIMIT or use the Arrow/Parquet
+  export (SE-9)".
+- `DELETE FROM orders` was refused with 42501.
+- MCP tools/list returned exactly the 13 reads: data_quality, dataset_data, docs, explain_change, how_calculated,
+  lineage, list_projects, list_reports, project_locale, readiness, semantic_model, semantic_query, visual_data.
+- MCP semantic_query of revenue by cafes.cafe_id returned one row, CF001 2888.56, the owner's figure for that café.
+- set_measure and delete_project returned isError: "'set_measure' isn't available with a personal token: it only
+  reads. Do it in the app."
+- After the Viewer revoked the token in the app: psql "password authentication failed ... use a personal token from
+  the app", and MCP returned 401.
+- No log in /data/logs held a token.

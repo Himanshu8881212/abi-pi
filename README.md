@@ -286,9 +286,8 @@ ABI_IMAGE=ghcr.io/himanshu8881212/abi:latest-video
 
 Built here: `docker build --target video .` (a plain `docker build .` makes the default image).
 
-<!-- M4 measure step: replace this placeholder with numbers measured on pve1. -->
-**Memory (to be measured):** the default container's idle RSS and the RSS each chat adds are not measured yet; the
-1.2 measure step fills in this sentence.
+**Memory** (measured on 5 Nov 2026, pve1, the default image, no model): an idle container uses about 476 MB, against
+1.1.0's 620 MB. The heavy worker runs only while there is work. Each open chat adds about 104 MB (its agent).
 
 ### Heavy jobs and the runner
 
