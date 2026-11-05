@@ -17,6 +17,8 @@ jobs:
       PGBIN: /usr/lib/postgresql/17/bin  # scripts/engine.sh's Postgres, as in the Dockerfile
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # tests compare with v1.1.0's files (git show v1.1.0:...)
       - name: Postgres 17 (PGDG)
         run: |
           sudo apt-get install -y postgresql-common
