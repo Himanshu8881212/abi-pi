@@ -120,6 +120,9 @@ ZONE = re.compile(r"(?<![\w/])[A-Z][A-Za-z_]+(?:/[A-Za-z_]+)+(?![\w/])")
 QUOTED = re.compile(r"\"([^\"\n]{2,100})\"|“([^”\n]{2,100})”|(?<!\w)'([^'\n]{2,100})'(?!\w)|‘([^’\n]{2,100})’")
 # 1.2 (owner, 5 Nov 2026): after a count, up to two words and a plural noun, then ":" or "(" opening what it counts
 COUNTED = re.compile(r"(?:\s+[A-Za-z][\w-]*){0,2}?\s+[A-Za-z][\w-]*[A-Za-z](?<![sS])s[*_]*\s*[:(]")
+# 1.2 final rerun: "Three northern cities stand out:" with the list right under it (a verb between the noun and
+# the colon, the colon ending the line); the list under it must still name exactly that many backed items
+COUNTED_LINE = re.compile(r"(?:\s+[A-Za-z][\w-]*){0,2}?\s+(?P<noun>[A-Za-z][\w-]*[A-Za-z](?<![sS])s)(?:\s+[A-Za-z][\w-]*){1,3}[*_]*\s*:[*_]*(?=[ \t]*(?:\n|$))")
 NOT_NOUN = {"has", "was", "does", "this", "its", "thus", "plus", "yes", "goes"}
 BULLET = re.compile(r"(\s*)(?:[-*•+]|\d+[.)])\s+(.*)")
 
@@ -287,8 +290,15 @@ def _listed(answer: str, span: tuple[int, int], tok: str, named) -> bool:
     many distinct items and `named` backs every one. It grounds the count only: the names are still checked as names.
     Refused: a count without a list ("in 3 regions"), a list before the count ("A, B and C: all three"), decimals,
     currency, percentages, scales."""
-    if not re.fullmatch(r"\d+|[A-Za-z]+(?:-[A-Za-z]+)?", tok) or not (m := COUNTED.match(answer, span[1])) \
-            or re.findall(r"[A-Za-z][\w-]*", m[0])[-1].lower() in NOT_NOUN:
+    if not re.fullmatch(r"\d+|[A-Za-z]+(?:-[A-Za-z]+)?", tok):
+        return False
+    if m := COUNTED.match(answer, span[1]):
+        noun = re.findall(r"[A-Za-z][\w-]*", m[0])[-1]
+    elif m := COUNTED_LINE.match(answer, span[1]):
+        noun = m["noun"]
+    else:
+        return False
+    if noun.lower() in NOT_NOUN:
         return False
     n, rest = int(tok) if tok.isdigit() else _words(tok), answer[m.end():]
     line, _, below = rest.partition("\n")

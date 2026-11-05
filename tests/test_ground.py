@@ -644,6 +644,11 @@ def test_a_count_grounds_by_the_backed_items_it_lists():
                 "| East | 3,586.63 |", reg) == []
     assert nums("Revenue grew in 3 regions: North, South and East.", reg) == []
     assert nums("Revenue grew in 3 regions.", reg) == ["3"]  # no names
+    # 1.2 final rerun (why 2 of 5 masked "Three"): a verb between the noun and a colon that ends the line, the list under it
+    led = "- **Three regions stand out:**\n  - North: 1,586.08\n  - South: 3,447.20\n  - East: 3,586.63"
+    assert nums(led, reg) == [] and nums("Three regions lead the drop:\n- North\n- South\n- East", reg) == []
+    assert nums("Three regions lead the drop:\n- North\n- South", reg) == ["Three"]  # 3 is not 2
+    assert nums("Three regions lead the drop: North and South fell, East held.", reg) == ["Three"]  # not the line's end
     assert nums("Revenue grew in 3 regions: North and South.", reg) == ["3"]  # 3 is not 2
     assert nums("Revenue grew 3% in 3 regions: North, South and East.", reg) == ["3%"]  # a percentage is never a count
     assert nums("Revenue grew in 3 regions.", q(["regions_up"], [[3]])) == []  # a tool figure, as before
