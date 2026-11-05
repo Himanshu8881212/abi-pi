@@ -59,3 +59,6 @@ Checked: offline 80 passed, live agent tests 18 of 18, container check 13 of 13 
   project without its own sends all its email through Settings › Email: Email this report, Monitor alerts, flows, the
   agent and custom agents, the first send to a domain asking once per project; a mail server set up for invitations
   in 1.1 serves every such project after the upgrade.)
+- DuckDB stays 1.5.6 (DuckLake catalog 1.0) in 1.2; DuckDB 2.0 / DuckLake 1.1 comes in 1.3 with a one-off catalog
+  migration after a backup ([docs/decisions/duckdb.md](docs/decisions/duckdb.md)). From 1.2: the lake's data path
+  may be an `s3://` URL as far as rename, delete and purge go (the lake on S3 itself is 1.3).

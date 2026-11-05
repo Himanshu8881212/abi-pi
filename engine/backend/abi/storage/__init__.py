@@ -9,8 +9,10 @@ Every committed write is exactly one DuckLake snapshot; its id is the data versi
 """
 
 import os
+import posixpath
 import re
 import shutil
+import tempfile
 import threading
 import time
 import uuid
@@ -18,7 +20,6 @@ import weakref
 from collections.abc import Callable
 from contextlib import nullcontext, suppress
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 import duckdb
 import psycopg
@@ -67,8 +68,9 @@ def connect(project: str, catalog: str | None = None, data_path: str | None = No
     # and by the worker, and instances spilling into one folder delete and overwrite each other's files (LOAD-MEMORY).
     # DuckDB creates it on the first spill and removes it on close.
     # ponytail: a killed process leaves its folder behind; sweep <data_path>/.tmp at startup if that piles up
-    os.makedirs(f"{data_path}/.tmp", exist_ok=True)
-    con.execute(f"SET temp_directory = '{_lit(data_path)}/.tmp/{project}-{uuid.uuid4().hex}'")
+    spill = os.path.join(tempfile.gettempdir(), "abi-lake") if remote(data_path) else data_path  # M4.4: spills are local
+    os.makedirs(f"{spill}/.tmp", exist_ok=True)
+    con.execute(f"SET temp_directory = '{_lit(spill)}/.tmp/{project}-{uuid.uuid4().hex}'")
     # D-27 (H-01.7-fix-1): httpfs copies AWS_*/DUCKDB_S3_* env into its global s3_* settings when it loads, and an
     # S3 source without its own key would be signed with the server's identity; RESET GLOBAL restores the no-env defaults.
     con.execute("LOAD httpfs")
@@ -89,9 +91,13 @@ def connect(project: str, catalog: str | None = None, data_path: str | None = No
             # ponytail: ~6 ms connect per catalog transaction; keep an LRU of hot lakes pooled
             # (postgres_configure_pool) if that latency matters
             con.execute("SET pg_pool_max_connections = 0")
+        folder = f"{data_path}/{project}"
+        if pg and remote(data_path) and pg.execute("SELECT to_regclass(%s)", [f'"{project}".ducklake_metadata']).fetchone()[0]:
+            # M4.4: a renamed lake on an object store keeps its files where they are (move_lake)
+            folder = pg.execute(f"""SELECT value FROM "{project}".ducklake_metadata WHERE key = 'data_path'""").fetchone()[0]
         con.execute(
             f"ATTACH 'ducklake:{_lit(catalog)}' AS lake"
-            f" (DATA_PATH '{_lit(data_path)}/{project}', METADATA_SCHEMA '{project}', DATA_INLINING_ROW_LIMIT 0)"
+            f" (DATA_PATH '{_lit(folder)}', METADATA_SCHEMA '{project}', DATA_INLINING_ROW_LIMIT 0)"
         )
         for layer in LAYERS:
             con.execute(f"CREATE SCHEMA IF NOT EXISTS lake.{layer}")  # no-op (no snapshot) once it exists
@@ -105,6 +111,11 @@ def connect(project: str, catalog: str | None = None, data_path: str | None = No
             _oid[con] = _schema_oid(pg, project)
     _project[con] = project
     return con
+
+
+def remote(path: str) -> bool:
+    """M4.4: `path` is an object store URL (s3://, gs://, …), not a local folder: no pathlib, no rename, no rmtree."""
+    return "://" in path
 
 
 def _schema_oid(pg, project: str) -> int | None:
@@ -263,15 +274,17 @@ DELETED = "_deleted_"  # an archived lake's name prefix: never a project ID (tho
 
 def lake_exists(conn, project: str) -> bool:
     """A lake catalog schema or data folder named `project` exists (also a leftover of an earlier project)."""
-    folder = Path(os.environ.get("ABI_DATA_PATH", "/data/lake")) / project
-    return folder.exists() or conn.execute("SELECT 1 FROM pg_namespace WHERE nspname = %s", [project]).fetchone() is not None
+    base = os.environ.get("ABI_DATA_PATH", "/data/lake")  # M4.4: lakes on an object store never move: only the catalog
+    return not remote(base) and os.path.exists(f"{base}/{project}") \
+        or conn.execute("SELECT 1 FROM pg_namespace WHERE nspname = %s", [project]).fetchone() is not None
 
 
 def move_lake(conn, old: str, new: str) -> list[tuple[str, str]]:
     """E-14.2: rename a project's lake catalog schema inside `conn`'s transaction and return the data folder move
     [(from, to)] for the caller to make before it commits. DuckLake stores file paths relative to the catalog's
     `data_path`, so moving the folder and updating that one value keeps every file readable (checked on 1.5.6,
-    work/validation/E-14.2.md). No lake: nothing to move."""
+    work/validation/E-14.2.md). No lake: nothing to move. M4.4: an object store has no rename, so a lake there keeps
+    its files and its data_path (connect attaches it there)."""
     if not re.fullmatch(PROJECT, old):
         return []  # X-04-fix-4: a folder with an invalid ID never got a lake (connect refuses it)
     if os.environ.get("ABI_LAKE_CATALOG", "postgres:") != "postgres:":  # only then the catalog is in `conn`'s database
@@ -284,9 +297,11 @@ def move_lake(conn, old: str, new: str) -> list[tuple[str, str]]:
         conn.execute("SET LOCAL lock_timeout = '10s'")  # a worker mid-commit on this lake holds it briefly
         conn.execute(f'ALTER SCHEMA "{old}" RENAME TO "{new}"')  # both names are PROJECT or DELETED + PROJECT
         path = conn.execute(f"""SELECT value FROM "{new}".ducklake_metadata WHERE key = 'data_path'""").fetchone()["value"]
-        to = str(Path(path).with_name(new)) + "/"
+        if remote(path):
+            return []
+        to = posixpath.join(posixpath.dirname(path.rstrip("/")), new) + "/"
         conn.execute(f"""UPDATE "{new}".ducklake_metadata SET value = %s WHERE key = 'data_path'""", [to])
-        return [(path, to)] if Path(path).is_dir() else []  # tiny tables are inlined in the catalog: maybe no folder yet
+        return [(path, to)] if os.path.isdir(path) else []  # tiny tables are inlined in the catalog: maybe no folder yet
 
 
 def purge_deleted(conn, now: float | None = None) -> None:
@@ -300,9 +315,26 @@ def purge_deleted(conn, now: float | None = None) -> None:
             conn.execute("""SELECT pg_terminate_backend(l.pid) FROM pg_locks l JOIN pg_class c ON c.oid = l.relation
                             JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = %s AND l.pid <> pg_backend_pid()""", [s])
             conn.execute("SET LOCAL lock_timeout = '30s'")
+            if remote(path):  # M4.4: no folder to remove; DuckLake deletes the files its catalog lists, nothing else
+                drop_files(s)
             conn.execute(f'DROP SCHEMA "{s}" CASCADE')
-            shutil.rmtree(path, ignore_errors=True)
+            if not remote(path):
+                shutil.rmtree(path, ignore_errors=True)
             conn.commit()
+
+
+def drop_files(schema: str) -> None:
+    """M4.4: delete every data and delete file of the lake in catalog schema `schema` through DuckDB's own file system
+    (S3 too): drop its tables, expire every other snapshot, clean up. Only the files it lists: an object store prefix
+    can be shared with a later project of the same name (a renamed lake there keeps its files where they are)."""
+    with duckdb.connect() as con:
+        con.execute("LOAD httpfs")
+        con.execute(f"ATTACH 'ducklake:{_lit(os.environ.get('ABI_LAKE_CATALOG', 'postgres:'))}' AS lake"
+                    f" (METADATA_SCHEMA '{_lit(schema)}')")
+        for s, t in con.execute("SELECT schema_name, table_name FROM duckdb_tables() WHERE database_name = 'lake'").fetchall():
+            con.execute(f"DROP TABLE lake.{_q(s)}.{_q(t)}")
+        con.execute("FROM ducklake_expire_snapshots('lake', older_than => now())").fetchall()
+        con.execute("FROM ducklake_cleanup_old_files('lake', cleanup_all => true)").fetchall()
 
 
 def retention_days() -> float:

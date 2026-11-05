@@ -151,3 +151,86 @@ def test_the_engines_grounding_takes_the_harness_rules_of_the_m2_review():
                "print(json.dumps([(lambda o: o['numbers'] + o['names'])(g.check(a, rs, fields={'day'})) for a, rs, _ in json.load(sys.stdin)]))",
                stdin=json.dumps(test_ground.REVIEW))
     assert json.loads(r.stdout.strip().splitlines()[-1]) == [want for _, _, want in test_ground.REVIEW], r.stderr[-500:]
+
+
+@pytest.mark.skipif(not PY.exists() or engine("from abi import db; db.connect().close()").returncode, reason="engine's Postgres not running")
+def test_a_lake_on_an_object_store_keeps_its_url_through_rename_delete_and_purge(tmp_path):
+    """M4.4: pathlib turned "s3://b/lake/p/" into "s3:/b/lake/…": connect spilled into a local "s3:" folder, lake_exists
+    looked there, move_lake wrote data_path "s3:/b/lake/new/" (the renamed lake no longer attached) and purge_deleted
+    rmtree'd a URL, leaving every file. Offline: the lakes are empty, so DuckLake never reads the bucket."""
+    r = engine(f"""
+import os, json
+os.chdir('{tmp_path}')
+os.environ['ABI_DATA_PATH'] = 's3://abi-m44-test/lake'
+from abi import db, storage
+with db.connect() as c:
+    for s in ('pi_s3_a', 'pi_s3_b', '_deleted_1_pi_s3_b'):
+        c.execute(f'DROP SCHEMA IF EXISTS "{{s}}" CASCADE')
+    c.commit()
+con = storage.connect('pi_s3_a')
+spill = con.execute("SELECT current_setting('temp_directory')").fetchone()[0]
+con.close()
+os.makedirs('s3:/abi-m44-test/lake/pi_s3_b')  # where pathlib looked
+out, path = {{'spill_local': '://' not in spill and not os.path.exists('s3:/abi-m44-test/lake/.tmp')}}, lambda c, s: c.execute(
+    f'SELECT value FROM "{{s}}".ducklake_metadata WHERE key = %s', ['data_path']).fetchone()['value']
+with db.connect() as c:
+    out['taken'] = storage.lake_exists(c, 'pi_s3_b')
+    out['moves'] = storage.move_lake(c, 'pi_s3_a', 'pi_s3_b')
+    c.commit()
+    out['path'] = path(c, 'pi_s3_b')
+storage.connect('pi_s3_b').close()  # attaches at the files' own place
+calls = []
+storage.drop_files = lambda s, f=storage.drop_files: (calls.append(s), f(s))
+storage.shutil.rmtree = lambda p, f=storage.shutil.rmtree, **k: (calls.append(p), f(p, **k))  # other old lakes still go
+with db.connect() as c:
+    storage.move_lake(c, 'pi_s3_b', '_deleted_1_pi_s3_b')
+    c.commit()
+    storage.purge_deleted(c)
+    out['gone'] = not c.execute("SELECT 1 FROM pg_namespace WHERE nspname = '_deleted_1_pi_s3_b'").fetchone()
+out['calls'] = [x for x in calls if 'pi_s3' in x]
+print(json.dumps(out))
+""", timeout=120)
+    assert json.loads(r.stdout.strip().splitlines()[-1]) == {
+        "spill_local": True, "taken": False, "moves": [], "path": "s3://abi-m44-test/lake/pi_s3_a/", "gone": True,
+        "calls": ["_deleted_1_pi_s3_b"]}, r.stderr[-2000:]
+
+
+@pytest.mark.skipif(not PY.exists() or engine("from abi import db; db.connect().close()").returncode, reason="engine's Postgres not running")
+def test_a_local_lake_still_moves_its_folder_and_drop_files_deletes_every_file(tmp_path):
+    """M4.4, today's behaviour on a folder: lake_exists sees a leftover folder, move_lake moves the folder and data_path to
+    the sibling; drop_files (the object-store purge) deletes every file a lake's catalog lists, older snapshots' too."""
+    r = engine(f"""
+import os, json
+os.environ['ABI_DATA_PATH'] = '{tmp_path}/lake'
+from abi import db, storage
+with db.connect() as c:
+    for s in ('pi_loc_a', 'pi_loc_b'):
+        c.execute(f'DROP SCHEMA IF EXISTS "{{s}}" CASCADE')
+    c.commit()
+con = storage.connect('pi_loc_a')
+con.execute('CREATE TABLE lake.raw.t AS SELECT range i FROM range(5)')
+con.execute('INSERT INTO lake.raw.t VALUES (9)')
+con.close()
+os.makedirs('{tmp_path}/lake/pi_loc_c')
+files = lambda: sorted(os.path.relpath(f'{{d}}/{{f}}', '{tmp_path}') for d, _, fs in os.walk('{tmp_path}/lake') for f in fs if f.endswith('.parquet'))
+out = {{'files': len(files())}}
+with db.connect() as c:
+    out['taken'] = [storage.lake_exists(c, p) for p in ('pi_loc_a', 'pi_loc_b', 'pi_loc_c')]
+    out['moves'] = storage.move_lake(c, 'pi_loc_a', 'pi_loc_b')
+    for a, b in out['moves']:
+        os.rename(a, b)
+    c.commit()
+con = storage.connect('pi_loc_b')
+out['rows'] = con.execute('SELECT count(*) FROM lake.raw.t').fetchone()[0]
+con.close()
+storage.drop_files('pi_loc_b')
+out['left'] = files()
+with db.connect() as c:
+    c.execute('DROP SCHEMA pi_loc_b CASCADE')
+    c.commit()
+print(json.dumps(out))
+""", timeout=120)
+    lake = f"{tmp_path}/lake"
+    assert json.loads(r.stdout.strip().splitlines()[-1]) == {
+        "files": 2, "taken": [True, False, True], "moves": [[f"{lake}/pi_loc_a/", f"{lake}/pi_loc_b/"]], "rows": 6,
+        "left": []}, r.stderr[-2000:]
