@@ -231,8 +231,13 @@ def _catalog(user: User, project: str, sql: str, cols: list[tuple], describe: bo
 @action(Role.viewer)
 def sql_query(conn, user: User, args: SqlInput) -> dict:
     """Runs one read-only SELECT over the project's model tables for SQL clients (the SE-10 endpoint): unqualified table names, a fixed list of functions, row-level security applied, at most 100,000 rows. To answer data questions use semantic_query (measures)."""
+    from abi.semantic import model  # not at top: model imports the semantic package
+
     con = storage.lake(args.project)
-    cols = detect._columns(con.cursor(), "model")
+    # M4 review: hidden (staging) tables are out of the model here too, as in semantic_query: bronze and silver have
+    # no rule of their own (rules go on gold), so a restricted Viewer would read their rows unfiltered
+    hide = {t["table"] for t in model._read(args.project, "model.json").get("tables", []) if t.get("hidden")}
+    cols = [c for c in detect._columns(con.cursor(), "model") if c[0] not in hide]
     known = {t for t, _, _ in cols}
     sql = _bind(args.sql, args.params, args.types, args.project, {k.lower() for k in known})
     if not any(t in {k.lower() for k in known} and s not in CATALOGS for s, t in _parsed(con.cursor(), sql)[1]):
@@ -493,7 +498,7 @@ async def _startup(r: asyncio.StreamReader, w: asyncio.StreamWriter) -> tuple[tu
     p = body.split(b"\0")
     params = {k.decode(): v.decode() for k, v in zip(p[0::2], p[1::2], strict=False) if k}
     name, project = params.get("user", ""), params.get("database", "")
-    if not tls and not _local() and not _loopback(w.get_extra_info("peername")[0]):  # before the client sends a password
+    if not tls and not _plain(w.get_extra_info("peername")[0]):  # before the client sends a password
         w.write(_error("28000", "TLS is required from this address: connect with sslmode=require"))
         return
     w.write(_msg(b"R", struct.pack("!i", 3)))  # AuthenticationCleartextPassword
@@ -679,9 +684,30 @@ async def _handle(r: asyncio.StreamReader, w: asyncio.StreamWriter) -> None:
 
 def _local() -> bool:
     """M4.5: ABI_SQL_BIND=127.0.0.1, so only this machine reaches the port (in Docker: compose publishes it there, and
-    its clients arrive from the bridge's gateway), and a plain connection is allowed.
-    ponytail: in Docker, other containers on the compose network reach it too; TLS if that network holds strangers."""
+    its clients arrive from the bridge's gateway), and a plain connection is allowed (`_plain`)."""
     return os.environ.get("ABI_SQL_BIND") == "127.0.0.1"
+
+
+def _gateway() -> str | None:
+    """The default route's gateway (Linux): in Docker, the address this machine's clients arrive from."""
+    try:
+        with open("/proc/net/route") as f:
+            for line in f.read().splitlines()[1:]:
+                x = line.split()
+                if x[1] == "00000000" and int(x[3], 16) & 2:  # destination 0.0.0.0, RTF_GATEWAY
+                    return str(ipaddress.IPv4Address(struct.pack("<I", int(x[2], 16))))
+    except (OSError, IndexError, ValueError):
+        pass
+    return None
+
+
+def _plain(host: str) -> bool:
+    """A connection without TLS: from loopback; with `_local`, also from the gateway (M4 review: not from another
+    container on the compose network, which reaches the listener at 0.0.0.0 inside the container)."""
+    if _loopback(host):
+        return True
+    ip = ipaddress.ip_address(host.split("%")[0])
+    return _local() and str(getattr(ip, "ipv4_mapped", None) or ip) == _gateway()
 
 
 async def start() -> None:

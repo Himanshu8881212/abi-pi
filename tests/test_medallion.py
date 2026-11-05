@@ -142,3 +142,37 @@ def test_a_cycle_is_refused_and_git_stays_clean(built):
     with pytest.raises(abi.ActionError) as e:  # a step names one of the two
         abi.call("set_steps", project=NEW, table="x", steps=[{"type": "source", "source": "bronze_orders", "table": "silver_orders"}])
     assert e.value.status in (400, 422), e.value.body
+
+
+# IN-6 as the heavy worker runs it, twice: the first time silver's build fails (bronze's new file lands, gold is skipped)
+FAIL_ONCE = r"""
+import shutil
+import duckdb
+from abi import ingest, storage
+real, hit = storage.refresh, []
+def broken(con, table, *a, **k):
+    if table == 'silver_orders':
+        hit.append(table)
+        raise duckdb.IOException('silver fails this once (test)')
+    return real(con, table, *a, **k)
+storage.refresh = broken
+shutil.copy(SRC, DST)
+ingest.refresh_changed(only=P)
+storage.refresh = real
+ingest.refresh_changed(only=P)
+print(len(hit))
+"""
+
+
+def test_a_rebuild_that_failed_after_its_input_landed_runs_at_the_next_check(built):
+    """M4 review: a built table's fingerprint holds its inputs' (bronze's files), so a silver build that failed (or was
+    killed) after bronze's new snapshot runs at IN-6's next check, and gold after it: gold matches the files again."""
+    first = sorted((built / "orders").glob("*.parquet"))[0]
+    r = engine(f"P, SRC, DST = {NEW!r}, {str(first)!r}, {str(built / 'orders' / 'zz_again.parquet')!r}\n{FAIL_ONCE}", timeout=300)
+    assert r.returncode == 0 and r.stdout.split()[-1] == "1", (r.stdout[-500:], r.stderr[-2000:])  # silver's build failed once
+    want = {r: round(float(v), 2) for r, v in duckdb.sql(
+        f"SELECT c.region, sum(o.revenue) FROM read_parquet('{built}/orders/*.parquet') o"
+        f" JOIN read_parquet('{built}/cafes/*.parquet') c USING (cafe_id) WHERE o.quantity > 0 GROUP BY 1").fetchall()}
+    got = {r: round(float(v), 2) for r, v in abi.call(
+        "sql_query", project=NEW, sql="SELECT region, sum(revenue) FROM gold_revenue GROUP BY 1")["rows"]}
+    assert got == want, (got, want)

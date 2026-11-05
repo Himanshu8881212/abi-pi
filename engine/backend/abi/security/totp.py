@@ -215,6 +215,7 @@ def reset_mfa(conn, user: User, args: accounts.UserRef) -> dict:
         raise ActionFailed(400, f"No user named '{args.name}'.")
     _clear(conn, target["id"])
     conn.execute("DELETE FROM sessions WHERE user_id = %s", [target["id"]])
+    conn.execute("DELETE FROM personal_tokens WHERE user_id = %s", [target["id"]])  # M4 review: a lost device's too
     mail.notice(conn, target["id"], "An administrator turned off two-step sign-in for your account.")
     return {}
 
@@ -236,6 +237,8 @@ def set_mfa_required(conn, user: User, args: Requirement) -> dict:
         raise ActionFailed(404, f"No tenant '{args.tenant}'.")
     if not args.on:
         return {}
+    conn.execute("DELETE FROM personal_tokens WHERE user_id IN (SELECT id FROM users WHERE tenant = %s AND totp_secret IS NULL)",
+                 [args.tenant])  # M4 review: tokens minted without two-step sign-in end with its sessions
     return {"signed_out": conn.execute(
         "DELETE FROM sessions WHERE oidc_provider IS NULL"
         " AND user_id IN (SELECT id FROM users WHERE tenant = %s AND totp_secret IS NULL)", [args.tenant]).rowcount}

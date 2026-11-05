@@ -20,6 +20,7 @@ the heavy worker runs the same action inline (`job`) and `load_runs` tells its c
 import contextlib
 import fcntl
 import functools
+import hashlib
 import json
 import logging
 import os
@@ -805,11 +806,17 @@ def _load(conn, src: Source, author: str, unless: str | None = None, used: dict 
 def _build(conn, project: str, table: str, author: str, unless: str | None = None,
            declared: list[dict] | None = None) -> int | None:
     """M4.2: model.<table> from the model.<t> its steps start from (`transform.Source.table`), in one snapshot: no
-    source read, no raw.<table> (gone if it had one). Its fingerprint is its steps (an undo or edit rebuilds it); what
-    it reads changing forces it (`refresh`). Skipped (None) when the fingerprint equals `unless`."""
+    source read, no raw.<table> (gone if it had one). Its fingerprint is its steps (an undo or edit rebuilds it) and the
+    fingerprints of the tables it reads (M4 review: a rebuild that failed or was killed after its input landed runs at
+    IN-6's next check; transitive, as theirs hold their inputs'); what it reads changing also forces it (`refresh`).
+    Skipped (None) when the fingerprint equals `unless`."""
     _lock(conn, project, table)
     steps = transform.tables(project)[table]
-    fingerprint = json.dumps({"steps": [s.model_dump(mode="json") for s in steps]}, sort_keys=True)
+    reads = sorted(transform.reads(steps) - {table})
+    prints = {r["table_name"]: r["fingerprint"] for r in conn.execute(
+        "SELECT table_name, fingerprint FROM sources WHERE project = %s AND table_name = ANY(%s)", [project, reads])}
+    fingerprint = json.dumps({"steps": [s.model_dump(mode="json") for s in steps], "reads": {u: prints.get(u) and hashlib.sha256(prints[u].encode()).hexdigest() for u in reads}},
+                             sort_keys=True)
     if unless is not None and fingerprint == unless:
         return None
     if CHECK.get():  # M4.1: as `_load`'s

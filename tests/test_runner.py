@@ -175,6 +175,22 @@ h.commit()
             assert bk.returncode == 0 and st(held) == "succeeded", err
             assert until(lambda: st(after) == "succeeded", 60), log("runner_supervisor")  # after the backup
             assert log().count("started the worker_heavy") == 1, log()
+
+            # M4 review: a heavy job a dead worker left `doing` with M4.1's lock per project holds nothing: it ends
+            # failed within a minute (retry_stalled_runs), the project's next one runs, and the runner still stops;
+            # jobs queued now carry no lock
+            lock = f"abi.worker.build_copies:{P}"
+            stuck = sql("INSERT INTO procrastinate_jobs (queue_name, task_name, lock, args, status) VALUES ('heavy',"
+                        " 'abi.worker.build_copies', %s, jsonb_build_object('project', %s::text), 'doing') RETURNING id", lock, P)
+            nxt = sql("INSERT INTO procrastinate_jobs (queue_name, task_name, lock, queueing_lock, args) VALUES ('heavy',"
+                      " 'abi.worker.build_copies', %s, %s, jsonb_build_object('project', %s::text)) RETURNING id", lock, lock, P)
+            assert until(lambda: st(stuck) == "failed" and st(nxt) == "succeeded", 100), (st(stuck), st(nxt), log("runner_supervisor"))
+            assert until(lambda: not alive("runner"), IDLE + 15), log("runner_supervisor")
+            r = subprocess.run(["sh", "-c", f'{sh("env").stdout}\nexec "{PY}" -c "$0"', f"from abi import worker; worker._heavy(worker.build_copies, {P!r})"],
+                               env=env, capture_output=True, text=True, timeout=120)
+            assert r.returncode == 0, r.stderr[-2000:]
+            assert sql("SELECT count(*) FILTER (WHERE lock IS NULL) || ' ' || count(*) FROM procrastinate_jobs WHERE task_name ="
+                       " 'abi.worker.build_copies' AND id > %s::bigint", nxt) == "1 1"
     finally:
         beat.set()
         abi.URL = url

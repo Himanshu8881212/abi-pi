@@ -243,6 +243,59 @@ def test_sql_with_a_personal_token_is_rls_capped_and_revocable(out):
         assert [t["name"] for t in out["tokens"](op="list")["result"]["tokens"]] == ["old"], "the revoked one is gone, the expired one listed"
 
 
+def test_sql_reads_no_hidden_staging_table(out):
+    """M4 review: a hidden (staging) table is out of the SQL endpoint's model as it is out of semantic_query's (bronze
+    and silver carry no rule of their own: rules go on gold, so a restricted Viewer would read every row there)."""
+    sure("set_table", project=P, table="orders", hidden=True)
+    try:
+        with abi.as_user(abi.login(out["name"], out["pw"])[1]["token"]):
+            with pytest.raises(abi.ActionError) as e:
+                abi.call("sql_query", project=P, sql="SELECT region, count(*) FROM orders GROUP BY 1")
+            listed = abi.call("sql_query", project=P, sql="SELECT table_name FROM information_schema.tables")["rows"]
+    finally:
+        sure("set_table", project=P, table="orders", hidden=False)
+    assert e.value.status in (400, 403) and "orders" in str(e.value), e.value
+    assert ["orders"] not in listed, listed
+
+
+def test_a_password_reset_by_link_ends_the_personal_tokens(out):
+    """M4 review: the emailed reset (the way back into an account you think is taken) ends personal tokens too, as a
+    password change does."""
+    made = out["tokens"](op="mint", name="before the reset")["result"]
+    out["seen"].append(made["token"])
+    assert mcp(out["port"], made["token"], "tools/list")[0] == 200
+    link, out["pw"] = secrets.token_urlsafe(24), secrets.token_urlsafe(16)
+    r = engine(f"""
+import os
+from abi import db, security
+from abi.security import mail
+mail._on = lambda conn: True  # as if Settings › Email were set up
+with db.connect() as c:
+    c.execute("INSERT INTO account_tokens (hash, kind, user_id, email, expires) VALUES (%s, 'reset', {out['uid']}, NULL,"
+              " now() + interval '30 minutes')", [security._token_hash(os.environ['LINK'])])
+mail._use("reset", mail.TokenPassword(token=os.environ['LINK'], password=os.environ['NEW']), "")
+""", env={"LINK": link, "NEW": out["pw"]})
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert mcp(out["port"], made["token"], "tools/list")[0] == 401
+
+
+def test_plain_sql_on_this_machine_is_only_from_loopback_or_the_gateway():
+    """M4 review: ABI_SQL_BIND=127.0.0.1 allows plain connections from loopback and Docker's gateway (this machine
+    through the published port), not from another container on the compose network."""
+    r = engine("""
+import json, os
+import abi.app  # noqa: F401
+from abi.semantic import sql
+sql._gateway = lambda: "172.18.0.1"
+os.environ["ABI_SQL_BIND"] = "127.0.0.1"
+out = [sql._plain(h) for h in ("127.0.0.1", "::1", "172.18.0.1", "::ffff:172.18.0.1", "172.18.0.5", "10.0.0.7")]
+os.environ["ABI_SQL_BIND"] = "0.0.0.0"
+print(json.dumps(out + [sql._plain("172.18.0.1"), sql._plain("127.0.0.1")]))
+""")
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert json.loads(r.stdout.splitlines()[-1]) == [True, True, True, True, False, False, False, True]
+
+
 def test_without_tls_the_sql_port_starts_only_on_this_machine(tmp_path):
     with sql_server() as (_, lines, up):
         assert not up and any("needs TLS" in x for x in lines), lines

@@ -241,8 +241,10 @@ the password your personal token; the tables are the model's, under `public`. On
 at most 100,000 rows (more is refused: add a `LIMIT` or filter), 60 seconds each. The port starts only with TLS,
 unless it stays on this machine:
 
-- **This machine only**: `ABI_SQL_BIND=127.0.0.1` (the default with HTTPS on): plain connections are fine.
-- **Other devices**: a certificate and key, files on this machine readable by the container (uid 10001):
+- **This machine only**: `ABI_SQL_BIND=127.0.0.1` (the default with HTTPS on): plain connections are fine from this
+  machine; other containers on ABI's Docker network still need TLS.
+- **Other devices**: a certificate and key, files on this machine readable by the container (uid 10001; for the key
+  `sudo chown 10001 key.pem && sudo chmod 600 key.pem`, never world-readable):
   `ABI_SQL_TLS_CERT=/path/fullchain.pem` and `ABI_SQL_TLS_KEY=/path/key.pem` (with HTTPS on, also `ABI_SQL_BIND=0.0.0.0`). With HTTPS on and your own files for
   Caddy, name the same two files (`ABI_SQL_TLS_CERT=${ABI_TLS_CERT}` and `ABI_SQL_TLS_KEY=${ABI_TLS_KEY}` in `.env`).
   Caddy's automatic certificate (a public name or `ABI_TLS=internal`) lives in its own volume and renews there: give
@@ -284,7 +286,9 @@ the image here):
 ABI_IMAGE=ghcr.io/himanshu8881212/abi:latest-video
 ```
 
-Built here: `docker build --target video .` (a plain `docker build .` makes the default image).
+Built here: `docker build --target video .` (a plain `docker build .` makes the default image). `docker compose`
+builds the default image too when it can't pull `ABI_IMAGE`: for a `-video` tag it can't pull, build it first with
+`docker build --target video -t "$ABI_IMAGE" .` (`scripts/upgrade.sh` does this for you).
 
 **Memory** (measured on 5 Nov 2026, pve1, the default image, no model): an idle container uses about 476 MB, against
 1.1.0's 620 MB. The heavy worker runs only while there is work. Each open chat adds about 105 MB (its agent), up to
@@ -318,7 +322,9 @@ reads: the engine's Postgres (the job in `procrastinate_jobs`, queue `heavy`) an
 image's environment (`ABI_PI_DATA`, by default `/data`, with Postgres's socket in `/data/pg`); in the container:
 `docker exec abi abi-run 42`. Exit codes: `0` the job succeeded; `1` it failed, with its error on stderr (the load,
 training or flow run says why, as in the app); `2` no heavy job with that id is queued now; `75` a backup holds the
-workers: run it again after.
+workers: run it again after. Killed mid-job (out of memory, evicted), abi-run's job is found within a minute (no
+heartbeat for 30 s), as a dead heavy worker's is: a flow run goes back on the heavy queue and resumes, a load fails as
+interrupted, any other heavy job ends failed (the next minute's check queues file reloads and query copies again).
 
 ### If something goes wrong
 

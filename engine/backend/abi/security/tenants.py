@@ -308,6 +308,8 @@ def set_user_tenant(conn, user: User, args: UserTenant) -> dict:
     conn.execute(  # D-52: a tenant that requires MFA ends the password sessions of an account without it, moved in too
         "DELETE FROM sessions WHERE oidc_provider IS NULL AND user_id IN (SELECT u.id FROM users u JOIN tenants t"
         " ON t.id = u.tenant WHERE u.name = %s AND t.mfa_required AND u.totp_secret IS NULL)", [args.name])
+    conn.execute("DELETE FROM personal_tokens WHERE user_id IN (SELECT u.id FROM users u JOIN tenants t ON t.id = u.tenant"
+                 " WHERE u.name = %s AND t.mfa_required AND u.totp_secret IS NULL)", [args.name])  # M4 review: and its tokens
     return {}
 
 

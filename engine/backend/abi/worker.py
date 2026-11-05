@@ -64,9 +64,11 @@ def _wake(key, due) -> bool:
 
 
 def _heavy(task, project: str) -> None:
-    """M4.1: `task` for `project` on the heavy queue, one at a time per project; one already queued is that one."""
+    """M4.1: `task` for `project` on the heavy queue; one already queued is that one. No procrastinate lock (M4 review):
+    a job a dead worker left `doing` would hold it, and the project's next one would wait for good. Loads take
+    ingest's lock per table, writes storage's project lock."""
     with contextlib.suppress(AlreadyEnqueued):
-        defer(task.configure(lock=f"{task.name}:{project}", queueing_lock=f"{task.name}:{project}"), project=project)
+        defer(task.configure(queueing_lock=f"{task.name}:{project}"), project=project)
 
 
 def _alone(tick):
@@ -165,11 +167,15 @@ async def retry_stalled_runs(timestamp: int) -> None:
     """FL-4: a run whose worker died mid-run (SIGKILL, power loss: no heartbeat for 30 s) is queued again and resumes
     after its `ok` steps (Procrastinate's documented pattern: howto/production/retry_stalled_jobs). Healthy jobs keep
     their live heartbeat and are never picked."""
-    for job in await app.job_manager.get_stalled_jobs(task_name=run_flow.name):
-        await app.job_manager.retry_job(job)
+    for job in await app.job_manager.get_stalled_jobs(task_name=run_flow.name):  # one abi-run ran goes back to the heavy queue
+        await app.job_manager.retry_job(job, queue="heavy" if job.queue.startswith("abi-run-") else None)
     for job in await app.job_manager.get_stalled_jobs(task_name=load.name):  # a load isn't resumed: its run fails
         await asyncio.to_thread(ingest.interrupted, job.task_kwargs["run"])
         await app.job_manager.finish_job(job, Status.FAILED, delete_job=False)
+    # M4 review: the other heavy jobs end failed, so `doing` holds no lock (a 1.2 M4.1 job's) and the next one runs
+    for name in (refresh_changed.name, build_copies.name, train_model.name, score_model.name, purge_archive.name):
+        for job in await app.job_manager.get_stalled_jobs(task_name=name):
+            await app.job_manager.finish_job(job, Status.FAILED, delete_job=False)
 
 
 @app.periodic(cron="* * * * *")
@@ -277,7 +283,9 @@ OUTCOME = {load.name: ("load_runs", "run"), train_model.name: ("ml_runs", "run_i
 def run(job: int) -> int:
     """M4.1 abi-run, the contract 1.3's launchers call: queued heavy job `job` to its end in this process, as the heavy
     worker runs it (so as the person it runs for), then 0, or 1 with its error on stderr; 2: no such job is queued now.
-    The job moves to a queue of its own while it runs, so no worker takes it meanwhile, and back after."""
+    The job moves to a queue of its own while it runs, so no worker takes it meanwhile, and back after. Killed, the
+    job its worker ran is stalled (retry_stalled_runs). ponytail: killed in the moment between the move and the worker
+    taking it, the job stays todo on its own queue; a lease column instead of the queue if launchers hit that."""
     queue = f"abi-run-{job}"
     with db.connect() as conn:
         if not conn.execute("UPDATE procrastinate_jobs SET queue_name = %s WHERE id = %s AND queue_name = 'heavy' AND status = 'todo'"

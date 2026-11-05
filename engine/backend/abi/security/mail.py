@@ -249,5 +249,6 @@ def _use(kind: str, body: TokenPassword, ip: str) -> dict:
                                       [security.hash_password(body.password.get_secret_value()), row["user_id"]]).fetchone())
         conn.execute("DELETE FROM account_tokens WHERE user_id = %s OR email = %s", [account.id, row["email"]])
         conn.execute("DELETE FROM sessions WHERE user_id = %s", [account.id])
+        conn.execute("DELETE FROM personal_tokens WHERE user_id = %s", [account.id])  # M4 review: as set_password does
         audit(conn, account, "rest", USED[kind], None, None, 200)
     return {}

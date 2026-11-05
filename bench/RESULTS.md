@@ -1006,7 +1006,7 @@ and files; the live abi and lake containers' start time, restart count and image
 | M4 target (PLAN.md) | 1.1.0 | 1.2 M4 (7c6db7a) | |
 |---|---|---|---|
 | default image without Remotion, <= 2,843,622,285 - (video - default) | 2,843,622,285 bytes | default 2,476,372,582, video 2,700,262,250 bytes: limit 2,619,732,617, 143,360,035 under; the -video image renders a one-slide video (11,821 bytes), the default one says how to switch | met |
-| runner profile: a 10M-order load runs in the runner, exact | | through the app's upload: orders 70.81 s, Ready 79.96 s, exact to the cent; the job ran in abi-m4-runner, abi-m4 started no heavy worker [0.40-2.61] | met |
+| runner profile: a 10M-order load runs in the runner, exact | orders 47.56 s, Ready 54.82 s (one container) | through the app's upload: orders 70.81 s, Ready 79.96 s, exact to the cent; the job ran in abi-m4-runner, abi-m4 started no heavy worker [0.40-2.61] | met |
 | the runner's worker gone <= 3 min after the heavy queue empties | never stops (M3: always on) | 182.6 s (the job ended 08:05:55.4, the worker stopped 08:08:58) | missed by 2.6 s |
 | the runner container's memory back within 10% of its idle | | anon 0.40 MB idle, 0.43 MB after; memory.current 1.90 MB idle, 4.65 MB after (+2.75 MB of page cache) | met for anon, missed for memory.current |
 | the same in one container (no profile) | | orders 70.68 s, Ready 79.24 s, exact; worker gone 181.6 s after its job; container 773.5 MB idle, 788.2 MB after (+1.9%; anon 647.1 to 659.1 MB) [0.34-2.24] | gone missed by 1.6 s; memory met |
@@ -1075,7 +1075,8 @@ root-only files and was never printed.
 5 Nov 2026, 10:35-11:50 UTC: release-1.2 at 97de9e3 plus the M4 tuning in the working tree, not yet committed:
 scripts/engine.sh (the idle clock starts at the last heavy job's end in procrastinate_events, TERM 3 s early),
 storage's THREADS (a lake gets a third of the CPUs under ABI_ROLE=runner: 2 of 6 here), and bench/perf.py's isolation
-phases. That tree was archived with `git archive $(git stash create)` (stash commit 30668b6, tree f0e0db3) into
+phases. That tree was archived with `git archive $(git stash create)` (stash commit 30668b6, tree f0e0db3; committed
+afterwards, the same code, as b3746c9) into
 /opt/abi-m4 on LXC 100. Everything else follows round 1: both targets built there (tags abi-m4:default and
 abi-m4:video, every layer from the build cache), the same throwaway install (project abi-m4, containers abi-m4 and
 abi-m4-runner, volume abi-m4-data, app 8797, SQL 15497 at the LXC's address, a self-signed certificate, the owner's
@@ -1089,12 +1090,12 @@ were the same before and after.
 | M4 target (PLAN.md) | round 1 (7c6db7a) | round 2 (this tree) | |
 |---|---|---|---|
 | default image without Remotion, <= 2,843,622,285 - (video - default) | default 2,476,372,582, 143,360,035 under | default 2,476,373,331, video 2,700,262,999: moved 223,889,668, limit 2,619,732,617, 143,359,286 under; the -video image rendered a one-slide video (11,821 bytes), the default one says how to switch | met |
-| runner profile: a 10M-order load runs in the runner, exact | orders 70.81 s, Ready 79.96 s | orders 94.86 s, Ready 103.36 s, exact to the cent; the job ran in abi-m4-runner (peak 278,835,200 bytes), abi-m4 ran no heavy worker in any sample [0.48-2.46] | met |
+| runner profile: a 10M-order load runs in the runner, exact | orders 70.81 s, Ready 79.96 s | orders 94.86 s, Ready 103.36 s (1.1.0 in one container: 47.56 / 54.82 s, so 2.0x / 1.9x), exact to the cent; the job ran in abi-m4-runner (peak 278,835,200 bytes), abi-m4 ran no heavy worker in any sample [0.48-2.46] | met |
 | the runner's worker gone <= 3 min after the heavy queue empties | 182.6 s | 177.1 s (the job ended 10:44:23.9, the worker stopped 10:47:21) | met |
 | the runner container's memory back within 10% of its idle | anon met, memory.current +2.75 MB | anon 0.406 to 0.406 MB (x1.00); memory.current minus file and slab_reclaimable 1.527 to 1.535 MB (x1.005); memory.current 1.80 to 4.69 MB (x2.60) | met for anon, missed for memory.current |
 | the same in one container (no profile) | gone 181.6 s, memory +1.9% | orders 70.61 s, Ready 79.14 s, exact; worker gone 177.8 s after its job; container 754.0 to 767.3 MB (+1.8%; anon 674.4 to 685.4 MB) [0.28-2.44] | met |
 | 100M orders through the app with the runner profile: Ready with a model, exact, no client timeout | Ready 795.54 s | orders in 955.23 s, Ready at 1,055.10 s, exact to the cent, no timeout; runner peak 743,972,864 bytes of its 4 GiB | met |
-| another project's uncached queries during it <= 1.5x idle | x1.17 p50, x1.53 p95 | idle (200) 70.2 / 77.0 ms, during (12,269) 80.7 / 108.2 ms: x1.15 p50, x1.41 p95 [0.36-6.85] | met |
+| another project's uncached queries during it <= 1.5x idle | x1.17 p50, x1.53 p95 | idle (200) 70.2 / 77.0 ms, during (12,269) 80.7 / 108.2 ms: x1.15 p50, x1.41 p95 [0.36-6.85]; by phase (below): tables p95 x1.28, build_model and Ready p95 x3.14 | met overall and while the tables arrive; missed during build_model (x3.1) |
 | medallion at 10M, the 1.2 way: each source read once, raw/ + model/ <= 417,189,763 bytes, gold exact | 282,925,126 bytes, 72.42 s | 282,925,507 bytes (40.7%), all in model/, none in raw/; rebuild 74.44 s (1.1.0: 147.52 s); bronze_orders, silver_orders, gold_revenue refreshed once each; exact to the cent | met |
 | idle container RSS and RSS per chat (README) | 476 MB; 104.7 / 103.8 MB | 476.4 MB idle (a fresh start); 155.3 then 104.6 MB a chat | recorded |
 | data out from the Proxmox host | met | all four, as in round 1 (below) | met |
@@ -1115,7 +1116,17 @@ when the orders' last piece queued it). abi-m4 had no heavy worker in any sample
 a lake make the orders load 37% slower than round 1 (955.23 s against 698.60 s). In exchange the other project's p95
 fell from x1.53 to x1.41. perf.py now splits the queries during the load by phase:
 - while the tables arrived (the runner's job): n 11,447, p50 80.4 ms, p95 98.8 ms (x1.28 of idle p95).
-- during build_model and Ready, which run in abi-m4 at half the CPUs: n 822, p50 101.2 ms, p95 242.1 ms.
+- during build_model and Ready, which run in abi-m4 at half the CPUs: n 822, p50 101.2 ms, p95 242.1 ms (x3.14 of
+  idle p95).
+Part of the aggregate's gain over round 1 is dilution: the slower load added about 3,400 cheap tables-phase queries
+(12,269 against 8,849), while the build_model phase, untouched by the tune, kept about 820 at x3.1, the tail M3
+round 2 already traced to build_model. The fix is fewer threads for build_model while another project is queried, or
+build_model in the runner; not done in 1.2 M4.
+The 10M load in the runner (item 1) is 2.0x 1.1.0's one-container time (94.86 s against 47.56 s), more than round
+1's 1.5x, for the same reason: the runner's lake has a third of the CPUs.
+Not measured in either round: Postgres connections with the runner profile (max_connections stays 100; the runner
+adds its own ABI_PG_POOL of 20 and procrastinate's). The next pve1 round should sample pg_stat_activity during a
+100M load with 8 chats.
 The tune step's run of the same tree (abi-m4f, 300 idle queries) gave x1.18 p50 and x1.37 p95, model phase p95
 191.2 ms. The lake held 1,394,007,303 bytes (round 1: 1,151,802,821). abi-m4 peaked at 3,885,981,696 bytes, mostly
 perf.py's own generation and copy of the files. Its memory.events showed sock_throttled 51, and no oom.
