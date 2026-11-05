@@ -1,5 +1,5 @@
 {
- "about": "The harness's agent team: one Lead (the agent in the chat) and eight specialists it delegates to. scripts/team.py validates plans, guards delegation, briefs specialists, takes handoffs and runs post-checks from this file; scripts/gen_agents.py writes .pi/agents/<name>.md from it.",
+ "about": "The harness's agent team: one Lead (the agent in the chat) and nine specialists it delegates to. scripts/team.py validates plans, guards delegation, briefs specialists, takes handoffs and runs post-checks from this file; scripts/gen_agents.py writes .pi/agents/<name>.md from it.",
  "phases": [
   "data",
   "model",
