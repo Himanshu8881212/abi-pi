@@ -52,7 +52,7 @@ One app, in the order the work happens:
 | **Data model** | Measures, a glossary, saved queries, joins and a calendar, row-level and column security, a model canvas. |
 | **Write-back** | Edit rows in the app, or have the agent change a total and let ABI spread it over the rows below; the agent's edits wait for your approval, and every edit undoes in one step. For a table loaded straight from a Postgres or MySQL table (its source added with `"sync": true`, its key the source's primary key), an Owner can have the agent write the edits back to it, after a preview of every change they confirm. |
 | **Visualize** | Reports with cross-filtering, drag-and-resize layouts, Explore with saved analyses, Monitor checks (a measure against a value, a target or its last period, freshness, failed flows; measure checks saved there alert in the Inbox, and by email if you like, with no browser open), an Inbox of alerts, flow posts and subscriptions, a Home page of pinned widgets. |
-| **Export** | Board packs and one-pagers as PDF, PPTX and PNG, data extracts (Excel, CSV), and short explainer videos (MP4) of a report. |
+| **Export** | Board packs and one-pagers as PDF, PPTX and PNG, data extracts (Excel, CSV), and short explainer videos (MP4) of a report (with the `-video` image: below, The two images). |
 | **Automate** | Flows on a schedule, a report emailed as a PDF on the days you pick (**Email this report** on its page), ML forecasts, tools, and custom agents with their own evaluation sets, each from a form, from a sentence to the agent, or as JSON. |
 | **Knowledge** | A vault for your business definitions; the agent cites it before it defines or judges a measure. |
 | **Govern** | Row-level security and hidden columns, roles, Developer and Viewer modes, commits and history, Publish to a read-only copy, model settings. |
@@ -237,7 +237,7 @@ isn't offered there: it stays with the app's own agent.
 
 **SQL** (psql, DBeaver, Power BI, Tableau, Metabase, Excel through ODBC: anything that speaks Postgres): add
 `ABI_SQL_PORT=5433` to `.env` and `docker compose up -d`. A database is a project, the user name your ABI name and
-the password your personal token; the tables are the model's, under `public`. Only one read-only `SELECT` at a time,
+the password your personal token; the tables are the model's, under `public`. One read-only `SELECT` per query,
 at most 100,000 rows (more is refused: add a `LIMIT` or filter), 60 seconds each. The port starts only with TLS,
 unless it stays on this machine:
 
@@ -373,9 +373,10 @@ Every release runs three suites, and their results go into [RELEASE.md](RELEASE.
   probes and a real browser over every page.
 - **Live agent tests** (`ABI_PI_LIVE=1 .venv/bin/python -m pytest -q -m live tests`): the agent driven like a person
   through real scenarios, from a raw file to a model, a report, a flow and a custom agent.
-- **Container check** (`tests/container_check.sh`): a fresh volume, loading and querying, PDF, PPTX and video export,
-  the agent, a hard kill, a killed engine and worker, a clean `docker stop`, backup and restore, no secrets in the
-  image or logs, non-root user, health check.
+- **Container check** (`tests/container_check.sh`): a fresh volume, loading and querying, PDF and PPTX export, video
+  export on the `-video` image (on the default one, its message saying how to switch), the agent, a hard kill, a
+  killed engine and worker, a clean `docker stop`, backup and restore, no secrets in the image or logs, non-root
+  user, health check.
 
 For 1.0 the whole thing was also run on 7.4 million orders from S3: the agent built the project from eight plain
 requests, and its revenue by region matched an independent DuckDB sum to the cent.
@@ -396,8 +397,9 @@ requests, and its revenue by region matched an independent DuckDB sum to the cen
   day: rows changed or deleted in place at the source stay as loaded until a **Reload** on its card. A Postgres
   `money` column loads as text, a `numeric` without a scale as a float, an enum as its labels. No Snowflake,
   BigQuery, SQL Server or Oracle yet, and no `gs://` or `az://` locations.
-- Files already in ABI's files folder on the server (server paths) are the workspace owner's to load; everyone else
-  uploads their files.
+- Files already in ABI's files folder on the server (server paths) load only as an upload into, or a path already
+  loaded by, a project where the person reads every row; any other file there is the workspace owner's to load.
+  Everyone else uploads their files.
 
 ## Contributing
 

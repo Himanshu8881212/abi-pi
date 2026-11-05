@@ -1,8 +1,119 @@
-# ABI-PI 1.0.1
+# ABI-PI 1.2.0
 
 A self-hosted agentic BI app in one container: ABI-PI's own copy of ABI's engine (Postgres, semantic engine, flows,
 ML, custom agents), the Pi agent with a team of specialists, and a one-page app. Install: see [README.md](README.md)
 (`.env` with the owner account, `docker compose up -d`).
+
+## 1.2.0
+
+The milestones' own measurements are in [bench/RESULTS.md](bench/RESULTS.md), each beside 1.1.0's.
+
+### What is new
+
+- **Your data, as it is** (M1): upload CSV, TSV, Excel (pick the sheet), JSON/NDJSON, Parquet or Avro files of any
+  size, point at an S3 glob of any of those or a Delta or Iceberg table, or (workspace owners) add a Postgres or MySQL
+  table with **Add a database table**; its login is stored encrypted for that host only and it reloads daily past an
+  increasing column. An uploaded CSV keeps quoted line breaks in one row. A server path loads only what you may read.
+- **HTTPS in one command** (M1): `COMPOSE_PROFILES=https` and `ABI_DOMAIN` in `.env` put Caddy in front with a
+  certificate (a public name's from Let's Encrypt, `ABI_TLS=internal` for a LAN name or an IP address, or your own).
+- **Results reach people** (M1): **Email this report** sends a report as a PDF on the days and at the time you pick;
+  Monitor's measure checks alert in the new **Inbox**, and by email, with no browser open; Settings › Usage shows
+  the cost of the models you give prices; every page links the running version's source (AGPL-3.0 §13).
+- **Charts the report format promises** (M1): pie (donut), combo, stacked and grouped bars, a line per member,
+  scatter, waterfall, funnel and treemap, each with tooltips from its rows; a click on any mark filters the report.
+  Slicers filter the report again (they did nothing in 1.1), drawn as toggles; the filter bar is chips and a
+  **+ Filter** picker.
+- **"Why did it change?" with figures you can trust** (M2): one call (`explain_change`) gives the member that moved
+  most, both periods, the change and its share; questions can compare periods inline (a change, a % change, a share)
+  without saving a measure; a project's first build adds governed `*_prev`, `*_change` and `*_change_pct` measures;
+  an answer is checked only against the rows of its own exchange and the one before.
+- **Pages that don't queue** (M3, M3.6): page data is computed once for everyone who sees the same rows and handed to
+  nobody else; people with row-level security share one read of a fact and each gets their own rows from it. Reads
+  stop after `ABI_QUERY_TIMEOUT`, and at most `ABI_MAX_AGENTS` chats run their agent at once (one person at most half).
+- **Big work in the background** (M3): a load of more than `ABI_INLINE_ROWS` rows answers at once and loads as a run
+  you can follow on the Sources page and in the chat; a 100-million-row upload now builds its model; Publish reloads
+  nothing it didn't change; one project's load no longer holds up another project, a schedule or an answer; PDF, PNG
+  and PowerPoint exports and videos have time limits.
+- **Self-healing** (M3): a killed engine or worker serves again by itself, Docker's health check sees the engine and
+  the workers, and `docker stop` shuts Postgres down cleanly. A deleted project's uploads go with its lake, 30 days
+  after the deletion, never one a live project still reads.
+- **Heavy jobs on demand** (M4): the heavy worker (big loads, query copies, heavy flow runs, ML) runs only while there
+  is work and is gone `ABI_RUNNER_IDLE` seconds after the last job, so its memory goes back; the `runner` profile
+  gives heavy jobs a container and memory limit of their own; `abi-run <job id>` runs one queued heavy job for a
+  launcher (the 1.3 Kubernetes Job contract).
+- **Silver feeds gold** (M4): a table's `source` step may start from a table the project builds, so a bronze, silver,
+  gold rebuild reads the source once and stores less.
+- **A lighter image** (M4): `:latest` no longer carries Remotion; `:latest-video` adds it for explainer videos.
+- **Data out** (M4): mint a **personal token** (click your name › Personal tokens) and read ABI as yourself from an
+  MCP client at `/mcp` (13 read tools) or, with `ABI_SQL_PORT`, from psql, DBeaver or a BI tool over TLS; row-level
+  security and column rules hold, nothing can be changed, every call is audited.
+
+### Upgrade notes
+
+`git pull && scripts/upgrade.sh` backs up the install, then upgrades it in place (README › Update). Before you do:
+
+- **No way back without the backup.** The engine's database schema goes from 2 to 5 on the first start, and the
+  volume records 1.2.0: a 1.1 engine refuses the upgraded database and a 1.1 image refuses the volume. To go back,
+  restore the backup `scripts/upgrade.sh` made into a new volume (README › Back up and restore).
+- **Videos need the `-video` image.** An install that makes explainer videos sets
+  `ABI_IMAGE=ghcr.io/himanshu8881212/abi:latest-video` in `.env` first; without it the Video page says so, and PDF,
+  PNG and PowerPoint exports work as before.
+- **Profiles.** HTTPS is `COMPOSE_PROFILES=https`, the runner container `COMPOSE_PROFILES=runner`, both
+  `COMPOSE_PROFILES=https,runner`; `scripts/upgrade.sh` and a plain `docker compose up -d` keep what `.env` says.
+- **`ABI_DOMAIN` alone closes port 8790 to the network**: with HTTPS on, ABI's own port listens on this machine only
+  (`ABI_BIND=0.0.0.0` opens it again), and `ABI_PUBLIC_URL` becomes `https://ABI_DOMAIN` unless `.env` sets one:
+  remove or change an old `http://` address there.
+- **Settings › Email now serves every project without a mail server of its own**: one set up for invitations in 1.1
+  then also sends flows', the agent's and custom agents' emails, the first send to a domain asking once per project.
+- **Monitor checks from 1.1** (or made by the agent) alert with the page closed only once you click **Alert with the
+  page closed** on their card.
+- **Published copies lose their flows** at the next Publish, so nothing sends twice; flows run once, in the project.
+  Publish no longer reloads the copy's sources: only tables it changed load again.
+- **Server paths** (files already in ABI's files folder) load only an upload into, or a path already loaded by, a
+  project where the person reads every row; any other file there is the workspace owner's to load. Everyone else
+  uploads their files.
+- **Loads past `ABI_INLINE_ROWS`** (default 4,400,000 rows) answer with a run instead of waiting; a script that calls
+  `add_data`, `set_steps` or `refresh` gets a run ID back for them.
+- **DuckDB uses half the CPUs** ABI's process may use per project (a third in the runner), so one project's load leaves
+  the rest to other projects' questions; set `ABI_DUCKDB_THREADS` for one big load or query to use more.
+- **Heavy jobs move** off the always-on worker to the heavy worker (`ABI_HEAVY_CONCURRENCY`, `1` or `2`; any other
+  value stops ABI from starting), or to the runner container with the runner profile. Jobs a 1.1 volume queued run
+  as before.
+- **Uploads of deleted projects** are removed 30 days after the deletion; for projects deleted under 1.1 (no list of
+  their uploads), unlisted uploads wait until the last of those lakes is purged.
+- **New settings** (all optional, defaults in README › All settings): `ABI_BIND`, `ABI_SOURCE_URL`, the HTTPS ones,
+  the SQL endpoint's (`ABI_SQL_PORT`, `ABI_SQL_BIND`, `ABI_SQL_TLS_CERT`, `ABI_SQL_TLS_KEY`), `ABI_HEAVY_CONCURRENCY`,
+  `ABI_RUNNER_IDLE`, `ABI_RUNNER_MEMORY`, `ABI_RUNNER_DUCKDB_MEMORY_LIMIT`, `ABI_DUCKDB_MEMORY_LIMIT` and
+  `ABI_QUERY_CACHE_MB` (now passed by compose), `ABI_DUCKDB_THREADS`, `ABI_MAX_AGENTS`, `ABI_QUERY_TIMEOUT`, `ABI_RLS_SHARED_ROWS`, `ABI_PG_POOL`, `ABI_INLINE_ROWS`, `ABI_RENDER_TIMEOUT`
+  and `ABI_VIDEO_TIMEOUT`.
+
+### Known limits in 1.2
+
+- A "why" answer is masked at times: M2's round 3 passed 19 of 20 "why" runs, and 8 of 10 in a small sample after
+  its review fixes; the misses were masked count words ("two Retail products"). Counts never ground, so a sentence
+  that counts is masked rather than trusted.
+- While a big load builds its model, other projects' uncached questions slow down more than during the rest of the
+  load (bench/RESULTS.md, M4 round 3: p95 x3.30 during build_model, x1.39 over the whole load).
+- After a heavy job the runner container's memory stays above idle in reclaimable kernel cache (its processes' own
+  memory goes back).
+- Row-level and column rules go on the gold tables; a bronze or silver table left visible (not hidden) reads the same
+  for everyone with a role over every door. Hide staging tables.
+- AVG visuals read each restricted person's own rows (no shared read).
+- Remote runners (Kubernetes) are 1.3; 1.2 runs heavy jobs on the same machine.
+- The heavy worker has crashed in a query copy right after a project was deleted; the supervisor restarts it and the
+  job ends failed within a minute.
+
+### Checked for 1.2.0
+
+The release run fills this in with measured numbers only.
+
+- Offline tests: _to be measured_
+- Live agent tests: _to be measured_
+- Container check (`tests/container_check.sh`) on the release image: _to be measured_
+- A 1.1.0 volume upgraded with `scripts/upgrade.sh` on a test install: _to be measured_
+- 50 sessions after a commit, page p95 (without and with `--rls`); a 100M-row upload; Brewline revenue by region to
+  the cent, on the release image: _to be measured_
+- The arm64 image started (`.github/workflows/image.yml`): _to be measured_
 
 ## What is in it
 
