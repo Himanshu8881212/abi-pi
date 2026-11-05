@@ -73,6 +73,7 @@ def main(argv=None) -> dict:
             "delegated": [s.get("agent") for s in subs],
             "specialists_missing": [n for n in nine if n not in {s.get("agent") for s in subs}],
             "handoffs": [{k: j.get(k) for k in ("agent", "task_id", "status", "ok", "check", "passed") if k in j} for j in journal],
+            "journal": [json.dumps(j, default=str)[:1500] for j in journal],  # every entry, so a failed check says why
             "pending": pending, "confirms_asked": [t for t, _ in r.confirms],
             "right": {"model_ready_and_exact": bench.loaded(p, want),
                       "report_visuals": [len(pg.get("visuals", [])) for rp in reports for pg in rp.get("pages", [])],
