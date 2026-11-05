@@ -1069,3 +1069,80 @@ root-only files and was never printed.
 - After the Viewer revoked the token in the app: psql "password authentication failed ... use a personal token from
   the app", and MCP returned 401.
 - No log in /data/logs held a token.
+
+## 1.2 M4 round 2 (pve1)
+
+5 Nov 2026, 10:35-11:50 UTC: release-1.2 at 97de9e3 plus the M4 tuning in the working tree, not yet committed:
+scripts/engine.sh (the idle clock starts at the last heavy job's end in procrastinate_events, TERM 3 s early),
+storage's THREADS (a lake gets a third of the CPUs under ABI_ROLE=runner: 2 of 6 here), and bench/perf.py's isolation
+phases. That tree was archived with `git archive $(git stash create)` (stash commit 30668b6, tree f0e0db3) into
+/opt/abi-m4 on LXC 100. Everything else follows round 1: both targets built there (tags abi-m4:default and
+abi-m4:video, every layer from the build cache), the same throwaway install (project abi-m4, containers abi-m4 and
+abi-m4-runner, volume abi-m4-data, app 8797, SQL 15497 at the LXC's address, a self-signed certificate, the owner's
+password in a root-only file), compose defaults, no model. The same scripts ran the same perf.py subcommands one run
+at a time, each started at a 1-minute load average of 0.22-0.51; [a-b] is the range from start to end. mon.sh also
+recorded each container's memory.stat `file` and `slab_reclaimable`. Before starting I removed the tune step's
+throwaway install abi-m4f, after its last run, and kept its logs. Afterwards this install was removed with its
+images, volume, network, folder and files. The live abi and lake containers' start time, restart count and image
+were the same before and after.
+
+| M4 target (PLAN.md) | round 1 (7c6db7a) | round 2 (this tree) | |
+|---|---|---|---|
+| default image without Remotion, <= 2,843,622,285 - (video - default) | default 2,476,372,582, 143,360,035 under | default 2,476,373,331, video 2,700,262,999: moved 223,889,668, limit 2,619,732,617, 143,359,286 under; the -video image rendered a one-slide video (11,821 bytes), the default one says how to switch | met |
+| runner profile: a 10M-order load runs in the runner, exact | orders 70.81 s, Ready 79.96 s | orders 94.86 s, Ready 103.36 s, exact to the cent; the job ran in abi-m4-runner (peak 278,835,200 bytes), abi-m4 ran no heavy worker in any sample [0.48-2.46] | met |
+| the runner's worker gone <= 3 min after the heavy queue empties | 182.6 s | 177.1 s (the job ended 10:44:23.9, the worker stopped 10:47:21) | met |
+| the runner container's memory back within 10% of its idle | anon met, memory.current +2.75 MB | anon 0.406 to 0.406 MB (x1.00); memory.current minus file and slab_reclaimable 1.527 to 1.535 MB (x1.005); memory.current 1.80 to 4.69 MB (x2.60) | met for anon, missed for memory.current |
+| the same in one container (no profile) | gone 181.6 s, memory +1.9% | orders 70.61 s, Ready 79.14 s, exact; worker gone 177.8 s after its job; container 754.0 to 767.3 MB (+1.8%; anon 674.4 to 685.4 MB) [0.28-2.44] | met |
+| 100M orders through the app with the runner profile: Ready with a model, exact, no client timeout | Ready 795.54 s | orders in 955.23 s, Ready at 1,055.10 s, exact to the cent, no timeout; runner peak 743,972,864 bytes of its 4 GiB | met |
+| another project's uncached queries during it <= 1.5x idle | x1.17 p50, x1.53 p95 | idle (200) 70.2 / 77.0 ms, during (12,269) 80.7 / 108.2 ms: x1.15 p50, x1.41 p95 [0.36-6.85] | met |
+| medallion at 10M, the 1.2 way: each source read once, raw/ + model/ <= 417,189,763 bytes, gold exact | 282,925,126 bytes, 72.42 s | 282,925,507 bytes (40.7%), all in model/, none in raw/; rebuild 74.44 s (1.1.0: 147.52 s); bronze_orders, silver_orders, gold_revenue refreshed once each; exact to the cent | met |
+| idle container RSS and RSS per chat (README) | 476 MB; 104.7 / 103.8 MB | 476.4 MB idle (a fresh start); 155.3 then 104.6 MB a chat | recorded |
+| data out from the Proxmox host | met | all four, as in round 1 (below) | met |
+
+Runner memory (item 2). After the job, the runner's anon memory went back to exactly its idle value. memory.current
+stayed 2.9 MB higher. All of that was slab_reclaimable (0.27 MB idle, 3.15 MB after): the kernel's dentry and inode
+cache for the files the job opened, which the kernel frees only under memory pressure. memory.current minus file and
+slab_reclaimable came back within 0.5%. To show the memory is reclaimable, after the runs I wrote 64M to the runner
+cgroup's memory.reclaim from the LXC. The write returned EAGAIN because there was less than 64M to reclaim, but
+memory.current fell from 5.44 MB to 1.40 MB, below its idle mean. So "memory.current within 10%" can't hold for a
+container that has just read files. Measured as anon, or as memory.current minus reclaimable memory, the target holds.
+
+Idle stop (item 2). Both stops now come 177-178 s after the job's end in procrastinate_events, against 181.6-182.6 s
+in round 1. The tune step's abi-m4f install measured 177.7-177.9 s on three 20M runs.
+
+100M and isolation (item 3). The load job ran in the runner (it started its heavy worker 3.6 min into the upload,
+when the orders' last piece queued it). abi-m4 had no heavy worker in any sample. The two threads the runner now gives
+a lake make the orders load 37% slower than round 1 (955.23 s against 698.60 s). In exchange the other project's p95
+fell from x1.53 to x1.41. perf.py now splits the queries during the load by phase:
+- while the tables arrived (the runner's job): n 11,447, p50 80.4 ms, p95 98.8 ms (x1.28 of idle p95).
+- during build_model and Ready, which run in abi-m4 at half the CPUs: n 822, p50 101.2 ms, p95 242.1 ms.
+The tune step's run of the same tree (abi-m4f, 300 idle queries) gave x1.18 p50 and x1.37 p95, model phase p95
+191.2 ms. The lake held 1,394,007,303 bytes (round 1: 1,151,802,821). abi-m4 peaked at 3,885,981,696 bytes, mostly
+perf.py's own generation and copy of the files. Its memory.events showed sock_throttled 51, and no oom.
+
+Still open, as in round 1. When perf.py deleted the 100M project, the runner's heavy worker died with status 139 in
+that minute's build_copies job (11:12:34; job 328). The supervisor logged "it starts again in 0 s" but started none,
+because no job was due. Job 328 stayed "doing" until the install was removed. Later heavy jobs ran normally: after
+`rm` of the runner, abi-m4's heavy worker took the next 10M load.
+
+Medallion (item 4). It built in 68.39 s for bronze_orders, 14.15 s for silver_orders and 2.10 s for gold_revenue.
+The rebuild wrote no query-copy bytes. 432,055,743 bytes of copies were written before it.
+
+Memory (item 5). `perf.py memory --chats 8`, twice, after `docker restart abi-m4` and 4 minutes idle with no heavy
+worker. Idle: memory.current 476.4 MB (1.1.0: 620 MB); RSS sums app 33.2, engine 228.9, default worker 279.9 and
+Postgres 329.2 MB in 21 processes. Per chat (app + Pi): 155.3 MB, then 104.6 MB. The first run's 8 Pi processes held
+1,241.5 MB against 836.0 MB in the second. Round 1's 154.6 MB first run (before its restart) looked the same.
+
+Data out (item 6), from the Proxmox host. psql 17.11 came from Debian's packages, unpacked into a throwaway folder.
+The MCP client was the stdlib JSON-RPC one over http to /mcp. A Viewer of perf_brewline (120 cafés, 73,941 orders)
+was limited by a rule to CF001 and minted a personal token in the app. The token stayed in root-only files and was
+never printed.
+- verify-full gave TLSv1.3 (TLS_AES_256_GCM_SHA384).
+- `GROUP BY cafe_id` gave only `CF001|542`, and `count(*)` gave 542.
+- The self cross join counted 293,764.
+- `LIMIT 150000` was refused with 54000 "More than 100,000 rows".
+- `DELETE` was refused with 42501.
+- MCP tools/list returned exactly the 13 reads, and semantic_query returned one row, CF001 2888.56.
+- set_measure and delete_project returned isError, "isn't available with a personal token".
+- After the Viewer revoked the token in the app, psql's password authentication failed and MCP returned 401.
+- No file in /data/logs held the token.
