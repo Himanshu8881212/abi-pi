@@ -13,7 +13,7 @@ dynamic-tools,provider-payload,hello}`.
 | Endpoint | the local CLIProxyAPI (`~/cliproxy-server-credentials.txt`: base URL and key read at request time by `scripts/creds.py`, never copied) |
 | Model ID | `gpt-6.1-sol` (Pi also lists `openai/gpt-6.1-sol`, but that provider's ChatGPT sign-in had expired: `invalid_grant`) |
 | Reasoning effort | `medium` (`.pi/settings.json` `defaultThinkingLevel`; `low` benchmarked: no faster, see `bench/RESULTS.md`) |
-| Where | `.pi/settings.json`: `defaultProvider cliproxy`, `defaultModel gpt-6.1-sol`, `enabledModels ["cliproxy/gpt-6.1-sol"]`; subagents name `model: cliproxy/gpt-6.1-sol` |
+| Where | `.pi/settings.json`: `defaultProvider cliproxy`, `defaultModel gpt-6.1-sol`, `enabledModels ["cliproxy/gpt-6.1-sol"]`; subagents name no model: they run on the model set in Settings, else the Lead's (1.2) |
 
 ## The eight parts
 
