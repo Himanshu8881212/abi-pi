@@ -26,9 +26,8 @@ THEMES = {"paper": {"paper": "#f7f7f5", "sheet": "#ffffff", "ink": "#0b0b0b", "m
           "ink": {"paper": "#0b0b0b", "sheet": "#141414", "ink": "#f2f2ef", "mute": "#9b9b96", "faint": "#2a2a28", "accent": "#ff6a3d"}}
 NUM = re.compile(r"-?\d[\d,]*(?:\.\d+)?\s*(?:bn|m|k|%)?", re.I)
 YEAR = re.compile(r"^(19|20)\d\d$")  # a year is a label, not a figure
-# 1.2 M4.3: Remotion is in the -video image only (Dockerfile's video target); the default image is the light one
-NO_VIDEO = ("Video needs ABI's -video image, which adds Remotion; this install runs the light image. To switch, set "
-            "ABI_IMAGE=ghcr.io/himanshu8881212/abi:latest-video in .env, then run scripts/upgrade.sh.")
+# the image always has Remotion; an install from source adds it once (README > Run it from source)
+NO_VIDEO = "Video needs Remotion, which this install doesn't have yet: run `cd scripts/video && npm ci` once."
 
 
 def missing() -> str:

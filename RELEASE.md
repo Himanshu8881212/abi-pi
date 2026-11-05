@@ -43,7 +43,8 @@ The milestones' own measurements are in [bench/RESULTS.md](bench/RESULTS.md), ea
   launcher (the 1.3 Kubernetes Job contract).
 - **Silver feeds gold** (M4): a table's `source` step may start from a table the project builds, so a bronze, silver,
   gold rebuild reads the source once and stores less.
-- **A lighter image** (M4): `:latest` no longer carries Remotion; `:latest-video` adds it for explainer videos.
+- **One image for amd64 and arm64**: `:latest` and `:1.2.0` carry everything, explainer videos included, for both
+  architectures (M4 split video into a -video image; the owner kept it in the one image).
 - **Answers keep their figures** (M5): an answer the agent wrote beside opening a chart reached the person without
   its figures; the agent now opens the chart first and writes the whole answer after it.
 - **Data out** (M4): mint a **personal token** (click your name › Personal tokens) and read ABI as yourself from an
@@ -65,9 +66,6 @@ Before you do:
   `ABI_IMAGE=ghcr.io/himanshu8881212/abi:1.1.0` in `.env` (`:latest` is 1.2.0 and would migrate the data again), run
   `git checkout v1.1.0 -- docker-compose.yml scripts`, restore both files into a new volume with that image (README ›
   Back up and restore), then `docker compose up -d`.
-- **Videos need the `-video` image.** An install that makes explainer videos sets
-  `ABI_IMAGE=ghcr.io/himanshu8881212/abi:latest-video` in `.env` first; without it the Video page says so, and PDF,
-  PNG and PowerPoint exports work as before.
 - **Profiles.** HTTPS is `COMPOSE_PROFILES=https`, the runner container `COMPOSE_PROFILES=runner`, both
   `COMPOSE_PROFILES=https,runner`; `scripts/upgrade.sh` and a plain `docker compose up -d` keep what `.env` says.
 - **`ABI_DOMAIN` alone closes port 8790 to the network**: with HTTPS on, ABI's own port listens on this machine only
@@ -141,9 +139,10 @@ The release run fills this in with measured numbers only.
   35 s: met.
 - Container check on pve1 (5 Nov; 8c266ce built there from `git archive`, linux/amd64): `ABI_IMAGE=abi-rc:1.2.0
   tests/container_check.sh` 15 of 15 in 150 s (fresh volume up in 13 s, the engine and the worker killed with -9
-  serving again in 8 s, `docker stop` in 2 s, no secret in the logs, the volume, the image or the backup; video says
-  how to switch), the -video image 15 of 15 in 176 s with a video rendered. `docker image inspect --format
-  '{{.Size}}'`: default 2,471,828,806 bytes, -video 2,695,718,474 (1.1.0: 2,843,622,285). On the upgraded test
+  serving again in 8 s, `docker stop` in 2 s, no secret in the logs, the volume, the image or the backup; measured
+  on the candidate's two images then: the one without Remotion 15 of 15 in 150 s, the one with it 15 of 15 in 176 s with
+  a video rendered). `docker image inspect --format '{{.Size}}'`: with Remotion, as 1.2.0 ships, 2,695,718,474 bytes
+  (without it 2,471,828,806; 1.1.0: 2,843,622,285). On the upgraded test
   install below, each profile on test ports:
   - https with `ABI_TLS=internal`: a certificate for the name from Caddy's own authority (verified against its
     `root.crt`), http answered 308 to https, sign-in 303 over https, and `/events` streams through Caddy (an event
@@ -250,6 +249,3 @@ Checked: offline 80 passed, live agent tests 18 of 18, container check 13 of 13 
 - DuckDB stays 1.5.6 (DuckLake catalog 1.0) in 1.2; DuckDB 2.0 / DuckLake 1.1 comes in 1.3 with a one-off catalog
   migration after a backup ([docs/decisions/duckdb.md](docs/decisions/duckdb.md)). From 1.2: the lake's data path
   may be an `s3://` URL as far as rename, delete and purge go (the lake on S3 itself is 1.3).
-- From 1.2, explainer videos need the `-video` image: `:latest` no longer carries Remotion, so an install that makes
-  videos sets `ABI_IMAGE=ghcr.io/himanshu8881212/abi:latest-video` in `.env` before `scripts/upgrade.sh` (README ›
-  The two images). Without it the Video page says so, and PDF, PNG and PowerPoint exports work as before.

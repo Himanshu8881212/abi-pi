@@ -57,18 +57,18 @@ def test_served_page_is_live_and_queries_go_through_abi(srv):
     assert code == 200 and len(r["result"]["rows"]) == 2
 
 
-def test_the_video_page_on_the_light_image_says_how_to_switch(srv, tmp_path, monkeypatch):
-    """1.2 M4.3: the default image has no Remotion. The Video page says so, with the one line to switch, instead of a
-    render that fails; /video/export answers the same."""
+def test_the_video_page_without_remotion_says_how_to_add_it(srv, tmp_path, monkeypatch):
+    """An install from source without Remotion: the Video page says so, with the one command to add it, instead of a
+    render that fails; /video/export answers the same. The image always has it."""
     port, key, _ = srv
-    monkeypatch.setattr(app.video, "HERE", tmp_path)  # as on the default image: no scripts/video/node_modules
+    monkeypatch.setattr(app.video, "HERE", tmp_path)  # a source install: no scripts/video/node_modules
     page = urllib.request.urlopen(f"http://127.0.0.1:{port}/").read().decode()
     me = json.loads(re.search(r"window.ME=(\{.*?\});window.APP=", page).group(1).replace("<\\/", "</"))
-    assert me["novideo"] == app.video.NO_VIDEO and "ABI_IMAGE=ghcr.io/himanshu8881212/abi:latest-video" in me["novideo"]
+    assert me["novideo"] == app.video.NO_VIDEO and "npm ci" in me["novideo"]
     assert "if(ME.novideo){c.append(h('p','empty',ME.novideo))" in page
     code, r = post(port, "/video/export", {"report": "overview"}, key)
     assert code == 400 and r["error"] == app.video.NO_VIDEO
-    (tmp_path / "video/node_modules/remotion").mkdir(parents=True)  # the -video image
+    (tmp_path / "video/node_modules/remotion").mkdir(parents=True)  # Remotion added
     page = urllib.request.urlopen(f"http://127.0.0.1:{port}/").read().decode()
     assert json.loads(re.search(r"window.ME=(\{.*?\});window.APP=", page).group(1))["novideo"] == ""
 

@@ -1,6 +1,5 @@
-# A tag v1.2.3 publishes ghcr.io/<owner>/abi:1.2.3 and :latest for amd64 and arm64 (docker compose pull uses it),
-# and the -video image (Remotion added) as :1.2.3-video and :latest-video, once the offline tests (test.yml) pass on
-# that commit.
+# A tag v1.2.3 publishes ghcr.io/<owner>/abi:1.2.3 and :latest for amd64 and arm64 (docker compose pull uses it), one
+# image with everything (video included), once the offline tests (test.yml) pass on that commit.
 name: release
 on:
   push:
@@ -31,23 +30,13 @@ jobs:
           # only the tag v<version> publishes :<version> and :latest (a dispatch from a branch publishes nothing)
           [ "$GITHUB_REF_NAME" = "v$v" ] || { echo "::error::$GITHUB_REF_NAME is not the tag v$v" >&2; exit 1; }
           echo "version=$v" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@v7  # the default (light) image
+      - uses: docker/build-push-action@v7  # the image
         with:
           context: .
           target: default
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.tag.outputs.image }}:${{ steps.tag.outputs.version }},${{ steps.tag.outputs.image }}:latest
-          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      - uses: docker/build-push-action@v7  # the -video image: the default one plus Remotion (its layers from the cache)
-        with:
-          context: .
-          target: video
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.tag.outputs.image }}:${{ steps.tag.outputs.version }}-video,${{ steps.tag.outputs.image }}:latest-video
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

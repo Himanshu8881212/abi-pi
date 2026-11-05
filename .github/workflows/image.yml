@@ -1,5 +1,5 @@
-# The default image built for linux/arm64 on an arm64 machine and started as a stranger would: healthy, sign-in, a small
-# CSV uploaded through the app loads exact, a PDF export renders, PID 1 is tini and the user is abi. release.yml
+# The image built for linux/arm64 on an arm64 machine and started as a stranger would: healthy, sign-in, a small
+# CSV uploaded through the app loads exact, a PDF export and a video render, PID 1 is tini and the user is abi. release.yml
 # publishes arm64 too; this is the only place one is started. Run it by hand (Actions › image › Run workflow).
 name: image
 on:
@@ -65,6 +65,9 @@ jobs:
           r = abi.load(\"main\", \"arm_pdf\", [\"/tmp/orders.csv\"]); assert r.get(\"report\") and not r[\"failed\"], r; print(r[\"report\"])"'
           echo '{"report": "overview", "pages": "all", "format": "pdf"}' | post /report/export arm_pdf > "$S/r.pdf"
           echo "pdf: $(wc -c < "$S/r.pdf") bytes, $(head -c 200 "$S/r.pdf" | tr -cd '[:print:]')"; [ "$(head -c 5 "$S/r.pdf")" = "%PDF-" ]
+          # a video of the same report: Remotion is in the image, so its arm64 build must render too
+          docker exec "$C" sh -c 'cd /app && eval "$(scripts/engine.sh env)" && python3 scripts/video.py arm_pdf overview --seconds 1 --size 320x180 --out /tmp/v.mp4'
+          docker cp "$C:/tmp/v.mp4" "$S/v.mp4"; echo "video: $(wc -c < "$S/v.mp4") bytes"; head -c 12 "$S/v.mp4" | grep -q ftyp
           echo "all checks passed on $(docker exec "$C" uname -m)"
       - if: failure()
         run: |

@@ -63,12 +63,9 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 CMD ["/
 # tini as PID 1 reaps the engine's exited children (else a stopped worker stays a zombie that looks alive)
 ENTRYPOINT ["tini", "--", "docker/entrypoint.sh"]
 
-# the -video image (1.2 M4.3): the light image plus Remotion for explainer videos (scripts/video.py); one Chrome for
-# everything: Remotion uses the engine's
-FROM base AS video
+# the image (owner, 5 Nov 2026: video always in it): Remotion for explainer videos (scripts/video.py) on top of the
+# base; one Chrome for everything (Remotion uses the engine's). The last stage, so a plain `docker build .` makes it.
+FROM base AS default
 COPY --chown=abi:abi scripts/video/package.json scripts/video/package-lock.json* scripts/video/
 RUN cd scripts/video && npm ci --no-audit --no-fund && rm -rf /home/abi/.npm
 ENV REMOTION_BROWSER=/opt/abi/headless_shell
-
-# the default (light) image: the last stage, so a plain `docker build .` makes it; no Remotion
-FROM base AS default

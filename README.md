@@ -52,7 +52,7 @@ One app, in the order the work happens:
 | **Data model** | Measures, a glossary, saved queries, joins and a calendar, row-level and column security, a model canvas. |
 | **Write-back** | Edit rows in the app, or have the agent change a total and let ABI spread it over the rows below; the agent's edits wait for your approval, and every edit undoes in one step. For a table loaded straight from a Postgres or MySQL table (its source added with `"sync": true`, its key the source's primary key), an Owner can have the agent write the edits back to it, after a preview of every change they confirm. |
 | **Visualize** | Reports with cross-filtering, drag-and-resize layouts, Explore with saved analyses, Monitor checks (a measure against a value, a target or its last period, freshness, failed flows; measure checks saved there alert in the Inbox, and by email if you like, with no browser open), an Inbox of alerts, flow posts and subscriptions, a Home page of pinned widgets. |
-| **Export** | Board packs and one-pagers as PDF, PPTX and PNG, data extracts (Excel, CSV), and short explainer videos (MP4) of a report (with the `-video` image: below, The two images). |
+| **Export** | Board packs and one-pagers as PDF, PPTX and PNG, data extracts (Excel, CSV), and short explainer videos (MP4) of a report. |
 | **Automate** | Flows on a schedule, a report emailed as a PDF on the days you pick (**Email this report** on its page), ML forecasts, tools, and custom agents with their own evaluation sets, each from a form, from a sentence to the agent, or as JSON. |
 | **Knowledge** | A vault for your business definitions; the agent cites it before it defines or judges a measure. |
 | **Govern** | Row-level security and hidden columns, roles, Developer and Viewer modes, commits and history, Publish to a read-only copy, model settings. |
@@ -172,7 +172,7 @@ people open, so the links come back to ABI.
 | `COMPOSE_PROFILES`, `ABI_DOMAIN`, `ABI_TLS`, `ABI_TLS_CERT`, `ABI_TLS_KEY`, `ABI_HTTP_PORT`, `ABI_HTTPS_PORT` | no | HTTPS in front of ABI (below). |
 | `ABI_SQL_PORT`, `ABI_SQL_BIND`, `ABI_SQL_TLS_CERT`, `ABI_SQL_TLS_KEY` | no | The SQL endpoint for psql, DBeaver and BI tools, off unless `ABI_SQL_PORT` is set (below: Data out). `ABI_SQL_BIND`: the address it is published on, set only with `ABI_SQL_PORT`. Default: as `ABI_BIND`. |
 | `ABI_VOLUME` | no | The data volume's name. Default `abi_abi-data`; an install from 1.0 keeps `abi-pi_abi-pi-data` (`scripts/upgrade.sh` sets it). |
-| `ABI_IMAGE` | no | The image to run. Default `ghcr.io/himanshu8881212/abi:latest` (pulled with `docker compose pull`, else built here); `ghcr.io/himanshu8881212/abi:latest-video` for explainer videos (below: The two images). |
+| `ABI_IMAGE` | no | The image to run. Default `ghcr.io/himanshu8881212/abi:latest` (pulled with `docker compose pull`, else built here); pin a version with `ghcr.io/himanshu8881212/abi:1.2.0` (below: The image). |
 | `ABI_SECRET_KEY` | no | A Fernet key that encrypts the API keys admins save. Default: a key file in the volume. Make one with `python3 -c "import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())"`. |
 | `ABI_DUCKDB_MEMORY_LIMIT` | no | The memory DuckDB may use for one project's queries and loads in each engine process (the engine and each worker); above it, it spills to disk. Default `1500MB`. |
 | `ABI_DUCKDB_THREADS` | no | DuckDB threads for one project's queries and loads in each engine process. Fewer keep other projects' questions quick while one project loads or builds its model; more make one big load or query faster. Default: half the CPUs ABI's process may use, a third in the runner container (a Docker `--cpus` quota isn't counted: set it then). |
@@ -272,24 +272,13 @@ and waits until it's healthy; Caddy comes along when HTTPS is on (`COMPOSE_PROFI
 moves over too: it keeps its volume and its `.env`. The volume remembers its version (`docker exec abi cat
 /data/VERSION`) and an older image refuses it: to go back, restore a backup into a new volume (below).
 
-### The two images
+### The image
 
-| Image | What it holds |
-|---|---|
-| `abi:latest` (and `abi:<version>`), the default | Everything except video: the engine, Postgres, the agent, the app, and the headless Chrome for PDF, PNG and PowerPoint exports and report emails. |
-| `abi:latest-video` (and `abi:<version>-video`) | The default image plus Remotion (`scripts/video/`), for explainer videos (MP4) in the app's Video page and in board packs. |
-
-On the default image, the Video page and a board pack's video item say that video needs the -video image. To switch,
-put one line in `.env` and upgrade (`scripts/upgrade.sh` keeps an install on the image it chose, also when it builds
-the image here):
-
-```sh
-ABI_IMAGE=ghcr.io/himanshu8881212/abi:latest-video
-```
-
-Built here: `docker build --target video .` (a plain `docker build .` makes the default image). `docker compose`
-builds the default image too when it can't pull `ABI_IMAGE`: for a `-video` tag it can't pull, build it first with
-`docker build --target video -t "$ABI_IMAGE" .` (`scripts/upgrade.sh` does this for you).
+One image, `ghcr.io/himanshu8881212/abi:latest` (and `:<version>`), for linux/amd64 (most servers) and linux/arm64
+(Apple Silicon, Graviton, Ampere, Raspberry Pi): Docker pulls the one that fits. It holds everything: the engine,
+Postgres, the agent, the app, the headless Chrome for PDF, PNG and PowerPoint exports and report emails, and Remotion
+for explainer videos (MP4). Built here: `docker build .`. Pin a version with `ABI_IMAGE=ghcr.io/himanshu8881212/abi:1.2.0`
+in `.env`.
 
 **Memory** (measured on 5 Nov 2026, pve1, the default image, no model; bench/RESULTS.md, 1.2.0 release candidate):
 an idle container uses about 464 MB, against 1.1.0's 620 MB. The heavy worker runs only while there is work. Each
@@ -383,7 +372,7 @@ Every release runs three suites, and their results go into [RELEASE.md](RELEASE.
 - **Live agent tests** (`ABI_PI_LIVE=1 .venv/bin/python -m pytest -q -m live tests`): the agent driven like a person
   through real scenarios, from a raw file to a model, a report, a flow and a custom agent.
 - **Container check** (`tests/container_check.sh`): a fresh volume, loading and querying, PDF and PPTX export, video
-  export on the `-video` image (on the default one, its message saying how to switch), the agent, a hard kill, a
+  export, the agent, a hard kill, a
   killed engine and worker, a clean `docker stop`, backup and restore, no secrets in the image or logs, non-root
   user, health check.
 
@@ -421,6 +410,7 @@ ABI is early, and that's the best time to shape it. Bug reports, ideas and pull 
    ```sh
    uv sync && (cd engine/backend && uv sync --frozen --no-dev)
    (cd engine/frontend && npm ci && npx vite build --outDir ../backend/static --emptyOutDir)
+   (cd scripts/video && npm ci)                            # explainer videos (Remotion)
    scripts/engine.sh start                                 # Postgres 17 (brew install postgresql@17), engine, workers
    scripts/accounts.py                                     # first run: accounts, passwords in data/accounts.txt
    .venv/bin/python scripts/app.py main 8790 --single      # one person, this machine only
