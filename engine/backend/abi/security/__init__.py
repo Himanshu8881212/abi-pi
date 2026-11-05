@@ -125,6 +125,20 @@ def user_for_token(conn: psycopg.Connection, token: str) -> User | None:
     return User(**row) if row else None
 
 
+PERSONAL = "abi_pt_"  # M4.5: a personal token's prefix (secret scanners and log greps find it)
+
+
+def user_for_personal(conn: psycopg.Connection, token: str) -> User | None:
+    """M4.5: the account behind a personal token that is neither revoked nor expired, its use noted. Only the read-only
+    doors ask this (the SQL endpoint, /api/mcp/outside): user_for_token never takes a personal token."""
+    if not token.startswith(PERSONAL):
+        return None
+    row = conn.execute(
+        "UPDATE personal_tokens p SET last_used = now() FROM users u WHERE u.id = p.user_id AND p.token_hash = %s"
+        " AND p.expires > now() RETURNING u.id, u.name, u.workspace_owner", [_token_hash(token)]).fetchone()
+    return User(**row) if row else None
+
+
 def user(conn: psycopg.Connection, user_id: int) -> User | None:
     row = conn.execute("SELECT id, name, workspace_owner FROM users WHERE id = %s", [user_id]).fetchone()
     return User(**row) if row else None

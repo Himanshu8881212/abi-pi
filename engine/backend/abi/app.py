@@ -140,6 +140,7 @@ app.include_router(tiles.router)
 app.include_router(tools.builtin.router)
 app.include_router(usage.router)
 app.router.add_route("/api/mcp", mcp.Endpoint())  # SE-9 MCP (D-33)
+app.router.add_route("/api/mcp/outside", mcp.Endpoint(outside=True))  # M4.5: the app's /mcp, personal tokens
 
 
 @app.get("/api/health")

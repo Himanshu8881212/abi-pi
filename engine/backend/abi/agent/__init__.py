@@ -122,7 +122,8 @@ def forget(conn, user: User, args: MemoryRef) -> dict:
 
 MFA = ("mfa_status", "start_mfa", "confirm_mfa", "disable_mfa", "reset_mfa", "set_mfa_required")
 CHATGPT = ("chatgpt_account", "set_chatgpt_model", "unlink_chatgpt")  # D-53: a person's own account link
-UI_ONLY = ("save_chat",)  # CHAT-PERSIST: the UI writes the transcript; an agent would write history it never had
+UI_ONLY = ("save_chat",  # CHAT-PERSIST: the UI writes the transcript; an agent would write history it never had
+           "create_personal_token", "personal_tokens", "revoke_personal_token")  # M4.5: a person's own credentials
 
 
 def _secret(act) -> bool:

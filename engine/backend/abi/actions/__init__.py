@@ -45,6 +45,7 @@ class Action:
 
 ACTIONS: dict[str, Action] = {}
 VIA: ContextVar[str] = ContextVar("via", default="rest")  # the running action's caller; Git signs agent changes as the agent (UI-4)
+OUTSIDE: ContextVar[bool] = ContextVar("abi_outside", default=False)  # M4.5: a personal token's outside client
 
 
 def by_agent() -> bool:
@@ -118,7 +119,8 @@ def audit(conn, user: User | None, via: str, name: str, project, input, status: 
     conn.execute(
         "INSERT INTO audit_log (user_id, user_name, via, action, project, input, status, detail)"
         " VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-        [user and user.id, user and user.name, via, name, project, None if input is None else Jsonb(input), status, detail],
+        [user and user.id, user and user.name, f"{via}:token" if OUTSIDE.get() else via, name, project,
+         None if input is None else Jsonb(input), status, detail],
     )
 
 

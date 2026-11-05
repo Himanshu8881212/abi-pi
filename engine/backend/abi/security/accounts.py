@@ -1,6 +1,7 @@
 """Local accounts (SC-1) and per-project roles (SC-2) as actions, plus first-run setup and login."""
 
 import hashlib
+import secrets
 from typing import Annotated, Literal
 
 import psycopg
@@ -8,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, SecretStr
 
-from abi import db, security
+from abi import actions, db, security
 from abi.actions import ActionFailed, action, audit, current_user, require_confirmation
 from abi.project import SCHEMA, git
 from abi.project.bundle import dumps
@@ -159,6 +160,7 @@ def set_password(conn, user: User, args: NewPassword) -> dict:
     conn.execute("UPDATE users SET password_hash = %s WHERE id = %s", [security.hash_password(new), row["id"]])
     conn.execute("DELETE FROM sessions WHERE user_id = %s", [row["id"]])
     conn.execute("DELETE FROM account_tokens WHERE user_id = %s", [row["id"]])  # SC-10: older reset/invite links die
+    conn.execute("DELETE FROM personal_tokens WHERE user_id = %s", [row["id"]])  # M4.5: and their personal tokens
     return {}
 
 
@@ -202,6 +204,48 @@ def set_tenant_admin(conn, user: User, args: AdminFlag) -> dict:
     if not (target := _find(conn, user, args.name)):
         raise ActionFailed(400, f"No user named '{args.name}'.")
     conn.execute("UPDATE users SET tenant_admin = %s WHERE id = %s", [args.on, target["id"]])
+    return {}
+
+
+class NewToken(BaseModel):
+    name: str = Field(min_length=1, max_length=100, description="what it is for, e.g. the BI tool")
+    days: int = Field(90, ge=1, le=365, description="days until it expires")
+
+
+@action(Role.viewer)
+def create_personal_token(conn, user: User, args: NewToken) -> dict:
+    """M4.5: a read-only personal token for SQL clients and outside MCP clients: it signs in only as you, only to read,
+    until it expires or is revoked. Shown this once (stored hashed). Only your own click in the app makes one."""
+    if actions.VIA.get() != "rest" or actions.inbound():  # SC-4: a credential, for the person's screen only
+        raise ActionFailed(403, "A personal token is made by your own click in the app.")
+    token = security.PERSONAL + secrets.token_urlsafe(32)
+    row = conn.execute("INSERT INTO personal_tokens (token_hash, user_id, name, expires) VALUES"
+                       " (%s, %s, %s, now() + make_interval(days => %s)) RETURNING id, expires",
+                       [security._token_hash(token), user.id, args.name, args.days]).fetchone()
+    return {"id": row["id"], "name": args.name, "expires": row["expires"], "token": token}
+
+
+@action(Role.viewer)
+def personal_tokens(conn, user: User, args: git.NoInput) -> dict:
+    """M4.5: your personal tokens (a workspace owner: everyone's): id, person, name, created, last used, expires; never
+    the token itself."""
+    return {"tokens": conn.execute(
+        "SELECT p.id, u.name AS person, p.name, p.created, p.last_used, p.expires FROM personal_tokens p"
+        " JOIN users u ON u.id = p.user_id WHERE %s OR p.user_id = %s ORDER BY p.created DESC",
+        [user.workspace_owner, user.id]).fetchall()}
+
+
+class TokenRef(BaseModel):
+    id: int
+
+
+@action(Role.viewer)
+def revoke_personal_token(conn, user: User, args: TokenRef) -> dict:
+    """M4.5: ends a personal token at once (an open SQL connection with it stops at its next statement): yours, or a
+    workspace owner's anyone's."""
+    if not conn.execute("DELETE FROM personal_tokens WHERE id = %s AND (%s OR user_id = %s)",
+                        [args.id, user.workspace_owner, user.id]).rowcount:
+        raise ActionFailed(404, "No such personal token of yours.")
     return {}
 
 

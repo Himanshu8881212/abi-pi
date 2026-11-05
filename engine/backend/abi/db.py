@@ -22,7 +22,7 @@ from psycopg_pool import ConnectionPool, PoolTimeout  # procrastinate's psycopg[
 VERSION = tomllib.loads((Path(__file__).parent.parent / "pyproject.toml").read_text())["project"]["version"]
 # H-03.2: bump with every change to SCHEMA (test_H03_schema_number_bumped pins SCHEMA's sha256 to it), so older code
 # refuses a database newer code has upgraded instead of running on it.
-SCHEMA_NUMBER = 4  # 3: ABI-PI 1.2 (flow_conditions.since); 4: load_runs (M3.2)
+SCHEMA_NUMBER = 5  # 3: ABI-PI 1.2 (flow_conditions.since); 4: load_runs (M3.2); 5: personal_tokens (M4.5)
 QUEUE = importlib.metadata.version("procrastinate")
 # The Procrastinate of v0.5.0-alpha, the oldest release we upgrade from (D-133); installs before H-03.2 recorded none.
 QUEUE_BASELINE = "3.10.0"
@@ -656,6 +656,17 @@ CREATE TABLE IF NOT EXISTS load_runs (
   finished timestamptz
 );
 CREATE INDEX IF NOT EXISTS load_runs_user ON load_runs (project, user_id, created);
+-- ABI-PI 1.2 M4.5: read-only personal tokens for outside clients (SQL, /mcp), minted by the person's own click; the
+-- token itself only hashed. Not a session: user_for_token never accepts one, so no REST call or action takes it.
+CREATE TABLE IF NOT EXISTS personal_tokens (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  token_hash bytea NOT NULL UNIQUE,
+  user_id bigint NOT NULL REFERENCES users ON DELETE CASCADE,
+  name text NOT NULL,
+  created timestamptz NOT NULL DEFAULT now(),
+  expires timestamptz NOT NULL,
+  last_used timestamptz
+);
 """
 
 

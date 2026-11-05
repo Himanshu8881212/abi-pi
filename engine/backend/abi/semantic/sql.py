@@ -7,6 +7,7 @@ import datetime
 import ipaddress
 import itertools
 import json
+import logging
 import os
 import re
 import ssl
@@ -412,16 +413,20 @@ def _current(conn, login: tuple) -> User | None:
     kind, v = login
     if kind == "token":
         return security.user_for_token(conn, v)
+    if kind == "personal":  # M4.5: a personal token, until it is revoked or expires
+        return security.user_for_personal(conn, v)
     row = conn.execute(ACCOUNT.format("id"), [v[0]]).fetchone()
     ok = row and row["password_only"] and row["password_hash"] == v[1]
     return User(row["id"], row["name"], row["workspace_owner"]) if ok else None
 
 
 def _login(name: str, password: str, project: str, ip: str) -> tuple | str:
-    """The account password or a session token of `name` (SC-10 throttle shared with /api/login: security.attempt);
+    """The account password, a personal token or a session token of `name` (SC-10 throttle shared with /api/login: security.attempt);
     the user needs a role in `project`. Returns the login credential (for `_current`) or the refusal text (the same
     for every bad credential). An account with two-step sign-in uses a session token: the app sign-in asked the code."""
     def check(conn):
+        if (user := security.user_for_personal(conn, password)) and user.name == name:
+            return "personal", password
         if (user := security.user_for_token(conn, password)) and user.name == name:
             return "token", password
         row = conn.execute(ACCOUNT.format("name"), [name]).fetchone()
@@ -437,8 +442,8 @@ def _login(name: str, password: str, project: str, ip: str) -> tuple | str:
     with db.connect() as conn:
         if login in (None, MFA) or not (user := _current(conn, login)):
             actions.audit_login(name, "sql", 401, MFA if login == MFA else None)
-            return (f'password authentication failed for user "{name}"; an account with two-step sign-in uses a'
-                    " session token from the app as its password")
+            return (f'password authentication failed for user "{name}"; use a personal token from the app as the'
+                    " password (your name, then Personal tokens)")
         if security.role_in(conn, user, project) is None:
             actions.audit_login(name, "sql", 403, "no role")
             return f'user "{name}" has no role in project "{project}"'
@@ -488,7 +493,7 @@ async def _startup(r: asyncio.StreamReader, w: asyncio.StreamWriter) -> tuple[tu
     p = body.split(b"\0")
     params = {k.decode(): v.decode() for k, v in zip(p[0::2], p[1::2], strict=False) if k}
     name, project = params.get("user", ""), params.get("database", "")
-    if not tls and not _loopback(w.get_extra_info("peername")[0]):  # before the client sends a password
+    if not tls and not _local() and not _loopback(w.get_extra_info("peername")[0]):  # before the client sends a password
         w.write(_error("28000", "TLS is required from this address: connect with sslmode=require"))
         return
     w.write(_msg(b"R", struct.pack("!i", 3)))  # AuthenticationCleartextPassword
@@ -672,11 +677,33 @@ async def _handle(r: asyncio.StreamReader, w: asyncio.StreamWriter) -> None:
         w.close()
 
 
+def _local() -> bool:
+    """M4.5: ABI_SQL_BIND=127.0.0.1, so only this machine reaches the port (in Docker: compose publishes it there, and
+    its clients arrive from the bridge's gateway), and a plain connection is allowed.
+    ponytail: in Docker, other containers on the compose network reach it too; TLS if that network holds strangers."""
+    return os.environ.get("ABI_SQL_BIND") == "127.0.0.1"
+
+
 async def start() -> None:
-    """App lifespan: listen on ABI_SQL_PORT (all interfaces) when it is set."""
+    """App lifespan: listen on ABI_SQL_PORT when it is set, at ABI_SQL_BIND (default every interface; ABI_SQL_LISTEN,
+    which compose sets inside the container, wins). M4.5: never without TLS (ABI_SQL_TLS_CERT/KEY) unless ABI_SQL_BIND
+    is 127.0.0.1: the port stays closed and the log says why; the engine serves on."""
     global SERVER
-    if port := os.environ.get("ABI_SQL_PORT"):
-        SERVER = await asyncio.start_server(_handle, None, int(port))
+    if not (port := os.environ.get("ABI_SQL_PORT")):
+        return
+    try:
+        tls = _tls()
+    except (OSError, ssl.SSLError, KeyError) as e:  # a missing or unreadable file, no key named: say which kind
+        tls, why = None, f" (its certificate didn't load: {type(e).__name__})"
+    else:
+        why = ""
+    if not tls and not _local():
+        logging.getLogger("abi.sql").error(
+            "The SQL endpoint (ABI_SQL_PORT) is not started: it needs TLS (ABI_SQL_TLS_CERT and ABI_SQL_TLS_KEY) unless"
+            f" ABI_SQL_BIND=127.0.0.1 keeps it on this machine{why}.")
+        return
+    host = os.environ.get("ABI_SQL_LISTEN") or os.environ.get("ABI_SQL_BIND") or None
+    SERVER = await asyncio.start_server(_handle, host, int(port))
 
 
 async def stop() -> None:

@@ -11,7 +11,10 @@ services:
     container_name: abi
     # ABI_PORT when 8790 is taken; ABI_BIND the address it listens on: every one, or with HTTPS (ABI_DOMAIN) this
     # machine only, so plain HTTP never reaches the network beside Caddy (ABI_BIND=0.0.0.0 opens it again)
-    ports: ["${ABI_BIND:-${ABI_DOMAIN:+127.0.0.1}}:${ABI_PORT:-8790}:8790"]
+    # ABI_SQL_PORT (M4.5, README: Data out): the SQL endpoint on that port too, at ABI_SQL_BIND (default: as the app's).
+    # Unset, the second entry is the first again and compose publishes one port.
+    ports: ["${ABI_BIND:-${ABI_DOMAIN:+127.0.0.1}}:${ABI_PORT:-8790}:8790",
+            "${ABI_SQL_BIND:-${ABI_BIND:-${ABI_DOMAIN:+127.0.0.1}}}:${ABI_SQL_PORT:-${ABI_PORT:-8790}}:${ABI_SQL_PORT:-8790}"]
     environment:
       ABI_USER: ${ABI_USER:?set ABI_USER in .env (the workspace owner)}
       ABI_PASSWORD: ${ABI_PASSWORD:?set ABI_PASSWORD in .env (8 characters or more)}
@@ -36,8 +39,17 @@ services:
       ABI_INLINE_ROWS: ${ABI_INLINE_ROWS:-4400000}  # a load of more rows answers at once and loads in the background
       ABI_RENDER_TIMEOUT: ${ABI_RENDER_TIMEOUT:-120}  # seconds a PDF, PNG or PowerPoint export may take (two at a time)
       ABI_VIDEO_TIMEOUT: ${ABI_VIDEO_TIMEOUT:-900}  # seconds a video export may take
+      # the SQL endpoint for psql, DBeaver and BI tools (personal tokens as the password): off unless ABI_SQL_PORT is set;
+      # it starts only with TLS (ABI_SQL_TLS_CERT and ABI_SQL_TLS_KEY, files on this machine) or with ABI_SQL_BIND=127.0.0.1
+      ABI_SQL_PORT: ${ABI_SQL_PORT:-}
+      ABI_SQL_BIND: ${ABI_SQL_BIND:-${ABI_BIND:-${ABI_DOMAIN:+127.0.0.1}}}  # where it is published (set it only with ABI_SQL_PORT); 127.0.0.1: this machine, TLS optional
+      ABI_SQL_LISTEN: 0.0.0.0  # inside the container: every interface, so the published port reaches it
+      ABI_SQL_TLS_CERT: ${ABI_SQL_TLS_CERT:+/certs/sql.crt}
+      ABI_SQL_TLS_KEY: ${ABI_SQL_TLS_KEY:+/certs/sql.key}
     volumes:
       - abi-data:/data                           # everything: the engine's database and lake, projects, chats, packs
+      - ${ABI_SQL_TLS_CERT:-./docker/Caddyfile}:/certs/sql.crt:ro  # the SQL endpoint's certificate and key, else a stand-in
+      - ${ABI_SQL_TLS_KEY:-./docker/Caddyfile}:/certs/sql.key:ro
     extra_hosts: ["host.docker.internal:host-gateway"]   # a model on this machine (Ollama) on Linux too
     restart: unless-stopped
   https:  # the https profile: Caddy in front with a certificate, http sent on to https (docker/Caddyfile)

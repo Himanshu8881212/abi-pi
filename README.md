@@ -170,6 +170,7 @@ people open, so the links come back to ABI.
 | `ABI_PUBLIC_URL` | no | The address people open, e.g. `https://abi.example.com`: emailed links and single sign-on return there. With HTTPS on (below), `https://ABI_DOMAIN` by itself. |
 | `ABI_SOURCE_URL` | no | You changed ABI and run it for others: where its source is published. The sign-in page and every page link it (AGPL-3.0 §13). Default: this repository. |
 | `COMPOSE_PROFILES`, `ABI_DOMAIN`, `ABI_TLS`, `ABI_TLS_CERT`, `ABI_TLS_KEY`, `ABI_HTTP_PORT`, `ABI_HTTPS_PORT` | no | HTTPS in front of ABI (below). |
+| `ABI_SQL_PORT`, `ABI_SQL_BIND`, `ABI_SQL_TLS_CERT`, `ABI_SQL_TLS_KEY` | no | The SQL endpoint for psql, DBeaver and BI tools, off unless `ABI_SQL_PORT` is set (below: Data out). `ABI_SQL_BIND`: the address it is published on, set only with `ABI_SQL_PORT`. Default: as `ABI_BIND`. |
 | `ABI_VOLUME` | no | The data volume's name. Default `abi_abi-data`; an install from 1.0 keeps `abi-pi_abi-pi-data` (`scripts/upgrade.sh` sets it). |
 | `ABI_IMAGE` | no | The image to run. Default `ghcr.io/himanshu8881212/abi:latest` (pulled with `docker compose pull`, else built here). |
 | `ABI_SECRET_KEY` | no | A Fernet key that encrypts the API keys admins save. Default: a key file in the volume. Make one with `python3 -c "import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())"`. |
@@ -211,6 +212,48 @@ plain HTTP never reaches the network (`ABI_BIND=0.0.0.0` opens it again). The ce
 unless `.env` already sets one: remove an old `http://` address there, or change it to the https one.
 Port 443 or 80 taken? `ABI_HTTPS_PORT=8443`, `ABI_HTTP_PORT=8080` (a public certificate needs one of the two kept).
 Your own proxy instead: `ABI_BIND=127.0.0.1`, and have it send `X-Forwarded-Proto: https`.
+
+### Data out: SQL and MCP clients
+
+Other tools read ABI as you, with a **personal token**: click your name, then **Personal tokens**, give it a name
+and an expiry (90 days unless you choose; at most 365) and copy it: it is shown only once. The list shows each
+token's name, when it was made, last used and expires; **Revoke** ends it at once (a workspace owner sees and can
+revoke everyone's). Changing your password ends your tokens too. A token only reads: it signs in as you, row-level
+security and column rules hold, and it can't change anything, confirm anything, make tokens or read secrets.
+
+**MCP** (Claude Desktop, Cursor, any client that speaks Streamable HTTP): the address is `https://abi.example.com/mcp`
+(or `http://<server>:8790/mcp` on a trusted network) with the header `Authorization: Bearer <token>`. It lists only
+reads: `list_projects`, `semantic_model`, `semantic_query`, `visual_data`, `dataset_data`, `list_reports`,
+`explain_change`, `how_calculated`, `lineage`, `docs`, `readiness`, `data_quality` and `project_locale`; any other
+tool is refused, and every call is in ABI's audit log as you, marked `mcp:token`. The vault (business documents)
+isn't offered there: it stays with the app's own agent.
+
+```json
+{"mcpServers": {"abi": {"type": "http", "url": "https://abi.example.com/mcp",
+                        "headers": {"Authorization": "Bearer abi_pt_..."}}}}
+```
+
+**SQL** (psql, DBeaver, Power BI, Tableau, Metabase, Excel through ODBC: anything that speaks Postgres): add
+`ABI_SQL_PORT=5433` to `.env` and `docker compose up -d`. A database is a project, the user name your ABI name and
+the password your personal token; the tables are the model's, under `public`. Only one read-only `SELECT` at a time,
+at most 100,000 rows (more is refused: add a `LIMIT` or filter), 60 seconds each. The port starts only with TLS,
+unless it stays on this machine:
+
+- **This machine only**: `ABI_SQL_BIND=127.0.0.1` (the default with HTTPS on): plain connections are fine.
+- **Other devices**: a certificate and key, files on this machine readable by the container (uid 10001):
+  `ABI_SQL_TLS_CERT=/path/fullchain.pem` and `ABI_SQL_TLS_KEY=/path/key.pem` (with HTTPS on, also `ABI_SQL_BIND=0.0.0.0`). With HTTPS on and your own files for
+  Caddy, name the same two files (`ABI_SQL_TLS_CERT=${ABI_TLS_CERT}` and `ABI_SQL_TLS_KEY=${ABI_TLS_KEY}` in `.env`).
+  Caddy's automatic certificate (a public name or `ABI_TLS=internal`) lives in its own volume and renews there: give
+  the SQL port its own files instead. Clients connect with `sslmode=require`.
+
+Without either, the port stays closed and `docker compose logs abi` says why.
+
+```sh
+psql "host=abi.example.com port=5433 dbname=main user=$USER sslmode=require"   # the token at the password prompt
+```
+
+In DBeaver: New connection, PostgreSQL, host, port `5433`, database the project, your name and the token as the
+password, and on the SSL tab "require". A BI tool's Postgres connector takes the same five things.
 
 ### Update
 

@@ -1246,12 +1246,25 @@ function pwDialog(){const d=h('dialog'),c=h('div','card'),cur=h('input','f'),nw=
  cur.type=nw.type='password';cur.placeholder='current password';cur.autocomplete='current-password';nw.placeholder='new password (8+ characters)';nw.autocomplete='new-password';
  const ok=btn('Change',async()=>{const r=await fetch('/password',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({current:cur.value,password:nw.value})}).then(x=>x.json()).catch(e=>({error:e.message}));
   cur.value=nw.value='';if(r.error){say(m,r.error,1);return}say(m,'Changed. Sign in again with the new one.');setTimeout(()=>location.reload(),1500)}),no=btn('Cancel',()=>{d.close();d.remove()});
- const row=h('div','row acts');row.append(ok,no);c.append(cur,nw,row,m);d.append(c);document.body.append(d);d.showModal();
+ const row=h('div','row acts');row.append(ok,btn('Personal tokens',()=>{d.close();d.remove();tokDialog()}),no);c.append(cur,nw,row,m);d.append(c);document.body.append(d);d.showModal();
  fetch('/signin/sso').then(r=>r.json()).then(L=>{if(!L.length)return;const l=h('div','row acts');c.insertBefore(h('h3','','Sign in with your company account'),m);c.insertBefore(l,m);
   L.forEach(x=>l.append(btn('Link '+x.name,async()=>{const r=await fetch('/api/oidc/'+encodeURIComponent(x.id)+'/start',{method:'POST',headers:{'Content-Type':'application/json'},body:'{"link":true}'}).then(y=>y.json());
    if(r.url)location.href=r.url;else say(m,r.error||'Not available.',1)})))}).catch(()=>{})}
+function tokDialog(){const d=h('dialog'),c=h('div','card'),list=h('div'),nm=h('input','f'),dy=h('input','f'),m=h('div','msg');  // M4.5
+ const post=b=>fetch('/tokens',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b)}).then(x=>x.json()).catch(e=>({error:e.message}));
+ nm.placeholder='what it is for, e.g. Power BI';dy.type='number';dy.min=1;dy.max=365;dy.value=90;dy.title='days until it expires';
+ const fill=async()=>{const r=await post({op:'list'});list.innerHTML='';if(r.error){say(m,r.error,1);return}
+  if(!r.result.tokens.length)list.append(h('p','empty','No personal tokens yet.'));
+  r.result.tokens.forEach(t=>{const row=h('div','row');row.append(h('span','',`${t.name}${t.person!==(window.ME||{}).name?' ('+t.person+')':''} · made ${t.created.slice(0,10)} · last used ${t.last_used?t.last_used.slice(0,10):'never'} · expires ${t.expires.slice(0,10)}`),
+   btn('Revoke',async()=>{if(!confirm(`Revoke "${t.name}"? Anything signed in with it stops at once.`))return;const x=await post({op:'revoke',id:t.id});if(x.error)say(m,x.error,1);fill()}));list.append(row)})};
+ const make=btn('Make a token',async()=>{const r=await post({op:'mint',name:nm.value.trim(),days:+dy.value||90});if(r.error){say(m,r.error,1);return}
+  const out=h('input','f');out.readOnly=true;out.value=r.result.token;c.insertBefore(out,m);out.select();nm.value='';
+  say(m,'Copy it now: it is shown only this once. It signs in as you, only to read: the SQL endpoint\'s password and an MCP client\'s bearer token.');fill()});
+ const row=h('div','row acts');row.append(nm,dy,make,btn('Close',()=>{d.close();d.remove()}));
+ c.append(h('h3','','Personal tokens'),h('p','','Read-only sign-in as you for SQL clients (psql, DBeaver, BI tools) and MCP clients: only your rows, nothing changes. Never share one.'),list,row,m);
+ d.append(c);document.body.append(d);d.showModal();fill()}
 {const q=new URLSearchParams(location.search).get('signin');if(q){setTimeout(()=>toast({linked:'Linked: you can sign in with it now.',conflict:'That account is linked to another person here.'}[q]||'Linking didn\'t work: try again.'));history.replaceState(null,'',location.pathname+location.hash)}}
-if(window.ME?.signin){const w=h('button','btn who',ME.name);w.title='Change your password';w.onclick=pwDialog;const f=h('form');f.method='post';f.action='/signout';f.append(h('button','btn','Sign out'));const r0=$('header .right');r0.prepend(w,f)}
+if(window.ME?.signin){const w=h('button','btn who',ME.name);w.title='Your password and personal tokens';w.onclick=pwDialog;const f=h('form');f.method='post';f.action='/signout';f.append(h('button','btn','Sign out'));const r0=$('header .right');r0.prepend(w,f)}
 if(window.ME&&!['editor','owner'].includes(ME.role))$('.modes').hidden=true;/* Viewer access only: no switch at all */$('#m-dev').onclick=()=>pickMode('developer');$('#m-view').onclick=()=>pickMode('viewer');
 let first=decodeURIComponent(location.hash.slice(1));if(!first)try{first=localStorage.getItem('abi-app-'+D.project)}catch(e){}setTimeout(()=>show(first||'home'));  // after the whole script: the chat page's parts are declared further down
 boot.then(()=>{sidebar();show(CUR);inboxCount()});setMode('developer');vc();
@@ -2395,6 +2408,27 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
             self.wfile.write(b)
             return None
 
+        def mcp(self, raw: bytes | None) -> None:
+            """M4.5: outside MCP clients with a personal token get ABI's read-only MCP (/api/mcp/outside) as the token's
+            person; the token goes on to ABI and nowhere else (no request log here). Host and Origin go along: ABI
+            refuses a browser page of another origin."""
+            h = {k: v for k in ("Authorization", "Content-Type", "Accept", "Mcp-Session-Id", "Mcp-Protocol-Version", "Origin",
+                                "Host") if (v := self.headers.get(k))}
+            try:
+                r = urllib.request.urlopen(urllib.request.Request(abi.URL + "/api/mcp/outside", raw, h, method=self.command), timeout=300)
+            except urllib.error.HTTPError as e:
+                r = e
+            with r:
+                b = r.read()
+                self.send_response(r.status)
+                for k in ("Content-Type", "Mcp-Session-Id", "WWW-Authenticate", "Allow"):
+                    if v := r.headers.get(k):
+                        self.send_header(k, v)
+                self.send_header("Content-Length", str(len(b)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(b)
+
         def authed(self) -> bool:
             if not self.allowed():
                 return False
@@ -2416,6 +2450,8 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                 self.send_header("Location", f"/?signin={out.group(1) if out else 'failed'}")  # always this app, never another address
                 self.end_headers()
                 return None
+            if route in ("/mcp", "/mcp/") and self.allowed():
+                return self.mcp(None)
             if not self.authed():
                 if signin and self.allowed() and route in ("/", "/app.html"):
                     return self.signin_page()
@@ -2522,6 +2558,8 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                 self.send_header("Location", "/")
                 self.end_headers()
                 return None
+            if self.path.partition("?")[0] in ("/mcp", "/mcp/") and self.allowed():
+                return self.mcp(raw)
             body = json.loads(raw)
             project = default
             if self.path.startswith("/agent/"):  # the harness on this machine, with the agent key: steer pages, data changed
@@ -2609,6 +2647,12 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
             # the page: a local Host (no DNS rebinding) and the per-start key (a custom header other sites can't send)
             if not secrets.compare_digest(self.headers.get("X-Abi-App", ""), key):
                 return self.reply(403, b'{"error":"forbidden"}')
+            if self.path == "/tokens":  # M4.5: your personal tokens (a workspace owner: everyone's); a new one is shown once
+                op = body.get("op")
+                out = (run("create_personal_token", {"name": str(body.get("name") or "")[:100], "days": int(body.get("days") or 90)}, None)
+                       if op == "mint" else run("revoke_personal_token", {"id": int(body.get("id") or 0)}, None) if op == "revoke"
+                       else run("personal_tokens", {}, None))
+                return self.reply(200, json.dumps(out, default=str).encode())
             if self.path == "/projects":  # the switcher: every workspace folder and its projects (ABI's synced copies here)
                 out = {}
                 for ws in sorted(abi.WORKSPACES.iterdir()) if abi.WORKSPACES.exists() else []:
