@@ -148,6 +148,12 @@ region."
 change it by clicking their name at the top. Then give them a role (Viewer reads, Editor builds) and, if you like,
 limit the sections and reports they see. Someone forgot their password? Set a new one for them on the same page.
 
+**Two-step sign-in**: each person turns it on by clicking their name › **Two-step sign-in** (their password, then the
+key in an authenticator app and its code; ten recovery codes are shown once). A workspace owner can require it for
+everyone in a tenant on **Users & access › Two-step sign-in**: the password sessions and personal tokens of its people
+without it end, and at their next sign-in the page shows them the key to add before they get in. Someone lost their
+phone and their codes? **Reset two-step** on their row (ABI asks you first) turns it off and signs them out.
+
 With a mail server (**Govern › Settings › Email**) you can also invite people by email, "Forgot your password?" on
 the sign-in page sends a reset link, and every project without a mail server of its own sends its email through it:
 reports, Monitor alerts, flows and the agent's (the first send to a domain asks once per project). With **Settings ›

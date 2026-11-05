@@ -535,8 +535,14 @@ async function usersPage(box){
    const y=await post('access',{user:u.name,sections:pick(sx),reports:pick(rx)});if(y.error)throw new Error(y.error);say(m,'Saved.')}catch(e){say(m,e.message,1)}},1);
   const np=h('input','f');np.type='password';np.autocomplete='new-password';np.placeholder='a new password for them (8+ characters)';
   const setp=btn('Set password',async()=>{try{const x=await confirmed(await post('setpass',{user:u.name,password:np.value}));np.value='';if(x)say(m,'Set: hand it over; they are signed out everywhere.')}catch(e){say(m,e.message,1)}});
+  const rmf=btn('Reset two-step',async()=>{try{const x=await confirmed(await post('mfa/reset',{user:u.name}));if(x)say(m,'Reset: their two-step sign-in is off and they are signed out everywhere; where it is required they set it up again at their next sign-in.')}catch(e){say(m,e.message,1)}});
   row.append(h('div','',`${u.name}${u.workspace_owner?' · workspace owner (sees everything)':''}${u.tenant?' · tenant '+u.tenant:''}`),h('label','l','Role in this project'),sel,
-   h('label','l','Sections'),sx,h('label','l','Reports'),rx,save,h('label','l','Forgot their password?'),np,setp,m);t.append(row)});
+   h('label','l','Sections'),sx,h('label','l','Reports'),rx,save,h('label','l','Forgot their password?'),np,setp,h('label','l','Lost their authenticator app and recovery codes?'),rmf,m);t.append(row)});
+ const mf=card('Two-step sign-in','a code from an authenticator app after the password; each person turns it on by clicking their name');g.append(mf);
+ mf.append(h('p','',U.tenants.length?'Require it for everyone in a tenant: the password sessions and personal tokens of its people without it end at once, and at their next sign-in they add the key to an authenticator app before they get in. Single sign-on is not affected.'
+  :'ABI requires it per tenant and this workspace has no tenants: each person can still turn it on for themselves.'));
+ U.tenants.forEach(x=>act(mf,(x.mfa_required?'Stop requiring it in ':'Require it for everyone in ')+x.name,async()=>{const y=await post('mfa/require',{tenant:x.id,on:!x.mfa_required});if(y.error)throw new Error(y.error);
+  setTimeout(()=>show(CUR),1500);return x.mfa_required?'No longer required in '+x.name+'.':`Required in ${x.name}: ${y.result.signed_out} password session(s) ended; they set it up at their next sign-in.`}));
  const note=card('What this controls','and what it does not');note.append(h('p','','Role, sign-in and row-level security are ABI\'s: they decide what data a person can read or change, everywhere. Sections and reports decide what this app shows them and the app\'s own routes refuse the rest. Row and column rules are on the Security page.'));g.append(note)}
 // Settings (admins): the agent's model and reasoning, and the providers (API keys go in, never come out)
 const PRESETS={openai:['OpenAI','openai-responses','https://api.openai.com/v1','gpt-5'],anthropic:['Anthropic','anthropic-messages','https://api.anthropic.com','claude-sonnet-4-5'],
@@ -1293,7 +1299,7 @@ function pwDialog(){const d=h('dialog'),c=h('div','card'),cur=h('input','f'),nw=
  cur.type=nw.type='password';cur.placeholder='current password';cur.autocomplete='current-password';nw.placeholder='new password (8+ characters)';nw.autocomplete='new-password';
  const ok=btn('Change',async()=>{const r=await fetch('/password',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({current:cur.value,password:nw.value})}).then(x=>x.json()).catch(e=>({error:e.message}));
   cur.value=nw.value='';if(r.error){say(m,r.error,1);return}say(m,'Changed. Sign in again with the new one.');setTimeout(()=>location.reload(),1500)}),no=btn('Cancel',()=>{d.close();d.remove()});
- const row=h('div','row acts');row.append(ok,btn('Personal tokens',()=>{d.close();d.remove();tokDialog()}),no);c.append(cur,nw,row,m);d.append(c);document.body.append(d);d.showModal();
+ const row=h('div','row acts');row.append(ok,btn('Personal tokens',()=>{d.close();d.remove();tokDialog()}),btn('Two-step sign-in',()=>{d.close();d.remove();mfaDialog()}),no);c.append(cur,nw,row,m);d.append(c);document.body.append(d);d.showModal();
  fetch('/signin/sso').then(r=>r.json()).then(L=>{if(!L.length)return;const l=h('div','row acts');c.insertBefore(h('h3','','Sign in with your company account'),m);c.insertBefore(l,m);
   L.forEach(x=>l.append(btn('Link '+x.name,async()=>{const r=await fetch('/api/oidc/'+encodeURIComponent(x.id)+'/start',{method:'POST',headers:{'Content-Type':'application/json'},body:'{"link":true}'}).then(y=>y.json());
    if(r.url)location.href=r.url;else say(m,r.error||'Not available.',1)})))}).catch(()=>{})}
@@ -1310,8 +1316,23 @@ function tokDialog(){const d=h('dialog'),c=h('div','card'),list=h('div'),nm=h('i
  const row=h('div','row acts');row.append(nm,dy,make,btn('Close',()=>{d.close();d.remove()}));
  c.append(h('h3','','Personal tokens'),h('p','','Read-only sign-in as you for SQL clients (psql, DBeaver, BI tools) and MCP clients: only your rows, nothing changes. Never share one.'),list,row,m);
  d.append(c);document.body.append(d);d.showModal();fill()}
+// two-step sign-in (ABI's start/confirm/disable_mfa as you): the key and the recovery codes live in this dialog only
+function mfaDialog(){const d=h('dialog'),c=h('div','card'),b=h('div'),m=h('div','msg'),close=()=>{d.close();d.remove()};
+ const post=x=>fetch('/mfa',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(x)}).then(y=>y.json()).catch(e=>({error:e.message}));
+ const inp=(ph,pw)=>{const i=h('input','f');i.placeholder=ph;if(pw){i.type='password';i.autocomplete='current-password'}else{i.autocomplete='one-time-code';i.inputMode='numeric'}return i};
+ const step=(...els)=>{b.innerHTML='';const r=h('div','row acts');els.filter(e=>e.tagName==='BUTTON').forEach(e=>r.append(e));b.append(...els.filter(e=>e.tagName!=='BUTTON'),r);m.textContent=''};
+ const codes=list=>{const pre=h('pre','',list.join('\n'));step(h('p','','Your recovery codes: each signs you in once if you lose your authenticator app. Save them now: they are shown only this once.'),pre,
+  btn('Copy',async()=>{await navigator.clipboard.writeText(pre.textContent);say(m,'Copied.')}),btn('I saved them',close,1))};
+ const on=async()=>{const pw=inp('your password',1);step(h('p','','Your password, to get a key for your authenticator app.'),pw,btn('Show the key',async()=>{const r=await post({op:'start',password:pw.value});pw.value='';if(r.error){say(m,r.error,1);return}
+  const k=h('input','f'),a=h('a','',' Open in an authenticator app'),cd=inp('the 6-digit code it shows');k.readOnly=true;k.value=r.result.secret;a.href=r.result.uri;
+  step(h('p','','Add this key to an authenticator app (or open the link on this device), then enter the code it shows.'),k,a,cd,btn('Turn on',async()=>{const x=await post({op:'confirm',code:cd.value});if(x.error){say(m,x.error,1);return}codes(x.result.recovery_codes)},1),btn('Cancel',close))},1),btn('Cancel',close))};
+ const off=()=>{const pw=inp('your password',1),cd=inp('a code from your app, or a recovery code');step(pw,cd,btn('Turn off',async()=>{const r=await post({op:'off',password:pw.value,code:cd.value});pw.value=cd.value='';if(r.error){say(m,r.error,1);return}await fill();say(m,'Two-step sign-in is off.')},1),btn('Cancel',close))};
+ const fill=async()=>{const r=await post({op:'status'});if(r.error){step(btn('Close',close));say(m,r.error,1);return}const s=r.result;
+  step(h('p','',s.on?(s.required?'Two-step sign-in is on; your organisation requires it.':'Two-step sign-in is on: after your password you enter a code from your authenticator app.'):'Two-step sign-in is off: your password alone signs you in.'),
+   ...(s.on?(s.required?[]:[btn('Turn off',off)]):[btn('Turn on',on,1)]),btn('Close',close))};
+ c.append(h('h3','','Two-step sign-in'),b,m);d.append(c);document.body.append(d);d.showModal();fill()}
 {const q=new URLSearchParams(location.search).get('signin');if(q){setTimeout(()=>toast({linked:'Linked: you can sign in with it now.',conflict:'That account is linked to another person here.'}[q]||'Linking didn\'t work: try again.'));history.replaceState(null,'',location.pathname+location.hash)}}
-if(window.ME?.signin){const w=h('button','btn who',ME.name);w.title='Your password and personal tokens';w.onclick=pwDialog;const f=h('form');f.method='post';f.action='/signout';f.append(h('button','btn','Sign out'));const r0=$('header .right');r0.prepend(w,f)}
+if(window.ME?.signin){const w=h('button','btn who',ME.name);w.title='Your password, personal tokens and two-step sign-in';w.onclick=pwDialog;const f=h('form');f.method='post';f.action='/signout';f.append(h('button','btn','Sign out'));const r0=$('header .right');r0.prepend(w,f)}
 if(window.ME&&!['editor','owner'].includes(ME.role))$('.modes').hidden=true;/* Viewer access only: no switch at all */$('#m-dev').onclick=()=>pickMode('developer');$('#m-view').onclick=()=>pickMode('viewer');
 let first=decodeURIComponent(location.hash.slice(1));if(!first)try{first=localStorage.getItem('abi-app-'+D.project)}catch(e){}setTimeout(()=>show(first||'home'));  // after the whole script: the chat page's parts are declared further down
 boot.then(()=>{sidebar();show(CUR);inboxCount()});setMode('developer');vc();
@@ -2030,7 +2051,7 @@ SIGNIN = """<!doctype html><meta charset=utf-8><meta name=viewport content='widt
 <link rel=stylesheet href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&display=swap"><style>:root{--bg:#f7f7f5;--card:#fff;--ink:#0b0b0b;--mute:#62625e;--line:#e4e4e1;--sig:#ff4f1f;color-scheme:light}@media (prefers-color-scheme:dark){:root{--bg:#0b0b0b;--card:#141414;--ink:#f2f2ef;--mute:#9b9b96;--line:#2a2a28;--sig:#ff6a3d;color-scheme:dark}}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);font:14px/1.5 "Inter Tight",system-ui,sans-serif;-webkit-font-smoothing:antialiased}form{display:flex;flex-direction:column;gap:6px;width:min(360px,calc(100vw - 32px));background:var(--card);border:1px solid var(--line);border-radius:8px;padding:32px}b{display:flex;align-items:center;gap:8px;font:700 20px "Inter Tight",sans-serif;letter-spacing:-.02em;margin-bottom:4px}b::before{content:"";width:12px;height:12px;background:var(--sig);border-radius:2px}label{font-size:12px;font-weight:500;color:var(--mute);margin-top:10px}input,button{font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:4px;background:var(--card);color:var(--ink)}input:focus{outline:none;border-color:var(--ink);box-shadow:0 0 0 3px color-mix(in srgb,var(--sig) 22%,transparent)}button{margin-top:16px;background:var(--ink);border-color:var(--ink);color:var(--card);font-weight:500;cursor:pointer}button.alt{margin-top:8px;width:100%;background:var(--card);color:var(--ink);border-color:var(--line)}#sso{display:contents}a{color:var(--mute);font-size:12px;margin-top:10px}[hidden]{display:none}.m{min-height:1.4em;color:var(--sig);font-size:13px}small{color:var(--mute)}</style>
 <form method=post action=/signin id=in><b>ABI</b><small>Sign in with your ABI account.</small><label for=n>Name or email</label>
 <input id=n name=name value="%NAME%" autocomplete=username autofocus required><label for=p>Password</label>
-<input id=p name=password type=password autocomplete=current-password required><label for=c %CODE%>Authenticator code</label>
+<input id=p name=password type=password autocomplete=current-password required>%KEY%<label for=c %CODE%>Authenticator code</label>
 <input id=c name=code inputmode=numeric autocomplete=one-time-code %CODE%><button>Sign in</button><span id=sso></span>
 <a href=# id=fg>Forgot your password?</a><span class=m>%MSG%</span><a href="%SRC%" target=_blank rel=noopener>ABI-PI %VER% · source code (AGPL-3.0)</a></form>
 <form id=pw hidden><b>ABI</b><small id=pwt>Choose your password.</small><label for=p1>New password (8 characters or more)</label>
@@ -2053,6 +2074,12 @@ NO_PROJECT = """<!doctype html><meta charset=utf-8><meta name=viewport content='
 <body style="font:14px/1.5 system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;background:#f7f7f5;color:#0b0b0b">
 <div style="max-width:340px"><b>Signed in as %NAME%</b><p>You have no project yet. Ask a workspace owner to give you a role in one.</p>
 <form method=post action=/signout><button>Sign out</button></form></div>"""
+CODES = """<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>Recovery codes · ABI</title>
+<body style="font:14px/1.5 system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;background:#f7f7f5;color:#0b0b0b">
+<div style="max-width:360px"><b>Two-step sign-in is on</b><p>Your recovery codes: each signs you in once if you lose your authenticator app.
+Save them now: they are shown only this once.</p><pre id=rc>%CODES%</pre>
+<button onclick="navigator.clipboard.writeText(document.getElementById('rc').textContent).then(()=>this.textContent='Copied')">Copy</button>
+<a href="/">I saved them: continue</a></div>"""
 
 
 
@@ -2383,10 +2410,13 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
         def do_POST(self):
             self.guarded(self.post)
 
-        def signin_page(self, msg: str = "", name: str = "", code: bool = False) -> None:
+        def signin_page(self, msg: str = "", name: str = "", code: bool = False, key: dict | None = None) -> None:
+            """The sign-in form; `key`: an enrolment's key (ABI's 403 mfa=setup), in this no-store answer only."""
+            shown = (f"<small>Key: <code>{html.escape(key['secret'])}</code> · <a href=\"{html.escape(key['uri'])}\">Open in an"
+                     " authenticator app</a></small>") if key else ""
             self.reply(200, SIGNIN.replace("%SRC%", html.escape(source_url())).replace("%VER%", html.escape(VERSION))
                        .replace("%MSG%", html.escape(msg)).replace("%NAME%", html.escape(name))
-                       .replace("%CODE%", "" if code else "hidden").encode(), "text/html; charset=utf-8")
+                       .replace("%CODE%", "" if code else "hidden").replace("%KEY%", shown, 1).encode(), "text/html; charset=utf-8")
 
         def start(self, name: str, tok: str) -> None:
             """A signed-in browser (ABI's session token stays here; the browser gets only the app's own cookie)."""
@@ -2581,9 +2611,18 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                         tries.clear()
                     tries[who] = tries.get(who, 0) + 1
                     time.sleep(min(20, 2 ** min(tries[who], 4)))
-                    msg = "Set up the authenticator for this account in ABI first." if b.get("mfa") == "setup" else b.get("message") or "Sign-in failed."
-                    return self.signin_page(msg, name, b.get("mfa") == "code")
+                    # mfa=setup: the tenant requires two-step sign-in and this account has none: enrol here (a new key each time)
+                    return self.signin_page(b.get("message") or "Sign-in failed.", name, bool(b.get("mfa")),
+                                            b if b.get("secret") and b.get("uri") else None)
                 tries.pop(who, None)
+                if codes := b.get("recovery_codes"):  # enrolled just now: its recovery codes, in this no-store answer only
+                    self.send_response(200)
+                    self.start(name, b["token"])
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    self.wfile.write(CODES.replace("%CODES%", html.escape("\n".join(codes))).encode())
+                    return None
                 self.send_response(303)
                 self.start(name, b["token"])
                 self.send_header("Location", "/")
@@ -2688,6 +2727,14 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                 if "result" in r:  # ABI signed this account out everywhere: so does the app
                     people.pop(next((k for k, v in people.items() if v is self.sess), ""), None)
                 return self.reply(200, json.dumps(r, default=str).encode())
+            if self.path == "/mfa" and self.sess:  # your two-step sign-in, as you (ABI's mfa_status, start_, confirm_, disable_mfa)
+                op, pw, cd = body.get("op"), str(body.get("password") or ""), str(body.get("code") or "")
+                need = {"status": (), "start": (pw,), "confirm": (cd,), "off": (pw, cd)}.get(op)
+                if need is None or not all(need) or len(pw) > 1024 or len(cd) > 64:  # checked here: never echoed back
+                    return self.reply(400, b'{"error":"Your password, and the code from your authenticator app (or a recovery code) where asked."}')
+                act, args = {"status": ("mfa_status", {}), "start": ("start_mfa", {"password": pw}), "confirm": ("confirm_mfa", {"code": cd}),
+                             "off": ("disable_mfa", {"password": pw, "code": cd})}[op]
+                return self.reply(200, json.dumps(run(act, args, None)).encode())  # the key and codes: this answer only
             if self.path.startswith("/admin/"):
                 if self.sess and not self.sess["admin"]:
                     return self.reply(403, b'{"error":"Users & access, Settings and database logins are for workspace owners."}')
@@ -2970,7 +3017,8 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
             except abi.ActionError as e:
                 return 200, json.dumps({"error": (e.body or {}).get("message", "ABI refused list_users")}).encode()
             reps = (abi.call("list_reports", project=p) or {}).get("reports") or []
-            return 200, json.dumps({"result": {"project": p, "users": users, "sections": SECTIONS, "published": bool(abi.folder(pub)),
+            tenants = [{k: t[k] for k in ("id", "name", "mfa_required")} for t in run("list_tenants", {}, None).get("result", {}).get("tenants") or []]
+            return 200, json.dumps({"result": {"project": p, "users": users, "sections": SECTIONS, "published": bool(abi.folder(pub)), "tenants": tenants,
                                                "reports": [{"id": r["id"], "name": r.get("name") or r["id"]} for r in reps],
                                                "access": (render.j(app_dir(p) / "people.json", {}) or {}).get("users") or {}}}, default=str).encode()
         if op == "usage":  # the agents' model work: tokens and cost per person and model, last 30 days
@@ -3028,6 +3076,14 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
             if not who or not 8 <= len(pw) <= 1024:
                 return 400, b'{"error":"A person and a password of 8 characters or more."}'
             return 200, json.dumps(run("set_password", {"name": who, "password": pw}, None), default=str).encode()
+        if op == "mfa/require":  # a tenant's accounts sign in with a code; ABI ends the password sessions of those without one
+            if not re.fullmatch(r"[\w-]{1,64}", str(body.get("tenant") or "")) or not isinstance(body.get("on"), bool):
+                return 400, b'{"error":"A tenant and on or off."}'
+            return 200, json.dumps(run("set_mfa_required", {"tenant": body["tenant"], "on": body["on"]}, None), default=str).encode()
+        if op == "mfa/reset":  # a lost authenticator and codes (destructive: ABI asks the owner, then signs them out everywhere)
+            if not who:
+                return 400, b'{"error":"A person."}'
+            return 200, json.dumps(run("reset_mfa", {"name": who}, None), default=str).encode()
         if op == "mail":  # the account mail server: invites and "forgot your password" links (its password: an ABI secret)
             import settings  # noqa: PLC0415 (sibling script)
             if body.get("off"):

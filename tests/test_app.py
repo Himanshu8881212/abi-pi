@@ -393,6 +393,142 @@ def test_an_owner_adds_a_person_without_email_and_they_change_their_own_password
         s.shutdown()
 
 
+def _totp(b32: str) -> str:
+    """The authenticator app's code now (RFC 6238: SHA1, 6 digits, 30 s), from the key the app showed."""
+    import base64, hmac, struct  # noqa: E401
+    d = hmac.new(base64.b32decode(b32), struct.pack(">Q", int(time.time() // 30)), "sha1").digest()
+    return f"{(struct.unpack('>I', d[(o := d[-1] & 15):o + 4])[0] & 0x7FFFFFFF) % 10 ** 6:06d}"
+
+
+def _yes(action, **args):
+    """An owner's call of a destructive action in a test's set-up or clean-up (the confirm token never printed)."""
+    try:
+        return abi.call(action, **args)
+    except abi.ActionError as e:
+        if e.status == 409 and (e.body or {}).get("confirm_token"):
+            return abi.call(action, confirm=e.body["confirm_token"], **args)
+        raise
+
+
+def _app_session(port):
+    """sign(name, password, code) -> (status, session cookie, page) and post(cookie, path, body) on this app."""
+    import http.client
+
+    def sign(n, pw, code=None):
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
+        c.request("POST", "/signin", urllib.parse.urlencode({"name": n, "password": pw, **({"code": code} if code else {})}),
+                  {"Content-Type": "application/x-www-form-urlencoded"})
+        r = c.getresponse()
+        return r.status, (r.getheader("Set-Cookie") or "").split(";")[0], r.read().decode()
+
+    def post(sid, path, body):
+        page = urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{port}/", headers={"Cookie": sid})).read().decode()
+        key = (re.search(r"KEY='([^']+)'", page) or [None, ""])[1]
+        r = urllib.request.Request(f"http://127.0.0.1:{port}{path}", json.dumps(body).encode(), {"Cookie": sid, "X-Abi-App": key, "Content-Type": "application/json"})
+        try:
+            return 200, json.loads(urllib.request.urlopen(r).read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read() or b"{}")
+    return sign, post
+
+
+def test_two_step_sign_in_is_turned_on_off_and_reset_in_the_app(capfd):
+    """5 Nov 2026: the app only took a code at sign-in. Now a person turns two-step on (password, key, code, recovery
+    codes once) and off (password and a code) by clicking their name, and a workspace owner resets someone's (ABI asks
+    first); a person who isn't an owner can't; the key and the codes never reach the app's log."""
+    import secrets as _s
+    if not _account("himanshu"):
+        pytest.skip("no accounts file")
+    s = app.serve(P, 0, open_browser=False, signin=True)
+    sign, post = _app_session(s.server_address[1])
+    name, pw = "probe_" + _s.token_hex(4), _s.token_urlsafe(12)
+    owner = abi.login("himanshu", _account("himanshu"))[1]["token"]
+    try:
+        with abi.as_user(owner):
+            abi.call("create_user", name=name, password=pw)
+        st, sid, _ = sign(name, pw)
+        assert st == 303 and sid
+        assert post(sid, "/mfa", {"op": "status"}) == (200, {"result": {"on": False, "required": False}})
+        code, r = post(sid, "/mfa", {"op": "start"})
+        assert code == 400, "no password: refused here, ABI is never asked"
+        code, r = post(sid, "/mfa", {"op": "start", "password": "wrong-" + pw})
+        assert "error" in r and pw not in json.dumps(r)
+        code, r = post(sid, "/mfa", {"op": "start", "password": pw})
+        key = r["result"]["secret"]
+        assert r["result"]["uri"].startswith("otpauth://totp/ABI:") and key in r["result"]["uri"]
+        assert "error" in post(sid, "/mfa", {"op": "confirm", "code": "nope"})[1], "a wrong code turns nothing on"
+        codes = post(sid, "/mfa", {"op": "confirm", "code": _totp(key)})[1]["result"]["recovery_codes"]
+        assert len(codes) == 10 and post(sid, "/mfa", {"op": "status"})[1]["result"]["on"]
+        st, sid2, page = sign(name, pw)
+        assert st == 200 and not sid2 and "Enter the code" in page and "autocomplete=one-time-code hidden" not in page, "now it asks for a code"
+        st, sid2, _ = sign(name, pw, codes[0])
+        assert st == 303 and sid2, "a recovery code signs in once"
+        assert "error" in post(sid, "/mfa", {"op": "off", "password": pw, "code": codes[0]})[1], "a used code is used up"
+        assert "result" in post(sid, "/mfa", {"op": "off", "password": pw, "code": codes[1]})[1]
+        assert post(sid, "/mfa", {"op": "status"})[1]["result"]["on"] is False
+        key2 = post(sid, "/mfa", {"op": "start", "password": pw})[1]["result"]["secret"]
+        assert "result" in post(sid, "/mfa", {"op": "confirm", "code": _totp(key2)})[1]
+        assert post(sid, "/admin/mfa/reset", {"user": name})[0] == 403, "only workspace owners reset someone's"
+        assert post(sid, "/admin/mfa/require", {"tenant": "x", "on": True})[0] == 403, "or require it"
+        st, osid, _ = sign("himanshu", _account("himanshu"))
+        code, r = post(osid, "/admin/mfa/reset", {"user": name})
+        assert code == 200 and "confirm" in r and "token" not in json.dumps(r).lower(), r
+        assert post(sid, "/mfa", {"op": "status"})[1]["result"]["on"], "nothing changes before the owner's yes"
+        assert "result" in post(osid, f"/confirm/{r['confirm']['id']}", {})[1]
+        st, sid3, _ = sign(name, pw)
+        assert st == 303 and sid3, "reset: the password alone signs in again"
+        out = "".join(capfd.readouterr())
+        assert not any(x in out for x in [key, key2, *codes]), "no key or recovery code in the app's log"
+    finally:
+        with abi.as_user(owner), contextlib.suppress(abi.ActionError):
+            _yes("delete_user", name=name)
+        s.shutdown()
+
+
+def test_a_tenant_that_requires_two_step_enrols_people_at_sign_in(capfd):
+    """Before, a person of a tenant that requires two-step sign-in read "Set up the authenticator in ABI first" and
+    could not get in through the app. Now the owner requires it on Users & access (their password sessions end) and the
+    sign-in page shows the key; the code signs in and shows the recovery codes once."""
+    import secrets as _s
+    if not _account("himanshu"):
+        pytest.skip("no accounts file")
+    s = app.serve(P, 0, open_browser=False, signin=True)
+    sign, post = _app_session(s.server_address[1])
+    name, pw, tid = "probe_" + _s.token_hex(4), _s.token_urlsafe(12), "tprobe_" + _s.token_hex(4)
+    owner = abi.login("himanshu", _account("himanshu"))[1]["token"]
+    try:
+        with abi.as_user(owner):
+            abi.call("create_tenant", id=tid, name="Probe tenant")
+            abi.call("create_user", name=name, password=pw, tenant=tid)
+        st, sid, _ = sign(name, pw)
+        assert st == 303 and sid, "not required yet: the password signs in"
+        assert post(sid, "/admin/mfa/require", {"tenant": tid, "on": True})[0] == 403, "only workspace owners require it"
+        st, osid, _ = sign("himanshu", _account("himanshu"))
+        users = post(osid, "/admin/users", {})[1]["result"]
+        assert {"id": tid, "name": "Probe tenant", "mfa_required": False} in users["tenants"]
+        code, r = post(osid, "/admin/mfa/require", {"tenant": tid, "on": True})
+        assert code == 200 and r["result"]["signed_out"] >= 1, r
+        st, sid2, page = sign(name, pw)
+        assert st == 200 and not sid2 and "requires two-step sign-in" in page and "otpauth://totp/ABI:" in page
+        assert "autocomplete=one-time-code hidden" not in page, "the code field is there"
+        key = re.search(r"Key: <code>([A-Z2-7]+)</code>", page).group(1)
+        st, sid2, page = sign(name, pw, _totp(key))
+        assert st == 200 and sid2.startswith("abi_u="), "enrolled and signed in"
+        codes = re.search(r"<pre id=rc>([^<]*)</pre>", page).group(1).split("\n")
+        assert len(codes) == 10 and "shown only this once" in page
+        home = urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{s.server_address[1]}/", headers={"Cookie": sid2})).read().decode()
+        assert "Signed in as" in home and "Sign in with your ABI account" not in home
+        out = "".join(capfd.readouterr())
+        assert key not in out and not any(c in out for c in codes), "no key or recovery code in the app's log"
+    finally:
+        with abi.as_user(owner):
+            with contextlib.suppress(abi.ActionError):
+                _yes("delete_user", name=name)
+            with contextlib.suppress(abi.ActionError):
+                _yes("delete_tenant", id=tid)
+        s.shutdown()
+
+
 def test_no_html_template_puts_text_in_unescaped():
     """Measure names, titles and errors come from projects (anyone with Editor): into HTML only through E()."""
     import render

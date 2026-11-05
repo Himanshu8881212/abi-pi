@@ -74,8 +74,8 @@ def login(name: str, password: str, code: str | None = None) -> tuple[int, dict]
             d = json.loads(e.read()).get("detail")
         except ValueError:
             d = None
-        if e.code in (401, 403, 429):  # wrong name or password, an MFA step, throttled: ABI's own words
-            return e.code, {k: v for k, v in d.items() if k in ("message", "mfa")} if isinstance(d, dict) else {"message": str(d or "Sign-in failed.")}
+        if e.code in (401, 403, 429):  # wrong name or password, an MFA step (enrolment: its key), throttled: ABI's own words
+            return e.code, {k: v for k, v in d.items() if k in ("message", "mfa", "secret", "uri")} if isinstance(d, dict) else {"message": str(d or "Sign-in failed.")}
         return e.code, {"message": "Sign-in failed."}  # never ABI's other bodies: a 422 repeats the password
 
 

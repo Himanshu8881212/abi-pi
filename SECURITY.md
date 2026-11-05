@@ -11,6 +11,11 @@ version (`docker exec abi cat /data/VERSION`). You get an answer within a week.
   page, a log or the agent.
 - **Sign-in:** ABI's accounts (password, optional authenticator code, OpenID Connect); sessions are HttpOnly
   same-site cookies; the app refuses other Host headers (DNS rebinding) and framing.
+- **Two-step sign-in** (TOTP): a person turns it on by clicking their name › Two-step sign-in, with their password; a
+  workspace owner requires it per tenant on Users & access (it ends the password sessions and personal tokens of
+  people without it; they enrol at their next sign-in) and resets a lost one there, after a confirmation. The key is
+  stored encrypted, recovery codes hashed and used once; the app passes both to the browser in a no-store answer and
+  never writes them to a log or a file.
 - **Personal tokens** (for MCP and SQL clients): stored hashed and shown once; they only read, as their person
   (row-level security and column rules hold), expire (at most 365 days), end with a password change and are audited
   per call. The SQL endpoint takes them only over TLS from another machine; `/mcp` takes them on whatever port ABI

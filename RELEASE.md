@@ -43,6 +43,9 @@ The milestones' own measurements are in [bench/RESULTS.md](bench/RESULTS.md), ea
   launcher (the 1.3 Kubernetes Job contract).
 - **Silver feeds gold** (M4): a table's `source` step may start from a table the project builds, so a bronze, silver,
   gold rebuild reads the source once and stores less.
+- **Two-step sign-in in the app**: turn it on or off by clicking your name; a workspace owner requires it per tenant
+  and resets a lost one on Users & access; a person who must set it up does so on the sign-in page (before, the app
+  only took a code and sent them to ABI's own screens).
 - **One image for amd64 and arm64**: `:latest` and `:1.2.0` carry everything, explainer videos included, for both
   architectures (M4 split video into a -video image; the owner kept it in the one image).
 - **Answers keep their figures** (M5): an answer the agent wrote beside opening a chart reached the person without
