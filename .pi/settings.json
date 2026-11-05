@@ -10,9 +10,7 @@
     "read",
     "ls",
     "grep",
-    "find",
-    "write",
-    "edit"
+    "find"
   ],
   "quietStartup": "header"
 }

@@ -462,16 +462,17 @@ export default async function abi(pi: ExtensionAPI) {
 			return { block: true, reason: `Viewer mode reads the published version: use project ${readsFrom}, not ${dev} (that one holds unpublished work).` };
 		if (name === "bash" || name === "powershell")
 			return { block: true, reason: "The shell is off in the ABI harness: data goes through ABI's tools, harness steps through the abi_* tools." };
-		if (["read", "write", "edit", "ls", "grep", "find"].includes(name)) {
+		// no file of this folder is the agent's to write: the harness's own code (ground.py, abi.py, this file) runs from it
+		if (name === "write" || name === "edit")
+			return { block: true, reason: "Refused: the agent writes no files; change the project through ABI actions." };
+		if (["read", "ls", "grep", "find"].includes(name)) {
 			const p = String((event.input as any).path ?? ".");
 			const real = inside(p, ctx.cwd);
 			const why = !real ? `${p} is outside the harness folder ${ROOT}`
 				: DATA_FILE.test(real) ? `${p} is a data file; read data only through ABI (semantic_query)`
 				: /^[\\/](scratch|\.venv|logs|data|engine)([\\/]|$)/.test(path.relative(ROOT, real).replace(/^/, "/")) ? `${p} is not a definitions folder (data/ is the engine's own data: read it only through ABI)`
 				// the admin's API keys and everyone's chats: never through the agent's file tools
-				: /[\\/]workspaces[\\/](_settings|[^\\/]+[\\/](_views|_team|_app[\\/][^\\/]+[\\/]packs))([\\/]|$)|secret\.key$/.test(real) ? `${p} holds keys, other people's chats, packs or the team's journal (the team reads it through its tools)`
-				: (name === "write" || name === "edit") && /[\\/]workspaces[\\/][^\\/]+[\\/][a-z][a-z0-9_]*[\\/]/.test(real)
-					? `${p} is in a project folder; ABI is the source of truth, change it through ABI actions` : null;
+				: /[\\/]workspaces[\\/](_settings|[^\\/]+[\\/](_views|_team|_app[\\/][^\\/]+[\\/]packs))([\\/]|$)|secret\.key$/.test(real) ? `${p} holds keys, other people's chats, packs or the team's journal (the team reads it through its tools)` : null;
 			if (why) return { block: true, reason: `Refused: ${why}.` };
 		}
 		if (name.startsWith(MCP)) {

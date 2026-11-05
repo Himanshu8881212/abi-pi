@@ -1,5 +1,6 @@
 """Guardrails that must hold (ABI_PI_LIVE=1: these drive the agent; the secret scan runs offline too)."""
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -99,3 +100,31 @@ def test_the_agents_file_tools_and_uploads_refuse_the_engines_data():
     for bad in (ROOT / "data/accounts.txt", ROOT / "data/lake/orders.parquet", ROOT / "engine/backend/abi/app.py"):
         with pytest.raises(SystemExit):
             abi.guard(bad)
+
+
+def test_the_agents_file_tools_never_write_the_harness():
+    """Release review: write and edit were refused only for data, keys and project folders, so the lead agent (or a
+    prompt injection reaching it) could rewrite scripts/ground.py, scripts/abi.py or this extension, which run again
+    from disk on every call: grounding off and code running as the app. They are now refused everywhere and the lead
+    no longer gets them. Driven as Pi runs the extension (test_app's stand-in Pi)."""
+    if not shutil.which("node"):
+        pytest.skip("no node")
+    from test_app import EXT
+    drive = EXT.split("const seen")[0] + (
+        'const on = {}, pi = new Proxy({}, { get: (_, k) => k === "on" ? (e, f) => (on[e] ??= []).push(f) : () => [] });\n'
+        "await (await import(process.argv[2])).default(pi);\n"
+        "const ctx = { hasUI: false, cwd: process.cwd(), ui: { setStatus() {}, notify() {} }, sessionManager: { getBranch: () => [] } };\n"
+        "const out = [];\n"
+        "for (const [toolName, p] of JSON.parse(process.argv[3])) { let r;\n"
+        "  for (const f of on.tool_call ?? []) r = (await f({ toolCallId: 't', toolName, input: { path: p, content: 'x', oldText: 'a', newText: 'b' } }, ctx)) ?? r;\n"
+        "  out.push(r?.block ?? false); }\n"
+        "console.log(JSON.stringify(out));")
+    calls = [[t, str(ROOT / p)] for t in ("write", "edit") for p in (
+        "scripts/ground.py", "scripts/abi.py", ".pi/extensions/abi/index.ts", ".pi/settings.json", "AGENTS.md", "notes.md")]
+    ext = ROOT / ".pi/extensions/abi/index.ts"
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("ABI_APP_", "ABI_PI_AGENT", "ABI_PI_ALLOWED", "ABI_PI_MODE"))}
+    r = subprocess.run(["node", "--experimental-strip-types", "--input-type=module", "-e", drive, str(ext.parent), str(ext), json.dumps(calls + [["read", str(ROOT / "AGENTS.md")]])],
+                       cwd=ROOT, capture_output=True, text=True, timeout=60, env={**env, "ABI_PI_LLM_BASE": "http://127.0.0.1:9/v1"})
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert json.loads(r.stdout.splitlines()[-1]) == [True] * len(calls) + [False]
+    assert not {"write", "edit"} & set(json.loads((ROOT / ".pi/settings.json").read_text())["defaultTools"])
