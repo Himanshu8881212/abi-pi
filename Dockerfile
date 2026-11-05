@@ -16,9 +16,10 @@ COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
-# postgresql: the engine's database; libgomp1: LightGBM; git: project copies; the rest: the engine's headless Chrome
+# postgresql: the engine's database; libgomp1: LightGBM; git: project copies; ffmpeg: explainer videos (H.264 MP4);
+# the rest: the engine's headless Chrome
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      postgresql libgomp1 git ca-certificates curl procps tini \
+      postgresql libgomp1 git ca-certificates curl procps tini ffmpeg \
       libnss3 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
       libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 fonts-dejavu-core fonts-liberation \
     && rm -rf /var/lib/apt/lists/* \
@@ -63,9 +64,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 CMD ["/
 # tini as PID 1 reaps the engine's exited children (else a stopped worker stays a zombie that looks alive)
 ENTRYPOINT ["tini", "--", "docker/entrypoint.sh"]
 
-# the image (owner, 5 Nov 2026: video always in it): Remotion for explainer videos (scripts/video.py) on top of the
-# base; one Chrome for everything (Remotion uses the engine's). The last stage, so a plain `docker build .` makes it.
+# the image (owner, 5 Nov 2026: video always in it, rendered by the engine's Chromium and ffmpeg, scripts/video.py).
+# The last stage, so a plain `docker build .` makes it.
 FROM base AS default
-COPY --chown=abi:abi scripts/video/package.json scripts/video/package-lock.json* scripts/video/
-RUN cd scripts/video && npm ci --no-audit --no-fund && rm -rf /home/abi/.npm
-ENV REMOTION_BROWSER=/opt/abi/headless_shell

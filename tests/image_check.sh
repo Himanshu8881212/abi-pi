@@ -45,7 +45,7 @@ import sys; sys.path.insert(0, \"scripts\"); import abi
 r = abi.load(\"main\", \"arm_pdf\", [\"/tmp/orders.csv\"]); assert r.get(\"report\") and not r[\"failed\"], r; print(r[\"report\"])"'
 echo '{"report": "overview", "pages": "all", "format": "pdf"}' | post /report/export arm_pdf > "$S/r.pdf"
 echo "pdf: $(wc -c < "$S/r.pdf") bytes, $(head -c 200 "$S/r.pdf" | tr -cd '[:print:]')"; [ "$(head -c 5 "$S/r.pdf")" = "%PDF-" ]
-# a video of the same report: Remotion is in the image, so its arm64 build must render too
+# a video of the same report: the image's Chromium draws it and ffmpeg encodes it, so its arm64 build must render too
 docker exec "$C" sh -c 'cd /app && eval "$(scripts/engine.sh env)" && python3 scripts/video.py arm_pdf overview --seconds 1 --size 320x180 --out /tmp/v.mp4'
 docker cp "$C:/tmp/v.mp4" "$S/v.mp4"; echo "video: $(wc -c < "$S/v.mp4") bytes"; head -c 12 "$S/v.mp4" | grep -q ftyp
 echo "all checks passed on $(docker exec "$C" uname -m)"

@@ -70,9 +70,6 @@ def test_a_bench_project_is_made_as_the_baselines_were(capsys):
 
 def test_pages_and_memory_through_an_app_here(capsys, monkeypatch, tmp_path):
     monkeypatch.setenv("ABI_USER", "admin")
-    # 1.2: ABI names no model, so a chat needs one: an endpoint nobody answers, so the agents start and none replies
-    monkeypatch.setenv("ABI_PI_LLM_BASE", "http://127.0.0.1:9/v1")
-    monkeypatch.setenv("ABI_PI_LLM_MODEL", "standin")
     monkeypatch.delenv("ABI_PASSWORD", raising=False)  # the bench reads data/accounts.txt, as scripts/creds.py does
     if not perf.password("admin"):
         pytest.skip("no accounts file")
@@ -122,7 +119,11 @@ def test_pages_and_memory_through_an_app_here(capsys, monkeypatch, tmp_path):
         (tmp_path / "bin/pi").chmod(0o755)
         monkeypatch.setenv("PATH", f"{tmp_path / 'bin'}{os.pathsep}{os.environ['PATH']}")
         monkeypatch.setattr(perf.settings, "load", lambda: {"model": None, "thinking": "medium"})  # the app's chats read it too
-        monkeypatch.delenv("ABI_PI_LLM_MODEL", raising=False)
+        # 1.2: ABI names no model, so the app starts an agent only for a named one: the stand-in's; it never answers, so
+        # the bench's wait for answers is cut to 20 s (its first wait, for the agents to start, ends when they have)
+        monkeypatch.setenv("ABI_PI_LLM_MODEL", "standin")
+        until = perf.until
+        monkeypatch.setattr(perf, "until", lambda ok, wait=perf.WAIT: until(ok, min(wait, 20)))
         monkeypatch.setattr(app, "MAX_AGENTS", 2)  # one Pi a person (half of it): two chats are two people's, as 8 chats are 8 people's
         r = run(capsys, "memory", "--url", url, "--project", P, "--chats", "2", "--app-pid", str(os.getpid()), "--hold", "0.5")
         # the app here is this pytest process, whose memory moves by itself (once -65 MB between samples): Pi's own counts

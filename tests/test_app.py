@@ -4,6 +4,7 @@ import json
 import subprocess
 import os
 import re
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -57,18 +58,19 @@ def test_served_page_is_live_and_queries_go_through_abi(srv):
     assert code == 200 and len(r["result"]["rows"]) == 2
 
 
-def test_the_video_page_without_remotion_says_how_to_add_it(srv, tmp_path, monkeypatch):
-    """An install from source without Remotion: the Video page says so, with the one command to add it, instead of a
-    render that fails; /video/export answers the same. The image always has it."""
+def test_the_video_page_without_ffmpeg_says_how_to_add_it(srv, monkeypatch):
+    """An install from source without ffmpeg (or the engine's Chromium): the Video page says what is missing and how to
+    add it, instead of a render that fails; /video/export answers the same. The image always has both."""
     port, key, _ = srv
-    monkeypatch.setattr(app.video, "HERE", tmp_path)  # a source install: no scripts/video/node_modules
+    monkeypatch.setattr(app.video, "FFMPEG", "abi-no-such-ffmpeg")  # a source install without ffmpeg
+    monkeypatch.setattr(app.video, "chromium", lambda: True)
     page = urllib.request.urlopen(f"http://127.0.0.1:{port}/").read().decode()
     me = json.loads(re.search(r"window.ME=(\{.*?\});window.APP=", page).group(1).replace("<\\/", "</"))
-    assert me["novideo"] == app.video.NO_VIDEO and "npm ci" in me["novideo"]
+    assert me["novideo"] == app.video.missing() and "apt install ffmpeg" in me["novideo"]
     assert "if(ME.novideo){c.append(h('p','empty',ME.novideo))" in page
     code, r = post(port, "/video/export", {"report": "overview"}, key)
-    assert code == 400 and r["error"] == app.video.NO_VIDEO
-    (tmp_path / "video/node_modules/remotion").mkdir(parents=True)  # Remotion added
+    assert code == 400 and r["error"] == app.video.missing()
+    monkeypatch.setattr(app.video, "FFMPEG", sys.executable)  # ffmpeg added (any program on the path stands for it)
     page = urllib.request.urlopen(f"http://127.0.0.1:{port}/").read().decode()
     assert json.loads(re.search(r"window.ME=(\{.*?\});window.APP=", page).group(1))["novideo"] == ""
 

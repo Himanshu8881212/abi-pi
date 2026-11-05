@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """A silent explainer video of a report: one slide per view, its numbers from ABI (visual_data, as the person), a
-caption per slide, the app's theme (light or dark), rendered by Remotion (scripts/video/) to an MP4.
+caption per slide, the app's theme (light or dark), drawn frame by frame by the engine's headless Chromium (Playwright,
+the one report exports use) from scripts/video.html and encoded by ffmpeg to an H.264 MP4 (yuv420p, 30 fps: plays
+everywhere, PowerPoint included).
 
     video.py <project> <report> [--pages p1,p2] [--views v1,v2] [--theme paper|ink] [--seconds 6] [--size 1920x1080]
              [--captions captions.json] [--out file.mp4]
 
 Captions: by default each one is written from the view's own rows (highest, lowest, first to last). An agent may pass
 its own ({view id: text}); every number in them must appear in that view's rows, or the video is refused.
-Licence: Remotion is free for individuals and companies up to 3 people; larger companies need its company licence.
 """
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -22,17 +24,50 @@ from pathlib import Path
 import abi
 
 HERE = Path(__file__).resolve().parent
+PY = HERE.parent / "engine/backend/.venv/bin/python"  # the engine's, which has Playwright
+FPS = 30
+FFMPEG = "ffmpeg"
+# the frames: the page's draw(i / fps) in the engine's Chromium, each frame's PNG to stdout (the last one again when
+# nothing moved); argv: page fps frames width height
+SHOOT = [str(PY), "-c", """import sys
+from playwright.sync_api import sync_playwright
+page, fps, n, w, h = sys.argv[1], *map(int, sys.argv[2:6])
+with sync_playwright() as p:
+    b = p.chromium.launch(args=['--disable-dev-shm-usage'])
+    pg = b.new_page(viewport={'width': w, 'height': h})
+    pg.goto('file://' + page)
+    png = b''
+    for i in range(n):
+        if pg.evaluate(f'draw({i} / {fps})') or not png:
+            png = pg.screenshot(type='png')
+        sys.stdout.buffer.write(png)
+    b.close()
+"""]
 THEMES = {"paper": {"paper": "#f7f7f5", "sheet": "#ffffff", "ink": "#0b0b0b", "mute": "#62625e", "faint": "#e4e4e1", "accent": "#ff4f1f"},
           "ink": {"paper": "#0b0b0b", "sheet": "#141414", "ink": "#f2f2ef", "mute": "#9b9b96", "faint": "#2a2a28", "accent": "#ff6a3d"}}
 NUM = re.compile(r"-?\d[\d,]*(?:\.\d+)?\s*(?:bn|m|k|%)?", re.I)
 YEAR = re.compile(r"^(19|20)\d\d$")  # a year is a label, not a figure
-# the image always has Remotion; an install from source adds it once (README > Run it from source)
-NO_VIDEO = "Video needs Remotion, which this install doesn't have yet: run `cd scripts/video && npm ci` once."
+# the image always has both; an install from source adds them once (README > Run it from source)
+NO_VIDEO = "Video needs {what}, which this install doesn't have yet: {how}."
+HOW = {"ffmpeg": "install it once (`apt install ffmpeg` or `brew install ffmpeg`)",
+       "the engine's headless Chromium": "run `engine/backend/.venv/bin/playwright install --only-shell chromium` once"}
+
+
+def home() -> str:
+    """The HOME the engine's Playwright keeps its Chromium under (as app.py's docs_pdf)."""
+    h = os.environ.get("ENGINE_HOME") or str(HERE.parent / "data/home")
+    return h if Path(h).exists() else os.environ.get("HOME", "")
+
+
+def chromium() -> bool:
+    cache = os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or Path(home(), "Library/Caches" if sys.platform == "darwin" else ".cache", "ms-playwright")
+    return PY.exists() and any(Path(cache).glob("chromium*"))
 
 
 def missing() -> str:
     """Why this install can't render a video ('' when it can)."""
-    return "" if (HERE / "video" / "node_modules" / "remotion").is_dir() else NO_VIDEO
+    gone = [k for k, ok in (("ffmpeg", shutil.which(FFMPEG)), ("the engine's headless Chromium", chromium())) if not ok]
+    return NO_VIDEO.format(what=" and ".join(gone), how="; ".join(HOW[k] for k in gone)) if gone else ""
 
 
 def compact(v) -> str:
@@ -130,24 +165,36 @@ def build(project: str, report: str, pages=None, views=None, theme="paper", seco
 
 
 def render(props: dict, out: Path) -> Path:
+    """The deck as an MP4: frame n is the page's draw(n / FPS), screenshotted by the engine's Chromium and piped as PNGs
+    to ffmpeg. Past ABI_VIDEO_TIMEOUT both are stopped with every process they started."""
     out.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
-        json.dump(props, f)
-    chrome = [f"--browser-executable={b}"] if (b := os.environ.get("REMOTION_BROWSER")) else []  # the image: the engine's Chrome
-    p = subprocess.Popen(["npx", "remotion", "render", "src/index.ts", "Deck", str(out.resolve()), f"--props={f.name}", "--log=error", *chrome],
-                         cwd=HERE / "video")
+    w, h = (props["width"] // 2 * 2, props["height"] // 2 * 2)  # yuv420p needs even sides
+    n = round(props["seconds"] * FPS) * (len(props["slides"]) + 2)  # the title card, the slides, the end card
     limit = float(os.environ.get("ABI_VIDEO_TIMEOUT", "900"))  # 1.2 M3.2: s; 1.1 waited for ever
-    try:
-        if p.wait(timeout=limit):
-            raise subprocess.CalledProcessError(p.returncode, p.args)
-    except subprocess.TimeoutExpired:
-        for pid in tree(p.pid):  # npx, node, its Chromium (in a process group of its own) and ffmpeg
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except OSError:  # ended meanwhile
-                pass
-        p.wait()
-        raise SystemExit(f"The video took longer than {limit:g} s (ABI_VIDEO_TIMEOUT) and was stopped.") from None
+    with tempfile.TemporaryDirectory() as d:
+        page = Path(d) / "deck.html"
+        page.write_text((HERE / "video.html").read_text().replace("/*PROPS*/null", json.dumps(props).replace("</", "<\\/")))
+        shoot = subprocess.Popen([*SHOOT, str(page), str(FPS), str(n), str(w), str(h)], stdout=subprocess.PIPE,
+                                 env={**os.environ, "HOME": home()})
+        enc = subprocess.Popen([FFMPEG, "-y", "-loglevel", "error", "-f", "image2pipe", "-c:v", "png", "-framerate", str(FPS), "-i", "-",
+                                "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(out.resolve())],
+                               stdin=shoot.stdout)
+        shoot.stdout.close()  # ffmpeg holds the pipe: if it stops, the frames stop too
+        try:
+            enc.wait(timeout=limit)
+            shoot.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            for pid in tree(shoot.pid) + tree(enc.pid):  # Python, Playwright's driver, its Chromium (a process group of its own), ffmpeg
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except OSError:  # ended meanwhile
+                    pass
+            shoot.wait()
+            enc.wait()
+            raise SystemExit(f"The video took longer than {limit:g} s (ABI_VIDEO_TIMEOUT) and was stopped.") from None
+    for p in (shoot, enc):
+        if p.returncode:
+            raise subprocess.CalledProcessError(p.returncode, p.args[:3])
     return out
 
 

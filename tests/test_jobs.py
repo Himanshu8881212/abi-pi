@@ -485,24 +485,25 @@ print(json.dumps({'spans': sorted(spans), 'refused': refused, 'error': error, 't
 
 
 def test_a_video_past_its_time_is_stopped_with_all_it_started(tmp_path, monkeypatch):
-    """1.1 waited for Remotion's render for ever. Past ABI_VIDEO_TIMEOUT it stops, and so does every process it
-    started, also one that left its process group as Remotion's Chromium does."""
+    """1.1 waited for the video's render for ever. Past ABI_VIDEO_TIMEOUT it stops, and so does every process it
+    started: the screenshots (stand-in), ffmpeg (stand-in) and one that left its process group as Chromium does."""
     pids = tmp_path / "pids"
-    (tmp_path / "npx").write_text(
+    (tmp_path / "ffmpeg").write_text(
         f"#!{sys.executable}\nimport os, subprocess, sys, time\n"
         "kid = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'], start_new_session=True)\n"
-        f"open({str(pids)!r}, 'w').write(f'{{os.getpid()}} {{kid.pid}}')\ntime.sleep(60)\n")
-    (tmp_path / "npx").chmod(0o755)
-    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+        f"open({str(pids)!r}, 'a').write(f' {{os.getpid()}} {{kid.pid}}')\ntime.sleep(60)\n")
+    (tmp_path / "ffmpeg").chmod(0o755)
+    monkeypatch.setattr(video, "FFMPEG", str(tmp_path / "ffmpeg"))
+    monkeypatch.setattr(video, "SHOOT", [sys.executable, "-c", f"import os, time; open({str(pids)!r}, 'a').write(f' {{os.getpid()}}'); time.sleep(60)"])
     monkeypatch.setenv("ABI_VIDEO_TIMEOUT", "3")
     t0 = time.monotonic()
     with pytest.raises(SystemExit, match="ABI_VIDEO_TIMEOUT"):
-        video.render({"slides": []}, tmp_path / "deck.mp4")
+        video.render({"slides": [], "seconds": 1, "width": 320, "height": 180}, tmp_path / "deck.mp4")
     assert time.monotonic() - t0 < 20
     end = time.monotonic() + 5
     while (alive := [p for p in map(int, pids.read_text().split()) if _alive(p)]) and time.monotonic() < end:
         time.sleep(0.1)
-    assert not alive, alive
+    assert len(pids.read_text().split()) == 3 and not alive, alive
 
 
 def _alive(pid: int) -> bool:

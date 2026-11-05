@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<!-- The explainer video's frames (scripts/video.py): a title card, one slide per report view (its numbers as ABI
+returned them, animated in) with a caption that says what to see, and an end card. The look is the app's Swiss
+signal: hairlines, one signal colour. frame(P, t) is a pure function of the props and the time (s); draw(t) puts it on
+the page, so video frame n is draw(n / FPS). No network: everything is in this file. -->
+<style>*{box-sizing:border-box}body{margin:0;overflow:hidden}#v{position:absolute;inset:0;overflow:hidden}</style>
+</head><body><div id="v"></div>
+<script>
+const P = /*PROPS*/null;
+const FPS = 30, FONT = '"Inter Tight", "Inter", "Helvetica Neue", Arial, sans-serif';
+const FILL = "position:absolute;inset:0;display:flex;flex-direction:column;";  // a full-frame layer
+const compact = (v) => v === null || v === undefined ? "—" : Math.abs(v) >= 1e9 ? (v / 1e9).toFixed(1) + "bn" : Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(1) + "m"
+  : Math.abs(v) >= 1e3 ? (v / 1e3).toFixed(1) + "k" : Number.isInteger(v) ? String(v) : v.toFixed(2);
+const ease = (f, a, b) => { const x = Math.min(1, Math.max(0, (f - a) / (b - a))); return 1 - (1 - x) ** 3; };  // out-cubic, clamped
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+function card(t, f, title, caption, n, body) {
+  const c = ease(f, 30, 50);
+  return `<div style="${FILL}background:${t.paper};color:${t.ink};font-family:${esc(FONT)};padding:64px 96px;gap:28px">`
+    + `<div style="display:flex;align-items:baseline;gap:24px;border-bottom:2px solid ${t.faint};padding-bottom:18px;opacity:${ease(f, 0, 12)}">`
+    + `<span style="background:${t.accent};color:#fff;padding:4px 14px;font-size:30px;font-weight:600;border-radius:6px">${n}</span>`
+    + `<span style="font-size:56px;font-weight:600;letter-spacing:-1px">${esc(title)}</span></div>`
+    + `<div style="flex:1;min-height:0;overflow:hidden;background:${t.sheet};border:2px solid ${t.faint};border-radius:12px;padding:36px;display:flex">${body}</div>`
+    + (caption ? `<div style="font-size:36px;line-height:1.35;max-width:1500px;opacity:${c};transform:translateY(${(1 - c) * 20}px)">${esc(caption)}</div>` : "")
+    + `</div>`;
+}
+
+function bars(s, t, f) {
+  const series = s.series || [], labels = s.labels || [], cols = [t.ink, t.accent, t.mute, t.faint];
+  const max = Math.max(1e-9, ...series.flatMap((x) => x.values.map((v) => v ?? 0)));
+  return `<div style="flex:1;display:flex;align-items:flex-end;gap:18px">` + labels.map((l, i) => {
+    const g = ease(f, 10 + i * 3, 40 + i * 3);
+    return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:10px;height:100%">`
+      + `<div style="flex:1;width:100%;display:flex;align-items:flex-end;gap:6px">` + series.map((x, j) =>
+        `<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%">`
+        + `<span style="font-size:22px;opacity:${g}">${compact(x.values[i])}</span>`
+        + `<div style="width:100%;height:${((x.values[i] ?? 0) / max) * 85 * g}%;background:${cols[j % 4]}"></div></div>`).join("")
+      + `</div><span style="font-size:22px;color:${t.mute};white-space:nowrap">${esc(l.length > 10 ? l.slice(0, 9) + "…" : l)}</span></div>`;
+  }).join("") + `</div>`;
+}
+
+function line(s, t, f) {
+  const series = s.series || [], labels = s.labels || [], W = 1600, H = 560;
+  const vals = series.flatMap((x) => x.values.filter((v) => v !== null)), max = Math.max(...vals, 0), min = Math.min(...vals, 0);
+  const x = (i) => 60 + (i * (W - 220)) / Math.max(1, labels.length - 1), y = (v) => H - 60 - ((v - min) / (max - min || 1)) * (H - 100);
+  const cols = [t.ink, t.accent, t.mute], g = ease(f, 8, 70), step = Math.ceil(labels.length / 8);
+  const font = `font-family="${esc(FONT)}"`;
+  return `<div style="flex:1;display:flex;flex-direction:column;gap:12px;min-width:0">`
+    + `<div style="display:flex;gap:36px;font-size:26px">` + series.map((sr, j) =>
+      `<span style="display:flex;align-items:center;gap:10px;color:${cols[j % 3]}"><span style="width:36px;height:6px;background:${cols[j % 3]}"></span>${esc(sr.name)}</span>`).join("") + `</div>`
+    + `<svg viewBox="0 0 ${W} ${H}" style="width:100%;flex:1;min-height:0" preserveAspectRatio="xMidYMid meet">`
+    + `<line x1="60" x2="${W - 160}" y1="${H - 60}" y2="${H - 60}" stroke="${t.faint}" stroke-width="2"/>`
+    + series.map((sr, j) => {
+      const pts = sr.values.map((v, i) => (v === null ? null : [x(i), y(v), v])).filter(Boolean);
+      const d = pts.map((p, i) => `${i ? "L" : "M"}${p[0]},${p[1]}`).join(" "), len = pts.length * 260, last = pts[pts.length - 1];
+      return `<g><path d="${d}" fill="none" stroke="${cols[j % 3]}" stroke-width="8" stroke-dasharray="${len}" stroke-dashoffset="${len * (1 - g)}"/>`
+        + (last ? `<text x="${last[0] + 16}" y="${last[1] + 10}" font-size="34" fill="${cols[j % 3]}" ${font} opacity="${g}">${compact(last[2])}</text>` : "") + `</g>`;
+    }).join("")
+    + labels.map((l, i) => (i % step === 0 || i === labels.length - 1
+      ? `<text x="${x(i)}" y="${H - 14}" text-anchor="middle" font-size="30" fill="${t.mute}" ${font}>${esc(l)}</text>` : "")).join("")
+    + `</svg></div>`;
+}
+
+function kpis(s, t, f, width) {
+  const ks = s.kpis || [], n = ks.length, cols = Math.min(4, n);
+  // the longest figure fits its column: the slide's padding (96 + 36 each side) and the gaps come off the width
+  const col = (width - 2 * (96 + 36) - 28 * (cols - 1)) / cols - 24, chars = Math.max(4, ...ks.map((k) => String(k.text).length));
+  const size = Math.min(n > 3 ? 64 : 88, Math.floor(col / (chars * 0.6)));
+  return `<div style="flex:1;display:grid;grid-template-columns:repeat(${cols}, minmax(0, 1fr));gap:28px;align-content:center">` + ks.map((k, i) => {
+    const g = ease(f, 6 + i * 6, 40 + i * 6);
+    return `<div style="border-left:4px solid ${t.accent};padding:8px 0 8px 20px;opacity:${g};min-width:0">`
+      + `<div style="font-size:${size}px;font-weight:600;letter-spacing:-2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(g < 1 && k.value !== null ? compact(k.value * g) : k.text)}</div>`
+      + `<div style="font-size:${Math.max(18, size * 0.36)}px;color:${t.mute};margin-top:12px">${esc(k.label)}</div></div>`;
+  }).join("") + `</div>`;
+}
+
+function table(s, t, f) {
+  const dims = s.dims ?? 1;
+  return `<table style="width:100%;border-collapse:collapse;font-size:28px;align-self:flex-start"><thead><tr>`
+    + (s.columns || []).map((c, i) => `<th style="text-align:${i ? "right" : "left"};border-bottom:2px solid ${t.faint};padding:10px 14px;font-size:22px;color:${t.mute};font-weight:500">${esc(c)}</th>`).join("")
+    + `</tr></thead><tbody>` + (s.rows || []).slice(0, 10).map((r, i) => `<tr style="opacity:${ease(f, 8 + i * 4, 24 + i * 4)}">` + r.map((v, j) =>
+      `<td style="text-align:${j >= dims ? "right" : "left"};border-bottom:1px solid ${t.faint};padding:10px 14px">${esc(typeof v === "number" && j >= dims ? compact(v) : v ?? "—")}</td>`).join("") + `</tr>`).join("")
+    + `</tbody></table>`;
+}
+
+// the frame at t seconds: the title card, a slide per view, the end card, each `seconds` long
+function frame(p, t) {
+  const per = Math.round(p.seconds * FPS), th = p.theme, g = Math.round(t * FPS), i = Math.floor(g / per), f = g - i * per;
+  const font = `font-family:${esc(FONT)}`;
+  if (i === 0)
+    return `<div style="${FILL}background:${th.ink};color:${th.paper};${font};justify-content:center;padding:120px">`
+      + `<div style="font-size:110px;font-weight:600;letter-spacing:-3px;opacity:${ease(f, 0, 20)}">${esc(p.title)}</div>`
+      + `<div style="font-size:44px;margin-top:24px;opacity:${ease(f, 15, 35)}">${esc(p.subtitle)}</div>`
+      + `<div style="width:${ease(f, 20, 60) * 60}%;height:6px;background:${th.accent};margin-top:48px"></div></div>`;
+  const s = p.slides[i - 1];
+  if (!s)
+    return `<div style="${FILL}background:${th.ink};color:${th.paper};${font};justify-content:center;align-items:center;font-size:40px;text-align:center;padding:120px">${esc(p.footer)}</div>`;
+  const body = s.kind === "bar" ? bars(s, th, f) : s.kind === "line" ? line(s, th, f) : s.kind === "kpi" ? kpis(s, th, f, p.width) : table(s, th, f);
+  return card(th, f, s.title, s.caption, String(i).padStart(2, "0"), body);
+}
+
+// draws frame t; false when it is the frame already shown (the renderer reuses that screenshot)
+let shown = null;
+function draw(t) {
+  const html = frame(P, t);
+  if (html === shown) return false;
+  document.getElementById("v").innerHTML = shown = html;
+  return true;
+}
+if (typeof module !== "undefined") module.exports = { frame, FPS };  // the offline test runs frame() in Node
+</script></body></html>

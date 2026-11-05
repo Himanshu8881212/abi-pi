@@ -282,9 +282,9 @@ moves over too: it keeps its volume and its `.env`. The volume remembers its ver
 
 One image, `ghcr.io/himanshu8881212/abi:latest` (and `:<version>`), for linux/amd64 (most servers) and linux/arm64
 (Apple Silicon, Graviton, Ampere, Raspberry Pi): Docker pulls the one that fits. It holds everything: the engine,
-Postgres, the agent, the app, the headless Chrome for PDF, PNG and PowerPoint exports and report emails, and Remotion
-for explainer videos (MP4). Built here: `docker build .`. Pin a version with `ABI_IMAGE=ghcr.io/himanshu8881212/abi:1.2.0`
-in `.env`.
+Postgres, the agent, the app, the headless Chrome for PDF, PNG and PowerPoint exports and report emails, and ffmpeg,
+which with that Chrome renders the explainer videos (H.264 MP4). Built here: `docker build .`. Pin a version with
+`ABI_IMAGE=ghcr.io/himanshu8881212/abi:1.2.0` in `.env`.
 
 **Memory** (measured on 5 Nov 2026, pve1, the default image, no model; bench/RESULTS.md, 1.2.0 release candidate):
 an idle container uses about 464 MB, against 1.1.0's 620 MB. The heavy worker runs only while there is work. Each
@@ -416,7 +416,8 @@ ABI is early, and that's the best time to shape it. Bug reports, ideas and pull 
    ```sh
    uv sync && (cd engine/backend && uv sync --frozen --no-dev)
    (cd engine/frontend && npm ci && npx vite build --outDir ../backend/static --emptyOutDir)
-   (cd scripts/video && npm ci)                            # explainer videos (Remotion)
+   engine/backend/.venv/bin/playwright install --only-shell chromium   # PDF, PNG, PowerPoint and video exports
+   brew install ffmpeg                                     # explainer videos (or: apt install ffmpeg)
    scripts/engine.sh start                                 # Postgres 17 (brew install postgresql@17), engine, workers
    scripts/accounts.py                                     # first run: accounts, passwords in data/accounts.txt
    .venv/bin/python scripts/app.py main 8790 --single      # one person, this machine only
@@ -464,6 +465,6 @@ if you run a changed version as a service for others, you must offer them its so
 it is published, and the app's source link (on the sign-in page and every page) points there.
 
 Third-party components keep their own licenses: see [engine/THIRD_PARTY_NOTICES](engine/THIRD_PARTY_NOTICES). The
-agent runs on the open-source [Pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent). Video
-export uses [Remotion](https://www.remotion.dev), which is free for individuals and companies of up to three people;
-larger companies need Remotion's company license.
+agent runs on the open-source [Pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent). Explainer
+videos are drawn by the engine's headless Chromium and encoded by [FFmpeg](https://ffmpeg.org) (free software, as
+Debian packages it); no third-party licence is needed for them.

@@ -973,11 +973,11 @@ sized by the method above (`docker image inspect --format '{{.Size}}'`, Docker 2
 
 | image | bytes |
 |---|---|
-| 1.1.0 (Remotion inside) | 2,843,622,285 |
-| default (`--target default`, no Remotion) | 2,476,372,582 |
+| 1.1.0 (the old video renderer inside) | 2,843,622,285 |
+| default (`--target default`, no video renderer) | 2,476,372,582 |
 | -video (`--target video`) | 2,700,262,250 |
 
-What moved to -video: 223,889,668 bytes (Remotion's node_modules). Target: default <= 2,843,622,285 - 223,889,668 =
+What moved to -video: 223,889,668 bytes (the old video renderer's node_modules). Target: default <= 2,843,622,285 - 223,889,668 =
 2,619,732,617; it is 143,360,035 under. Without dropping npm's cache (50 MB in /root/.npm, left by Pi's global install
 in 1.1.0 too) the default image was 2,560,595,246, 106,367 bytes over, so both stages now remove npm's cache. In the
 -video image a 320x180 one-slide video rendered (11,821 bytes); in the default one video.py says how to switch.
@@ -1005,7 +1005,7 @@ and files; the live abi and lake containers' start time, restart count and image
 
 | M4 target (PLAN.md) | 1.1.0 | 1.2 M4 (7c6db7a) | |
 |---|---|---|---|
-| default image without Remotion, <= 2,843,622,285 - (video - default) | 2,843,622,285 bytes | default 2,476,372,582, video 2,700,262,250 bytes: limit 2,619,732,617, 143,360,035 under; the -video image renders a one-slide video (11,821 bytes), the default one says how to switch | met |
+| default image without the old video renderer, <= 2,843,622,285 - (video - default) | 2,843,622,285 bytes | default 2,476,372,582, video 2,700,262,250 bytes: limit 2,619,732,617, 143,360,035 under; the -video image renders a one-slide video (11,821 bytes), the default one says how to switch | met |
 | runner profile: a 10M-order load runs in the runner, exact | orders 47.56 s, Ready 54.82 s (one container) | through the app's upload: orders 70.81 s, Ready 79.96 s, exact to the cent; the job ran in abi-m4-runner, abi-m4 started no heavy worker [0.40-2.61] | met |
 | the runner's worker gone <= 3 min after the heavy queue empties | never stops (M3: always on) | 182.6 s (the job ended 08:05:55.4, the worker stopped 08:08:58) | missed by 2.6 s |
 | the runner container's memory back within 10% of its idle | | anon 0.40 MB idle, 0.43 MB after; memory.current 1.90 MB idle, 4.65 MB after (+2.75 MB of page cache) | met for anon, missed for memory.current |
@@ -1089,7 +1089,7 @@ were the same before and after.
 
 | M4 target (PLAN.md) | round 1 (7c6db7a) | round 2 (this tree) | |
 |---|---|---|---|
-| default image without Remotion, <= 2,843,622,285 - (video - default) | default 2,476,372,582, 143,360,035 under | default 2,476,373,331, video 2,700,262,999: moved 223,889,668, limit 2,619,732,617, 143,359,286 under; the -video image rendered a one-slide video (11,821 bytes), the default one says how to switch | met |
+| default image without the old video renderer, <= 2,843,622,285 - (video - default) | default 2,476,372,582, 143,360,035 under | default 2,476,373,331, video 2,700,262,999: moved 223,889,668, limit 2,619,732,617, 143,359,286 under; the -video image rendered a one-slide video (11,821 bytes), the default one says how to switch | met |
 | runner profile: a 10M-order load runs in the runner, exact | orders 70.81 s, Ready 79.96 s | orders 94.86 s, Ready 103.36 s (1.1.0 in one container: 47.56 / 54.82 s, so 2.0x / 1.9x), exact to the cent; the job ran in abi-m4-runner (peak 278,835,200 bytes), abi-m4 ran no heavy worker in any sample [0.48-2.46] | met |
 | the runner's worker gone <= 3 min after the heavy queue empties | 182.6 s | 177.1 s (the job ended 10:44:23.9, the worker stopped 10:47:21) | met |
 | the runner container's memory back within 10% of its idle | anon met, memory.current +2.75 MB | anon 0.406 to 0.406 MB (x1.00); memory.current minus file and slab_reclaimable 1.527 to 1.535 MB (x1.005); memory.current 1.80 to 4.69 MB (x2.60) | met for anon, missed for memory.current |
@@ -1173,7 +1173,7 @@ restart count and image were the same before and after.
 
 | M4 target (PLAN.md) | round 2 (b3746c9's tree) | round 3 (91fa98d) | |
 |---|---|---|---|
-| default image without Remotion, <= 2,843,622,285 - (video - default) | default 2,476,373,331, 143,359,286 under | default 2,471,807,683, video 2,695,697,351: moved 223,889,668, limit 2,619,732,617, 147,924,934 under; the -video image rendered a one-slide video (11,821 bytes), the default one says how to switch | met |
+| default image without the old video renderer, <= 2,843,622,285 - (video - default) | default 2,476,373,331, 143,359,286 under | default 2,471,807,683, video 2,695,697,351: moved 223,889,668, limit 2,619,732,617, 147,924,934 under; the -video image rendered a one-slide video (11,821 bytes), the default one says how to switch | met |
 | runner profile: a 10M-order load runs in the runner, exact | orders 94.86 s, Ready 103.36 s | orders 94.97 s, Ready 103.92 s (1.1.0 in one container: 47.56 / 54.82 s), exact to the cent; the job ran in abi-m4-runner (peak 274,182,144 bytes), abi-m4 ran no heavy worker in any sample [0.33-2.41] | met |
 | the runner's worker gone <= 3 min after the heavy queue empties | 177.1 s | 177.0 s (the job ended 12:50:21.0, the worker stopped 12:53:18) | met |
 | the runner container's memory back within 10% of its idle | anon x1.00, memory.current x2.60 | anon 0.397 to 0.402 MB (x1.013); memory.current minus file and slab_reclaimable 1.443 to 1.438 MB (x0.997); memory.current 2.29 to 5.30 MB (x2.31; slab_reclaimable 0.28 to 3.16 MB) | met for anon and unreclaimable memory; missed for memory.current (reclaimable slab, as round 2 showed) |

@@ -1,5 +1,5 @@
 """The image: one image with everything, video included (owner, 5 Nov 2026; 1.2 M4.3's -video split is gone), for
-amd64 and arm64; a source install without Remotion says how to add it; upgrade.sh builds the image the install chose;
+amd64 and arm64, rendering videos with the engine's Chromium and ffmpeg; a source install without them says how to add them; upgrade.sh builds the image the install chose;
 and the engine loads Playwright and python-pptx only when it renders."""
 import json
 import os
@@ -34,7 +34,11 @@ def test_the_one_image_has_video_and_release_publishes_it_for_both_architectures
     assert list(s)[-1] == "default" and "video" not in s, "a plain `docker build .` makes the one image"
     img = "\n".join(s["default"])
     assert "playwright install" in img and "headless_shell" in img  # PDF, PNG, PPTX and report emails need it
-    assert "scripts/video/package.json" in img and "cd scripts/video && npm ci" in img and "REMOTION_BROWSER=" in img
+    assert re.search(r"apt-get install -y --no-install-recommends \\\n.* ffmpeg ", img), "ffmpeg encodes the videos"
+    assert "scripts/video" not in img and "npm ci" not in "\n".join(s["base"])  # the video needs no Node packages
+    old = "remo" + "tion"  # the renderer 1.2 removed (owner, 5 Nov 2026: its licence), spelled so this file doesn't name it
+    tracked = subprocess.run(["git", "grep", "-il", old], cwd=ROOT, capture_output=True, text=True).stdout
+    assert tracked == "", f"the old video renderer is still named in: {tracked}"
     rel = (ROOT / ".github/workflows/release.yml").read_text()
     assert rel.count("docker/build-push-action") == 2 and "target: default" in rel and "needs: tests" in rel
     assert "-video" not in rel and rel.count("linux/amd64,linux/arm64") == 1
@@ -56,23 +60,75 @@ def test_release_publishes_only_from_the_tag_of_its_version(tmp_path, ref, ok):
     assert ("version=1.2.0" in (tmp_path / "out").read_text()) == ok
 
 
-def test_video_without_remotion_says_how_to_add_it(tmp_path, monkeypatch):
-    monkeypatch.setattr(video, "HERE", tmp_path)  # a source install without scripts/video/node_modules
-    assert video.missing() == video.NO_VIDEO and "cd scripts/video && npm ci" in video.NO_VIDEO
+def test_video_without_ffmpeg_or_chromium_says_what_to_add(monkeypatch):
+    monkeypatch.setattr(video, "FFMPEG", "abi-no-such-ffmpeg")  # a source install without ffmpeg
+    monkeypatch.setattr(video, "chromium", lambda: True)
+    assert video.missing() == video.NO_VIDEO.format(what="ffmpeg", how=video.HOW["ffmpeg"]) and "apt install ffmpeg" in video.missing()
     monkeypatch.setattr(video.abi, "call", lambda *a, **k: pytest.fail("no query for a video this install can't render"))
-    with pytest.raises(SystemExit, match="npm ci"):
+    with pytest.raises(SystemExit, match="brew install ffmpeg"):
         video.build("p", "r")
-    (tmp_path / "video/node_modules/remotion").mkdir(parents=True)
+    monkeypatch.setattr(video, "chromium", lambda: False)
+    assert "ffmpeg and the engine's headless Chromium" in video.missing() and "playwright install" in video.missing()
+    monkeypatch.setattr(video, "FFMPEG", sys.executable)  # any program on the path stands for ffmpeg here
+    monkeypatch.setattr(video, "chromium", lambda: True)
     assert video.missing() == ""
 
 
 def test_a_board_pack_lists_the_video_it_cant_render_with_the_switch(tmp_path, monkeypatch):
-    monkeypatch.setattr(video, "HERE", tmp_path)
+    monkeypatch.setattr(video, "FFMPEG", "abi-no-such-ffmpeg")
     monkeypatch.setattr(pack, "home", lambda project: tmp_path / "packs")
     monkeypatch.setattr(pack.abi, "call", lambda tool, **k: {"reports": [{"id": "r", "pages": []}]} if tool == "list_reports" else {})
     man = pack.make("p", {"id": "board", "items": [{"kind": "video", "report": "r"}]})
     item = man["items"][0]
-    assert item["status"] == "failed" and item["error"] == video.NO_VIDEO
+    assert item["status"] == "failed" and item["error"] == video.missing() and "ffmpeg" in item["error"]
+
+
+DRAW = r"""
+const fs = require("fs"), m = { exports: {} };
+new Function("module", fs.readFileSync(process.argv[1], "utf8").split("<script>")[1].split("</script>")[0])(m);
+const { frame, FPS } = m.exports, p = JSON.parse(process.argv[2]), at = (n) => frame(p, n / FPS);
+console.log(JSON.stringify({ fps: FPS, same: at(40) === at(40) && at(400) === at(400), moves: at(10) !== at(20),
+  still: at(170) === at(175), slides: [at(0), at(200), at(380), at(560), at(740)].map((h) => h.slice(0, 1500)) }));
+"""
+
+
+def test_the_video_page_draws_each_frame_from_the_time_alone(tmp_path):
+    """scripts/video.html's frame(P, t) (draw(t) puts it on the page) is the same for the same t, moves while a slide
+    animates in and stands still after; the title card, a slide per view and the end card follow each other."""
+    props = {"title": "T <b>", "subtitle": "s", "footer": "the end", "theme": video.THEMES["paper"], "seconds": 6, "width": 1920, "height": 1080,
+             "slides": [{"title": "Bars", "kind": "bar", "caption": "c", "labels": ["a", "b"], "series": [{"name": "x", "values": [1, 2]}]},
+                        {"title": "KPIs", "kind": "kpi", "caption": "k", "kpis": [{"label": "Rev", "value": 37330985.06, "text": "37.3m"}]},
+                        {"title": "Rows", "kind": "table", "caption": "t", "dims": 1, "columns": ["r", "v"], "rows": [["N", 5]]}]}
+    r = subprocess.run(["node", "-e", DRAW, str(ROOT / "scripts/video.html"), json.dumps(props)], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)
+    assert out["fps"] == video.FPS and out["same"] and out["moves"] and out["still"], out
+    title, bars, kpi, rows, end = out["slides"]
+    assert "T &lt;b&gt;" in title and ">01<" in bars and ">02<" in kpi and ">03<" in rows and "the end" in end
+
+
+def test_render_pipes_the_frames_to_ffmpeg_as_an_h264_mp4(tmp_path, monkeypatch):
+    """render() without a browser: a stand-in for the screenshots (one 'PNG' per frame) and for ffmpeg (keeps its
+    arguments and what it was given). 2 s a slide at 30 fps, one slide: (1 + 2) x 60 frames, even sides."""
+    (tmp_path / "ffmpeg").write_text(f"#!{sys.executable}\nimport json, sys\n"
+                                     f"open({str(tmp_path / 'ff.json')!r}, 'w').write(json.dumps([sys.argv[1:], len(sys.stdin.buffer.read())]))\n"
+                                     "open(sys.argv[-1], 'wb').write(b'mp4')\n")
+    (tmp_path / "ffmpeg").chmod(0o755)
+    monkeypatch.setattr(video, "FFMPEG", str(tmp_path / "ffmpeg"))
+    assert "draw({i} / {fps})" in video.SHOOT[2] and video.SHOOT[0] == str(video.PY)  # the real one: the page in the engine's Chromium
+    monkeypatch.setattr(video, "SHOOT", [sys.executable, "-c", f"import shutil, sys; shutil.copy(sys.argv[1], {str(tmp_path / 'page.html')!r});"
+                                         f"open({str(tmp_path / 'shoot')!r}, 'w').write(' '.join(sys.argv[2:]));"
+                                         "sys.stdout.buffer.write(b'PNG.' * int(sys.argv[3]))"])
+    props = {"title": "T", "subtitle": "", "footer": "f </script>", "theme": video.THEMES["ink"], "seconds": 2, "width": 321, "height": 181,
+             "slides": [{"title": "K", "kind": "kpi", "caption": "c", "kpis": [{"label": "a", "value": 1, "text": "1"}]}]}
+    out = video.render(props, tmp_path / "out/deck.mp4")
+    args, got = json.loads((tmp_path / "ff.json").read_text())
+    assert out.read_bytes() == b"mp4" and got == 4 * 180
+    assert args == ["-y", "-loglevel", "error", "-f", "image2pipe", "-c:v", "png", "-framerate", "30", "-i", "-", "-c:v", "libx264",
+                    "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(out.resolve())]
+    assert (tmp_path / "shoot").read_text() == "30 180 320 180"
+    page = (tmp_path / "page.html").read_text()
+    assert "const P = {" in page and "f <\\/script>" in page and "/*PROPS*/" not in page  # the props in, the page not broken by them
 
 
 @pytest.mark.parametrize("env,image", [
