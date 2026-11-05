@@ -109,8 +109,44 @@ The release run fills this in with measured numbers only.
 
 - Offline tests: _to be measured_
 - Live agent tests: _to be measured_
-- Container check (`tests/container_check.sh`) on the release image: _to be measured_
-- A 1.1.0 volume upgraded with `scripts/upgrade.sh` on a test install: _to be measured_
+- Container check on pve1 (5 Nov; 8c266ce built there from `git archive`, linux/amd64): `ABI_IMAGE=abi-rc:1.2.0
+  tests/container_check.sh` 15 of 15 in 150 s (fresh volume up in 13 s, the engine and the worker killed with -9
+  serving again in 8 s, `docker stop` in 2 s, no secret in the logs, the volume, the image or the backup; video says
+  how to switch), the -video image 15 of 15 in 176 s with a video rendered. `docker image inspect --format
+  '{{.Size}}'`: default 2,471,828,806 bytes, -video 2,695,718,474 (1.1.0: 2,843,622,285). On the upgraded test
+  install below, each profile on test ports:
+  - https with `ABI_TLS=internal`: a certificate for the name from Caddy's own authority (verified against its
+    `root.crt`), http answered 308 to https, sign-in 303 over https, and `/events` streams through Caddy (an event
+    the app sent 4 s into the stream arrived 0.22 s later, keep-alives every 0.3 s); 8790 then listened on 127.0.0.1
+    only.
+  - runner: a 7,400,054-row Parquet upload through the app answered at once (queued) and loaded in `abi-runner`
+    (the job 72.1 s, done 82.3 s after the upload began; 7,400,054 rows, revenue 42,483,442.50 exact); its heavy worker stopped 180 s after
+    the queue emptied ("stopped after 256 s"), the container's memory from 207 MB back to 4.3 MB.
+  - `ABI_SQL_PORT` with TLS (a self-signed certificate) from the Proxmox host, a Viewer's personal token: psql
+    `sslmode=verify-full`, TLSv1.3; `orders` by café gave only `CF001|54540|312054.64` (the Viewer's rule); 150,000 rows
+    refused at 100,000; `DELETE` refused; a plain connection refused ("TLS is required from this address"); the
+    revoked token refused.
+  - MySQL 8.4 (a throwaway container on the install's network, Brewline 0.1's 739,826 orders) through the Sources
+    page's Database card: revenue by region equal to MySQL's own `SUM` to the
+    cent (East 1,103,521.44, North 1,012,273.62, South 1,017,927.17, West 1,126,592.58, the same row counts); the
+    source file holds only `${secret:…}` references, and the password is in none of the three containers' logs, the
+    files under `/data` and `/app`, the 5 Git histories, a database dump or the pages.
+- A 1.1.0 volume upgraded with `scripts/upgrade.sh` on a test install (pve1, 5 Nov; the 1.1.0 image 2fcf2e3d5762,
+  1.1.0's compose file and scripts). Seeded as a company uses 1.1: Brewline scale 1 (7,400,054 orders) uploaded as
+  Parquet through the app, an Owner, an Editor and a Viewer whose rule shows café CF001 only, the starter report, a
+  Monitor check, a flow scheduled for Mondays 07:00, a published copy, a vault document and one chat. Then the
+  README's update: this branch's files over the folder (as `git pull`), `ABI_IMAGE=abi-rc:1.2.0` in `.env`,
+  `scripts/upgrade.sh`: no registry, so it built the image there; done in 50 s with an 813 MB backup first. After it,
+  all 16 recorded items were equal: revenue by region to the cent as the Owner (engine and app) and in the published
+  copy (East 10,998,627.65, North 10,090,298.06, South 10,170,714.23, West 11,223,802.56, the generator's own sums),
+  the Viewer's page on the published copy with only CF001 (54,540 orders, 312,054.64), the three sign-ins, the flow
+  and its schedule, the check, the report, the rule, the vault document, the chat and the history. `schema_state`
+  says schema 5 (1.1.0: 2); Monitor and Inbox drew in Chromium with no script error (the 1.1 check offers "Alert
+  with the page closed"). `scripts/backup.sh` and the README's restore into a new volume: the same 16 items. Going
+  back: the 1.1.0 image refuses the volume ("This volume holds data of ABI 1.2.0 ... no downgrades"); with
+  `/data/VERSION` set back by hand its engine refuses the database (schema 5 over 2) and the container exits; the
+  upgrade's own backup restored with the 1.1.0 image gives the same 16 items. Fixed on the way: that backup was
+  world-readable (`-rw-r--r--`); `scripts/upgrade.sh` now writes it readable by its owner only.
 - 50 sessions after a commit, page p95 (without and with `--rls`); a 100M-row upload; Brewline revenue by region to
   the cent, on the release image: _to be measured_
 - The arm64 image started (`.github/workflows/image.yml`): _to be measured_

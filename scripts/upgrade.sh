@@ -16,9 +16,9 @@ OLD=$(mine abi-pi)  # 1.0's service name
 C=${OLD:-$(mine abi)}
 if [ -n "$C" ]; then
   mkdir -p backups
-  F=backups/abi-$(date +%Y%m%d-%H%M%S).tar
+  F=backups/abi-$(date +%Y%m%d-%H%M%S).tar  # the whole database: readable by this machine's owner only
   echo "backing up to $F"
-  docker exec "$C" scripts/backup.sh backup > "$F" || { rm -f "$F"; echo "The backup failed: nothing was changed." >&2; exit 1; }
+  (umask 077 && docker exec "$C" scripts/backup.sh backup > "$F") || { rm -f "$F"; echo "The backup failed: nothing was changed." >&2; exit 1; }
 fi
 if [ -n "$OLD" ]; then
   V=$(docker inspect "$OLD" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')

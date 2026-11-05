@@ -87,6 +87,30 @@ esac
     assert f"build --target {target} -t {image} ." in calls and "compose up -d" in calls, calls
 
 
+def test_upgrades_backup_is_readable_by_its_owner_only(tmp_path):
+    """The backup upgrade.sh takes first is the whole database (logins, every table): with the usual umask it was
+    world-readable (-rw-r--r--, M5 upgrade check on pve1); now 0600 whatever the umask."""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts/upgrade.sh").write_bytes((ROOT / "scripts/upgrade.sh").read_bytes())
+    (tmp_path / ".env").write_text("ABI_USER=a\n")
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin/docker").write_text("""#!/bin/sh
+case "$*" in
+  ps*service=abi) echo old ;;
+  "exec old scripts/backup.sh backup") echo the dump ;;
+  "compose ps -q abi") echo new ;;
+  inspect*) echo healthy ;;
+  "exec new cat /data/VERSION") echo 1.2.0 ;;
+esac
+""")
+    (tmp_path / "bin/docker").chmod(0o755)
+    r = subprocess.run(["sh", "-c", "umask 022 && sh scripts/upgrade.sh"], cwd=tmp_path, capture_output=True, text=True, timeout=60,
+                       env={**os.environ, "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}"})
+    [f] = (tmp_path / "backups").glob("abi-*.tar")
+    assert r.returncode == 0 and f.read_text() == "the dump\n", r.stdout + r.stderr
+    assert f.stat().st_mode & 0o077 == 0, oct(f.stat().st_mode)
+
+
 def test_the_engine_and_the_worker_start_without_playwright_or_pptx(tmp_path):
     """1.1 imported Playwright and python-pptx when the engine and every worker started (an idle engine measured
     228 MB before, 211 MB after; the worker 225 MB, 208 MB); now only a render loads them. With both made unimportable the engine and the worker still load."""
