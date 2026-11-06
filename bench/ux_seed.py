@@ -116,6 +116,9 @@ def showcase(cal: dict) -> dict:
 def build(o: perf.App) -> None:
     sm = abi.call("semantic_model", project=P)
     ask(o, "/api/save_report", {"project": P, "report": showcase((sm.get("columns") or {}).get("calendar") or {})})
+    # the starter measure "Orders rows" reads as a count of rows; the business word is Orders (R5)
+    ask(o, "/api/set_measure", {"project": P, "id": "orders_rows", "name": "Orders", "expression": "COUNT(orders.order_id)",
+                                "description": "The number of order lines."})
     for term, text, ms in (("Revenue", "What the customer paid: quantity x unit price, less the discount (vault: Brewline KPI definitions).", ["revenue"]),
                            ("Order", "One line of the till: one product in one quantity.", ["orders_rows"]),
                            ("Region", "North, East, South or West: the café's city decides it.", [])):

@@ -113,6 +113,15 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
   fit=(t,s,w,strict)=>{t.textContent=s;if(t.getComputedTextLength()<=w)return t;if(strict){t.remove();return null}for(let n=s.length-1;n>2;n--){t.textContent=s.slice(0,n)+'…';if(t.getComputedTextLength()<=w)return t}t.remove();return null},
   dark=k=>[0,5].includes(k%6);  // ink and mute tiles take light text, the rest ink
  // ranked bars across (a map's members, or bars whose names don't fit under them): every name, its value at the end
+ // a bar and a line measure per member, sideways: the bar's value and the second measure's dot (its own scale) on each row
+ const hb2=(rs,m,m2)=>{const n=rs.length,T=legend(svg,W,[N(m),N(m2)])+6,rh=Math.max(16,Math.min(40,(H-T-18)/n)),bh=Math.max(7,Math.min(18,rh*.55)),
+  lw=Math.min(W*.3,Math.max(...rs.map(i=>String(d.rows[i][0]??'—').length))*6.4+10),x0=lw+10,x1=W-96,mx=Math.max(1e-9,...rs.map(i=>Math.abs(val(i,m)||0))),mx2=Math.max(1e-9,...rs.map(i=>Math.abs(val(i,m2)||0)));
+  svg.setAttribute('viewBox',`0 0 ${W} ${Math.max(H,T+n*rh+18)}`);
+  rs.forEach((i,k)=>{const y=T+k*rh,v=val(i,m)||0,v2=val(i,m2),w=Math.max(1,(x1-x0)*Math.abs(v)/mx);fit(el('text',{x:lw,y:y+rh/2+4,'text-anchor':'end'},svg),String(d.rows[i][0]??'Not given'),lw-4);
+   mk(el('rect',{x:x0,y:y+(rh-bh)/2,width:w,height:bh,rx:2,fill:COL[0]},svg),i,[m,m2]);
+   if(typeof v2==='number')el('circle',{cx:x0+(x1-x0)*Math.abs(v2)/mx2,cy:y+rh/2,r:4,fill:COL[1],stroke:'var(--card)','stroke-width':1.5},svg);
+   const t=el('text',{x:x1+8,y:y+rh/2+4,class:'val'},svg);t.textContent=tick(v,m);if(typeof v2==='number'){const u=el('tspan',{fill:'var(--mute)'},t);u.textContent=' · '+tick(v2,m2)}});
+  el('text',{x:x0,y:T+n*rh+14,class:'ax'},svg).textContent=`bars: ${N(m)} · dots: ${N(m2)}, on its own scale`};
  const hb=(rs,m,note)=>{const n=rs.length;if(!n)return;const top=note?18:4,rh=Math.max(14,Math.min(52,(H-top-4)/n)),bh=Math.max(8,Math.min(26,rh*.62)),y0=top+Math.max(0,(H-top-4-rh*n)/2),lw=Math.min(W*.34,Math.max(...rs.map(i=>String(d.rows[i][0]??'—').length))*6.6+10),x0=lw+10,x1=W-64,mx=Math.max(1e-9,...rs.map(i=>Math.abs(val(i,m))));
   if(note)el('text',{x:0,y:11},svg).textContent=note;svg.setAttribute('viewBox',`0 0 ${W} ${Math.max(H,top+n*rh+4)}`);
   rs.forEach((i,k)=>{const y=y0+k*rh,v=val(i,m),w=Math.max(1,(x1-x0)*Math.abs(v)/(mx||1));fit(el('text',{x:lw,y:y+rh/2+4,'text-anchor':'end'},svg),String(d.rows[i][0]??'Not given'),lw-4);
@@ -146,9 +155,14 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
    if(h>=14){const t=el('text',{x,y:y+h/2+4,'text-anchor':'middle',class:'tl'},svg);if(dark(k))t.style.fill='var(--sheet)';const fw=Math.max(w(i),w(rs[k+1]??i))-8,full=`${d.rows[i][0]??'—'} · ${tick(val(i,m),m)}${k?' · '+Math.round(val(i,m)/val(rs[0],m)*100)+'%':''}`;t.textContent=full;if(t.getComputedTextLength()>fw&&!fit(t,`${d.rows[i][0]??'—'} · ${tick(val(i,m),m)}`,fw,1)){const t2=el('text',{x,y:y+h/2+4,'text-anchor':'middle',class:'tl'},svg);if(dark(k))t2.style.fill='var(--sheet)';fit(t2,String(d.rows[i][0]??'—'),fw,1)}}});return}
  if(type==='treemap'){const m=ms[0],rs=idx.filter(i=>val(i,m)>0).sort((i,j)=>val(j,m)-val(i,m)),sum=g=>g.reduce((s,i)=>s+val(i,m),0),
    gs=two?[...new Set(rs.map(i=>d.rows[i][0]))].map(g=>rs.filter(i=>d.rows[i][0]===g)).sort((a,b)=>sum(b)-sum(a)):rs.map(i=>[i]),T=two?legend(svg,W,gs.map(g=>d.rows[g[0]][0])):0;
-  sq(gs.map(sum),0,T,W,H-T).forEach(([x,y,w,h],k)=>sq(gs[k].map(i=>val(i,m)),x+1,y+1,Math.max(w-2,0),Math.max(h-2,0)).forEach(([x,y,w,h],j)=>{const i=gs[k][j];if(w<3||h<3)return;  // too small to draw: in the rows
+  const SMALL=[];sq(gs.map(sum),0,T,W,H-T-16).forEach(([x,y,w,h],k)=>sq(gs[k].map(i=>val(i,m)),x+1,y+1,Math.max(w-2,0),Math.max(h-2,0)).forEach(([x,y,w,h],j)=>{const i=gs[k][j];if(w<3||h<3)return;  // too small to draw: in the rows
    mk(el('rect',{x:x+1,y:y+1,width:Math.max(w-2,0),height:Math.max(h-2,0),fill:COL[k%6]},svg),i,[m]);
-   if(w>36&&h>18){const t=el('text',{x:x+7,y:y+16,class:'tl'},svg);if(dark(k))t.style.fill='var(--sheet)';let ok=fit(t,String(d.rows[i][nd-1]??'—'),w-12,1),flat=!!ok;if(!ok&&w>22){const t3=el('text',{x:x+4,y:y+14,class:'tl'},svg);t3.style.fontSize=w<40?'9.5px':'10px';if(dark(k))t3.style.fill='var(--sheet)';ok=flat=!!fit(t3,String(d.rows[i][nd-1]??'—'),w-8,w<40)}if(flat&&h>36){const u=el('text',{x:x+7,y:y+31,class:'tv'},svg);if(dark(k))u.style.fill='var(--sheet)';fit(u,tick(val(i,m),m),w-12,1)}}}));return}
+   /* a name whole or not at all: 11.5 px, 10 px, or on two lines; a tile too small for it is named under the chart */
+   const nm=String(d.rows[i][nd-1]??'—'),tx=(yy,fs)=>{const t=el('text',{x:x+6,y:y+yy,class:'tl'},svg);t.style.fontSize=fs;if(dark(k))t.style.fill='var(--sheet)';return t};let ok=null,flat=false;
+   if(w>20&&h>16){ok=fit(tx(16,'11.5px'),nm,w-12,1)||fit(tx(15,'10px'),nm,w-9,1);flat=!!ok;
+    const sp=nm.split(' ');if(!ok&&sp.length>1&&h>32){const a=sp.slice(0,Math.ceil(sp.length/2)).join(' '),b=sp.slice(Math.ceil(sp.length/2)).join(' '),t1=fit(tx(15,'10px'),a,w-9,1),t2=t1&&fit(tx(27,'10px'),b,w-9,1);if(t1&&!t2)t1.remove();ok=t2}}
+   if(!ok)SMALL.push(nm);if(flat&&h>36){const u=el('text',{x:x+6,y:y+31,class:'tv'},svg);if(dark(k))u.style.fill='var(--sheet)';fit(u,tick(val(i,m),m),w-12,1)}}));
+  if(SMALL.length){const t=el('text',{x:0,y:H-3},svg);fit(t,'Small tiles: '+SMALL.join(', '),W)}return}
  const L=60;let B=40;
  if(type==='scatter'&&ms.length>1){const [mx,my]=ms,rs=idx.filter(i=>num(i,mx)&&num(i,my)),g=two?[...new Set(rs.map(i=>d.rows[i][1]))]:[],T=(two?legend(svg,W,g):8)+16,R=20;
   if(!rs.length)return;const sc=(m,a,b,n)=>{const vs=rs.map(i=>val(i,m)),k=nice(Math.min(...vs),Math.max(...vs),n);return [v=>a+(v-k.lo)/(k.hi-k.lo)*(b-a),k.t]},
@@ -163,7 +177,8 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
  ord.forEach(i=>(two&&!per?[[d.rows[i][1],ms[0]]]:ms.map(m=>[m,m])).forEach(([n,m])=>{let s=S.find(s=>s.n===n);if(!s)S.push(s={n,m,v:cats.map(()=>null),r:cats.map(()=>null)});const k=ix.get(key(d.rows[i]));s.v[k]=val(i,m);s.r[k]=i}));
  if(!S.length)return;
  {const lw=Math.max(...cats.map(v=>Math.min(11,String(v??'—').length)))*6.2+8;if(type==='bar'&&!two&&!per&&S.length===1&&cats.length>=2&&cats.length<=24){hb(ord,S[0].m);return}}
- const rot=!per&&cats.length>3&&cats.length<=24&&cats.length*(Math.max(...cats.map(v=>Math.min(11,String(v??'—').length)))*6.2+8)>W-L-(type==='combo'?60:8);if(rot)B=Math.min(84,26+Math.max(...cats.map(v=>Math.min(13,String(v??'—').length)))*5.4);
+ const rot=!per&&cats.length>3&&cats.length<=24&&cats.length*(Math.max(...cats.map(v=>Math.min(11,String(v??'—').length)))*6.2+8)>W-L-(type==='combo'?60:8);
+ if(rot&&type==='combo'&&!two&&S.length===2){hb2(ord,S[0].m,S[1].m);return}  /* names that would slant: the combo turns sideways, names upright */if(rot)B=Math.min(84,26+Math.max(...cats.map(v=>Math.min(13,String(v??'—').length)))*5.4);
  const stack=type==='bar'&&two&&!per,combo=type==='combo'&&S.length>1,R=combo?60:type==='line'&&S.length<=2&&!(two&&!per)?58:8,PC=S.length===2&&/_prev$/.test(S[1].m)&&S[1].m.startsWith(S[0].m.replace(/_prev$/,''))?['var(--c1)','var(--c3)']:COL,T=S.length>1&&type!=='waterfall'?legend(svg,W,S.map(s=>two&&!per?s.n:N(s.m)),PC):10,cum=[];  // a measure against its previous period: now in ink, before in grey
  let run=0;if(type==='waterfall')S[0].v.forEach(v=>cum.push([run,run+=v||0]));
  const ax=(vs,m,x,an)=>{const {lo,hi,t}=nice(Math.min(0,...vs),Math.max(0,...vs),Math.max(2,Math.floor((H-B-T)/28))),y=v=>H-B-(v-lo)/(hi-lo)*(H-B-T);
@@ -192,7 +207,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
   pts.forEach((p,k)=>p&&mk(el('circle',{cx:p[0],cy:p[1],r:dot?4:Math.max(2,Math.min(4,step/3)),fill:COL[j%6],opacity:dot?1:.01},svg),s.r[k],[s.m],dot?.7:1));
   // a line ends on its latest value, marked and labelled
   if(!dot&&type==='line'&&S.length<=2&&run.length){const kk=s.v.map((v,k)=>v==null?-1:k).filter(k=>k>=0).at(-1),[lx,ly]=pts[kk];el('circle',{cx:lx,cy:ly,r:3.5,fill:COL[j%6],stroke:'var(--card)','stroke-width':1.5},svg);
-   let yy0=Math.max(T+9,Math.min(H-B-4,ly-13));  /* off the last point, above it */const g=el('g',{},svg),t=el('text',{x:lx+16,y:0,class:'endv'},g);t.textContent=tick(s.v[kk],s.m);const tw=t.getComputedTextLength()||30;
+   let yy0=Math.max(T+9,Math.min(H-B-4,ly+(S.length>1&&j===0?14:-13)));  /* off the last point: above it; with two lines the first one's below */const g=el('g',{},svg),t=el('text',{x:lx+16,y:0,class:'endv'},g);t.textContent=tick(s.v[kk],s.m);const tw=t.getComputedTextLength()||30;
    for(const b of ENDS)if(lx+10<b.x+b.w&&lx+10+tw+12>b.x&&Math.abs(yy0-b.y)<20)yy0=b.y+(yy0>=b.y?20:-20);ENDS.push({x:lx+10,w:tw+12,y:yy0});t.setAttribute('y',yy0+4);
    el('rect',{x:lx+10,y:yy0-8.5,width:tw+12,height:17,rx:4,class:'endb'},g).after(t);g.append(t)}});
  // a line over time: a guide follows the pointer to the nearest period and the tooltip has every series there
