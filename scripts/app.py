@@ -445,7 +445,7 @@ aside button.goto:hover{border-color:var(--line-strong);color:var(--ink)}aside b
 dialog .card>h4+.srow{border-top:0;padding-top:6px}dialog .card>h4+label.l{margin-top:12px!important}.mobile aside kbd{display:none}
 dialog .two .f{margin-top:6px}dialog .two label.l{margin:0}
 .node span{font:12px var(--text)}.node{border-radius:8px;box-shadow:var(--shadow)}.node b{font-size:13.5px}
-.rowcard textarea.desc{max-height:62px;overflow:hidden;font:13.5px/1.5 var(--text)}.rowcard textarea.desc:focus{max-height:220px;overflow:auto}.rowcard{align-items:start}
+.rowcard textarea.desc{max-height:80px;overflow:hidden;font:13.5px/1.5 var(--text)}.rowcard textarea.desc:focus{max-height:220px;overflow:auto}.rowcard{align-items:start}
 body[data-mode=viewer] .tcard label.l:has(input[type=checkbox]:not(:checked)){display:none}body[data-mode=viewer] .tcard label.l input[type=checkbox]{pointer-events:none}
 .mobile dialog{padding:22px 20px;border-radius:16px}.mobile dialog .srow .btn{flex:none}
 /* a field the action needs, an undo in a toast, a destructive confirmation */
@@ -469,6 +469,10 @@ label.chk.hl{background:color-mix(in srgb,var(--signal) 12%,var(--sheet));box-sh
 .card .row>input[type=time]{max-width:150px;flex:none}.card .row>input[type=number]{max-width:120px}.card .row>.l{margin:0}
 #chat .m.nav{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:5px 12px;text-decoration:none;color:var(--ink);background:var(--sheet);font-size:12.5px}
 #chat .m.nav:hover{border-color:var(--ink)}#chat .steps{border-left-width:2px;border-radius:0 6px 6px 0;background:var(--paper);padding:6px 12px}
+.grid>.card.sized:has(.kpi) .kpi .v{font-size:clamp(28px,14cqi,46px)}
+.row>input.f[type=time]{max-width:160px!important;flex:0 0 160px!important}.row>input.f[type=number]{max-width:120px!important;flex:0 0 120px!important}
+.card>.f+div.file{margin-top:8px}
+#chat .busy>span{display:inline-flex;align-items:center;gap:8px}#chat .busy>span::before{content:"";width:12px;height:12px;border-radius:50%;border:2px solid var(--signal);border-right-color:transparent;animation:spin .8s linear infinite}
 """
 
 JS = r"""
@@ -535,7 +539,10 @@ function rowcard(c,...fields){c.classList.add('rowcard');c.append(...fields);c.o
 function rowhead(...cols){const r=h('div','rowhead');cols.forEach(t=>r.append(h('span','',t)));return r}
 const W=/^(Save|Create|Delete|Edit report|New report|Reload |Run now|Enable|Disable|Train|Score|New |Ask$|Add |Remove|Edit|Publish|Save steps|Upload|Email this|Alert with)/;
 function btn(label,fn,pri){const b=h('button','btn'+(pri?' pri':'')+(W.test(label)?' w':'')+(/^(Delete|Remove|Revoke)/.test(label)?' danger':''),label);if(/^(Delete|Remove|Revoke|Edit|Delete report)$/.test(label)){b.title=label;b.classList.add('quiet')}{const m=BIC.find(([r])=>r.test(label));if(m)b.prepend(ic(m[1]));if(label.startsWith('+ '))b.lastChild.textContent=label.slice(2)}b.onclick=async()=>{b.disabled=true;const t=setTimeout(()=>b.classList.add('busy'),150);try{await fn()}finally{clearTimeout(t);b.disabled=false;b.classList.remove('busy')}};return b}
-const cell=v=>v!==null&&typeof v==='object'?JSON.stringify(v):typeof v==='string'&&/^\d{4}-\d\d-\d\dT\d\d:\d\d/.test(v)?new Date(v).toLocaleString():v;
+// a moment: Today, 07:14 · Yesterday, 18:02 · 6 Nov 2026, 07:14 (the person's own time zone)
+function when2(v){const d=new Date(v);if(isNaN(d))return v;const t=d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'}),n=new Date(),day=x=>new Date(x.getFullYear(),x.getMonth(),x.getDate()).getTime(),k=(day(n)-day(d))/864e5;
+ return k===0?`Today, ${t}`:k===1?`Yesterday, ${t}`:`${d.toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'})}, ${t}`}
+const cell=v=>v!==null&&typeof v==='object'?JSON.stringify(v):typeof v==='string'&&/^\d{4}-\d\d-\d\dT\d\d:\d\d/.test(v)?when2(v):v;
 function rows(box,d){box.innerHTML='';box.classList.add('out');if(!(d&&d.columns&&Array.isArray(d.rows))){box.append(h('pre','',JSON.stringify(d,null,1)));return}
  const rs=d.rows.map(r=>(Array.isArray(r)?r:d.columns.map(c=>r[c])).map(cell));table(box,{measures:d.measures||{},format:d.format||{},columns:d.columns,rows:rs})}
 // an admin action ABI wants confirmed: the person's own click in ABI's dialog, then the server runs it (null: they said no)
@@ -986,7 +993,7 @@ function monitorPage(box){const bar=h('div','row bar top');bar.append(btn('New m
   const fl=monFlow(ck);if(MODE==='developer'&&ck.condition)c.append(h('p','file',fl?(fl.enabled?`Checked in the background; alerts go to the Inbox${monMail(ck)?' and to '+monMail(ck):''}`:'Background checks are off: checked only while this page is open.'):'Checked only while this page is open.'));
   if(MODE==='developer'&&ck.condition&&!fl)act(c,'Alert with the page closed',async()=>{if(await monPost({action:'save',check:ck,email:''}))show('monitor')});
   if(MODE==='developer')act(c,'Edit',()=>newMonitor(box,ck));if(MODE==='developer')act(c,'Delete',async()=>{if(await monPost({action:'delete',id:ck.id}))show('monitor')})});
- const g=h('div','cards');box.append(g);const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),rs=q.rows||[],when=t=>t?String(t).slice(0,16).replace('T',' '):'—';
+ const g=h('div','cards');box.append(g);const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),rs=q.rows||[],when=t=>t?when2(t):'—';
  const M=D.app?.monitor||{watch:[],fresh_within_hours:36},watch=t=>M.watch?.length?M.watch.includes(t):/stream/.test(t),old=r=>watch(r[0])&&(!r[ix('last_load')]||Date.now()-Date.parse(r[ix('last_load')])>M.fresh_within_hours*3600e3);
  const fr=card('Data freshness',`ABI data quality; watched tables must load within ${M.fresh_within_hours} h (monitor.json)`),bad=rs.filter(r=>(r[ix('problems')]||[]).length||r[ix('missing_periods')]||old(r));
  fr.append(h('p',bad.length?'bad':'ok',bad.length?`${bad.length} of ${rs.length} tables have problems`:`All ${rs.length} tables without problems`));
@@ -1055,11 +1062,11 @@ function measures(box){modelBar(box);const top=h('div','row bar top'),q=h('input
   id.placeholder='a-z, 0-9, _';name.placeholder='display name';ex.placeholder='e.g. SUM(sales.revenue)';de.placeholder='what it means';
   if(isNew){// the name first, its ID made from it; the formula with the model's numeric columns one click away
    name.placeholder='e.g. Net revenue';let auto=true;name.oninput=()=>{if(auto)id.value=slug(name.value,'m')};id.oninput=()=>auto=false;
-   const cols=h('div','colpick');Object.entries(D.columns||{}).forEach(([t,cs])=>Object.entries(cs).forEach(([k,ty])=>{if(!/INT|DECIMAL|DOUBLE|FLOAT|NUMERIC|REAL/i.test(String(ty))||/(^|_)(id|key|year|month|day|week|quarter)$/.test(k))return;
+   const cols=h('div','colpick'),mt=D.model?.tables||{};Object.entries(D.columns||{}).filter(([t])=>!Object.keys(mt).length||(t in mt&&!mt[t]?.hidden)).forEach(([t,cs])=>Object.entries(cs).forEach(([k,ty])=>{if(!/INT|DECIMAL|DOUBLE|FLOAT|NUMERIC|REAL/i.test(String(ty))||/(^|_)(id|key|year|month|day|week|quarter)$/.test(k))return;
     const b=h('button','chip',`${t}.${k}`);b.type='button';b.title='Put it in the formula';b.onclick=()=>{const a=ex.selectionStart??ex.value.length,v=ex.value.trim()?`${t}.${k}`:`SUM(${t}.${k})`;ex.value=ex.value.slice(0,a)+v+ex.value.slice(ex.selectionEnd??a);ex.focus();ex.dispatchEvent(new Event('input'))};cols.append(b)}));
    c.append(h('label','l','Name'),name,h('label','l','ID (made from the name)'),id,h('label','l','Formula (MEL)'),ex,...(cols.children.length?[h('div','file','Numeric columns: click one to use it'),cols]:[]),h('label','l','Description'),de)}
   ex.classList.add('code');if(!isNew){ex.rows=1;rowcard(c,fld('Name',name,m.id),fld('MEL',ex),fld('Description',de))}
-  act(c,isNew?'Create':'Save',async()=>{await api('set_measure',{id:id.value,name:name.value,expression:ex.value,description:de.value||null}).catch(e=>{ex.classList.add('invalid');ex.focus();throw e});
+  act(c,isNew?'Create':'Save',async()=>{await api('set_measure',{id:id.value,name:name.value,expression:ex.value,description:de.value||null}).catch(e=>{ex.classList.add('invalid');ex.focus();if(!isNew&&m.expression)setTimeout(()=>{const ms=c.querySelector(':scope>.msg'),b=h('button','flink','Put the saved formula back');b.onclick=()=>{ex.value=m.expression;ex.classList.remove('invalid');ms.textContent='';c.classList.remove('dirty')};ms?.append(' ',b)});throw e});
    Object.assign(m,{id:id.value,name:name.value,expression:ex.value,description:de.value});if(isNew){D.measures.push(m);show('measures')}return 'Saved through ABI (checked like an import).'},1);
   // Test: the measure's total through ABI. ABI runs saved measures only, so an edit not yet saved is not what it tests
   act(c,'Test',async msg=>{say(msg,'Testing…');const t0=Date.now(),r=await api('semantic_query',{measures:[id.value]}),v=r.rows?.[0]?.[0];
