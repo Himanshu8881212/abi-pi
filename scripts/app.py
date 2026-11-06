@@ -473,6 +473,12 @@ label.chk.hl{background:color-mix(in srgb,var(--signal) 12%,var(--sheet));box-sh
 .row>input.f[type=time]{max-width:160px!important;flex:0 0 160px!important}.row>input.f[type=number]{max-width:120px!important;flex:0 0 120px!important}
 .card>.f+div.file{margin-top:8px}
 #chat .busy>span{display:inline-flex;align-items:center;gap:8px}#chat .busy>span::before{content:"";width:12px;height:12px;border-radius:50%;border:2px solid var(--signal);border-right-color:transparent;animation:spin .8s linear infinite}
+.card>details.more{margin:0 0 4px 18px}.card>details.more>summary{cursor:pointer;color:var(--mute);font-size:12.5px;padding:2px 0 8px}.card>details.more>summary:hover{color:var(--ink)}
+.card>details.more>.item{border-top:1px solid var(--line);padding:10px 0 10px 18px;position:relative}
+.card>details.more>.item.new::before{content:"";position:absolute;left:2px;top:16px;width:7px;height:7px;border-radius:50%;background:var(--signal)}
+.rows>.rowcard.derived{padding-left:40px;background:color-mix(in srgb,var(--paper) 55%,var(--sheet))}.rows>.rowcard.derived:hover{background:var(--hover)}
+.rows>.rowcard.derived .fld:first-child .f{font-size:13.5px;color:color-mix(in srgb,var(--ink) 85%,var(--mute))}
+.rows>.rowcard.derived::before{content:"";position:absolute;left:22px;top:22px;width:10px;height:10px;border-left:1.5px solid var(--line-strong);border-bottom:1.5px solid var(--line-strong);border-bottom-left-radius:3px}.rows>.rowcard{position:relative}
 """
 
 JS = r"""
@@ -1022,7 +1028,12 @@ async function inboxPage(box){const r=await ipost();if(r.error){box.append(h('p'
   if(m.data?.columns){const t=h('div'),y=m.data.columns.filter(c=>/(^|[._])year$/.test(c));  // a year reads 2026, not 2,026
    rows(t,{...m.data,rows:m.data.rows.map(r=>({...r,...Object.fromEntries(y.map(c=>[c,r[c]==null?r[c]:String(r[c])]))}))});d.append(t)}if(m.snapshot){const a=h('a','',`Open the ${m.snapshot.split('.').pop().toUpperCase()}`);a.href=m.snapshot;a.target='_blank';d.append(a)}mc.append(d)});
  const ac=card('Alerts','failed flows and data problems, as ABI reported them'),un=A.filter(a=>!a.read);if(!A.length)ac.append(h('p','empty','No alerts. ABI posts here when the model or the data needs a look.'));
- ac.classList.add('wide');A.forEach(a=>{const d=h('div','item'+(a.read?'':' new'));d.append(h('div','file',cell(a.at)),h('div','txt',a.message));ac.append(d)});
+ ac.classList.add('wide');
+ // alerts that say the same thing (same opening, e.g. 'Semantic model is not Ready') fold under the newest one
+ const key=a=>String(a.message||'').split(':')[0].slice(0,60);let last=null,fold=null;
+ A.forEach(a=>{const d=h('div','item'+(a.read?'':' new'));d.append(h('div','file',cell(a.at)),h('div','txt',a.message));
+  if(last&&key(last)===key(a)){if(!fold){fold=h('details','more');fold.append(h('summary',''));ac.append(fold)}fold.append(d);fold.querySelector('summary').textContent=`${fold.children.length-1} earlier like it`}
+  else{ac.append(d);fold=null}last=a});
  if(un.length||M.some(m=>m.id>s))act(ac,'Mark all read',async()=>{if(un.length)await ipost({read:un.map(a=>a.id)});try{localStorage.setItem(SEEN,String(Math.max(0,...M.map(m=>m.id))))}catch(e){}await inboxCount();show('inbox')});
  g.append(mc,ac)}
 // Explore: anyone's own analysis on the governed model (reads only, so Viewer can use it); kept analyses stay in this browser
@@ -1065,7 +1076,8 @@ function measures(box){modelBar(box);const top=h('div','row bar top'),q=h('input
    const cols=h('div','colpick'),mt=D.model?.tables||{};Object.entries(D.columns||{}).filter(([t])=>!Object.keys(mt).length||(t in mt&&!mt[t]?.hidden)).forEach(([t,cs])=>Object.entries(cs).forEach(([k,ty])=>{if(!/INT|DECIMAL|DOUBLE|FLOAT|NUMERIC|REAL/i.test(String(ty))||/(^|_)(id|key|year|month|day|week|quarter)$/.test(k))return;
     const b=h('button','chip',`${t}.${k}`);b.type='button';b.title='Put it in the formula';b.onclick=()=>{const a=ex.selectionStart??ex.value.length,v=ex.value.trim()?`${t}.${k}`:`SUM(${t}.${k})`;ex.value=ex.value.slice(0,a)+v+ex.value.slice(ex.selectionEnd??a);ex.focus();ex.dispatchEvent(new Event('input'))};cols.append(b)}));
    c.append(h('label','l','Name'),name,h('label','l','ID (made from the name)'),id,h('label','l','Formula (MEL)'),ex,...(cols.children.length?[h('div','file','Numeric columns: click one to use it'),cols]:[]),h('label','l','Description'),de)}
-  ex.classList.add('code');if(!isNew){ex.rows=1;rowcard(c,fld('Name',name,m.id),fld('MEL',ex),fld('Description',de))}
+  ex.classList.add('code');if(!isNew&&/_(prev|change|change_pct)$/.test(m.id||''))c.classList.add('derived');  /* a starter measure's period variants sit under it */
+  if(!isNew){ex.rows=1;rowcard(c,fld('Name',name,m.id),fld('MEL',ex),fld('Description',de))}
   act(c,isNew?'Create':'Save',async()=>{await api('set_measure',{id:id.value,name:name.value,expression:ex.value,description:de.value||null}).catch(e=>{ex.classList.add('invalid');ex.focus();if(!isNew&&m.expression)setTimeout(()=>{const ms=c.querySelector(':scope>.msg'),b=h('button','flink','Put the saved formula back');b.onclick=()=>{ex.value=m.expression;ex.classList.remove('invalid');ms.textContent='';c.classList.remove('dirty')};ms?.append(' ',b)});throw e});
    Object.assign(m,{id:id.value,name:name.value,expression:ex.value,description:de.value});if(isNew){D.measures.push(m);show('measures')}return 'Saved through ABI (checked like an import).'},1);
   // Test: the measure's total through ABI. ABI runs saved measures only, so an edit not yet saved is not what it tests
@@ -1765,16 +1777,18 @@ $('#chat-toggle').onclick=()=>openChat();$('#chat .wide-t').onclick=()=>{if(chat
 function wideT(full){const b=$('#chat .wide-t');b.classList.add('icon');b.replaceChildren(ic(full?'narrow':'wide'));b.setAttribute('aria-label',full?'Side panel':'Full page');b.title=full?'Back to the side panel':'Open the chat as a full page'}
 {const n=$('#chat-new'),x=$('#chat .x');n.classList.add('icon');n.replaceChildren(ic('plus'));n.setAttribute('aria-label','New chat');n.title='New chat';x.classList.add('icon');x.replaceChildren(ic('x'));x.setAttribute('aria-label','Close');x.title='Close the chat';wideT($('#chat').classList.contains('full'))}
 async function sendChat(){const t=inp.value.trim();if(!t)return;
- log.querySelector('.hello')?.remove();bubble('me',t);inp.value='';steps=null;
+ log.querySelector('.hello')?.remove();log.querySelector('.follow')?.remove();bubble('me',t);inp.value='';steps=null;TURN={shown:false};
  await fetch('/chat',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({message:t,page:CUR})})}
+// after an answer that opened no page: the next steps people take, one click each
+let TURN=null;function followUps(){const d=h('div','follow sugg');[['Show it as a chart','Show that as a chart on the page.'],['Break it down further','Break that down by the dimension that explains it most, and show it.']].forEach(([l,q])=>{const b=h('button','sg',l);b.onclick=()=>{inp.value=q;sendChat()};d.append(b)});log.append(d);log.scrollTop=log.scrollHeight}
 $('#chat .send').onclick=sendChat;inp.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChat()}};
 $('#chat .stop').onclick=()=>fetch('/chat/stop',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'});
 {const es=new EventSource('/events?k='+encodeURIComponent(KEY)+'&c='+CID+'&m='+(MOBILE?1:0)+'&p='+encodeURIComponent(D.project));
  es.onerror=()=>{if(es.readyState===2)stale()};  // the stream was refused: a restart or an ended session
  es.onmessage=async ev=>{const e=JSON.parse(ev.data);
-  if(e.type==='show'){PENDING.filters=e.filters||null;if(e.page==='explore'&&e.query){const q={measures:e.query.measures||[],dimensions:(e.query.dimensions||[]).slice(0,1),filters:e.query.filters||[]};PENDING.explore={...q,chart:e.chart};MINE.unshift({name:'Agent: '+q.measures.join(', ')+(q.dimensions[0]?' by '+q.dimensions[0]:''),q,type:e.chart||'bar',at:new Date().toISOString().slice(0,16).replace('T',' ')});saveMine();sidebar()}const nv=h('div','m nav','→ '+(e.page==='report'?'report '+e.report:e.page)+(e.note?' · '+e.note:''));nv.onclick=()=>show(e.page==='report'?'rep:'+e.report:e.page);log.append(nv);log.scrollTop=log.scrollHeight;const wasFull=chatBox.classList.contains('full');const k=e.page==='report'?'rep:'+e.report:e.page;show(k);if(wasFull)openChat(true);setTimeout(()=>highlight(e.item),400);if(e.note)toast('Agent: '+e.note)}
+  if(e.type==='show'){if(TURN)TURN.shown=true;PENDING.filters=e.filters||null;if(e.page==='explore'&&e.query){const q={measures:e.query.measures||[],dimensions:(e.query.dimensions||[]).slice(0,1),filters:e.query.filters||[]};PENDING.explore={...q,chart:e.chart};MINE.unshift({name:'Agent: '+q.measures.join(', ')+(q.dimensions[0]?' by '+q.dimensions[0]:''),q,type:e.chart||'bar',at:new Date().toISOString().slice(0,16).replace('T',' ')});saveMine();sidebar()}const nv=h('div','m nav','→ '+(e.page==='report'?'report '+e.report:e.page)+(e.note?' · '+e.note:''));nv.onclick=()=>show(e.page==='report'?'rep:'+e.report:e.page);log.append(nv);log.scrollTop=log.scrollHeight;const wasFull=chatBox.classList.contains('full');const k=e.page==='report'?'rep:'+e.report:e.page;show(k);if(wasFull)openChat(true);setTimeout(()=>highlight(e.item),400);if(e.note)toast('Agent: '+e.note)}
   else if(e.type==='data'){Object.assign(D,e.data);normQ(D.quality);const k=CUR,keep=[...document.querySelectorAll('main .card.editor')];sidebar();show(k);{const hd=$('main .pghead');if(hd)keep.reverse().forEach(c=>hd.after(c))}vc()}  // a form being filled in survives the redraw
-  else if(e.type==='busy'){busy.hidden=!e.on;$('#chat .stop').hidden=!e.on}
+  else if(e.type==='busy'){busy.hidden=!e.on;$('#chat .stop').hidden=!e.on;if(!e.on){if(TURN&&!TURN.shown&&log.lastElementChild?.classList.contains('ai'))followUps();TURN=null}}
   else if(e.type==='step'){if(!steps){steps=h('div','m steps');log.append(steps)}const last=[...steps.children].reverse().find(x=>x.dataset.t===e.tool&&x.dataset.s==='run');
    if(e.state==='run'||!last){const l=h('div','',`${e.state==='run'?'…':e.state==='ok'?'✓':'✗'} ${stepName(e.tool)}`);l.dataset.t=e.tool;l.dataset.s=e.state;steps.append(l)}
    else{last.textContent=`${e.state==='ok'?'✓':'✗'} ${stepName(e.tool)}`;last.dataset.s=e.state;last.className=e.state==='ok'?'':'bad'}log.scrollTop=log.scrollHeight}
