@@ -48,6 +48,8 @@
         "delete_ontology_item",
         "delete_rls_rule",
         "export_ontology",
+        "get_object",
+        "list_objects",
         "ontology",
         "propose_ontology",
         "remove_relationship",

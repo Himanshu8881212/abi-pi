@@ -673,7 +673,7 @@ def template(results: list) -> str:
     return "\n".join(lines)
 
 
-VOCAB_KEYS = {"id", "name", "term", "table", "column", "title"}
+VOCAB_KEYS = {"id", "name", "plural", "term", "table", "column", "title"}  # 1.2.6: an object type's plural ("Cafés")
 
 
 def scope(project: str, user_id: int | None = None, tables: set[str] | None = None) -> tuple[set[str], set[str], set[str]]:

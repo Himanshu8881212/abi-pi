@@ -14,7 +14,8 @@ import re
 from typing import Literal
 from urllib.parse import quote
 
-from pydantic import Field
+import duckdb
+from pydantic import BaseModel, Field
 
 from abi import semantic, storage
 from abi.actions import ActionFailed, action, require_confirmation
@@ -536,3 +537,186 @@ def export_ontology(conn, user: User, args: Export) -> dict:
         raise ActionFailed(404, f"Project '{args.project}' has no ontology yet: propose_ontology drafts one.")
     ts = triples(args.project, d)
     return {"format": args.format, "triples": len(ts), "content": turtle(ts) if args.format == "turtle" else jsonld(ts)}
+
+
+# ---------- objects: one by its key, many by filters, walked along links (row-level reads, as the person) ----------
+
+LIMIT = 1000  # D-17
+
+
+def _obj(project: str, name: str) -> tuple[dict, dict, dict, dict]:
+    """(ontology, model.json, the object type, lake columns) for type `name`; 404 without it."""
+    o = read(project)
+    x = next((x for x in o.get("objects", []) if x["id"] == name), None)
+    if x is None:
+        raise ActionFailed(404, f"No object type '{name}' in project '{project}': `ontology` lists them.")
+    return o, model._read(project, "model.json"), x, model.lake_columns(project)
+
+
+def _cast(v, typ: str) -> str:
+    return f"CAST('{storage._lit(str(v))}' AS {typ})"  # as rls._in: the value is only ever a quoted literal
+
+
+def _tuple(cols: list[str]) -> str:
+    return storage._q(cols[0]) if len(cols) == 1 else f"({', '.join(map(storage._q, cols))})"
+
+
+def _semi(hops: list[tuple[dict, bool]], start: str, cond: str) -> str:
+    """A condition on the table `hops` reach from table `start`: its rows that link to a row of `start` holding `cond`,
+    one `IN (SELECT …)` semi-join per hop, so a row counts once however many paths reach it (no fan-out, many-to-many
+    and several hops alike). Every table is unqualified: a restricted reader's are their row-level security views."""
+    at = start
+    for r, along in hops:
+        mine, theirs = (r["from"], r["to"]) if along else (r["to"], r["from"])
+        cond = f"{_tuple(theirs['columns'])} IN (SELECT {', '.join(map(storage._q, mine['columns']))} FROM {storage._q(at)} WHERE {cond})"
+        at = theirs["table"]
+    return cond
+
+
+def _follow(project: str, m: dict, o: dict, x: dict, ids: list[str], hid: dict) -> tuple[list, dict]:
+    """(the hops, the object type reached) walking links `ids` in order from type `x`, each from its `from` or (its
+    inverse) its `to` type, exactly along its `via`. A join column hidden from the reader refuses (403)."""
+    objs, links = {t["id"]: t for t in o.get("objects", [])}, {ln["id"]: ln for ln in o.get("links", [])}
+    hops = []
+    for i in ids:
+        ln = links.get(i)
+        if ln is None:
+            raise ActionFailed(400, f"No link '{i}' in project '{project}': `ontology` lists each type's links.")
+        if x["id"] not in (ln["from"], ln["to"]):
+            raise ActionFailed(400, f"Link '{i}' joins {ln['from']} and {ln['to']}, not {x['id']}.")
+        fwd = ln["from"] == x["id"]
+        h = walk(m, x["table"], ln["via"] if fwd else ln["via"][::-1])
+        if isinstance(h, str):
+            raise ActionFailed(400, f"Link '{i}' {h}.")
+        hops, x = hops + h, objs[ln["to"] if fwd else ln["from"]]
+    for r, _ in hops:
+        for side in (r["from"], r["to"]):
+            if bad := [c for c in side["columns"] if c.lower() in hid.get(side["table"], ())]:
+                raise ActionFailed(403, f"The walk joins on {side['table']}.{bad[0]}, a column hidden from you.")
+    return hops, x
+
+
+def _live(project: str, tables) -> None:
+    """ponytail: objects read DuckLake tables only; a live (ClickHouse) table answers 400 until objects need them."""
+    if t := next((t for t in tables if live.is_live(project, t)), None):
+        raise ActionFailed(400, f"Objects are read from loaded tables; '{t}' is a live table.")
+
+
+def _read(project: str, sql: str, asked: dict, user_id: int | None) -> list[tuple]:
+    """One read through the semantic engine as the person: RLS views, rls.check, the query log, D-32 redaction."""
+    try:
+        return [tuple(map(semantic.tidy, r)) for r in semantic.execute(project, sql, asked, user_id, timeout=semantic.TIMEOUT)]
+    except duckdb.ConversionException as e:
+        raise ActionFailed(400, f"A value doesn't fit its column: {e}") from None
+    except duckdb.Error as e:
+        raise ActionFailed(400, f"The read failed: {e}") from None
+
+
+class Get(storage.ProjectRef):
+    type: str = Field(description="an object type ID (`ontology`)")
+    key: list[storage.Value] = Field(min_length=1, description="the object's key value(s), in key column order")
+    links: list[str] = Field([], max_length=10, description="link IDs to list this object's neighbors along (the type's own links or inverses)")
+    limit: int = Field(20, ge=1, le=LIMIT, description="neighbors per link")
+
+
+@action(Role.viewer)
+def get_object(conn, user: User, args: Get) -> dict:
+    """One object by its key, as you see it (row-level security applies): its properties (the columns not hidden from you, then its one-to-one properties), its type's measures filtered to it, and up to `limit` neighbors (key and title) along each asked link. A hidden object answers like a missing one (404). Every figure you state must come from these rows."""
+    o, m, x, cols = _obj(args.project, args.type)
+    hid, t, keys = rls.hidden(args.project, user.id), x["table"], _keys(m)[x["table"]]
+    if len(args.key) != len(keys):
+        raise ActionFailed(400, f"{x['name']} is keyed by {', '.join(keys)}: give {len(keys)} value(s), in that order.")
+    walks = {i: _follow(args.project, m, o, x, [i], hid) for i in dict.fromkeys(args.links)}
+    _live(args.project, [t, *(r[s]["table"] for h, _ in walks.values() for r, _ in h for s in ("from", "to"))])
+    where = " AND ".join(f"{storage._q(k)} = {_cast(v, cols[t][k])}" for k, v in zip(keys, args.key))
+    props = _properties(m, x, cols, hid)
+    own = [p["column"] for p in props if "." not in p["column"]]
+    asked = {"get_object": x["id"], "key": args.key}
+    found = _read(args.project, f"SELECT {', '.join(map(storage._q, own))} FROM {storage._q(t)} WHERE {where} LIMIT 1", asked, user.id)
+    if not found:  # SE-6: a hidden object and a missing one answer alike
+        raise ActionFailed(404, f"No visible {x['name']} with key {json.dumps(args.key)} in project '{args.project}'.")
+    columns, row = own, list(found[0])
+    for pt in dict.fromkeys(p["column"].split(".", 1)[0] for p in props if "." in p["column"]):  # one-to-one: a second read
+        pcs = [p["column"].split(".", 1)[1] for p in props if p["column"].startswith(pt + ".")]
+        r = next((r for r in m.get("relationships", []) if r["from"]["table"] == pt and r["to"]["table"] == t and _one(m, r)), None)
+        if r is None or pt not in cols:
+            continue
+        got = _read(args.project, f"SELECT {', '.join(map(storage._q, pcs))} FROM {storage._q(pt)} WHERE {_semi([(r, False)], t, where)}"
+                                  " LIMIT 1", asked, user.id)
+        columns, row = columns + [f"{pt}.{c}" for c in pcs], row + list(got[0] if got else [None] * len(pcs))
+    out = {"type": x["id"], "name": x["name"], "key": [row[own.index(k)] if k in own else v for k, v in zip(keys, args.key)],
+           "title": row[own.index(x["title"])] if x["title"] in own else None}
+    if ms := x.get("measures"):
+        kv = [v if isinstance(v, str | int | float | bool) else str(v) for v in out["key"]]
+        try:
+            q = semantic.query(args.project, {"measures": ms, "filters": [{"column": f"{t}.{k}", "op": "=", "value": v} for k, v in zip(keys, kv)]},
+                               user.id, timeout=semantic.TIMEOUT)
+            columns, row, out["measures"] = columns + ms, row + list(q["rows"][0] if q["rows"] else [None] * len(ms)), q["measures"]
+        except ActionFailed as e:
+            out["measures_error"] = e.body["message"]
+    out |= {"columns": columns, "rows": [row], "links": []}
+    for i, (hops, y) in walks.items():
+        yt, show = y["table"], [c for c in dict.fromkeys([*_keys(m)[y["table"]], y["title"]]) if c.lower() not in hid.get(y["table"], ())]
+        sel = ", ".join(map(storage._q, show))
+        rows = _read(args.project, f"SELECT {sel} FROM {storage._q(yt)} WHERE {_semi(hops, t, where)} ORDER BY {sel} LIMIT {args.limit + 1}",
+                     asked | {"link": i}, user.id)
+        out["links"].append({"link": i, "to": y["id"], "columns": show, "rows": rows[:args.limit], "more": len(rows) > args.limit})
+    return out
+
+
+class Where(BaseModel):
+    property: str = Field(description="a column of the object type's table, or of the type reached by `link`")
+    op: Literal["=", "<>", "<", "<=", ">", ">=", "in"]
+    value: storage.Value | list[storage.Value] = Field(description="one value; a list for `in`")
+    link: str | None = Field(None, pattern=r"^[a-z][a-z0-9_-]{0,62}(\.[a-z][a-z0-9_-]{0,62}){0,3}$",
+                             description="link IDs joined by dots, walked in order from the listed type, e.g. visited or order_product.order_cafe:"
+                                         " the object qualifies when an object reached holds the condition")
+
+
+class By(BaseModel):
+    property: str
+    desc: bool = False
+
+
+class Objects(storage.ProjectRef):
+    type: str = Field(description="an object type ID (`ontology`)")
+    filters: list[Where] = Field([], max_length=20, description="all must hold")
+    search: str | None = Field(None, min_length=1, max_length=200, description="text in the title (case-insensitive)")
+    order: list[By] = Field([], max_length=5, description="default: the title, then the key")
+    limit: int = Field(100, ge=1, le=LIMIT)
+    offset: int = Field(0, ge=0)
+
+
+@action(Role.viewer)
+def list_objects(conn, user: User, args: Objects) -> dict:
+    """Lists objects of one type, as you see them (row-level security applies): their columns not hidden from you, filtered on their own properties or on a property of objects reached through a chain of links (`link`: e.g. customers who visited a North café: {link: visited, property: region, op: '=', value: North}), each object once however many ways it links. `search` matches text in the title. `more` says whether another page follows (`offset`). Every figure you state must come from these rows."""
+    o, m, x, cols = _obj(args.project, args.type)
+    hid, t = rls.hidden(args.project, user.id), x["table"]
+    seen = lambda tbl: [c for c in cols.get(tbl, {}) if c.lower() not in hid.get(tbl, ())]  # noqa: E731
+
+    def col(tbl: str, c: str) -> str:
+        if c not in seen(tbl):  # a hidden column reads like a missing one
+            raise ActionFailed(400, f"Table '{tbl}' has no column '{c}' you can read. Use one of: {', '.join(seen(tbl))}.")
+        return c
+
+    conds, tables = [], [t]
+    for f in args.filters:
+        hops, y = _follow(args.project, m, o, x, f.link.split("."), hid) if f.link else ([], x)
+        tables += [r[s]["table"] for r, _ in hops for s in ("from", "to")]
+        c, typ = col(y["table"], f.property), cols[y["table"]][f.property]
+        vals = f.value if isinstance(f.value, list) else [f.value]
+        if (f.op == "in") != isinstance(f.value, list) or not vals:
+            raise ActionFailed(400, "Use op 'in' with a list of values, any other op with one value.")
+        cond = f"{storage._q(c)} IN ({', '.join(_cast(v, typ) for v in vals)})" if f.op == "in" else f"{storage._q(c)} {f.op} {_cast(vals[0], typ)}"
+        conds.append(_semi([(r, not a) for r, a in reversed(hops)], y["table"], cond) if hops else cond)
+    if args.search:
+        conds.append(f"CAST({storage._q(col(t, x['title']))} AS VARCHAR) ILIKE '%{storage._lit(args.search)}%'")  # ponytail: % and _ match any text
+    _live(args.project, tables)
+    keys, show = _keys(m)[t], seen(t)
+    order = [f"{storage._q(col(t, b.property))}{' DESC' if b.desc else ''}" for b in args.order] or [storage._q(x["title"])] * (x["title"] in show)
+    order += [storage._q(k) for k in keys if k in show]  # then the key: pages never overlap
+    sql = (f"SELECT {', '.join(map(storage._q, show))} FROM {storage._q(t)} WHERE {' AND '.join(conds) or 'TRUE'}"
+           f" ORDER BY {', '.join(dict.fromkeys(order))} LIMIT {args.limit + 1} OFFSET {args.offset}")
+    rows = _read(args.project, sql, {"list_objects": x["id"], **args.model_dump(mode="json", exclude={"project", "type"})}, user.id)
+    return {"type": x["id"], "name": x["plural"], "key": keys, "title": x["title"], "columns": show, "rows": rows[:args.limit],
+            "offset": args.offset, "more": len(rows) > args.limit}
