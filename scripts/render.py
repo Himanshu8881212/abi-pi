@@ -115,12 +115,12 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
  // ranked bars across (a map's members, or bars whose names don't fit under them): every name, its value at the end
  // a bar and a line measure per member, sideways: the bar's value and the second measure's dot (its own scale) on each row
  const hb2=(rs,m,m2)=>{const n=rs.length,T=legend(svg,W,[N(m),N(m2)])+6,rh=Math.max(16,Math.min(40,(H-T-18)/n)),bh=Math.max(7,Math.min(18,rh*.55)),
-  lw=Math.min(W*.3,Math.max(...rs.map(i=>String(d.rows[i][0]??'—').length))*6.4+10),x0=lw+10,x1=W-96,mx=Math.max(1e-9,...rs.map(i=>Math.abs(val(i,m)||0))),mx2=Math.max(1e-9,...rs.map(i=>Math.abs(val(i,m2)||0)));
+  lw=Math.min(W*.3,Math.max(...rs.map(i=>String(d.rows[i][0]??'—').length))*6.4+10),x0=lw+10,x1=W-112,mx=Math.max(1e-9,...rs.map(i=>Math.abs(val(i,m)||0))),mx2=Math.max(1e-9,...rs.map(i=>Math.abs(val(i,m2)||0)));
   svg.setAttribute('viewBox',`0 0 ${W} ${Math.max(H,T+n*rh+18)}`);
   rs.forEach((i,k)=>{const y=T+k*rh,v=val(i,m)||0,v2=val(i,m2),w=Math.max(1,(x1-x0)*Math.abs(v)/mx);fit(el('text',{x:lw,y:y+rh/2+4,'text-anchor':'end'},svg),String(d.rows[i][0]??'Not given'),lw-4);
    mk(el('rect',{x:x0,y:y+(rh-bh)/2,width:w,height:bh,rx:2,fill:COL[0]},svg),i,[m,m2]);
    if(typeof v2==='number')el('circle',{cx:x0+(x1-x0)*Math.abs(v2)/mx2,cy:y+rh/2,r:4,fill:COL[1],stroke:'var(--card)','stroke-width':1.5},svg);
-   const t=el('text',{x:x1+8,y:y+rh/2+4,class:'val'},svg);t.textContent=tick(v,m);if(typeof v2==='number'){const u=el('tspan',{fill:'var(--mute)'},t);u.textContent=' · '+tick(v2,m2)}});
+   const t=el('text',{x:x1+16,y:y+rh/2+4,class:'val'},svg);t.textContent=tick(v,m);if(typeof v2==='number'){const u=el('tspan',{fill:'var(--mute)'},t);u.textContent=' · '+tick(v2,m2)}});
   el('text',{x:x0,y:T+n*rh+14,class:'ax'},svg).textContent=`bars: ${N(m)} · dots: ${N(m2)}, on its own scale`};
  const hb=(rs,m,note)=>{const n=rs.length;if(!n)return;const top=note?18:4,rh=Math.max(14,Math.min(52,(H-top-4)/n)),bh=Math.max(8,Math.min(26,rh*.62)),y0=top+Math.max(0,(H-top-4-rh*n)/2),lw=Math.min(W*.34,Math.max(...rs.map(i=>String(d.rows[i][0]??'—').length))*6.6+10),x0=lw+10,x1=W-64,mx=Math.max(1e-9,...rs.map(i=>Math.abs(val(i,m))));
   if(note)el('text',{x:0,y:11},svg).textContent=note;svg.setAttribute('viewBox',`0 0 ${W} ${Math.max(H,top+n*rh+4)}`);
