@@ -986,7 +986,7 @@ def test_each_chart_type_draws_its_own_shape_from_its_rows(srv, tmp_path):
         "stacked": (vd("bar", [amt], [week, reg]), {"rect"}), "grouped": (vd("bar", [amt, n], [reg]), {"rect"}),
         "scatter": (vd("scatter", [amt, n], [week]), {"circle"}), "waterfall": (vd("waterfall", [amt], [week]), {"rect"}),
         "funnel": (vd("funnel", [n], [week]), {"path"}), "treemap": (vd("treemap", [amt], [week, reg]), {"rect"}),
-        "lines": (vd("line", [amt], [day, reg]), {"circle"}), "map": (vd("map", [amt], [reg]), None),
+        "lines": (vd("line", [amt], [day, reg]), {"circle"}), "map": (vd("map", [amt], [reg]), {"rect"}),  # 1.2.5: a map's members ranked across
         "bridge": (syn("waterfall", ["s.step", "chg"], [["Start", 500], ["Price", -120], ["Volume", 180], ["FX", -25]]), {"rect"}),
         "net": (syn("bar", ["s.week", "s.kind", "chg"], [["W1", "Sales", 120], ["W1", "Refunds", -30], ["W2", "Sales", 140], ["W2", "Refunds", -10]]), {"rect"}),
     }
@@ -1028,6 +1028,9 @@ def test_each_chart_type_draws_its_own_shape_from_its_rows(srv, tmp_path):
             for i, c, sign in ((0, "x", 1), (1, "y", -1)):
                 s = sorted(dots, key=lambda m: xy(m)[i])
                 assert all(sign * (b[c] - a[c]) >= -.5 for a, b in zip(s, s[1:])), k
+        elif name == "map":  # a ranked bar is as long as its value
+            q = sum(m["w"] for m in rects) / sum(abs(val(m)) for m in rects)
+            assert all(abs(m["w"] - q * abs(val(m))) <= 1.5 for m in rects), k
         elif rects:  # a bar or step is as tall as its value
             q = sum(m["h"] for m in rects) / sum(abs(val(m)) for m in rects)
             assert all(abs(m["h"] - q * abs(val(m))) <= 1.5 for m in rects), k
@@ -1072,13 +1075,13 @@ with sync_playwright() as p:
     tip = s.evaluate("e => (e.dispatchEvent(new MouseEvent('mousemove', {bubbles: true})), document.querySelector('.tip').textContent)")
     s.evaluate("e => e.dispatchEvent(new MouseEvent('click', {bubbles: true}))")
     pg.wait_for_function("document.querySelectorAll('.card path[data-r]').length === 1")  # the report again, for that member
-    out = {"tip": tip, "chips": pg.eval_on_selector_all(".fchip", "cs => cs.map(c => c.querySelector('b').textContent + ': ' + c.querySelector('span').textContent)"), "map": pg.inner_text(".card:has(p.empty)")}
+    out = {"tip": tip, "chips": pg.eval_on_selector_all(".fchip", "cs => cs.map(c => c.querySelector('b').textContent + ': ' + c.querySelector('span').textContent)"), "map": pg.eval_on_selector_all(".card", "cs => cs.map(c => c.textContent).join(' | ')")}
     b.close()
 print(json.dumps(out))
 """, f"http://127.0.0.1:{port}/")
     tips = {f"{r[0]} · {d['measures'][amt]}: {r[1]:,.0f}": r[0] for r in d["rows"]}
     assert out["tip"] in tips and out["chips"] == [f"Region: {tips[out['tip']]}"], (out, tips)
-    assert "isn't drawn on this page yet" in out["map"], out
+    assert "ranked by" in out["map"] and "the PDF draws the map" in out["map"], out  # 1.2.5: drawn as ranked bars
 
 
 def test_a_slicer_filters_the_report_and_the_filter_bar_shows_and_edits_it(srv):

@@ -44,7 +44,8 @@ th{cursor:pointer;user-select:none;color:var(--mute);font-weight:500;font-size:1
 td.n{text-align:right;font:13px var(--text);font-variant-numeric:tabular-nums;letter-spacing:-.005em}tr:hover td{background:var(--hover)}
 .scroll th{position:sticky;top:0;z-index:1}
 .scroll{max-height:400px;overflow:auto}svg text{fill:var(--mute);font:11px var(--text);font-variant-numeric:tabular-nums}
-svg text.val{fill:var(--ink);font-weight:500;font-size:10.5px}svg text.on{fill:var(--ink);stroke:var(--card);stroke-width:3px;paint-order:stroke;stroke-linejoin:round;pointer-events:none}
+svg text.val{fill:var(--ink);font-weight:500;font-size:11px}svg text.tot{fill:var(--ink);font:600 16px var(--display);letter-spacing:-.01em}
+svg text.tl{fill:var(--ink);font-weight:500;font-size:11.5px;pointer-events:none}svg text.tv{fill:var(--ink);opacity:.78;font-size:11px;pointer-events:none}svg text.on{fill:var(--ink);stroke:var(--card);stroke-width:3px;paint-order:stroke;stroke-linejoin:round;pointer-events:none}
 .tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--sheet);padding:7px 10px;border-radius:var(--r);font-size:12px;line-height:1.4;display:none;z-index:40;box-shadow:var(--shadow-pop);font-variant-numeric:tabular-nums;max-width:320px}
 code,pre{font:12.5px/1.6 var(--mono)}pre{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);padding:12px 16px;overflow:auto;max-height:320px}
 .file{color:var(--mute);font:12px var(--mono);margin-top:8px}
@@ -102,28 +103,56 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
  // export), a (month or quarter, year) pair is one time axis; a type or shape not drawn here says so over its rows
  const c=d.columns,two=nd===2&&!c.includes('grouping_id'),yi=+!c[0].endsWith('.year'),
   per=two&&['bar','line','combo'].includes(type)&&c[0].split('.')[0]===c[1].split('.')[0]&&c[yi].endsWith('.year')&&/\.(month|quarter)$/.test(c[1-yi])&&d.rows.every(r=>typeof r[0]==='number'&&typeof r[1]==='number');
- if(!(nd===1&&['bar','line','combo','pie','funnel','waterfall','treemap','scatter'].includes(type)||two&&['bar','line','combo','treemap','scatter'].includes(type))){
+ if(!(nd===1&&['bar','line','combo','pie','funnel','waterfall','treemap','scatter','map'].includes(type)||two&&['bar','line','combo','treemap','scatter','heatmap','sankey'].includes(type))){
   if(['bar','line','pie','combo','funnel','treemap','waterfall','scatter','map','heatmap','sankey'].includes(type)){const p=document.createElement('p');p.className='empty';
-   p.textContent=`Shown as a table: a ${type} chart ${['map','heatmap','sankey'].includes(type)?"isn't drawn on this page yet (the PDF export draws it)":"can't be drawn from these columns"}.`;box.appendChild(p)}
+   p.textContent=`Shown as a table: a ${type} chart can't be drawn from these columns.`;box.appendChild(p)}
   table(box,d);return}
  const sz=box.closest('.sized'),W=box.clientWidth||600,H=sz?Math.max(140,box.clientHeight||260):260,svg=el('svg',{viewBox:`0 0 ${W} ${H}`,width:'100%'},box);
  // drawn for its box: a card made wider, narrower or (sized) taller draws again rather than stretching its text
  if(window.ResizeObserver){const ro=new ResizeObserver(()=>{if(svg.parentNode!==box)return ro.disconnect();if(Math.abs(box.clientWidth-W)>8||(sz&&Math.abs(box.clientHeight-H)>8)){ro.disconnect();svg.remove();chart(box,d)}});ro.observe(box)}
  const at=m=>c.indexOf(m),N=m=>d.measures[m]||m,val=(i,m)=>d.rows[i][at(m)],num=(i,m)=>typeof val(i,m)==='number',idx=d.rows.map((r,i)=>i),
   key=r=>!per?r[0]:c[1-yi].endsWith('.month')?`${MON[r[1-yi]-1]||r[1-yi]} ${r[yi]}`:`Q${r[1-yi]} ${r[yi]}`,tick=(v,m)=>fmt(v,{...d.format[m],compact:true,decimals:2}),
-  mk=(e,i,ks,o)=>mark(e,per?null:i,[...(per?[key(d.rows[i])]:d.rows[i].slice(0,nd).map(x=>x??'—')),...ks.map(m=>`${N(m)}: ${fmt(val(i,m),{...d.format[m],compact:false})}`)].join(' · '),o);
- if(type==='pie'){const m=ms[0],rs=idx.filter(i=>val(i,m)>0),tot=rs.reduce((s,i)=>s+val(i,m),0),T=legend(svg,W,rs.map(i=>d.rows[i][0])),
+  mk=(e,i,ks,o)=>mark(e,per?null:i,[...(per?[key(d.rows[i])]:d.rows[i].slice(0,nd).map(x=>x??'—')),...ks.map(m=>`${N(m)}: ${fmt(val(i,m),{...d.format[m],compact:false})}`)].join(' · '),o),
+  // a label that fits its width: shortened until it does, gone when not even a few letters do
+  fit=(t,s,w)=>{t.textContent=s;if(t.getComputedTextLength()<=w)return t;for(let n=s.length-1;n>2;n--){t.textContent=s.slice(0,n)+'…';if(t.getComputedTextLength()<=w)return t}t.remove();return null},
+  dark=k=>[0,5].includes(k%6);  // ink and mute tiles take light text, the rest ink
+ // ranked bars across (a map's members, or bars whose names don't fit under them): every name, its value at the end
+ const hb=(rs,m,note)=>{const n=rs.length;if(!n)return;const top=note?18:4,rh=Math.max(14,Math.min(30,(H-top-4)/n)),bh=Math.max(8,rh*.62),lw=Math.min(W*.34,Math.max(...rs.map(i=>String(d.rows[i][0]??'—').length))*6.6+10),x0=lw+10,x1=W-64,mx=Math.max(1e-9,...rs.map(i=>Math.abs(val(i,m))));
+  if(note)el('text',{x:0,y:11},svg).textContent=note;svg.setAttribute('viewBox',`0 0 ${W} ${Math.max(H,top+n*rh+4)}`);
+  rs.forEach((i,k)=>{const y=top+k*rh,v=val(i,m),w=Math.max(1,(x1-x0)*Math.abs(v)/(mx||1));fit(el('text',{x:lw,y:y+rh/2+4,'text-anchor':'end'},svg),String(d.rows[i][0]??'—'),lw-4);
+   mk(el('rect',{x:x0,y:y+(rh-bh)/2,width:w,height:bh,rx:Math.min(3,bh/4),fill:k?'var(--ink)':'var(--signal)'},svg),i,[m]);el('text',{x:x0+w+6,y:y+rh/2+4,class:'val'},svg).textContent=tick(v,m)})};
+ if(type==='map'){const m=ms[0];hb(idx.filter(i=>num(i,m)).sort((i,j)=>val(j,m)-val(i,m)),m,`${dimLabel(c[0])}, ranked by ${N(m)} (the PDF draws the map)`);return}
+ // a heatmap: one dimension down, one across, the measure as the cell's shade of the signal colour
+ if(type==='heatmap'){const m=ms[0],ys=[...new Set(d.rows.map(r=>r[0]))],xs=[...new Set(d.rows.map(r=>r[1]))],vs=idx.filter(i=>num(i,m)).map(i=>val(i,m)),lo=Math.min(...vs),hi=Math.max(...vs),
+   lw=Math.min(W*.3,Math.max(...ys.map(v=>String(v??'—').length))*6.6+10),top=20,cw=(W-lw-4)/Math.max(xs.length,1),chh=Math.max(14,Math.min(44,(H-top-4)/Math.max(ys.length,1)));
+  xs.forEach((x,k)=>{const t=el('text',{x:lw+cw*k+cw/2,y:13,'text-anchor':'middle'},svg);fit(t,String(x??'—'),cw-4)});
+  ys.forEach((y,k)=>fit(el('text',{x:lw-8,y:top+chh*k+chh/2+4,'text-anchor':'end'},svg),String(y??'—'),lw-10));
+  idx.forEach(i=>{if(!num(i,m))return;const v=val(i,m),p=hi>lo?(v-lo)/(hi-lo):1,k=ys.indexOf(d.rows[i][0]),j=xs.indexOf(d.rows[i][1]),x=lw+cw*j,y=top+chh*k,pc=Math.round(10+p*85);
+   const r=el('rect',{x:x+1,y:y+1,width:Math.max(cw-2,1),height:Math.max(chh-2,1),rx:3},svg);r.style.fill=`color-mix(in srgb,var(--signal) ${pc}%,var(--sheet))`;mk(r,i,[m]);
+   if(cw>34&&chh>16){const t=el('text',{x:x+cw/2,y:y+chh/2+4,'text-anchor':'middle',class:'val'},svg);t.textContent=tick(v,m);if(pc>58)t.style.fill='#fff';fit(t,t.textContent,cw-6)}});
+  svg.setAttribute('viewBox',`0 0 ${W} ${Math.max(H,top+chh*ys.length+4)}`);return}
+ // a sankey: the first dimension's members on the left flow into the second's on the right, as wide as the measure
+ if(type==='sankey'){const m=ms[0],rs=idx.filter(i=>num(i,m)&&val(i,m)>0),tot=rs.reduce((s,i)=>s+val(i,m),0);if(!tot)return;
+  const sum=(k,v)=>rs.filter(i=>d.rows[i][k]===v).reduce((s,i)=>s+val(i,m),0),A=[...new Set(rs.map(i=>d.rows[i][0]))].sort((a,b)=>sum(0,b)-sum(0,a)),Bn=[...new Set(rs.map(i=>d.rows[i][1]))].sort((a,b)=>sum(1,b)-sum(1,a)),
+   gap=8,lw=Math.min(W*.22,Math.max(...[...A,...Bn].map(v=>String(v??'—').length))*6.6+10),nx=12,x0=lw,x1=W-lw-nx,top=4,k=(H-top-4-gap*Math.max(A.length,Bn.length))/tot,
+   lay=(L2,col)=>{let y=top;return Object.fromEntries(L2.map(v=>{const hh=Math.max(2,sum(col,v)*k),o=[v,{y,h:hh,o:0}];y+=hh+gap;return o}))},PA=lay(A,0),PB=lay(Bn,1);
+  rs.sort((i,j)=>A.indexOf(d.rows[i][0])-A.indexOf(d.rows[j][0])||Bn.indexOf(d.rows[i][1])-Bn.indexOf(d.rows[j][1])).forEach(i=>{const a=PA[d.rows[i][0]],b=PB[d.rows[i][1]],w=Math.max(1,val(i,m)*k),ya=a.y+a.o,yb=b.y+b.o;a.o+=w;b.o+=w;
+   const xa=x0+nx,xm=(xa+x1)/2,p=el('path',{d:`M${xa},${ya}C${xm},${ya} ${xm},${yb} ${x1},${yb}L${x1},${yb+w}C${xm},${yb+w} ${xm},${ya+w} ${xa},${ya+w}Z`,fill:COL[A.indexOf(d.rows[i][0])%6],opacity:.28},svg);mk(p,i,[m],.55)});
+  A.forEach((v,j)=>{const a=PA[v];el('rect',{x:x0,y:a.y,width:nx,height:a.h,rx:2,fill:COL[j%6]},svg);fit(el('text',{x:x0-6,y:a.y+a.h/2+4,'text-anchor':'end'},svg),String(v??'—'),lw-8)});
+  Bn.forEach(v=>{const b=PB[v];el('rect',{x:x1,y:b.y,width:nx,height:b.h,rx:2,fill:'var(--c3)'},svg);fit(el('text',{x:x1+nx+6,y:b.y+b.h/2+4},svg),String(v??'—'),lw-8)});return}
+ if(type==='pie'){const m=ms[0],rs=idx.filter(i=>val(i,m)>0).sort((i,j)=>val(j,m)-val(i,m)),tot=rs.reduce((s,i)=>s+val(i,m),0),T=legend(svg,W,rs.map(i=>`${d.rows[i][0]??'—'} ${Math.round(val(i,m)/tot*100)}%`)),
    R=Math.max(8,Math.min(W-16,H-T-8)/2),r=R*.57,cx=W/2,cy=(H+T)/2,p=(a,q)=>`${cx+q*Math.sin(a)},${cy-q*Math.cos(a)}`;let a=0;
   rs.forEach((i,k)=>{const b=a+Math.min(val(i,m)/tot,.99999)*2*Math.PI,f=+(b-a>Math.PI);
-   mk(el('path',{d:`M${p(a,R)}A${R},${R} 0 ${f} 1 ${p(b,R)}L${p(b,r)}A${r},${r} 0 ${f} 0 ${p(a,r)}Z`,fill:COL[k%6],stroke:'var(--card)'},svg),i,[m]);a=b});return}
+   mk(el('path',{d:`M${p(a,R)}A${R},${R} 0 ${f} 1 ${p(b,R)}L${p(b,r)}A${r},${r} 0 ${f} 0 ${p(a,r)}Z`,fill:COL[k%6],stroke:'var(--card)','stroke-width':2},svg),i,[m]);a=b});
+  if(r>26){el('text',{x:cx,y:cy+2,'text-anchor':'middle',class:'tot'},svg).textContent=tick(tot,m);el('text',{x:cx,y:cy+18,'text-anchor':'middle'},svg).textContent='Total'}return}
  if(type==='funnel'){const m=ms[0],rs=idx.filter(i=>val(i,m)>0).sort((i,j)=>val(j,m)-val(i,m)),h=(H-8)/Math.max(rs.length,1),w=i=>(W-16)*val(i,m)/val(rs[0],m),x=W/2;
   rs.forEach((i,k)=>{const y=4+h*k,a=w(i)/2,b=w(rs[k+1]??i)/2;mk(el('path',{d:`M${x-a},${y}L${x+a},${y}L${x+b},${y+h-2}L${x-b},${y+h-2}Z`,fill:COL[k%6]},svg),i,[m]);
-   if(h>=14)el('text',{x,y:y+h/2+3,'text-anchor':'middle',class:'on'},svg).textContent=cut(d.rows[i][0],Math.floor((W-16)/7))});return}
+   if(h>=14){const t=el('text',{x,y:y+h/2+4,'text-anchor':'middle',class:'on'},svg);fit(t,`${d.rows[i][0]??'—'} · ${tick(val(i,m),m)}${k?' · '+Math.round(val(i,m)/val(rs[0],m)*100)+'%':''}`,Math.max(w(i),w(rs[k+1]??i))-8)}});return}
  if(type==='treemap'){const m=ms[0],rs=idx.filter(i=>val(i,m)>0).sort((i,j)=>val(j,m)-val(i,m)),sum=g=>g.reduce((s,i)=>s+val(i,m),0),
    gs=two?[...new Set(rs.map(i=>d.rows[i][0]))].map(g=>rs.filter(i=>d.rows[i][0]===g)).sort((a,b)=>sum(b)-sum(a)):rs.map(i=>[i]),T=two?legend(svg,W,gs.map(g=>d.rows[g[0]][0])):0;
   sq(gs.map(sum),0,T,W,H-T).forEach(([x,y,w,h],k)=>sq(gs[k].map(i=>val(i,m)),x+1,y+1,Math.max(w-2,0),Math.max(h-2,0)).forEach(([x,y,w,h],j)=>{const i=gs[k][j];if(w<3||h<3)return;  // too small to draw: in the rows
    mk(el('rect',{x:x+1,y:y+1,width:Math.max(w-2,0),height:Math.max(h-2,0),fill:COL[k%6]},svg),i,[m]);
-   if(w>40&&h>18)el('text',{x:x+6,y:y+15,class:'on'},svg).textContent=cut(d.rows[i][nd-1],Math.floor((w-10)/7))}));return}
+   if(w>36&&h>18){const t=el('text',{x:x+7,y:y+16,class:'tl'},svg);if(dark(k))t.style.fill='var(--sheet)';if(fit(t,String(d.rows[i][nd-1]??'—'),w-12)&&h>36){const u=el('text',{x:x+7,y:y+31,class:'tv'},svg);if(dark(k))u.style.fill='var(--sheet)';fit(u,tick(val(i,m),m),w-12)}}}));return}
  const L=60,B=40;
  if(type==='scatter'&&ms.length>1){const [mx,my]=ms,rs=idx.filter(i=>num(i,mx)&&num(i,my)),g=two?[...new Set(rs.map(i=>d.rows[i][1]))]:[],T=(two?legend(svg,W,g):8)+16,R=20;
   if(!rs.length)return;const sc=(m,a,b,n)=>{const vs=rs.map(i=>val(i,m)),k=nice(Math.min(...vs),Math.max(...vs),n);return [v=>a+(v-k.lo)/(k.hi-k.lo)*(b-a),k.t]},
@@ -137,17 +166,20 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
  ord.forEach(i=>ix.has(key(d.rows[i]))||ix.set(key(d.rows[i]),ix.size));const cats=[...ix.keys()];
  ord.forEach(i=>(two&&!per?[[d.rows[i][1],ms[0]]]:ms.map(m=>[m,m])).forEach(([n,m])=>{let s=S.find(s=>s.n===n);if(!s)S.push(s={n,m,v:cats.map(()=>null),r:cats.map(()=>null)});const k=ix.get(key(d.rows[i]));s.v[k]=val(i,m);s.r[k]=i}));
  if(!S.length)return;
+ {const lw=Math.max(...cats.map(v=>Math.min(11,String(v??'—').length)))*6.2+8;if(type==='bar'&&!two&&!per&&S.length===1&&cats.length<=24&&cats.length*lw>W-68){hb(ord,S[0].m);return}}
  const stack=type==='bar'&&two&&!per,combo=type==='combo'&&S.length>1,R=combo?60:8,T=S.length>1&&type!=='waterfall'?legend(svg,W,S.map(s=>two&&!per?s.n:N(s.m))):10,cum=[];
  let run=0;if(type==='waterfall')S[0].v.forEach(v=>cum.push([run,run+=v||0]));
  const ax=(vs,m,x,an)=>{const {lo,hi,t}=nice(Math.min(0,...vs),Math.max(0,...vs),Math.max(2,Math.floor((H-B-T)/28))),y=v=>H-B-(v-lo)/(hi-lo)*(H-B-T);
   t.forEach(v=>{an==='end'&&el('line',{x1:L,x2:W-R,y1:y(v),y2:y(v),stroke:'var(--line)'},svg);el('text',{x,y:y(v)+4,'text-anchor':an},svg).textContent=tick(v,m)});return y};
  const y=ax(type==='waterfall'?cum.flat():stack?cats.flatMap((_,k)=>[Math.max,Math.min].map(f=>S.reduce((t,s)=>t+f(0,s.v[k]||0),0))):(combo?S.slice(0,1):S).flatMap(s=>s.v.map(v=>v||0)),S[0].m,L-6,'end'),
   y2=combo?ax(S.slice(1).flatMap(s=>s.v.map(v=>v||0)),S[1].m,W-R+6,'start'):y;
+ el('line',{x1:L,x2:W-R,y1:y(0),y2:y(0),stroke:'var(--line-strong)'},svg);  // the zero line, a shade stronger than the grid
  const n=cats.length,step=(W-L-R)/Math.max(n,1),lab=Math.ceil(n*(Math.min(11,Math.max(...cats.map(v=>String(v??'—').length)))*6.2+8)/(W-L-R)),X=k=>L+step*k+step/2;
  let edge=0;cats.forEach((v,k)=>{if(k%lab)return;const t=el('text',{x:X(k),y:H-B+14,'text-anchor':'middle'},svg);t.textContent=cut(v,11);  // inside the box, none over the last
   const w=t.getComputedTextLength()/2,x=Math.min(X(k),W-w-2);if(x-w<edge)return t.remove();t.setAttribute('x',x);edge=x+w+6});
  if(type==='waterfall'){S[0].v.forEach((v,k)=>{if(v==null)return;const [p,q]=cum[k];  // each step floats from the running total; the tooltip shows the row's own value
-   mk(el('rect',{x:L+step*k+step*.15,y:Math.min(y(p),y(q)),width:Math.max(step*.7,1),height:Math.max(Math.abs(y(p)-y(q)),1),fill:v<0?'var(--red)':'var(--ok)'},svg),S[0].r[k],[S[0].m]);
+   mk(el('rect',{x:L+step*k+step*.15,y:Math.min(y(p),y(q)),width:Math.max(step*.7,1),height:Math.max(Math.abs(y(p)-y(q)),1),rx:2,fill:v<0?'var(--signal)':'var(--ink)'},svg),S[0].r[k],[S[0].m]);
+   if(step>=34){const t=el('text',{x:X(k),y:Math.min(y(p),y(q))-5,'text-anchor':'middle',class:'val'},svg);t.textContent=(v>0&&k?'+':'')+tick(v,S[0].m)}
    k&&el('line',{x1:X(k-1)+step*.35,x2:X(k)-step*.35,y1:y(p),y2:y(p),stroke:'var(--mute)','stroke-dasharray':'2 2'},svg)});return}
  const SW=Math.min(step*.8,120);if(stack)cats.forEach((_,k)=>{let p=0,q=0;S.forEach((s,j)=>{const v=s.v[k];if(v==null)return;const a=v<0?q:p,b=a+v;v<0?q=b:p=b;
   mk(el('rect',{x:L+step*k+(step-SW)/2,y:Math.min(y(a),y(b)),width:Math.max(SW,1),height:Math.abs(y(a)-y(b)),fill:COL[j%6]},svg),s.r[k],[s.m])})});
@@ -158,9 +190,12 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
  (type==='combo'?S.slice(1):type==='line'||type==='scatter'?S:[]).forEach(s=>{const j=S.indexOf(s),yy=combo?y2:y,dot=type==='scatter',pts=s.v.map((v,k)=>v==null?null:[X(k),yy(v)]);
   const ln=pts.map((p,k)=>p?(pts[k-1]?'L':'M')+p:'').join(''),run=pts.filter(Boolean);
   // one series: a faint area under it; a dense one (a point every few pixels, e.g. per day) a thinner line
-  if(!dot&&S.length===1&&type==='line'&&run.length>1&&pts.every(Boolean))el('path',{d:`${ln}L${run.at(-1)[0]},${H-B}L${run[0][0]},${H-B}Z`,fill:COL[j%6],opacity:.05},svg);
+  if(!dot&&S.length===1&&type==='line'&&run.length>1&&pts.every(Boolean))el('path',{d:`${ln}L${run.at(-1)[0]},${y(0)}L${run[0][0]},${y(0)}Z`,fill:COL[j%6],opacity:.06},svg);
   dot||el('path',{d:ln,fill:'none',stroke:COL[j%6],'stroke-width':step<4?1.25:2,'stroke-linejoin':'round','stroke-linecap':'round',...(step<2?{opacity:.6}:{})},svg);
-  pts.forEach((p,k)=>p&&mk(el('circle',{cx:p[0],cy:p[1],r:dot?4:Math.max(2,Math.min(4,step/3)),fill:COL[j%6],opacity:dot?1:.01},svg),s.r[k],[s.m],dot?.7:1))});
+  pts.forEach((p,k)=>p&&mk(el('circle',{cx:p[0],cy:p[1],r:dot?4:Math.max(2,Math.min(4,step/3)),fill:COL[j%6],opacity:dot?1:.01},svg),s.r[k],[s.m],dot?.7:1));
+  // a line ends on its latest value, marked and labelled
+  if(!dot&&type==='line'&&S.length<=2&&run.length){const kk=s.v.map((v,k)=>v==null?-1:k).filter(k=>k>=0).at(-1),[lx,ly]=pts[kk];el('circle',{cx:lx,cy:ly,r:3.5,fill:COL[j%6],stroke:'var(--card)','stroke-width':1.5},svg);
+   const t=el('text',{x:lx-6,y:ly-9,'text-anchor':'end',class:'val'},svg);t.textContent=tick(s.v[kk],s.m)}});
  // a line over time: a guide follows the pointer to the nearest period and the tooltip has every series there
  if(type==='line'&&(!two||per)){const g=el('line',{y1:T,y2:H-B,stroke:'var(--mute)','stroke-dasharray':'3 3',opacity:0,'pointer-events':'none'},svg);
   svg.addEventListener('mousemove',e=>{const r=svg.getBoundingClientRect();if(!r.width)return;const k=Math.round(((e.clientX-r.left)*W/r.width-L-step/2)/step);if(k<0||k>=n){g.setAttribute('opacity',0);return}
