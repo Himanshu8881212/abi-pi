@@ -442,11 +442,26 @@ aside button.goto:hover{border-color:var(--line-strong);color:var(--ink)}aside b
 @media (hover:none){.btn:hover{background:var(--sheet);border-color:var(--line)}.btn.pri:hover{background:var(--ink);border-color:var(--ink)}.btn:active:not(:disabled){background:var(--hover)}.btn.pri:active:not(:disabled){background:color-mix(in srgb,var(--ink) 84%,var(--sheet))}}
 .fpop>.file{margin:0;font-size:11.5px;text-transform:uppercase;letter-spacing:.06em}.fpop>.seg{gap:6px}.fpop>.seg .chip{cursor:pointer;padding:4px 10px;font-size:12.5px;margin:0}.fpop>.seg .chip.on{background:var(--ink);color:var(--sheet);border-color:var(--ink)}
 .pghead .bar .btn.quiet{width:34px;padding:0;font-size:0;gap:0}.pghead .bar .btn.quiet .ic{margin:0}.mobile .pghead .bar .btn.quiet{width:44px}
-dialog .card>h4+.srow{border-top:0;padding-top:6px}dialog .card>h4+label.l{margin-top:12px}.mobile aside kbd{display:none}
+dialog .card>h4+.srow{border-top:0;padding-top:6px}dialog .card>h4+label.l{margin-top:12px!important}.mobile aside kbd{display:none}
 dialog .two .f{margin-top:6px}dialog .two label.l{margin:0}
 .node span{font:12px var(--text)}.node{border-radius:8px;box-shadow:var(--shadow)}.node b{font-size:13.5px}
 .rowcard textarea.desc{max-height:62px;overflow:hidden;font:13.5px/1.5 var(--text)}.rowcard textarea.desc:focus{max-height:220px;overflow:auto}.rowcard{align-items:start}
 body[data-mode=viewer] .tcard label.l:has(input[type=checkbox]:not(:checked)){display:none}body[data-mode=viewer] .tcard label.l input[type=checkbox]{pointer-events:none}
+.mobile dialog{padding:22px 20px;border-radius:16px}.mobile dialog .srow .btn{flex:none}
+/* a field the action needs, an undo in a toast, a destructive confirmation */
+.f.invalid,input.invalid{border-color:var(--red)!important;box-shadow:0 0 0 3px color-mix(in srgb,var(--red) 18%,transparent)!important}
+.toast{display:flex;align-items:center;gap:14px}.toast .tact{border:0;background:none;color:var(--signal);font:600 13px var(--text);cursor:pointer;padding:4px 2px;text-decoration:underline;text-underline-offset:3px}
+.toast.bad .tact{color:#fff}.toast .tact:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+.btn.pri.danger-solid{background:var(--red);border-color:var(--red);color:#fff}.btn.pri.danger-solid:hover{background:color-mix(in srgb,var(--red) 86%,#000)}
+#confirm pre:empty{display:none}#confirm p{margin:0 0 8px;line-height:1.55}
+.days{gap:6px}.days label.chk{border:1px solid var(--line);border-radius:999px;padding:5px 12px;cursor:pointer;font-size:13px;background:var(--sheet);transition:background .12s,border-color .12s}
+.days label.chk input{position:absolute;opacity:0;pointer-events:none}.days label.chk:has(input:checked){background:var(--ink);border-color:var(--ink);color:var(--sheet)}
+.days label.chk:has(input:focus-visible){outline:2px solid var(--signal);outline-offset:2px}.days label.chk.invalid,.days:has(.invalid) label.chk{border-color:var(--red)}
+.card>.row.seg+.days{margin-top:8px}.card>.two{max-width:520px}p.sum{margin:16px 0 0;padding:10px 12px;border-radius:var(--r);background:var(--paper);border:1px solid var(--line);font-size:13.5px}
+.mobile .days label.chk{min-height:40px;display:inline-flex;align-items:center}
+.flowsteps{counter-reset:st;gap:6px!important}.flowsteps>.row{counter-increment:st;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r);background:var(--sheet)}
+.flowsteps>.row::before{content:counter(st);display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--hover);font:600 11px var(--text);color:var(--mute)}
+.flowsteps>.row>b{font-weight:500;font-size:13.5px}
 """
 
 JS = r"""
@@ -502,7 +517,7 @@ async function api(action,args){
  let r=await post('/api/'+action,{project:D.project,...args});
  if(r.confirm){if(!await ask(r.confirm))throw new Error('You declined. Nothing changed.');r=await post('/confirm/'+r.confirm.id)}
  if(r.error)throw new Error(r.error);return r.result}
-function ask(c){return new Promise(res=>{const d=$('#confirm');$('#confirm h3').textContent=c.title||(c.id?'ABI asks for your confirmation':'Confirm');$('#c-msg').textContent=c.message;$('#c-prev').textContent=c.preview||'';$('#c-prev').hidden=!c.preview;
+function ask(c){return new Promise(res=>{const d=$('#confirm'),bad=/\b(delet|remov|drop|revok|stop|disabl|overwrit)/i.test((c.title||'')+' '+(c.message||''));$('#c-yes').classList.toggle('danger-solid',bad);$('#c-yes').textContent=bad?'Yes, go ahead':'Confirm';$('#confirm h3').textContent=c.title||(c.id?'ABI asks for your confirmation':'Confirm');$('#c-msg').textContent=c.message;$('#c-prev').textContent=c.preview||'';$('#c-prev').hidden=!c.preview;
  d.showModal();$('#c-yes').onclick=()=>{d.close();res(true)};$('#c-no').onclick=()=>{d.close();res(false)}})}
 function say(box,text,bad){box.textContent=text;box.className='msg '+(bad?'bad':'ok')}
 function card(title,sub){const c=h('div','card'),t=h('h3');t.append(h('span','',title));if(sub&&/\s/.test(sub))t.title=sub;else if(sub)t.append(h('span','file',sub));c.append(t);return c}
@@ -518,7 +533,9 @@ function rows(box,d){box.innerHTML='';box.classList.add('out');if(!(d&&d.columns
 // an admin action ABI wants confirmed: the person's own click in ABI's dialog, then the server runs it (null: they said no)
 async function confirmed(x){if(x.confirm){if(!await ask(x.confirm))return null;x=await fetch('/confirm/'+x.confirm.id,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(y=>y.json())}if(x.error)throw new Error(x.error);return x}
 function act(c,label,fn,pri){const m=c.querySelector(':scope>.msg')||c.appendChild(h('div','msg'));let r=c.querySelector(':scope>.acts');if(!r){r=h('div','row acts');c.insertBefore(r,m)}
- r.append(btn(label,async()=>{try{const t=await fn(m);if(t)c.isConnected?say(m,t):toast(t)}catch(e){c.isConnected?say(m,e.message,1):toast(e.message,1)}},pri));return m}
+ r.append(btn(label,async()=>{c.querySelectorAll('.invalid').forEach(x=>x.classList.remove('invalid'));try{const t=await fn(m);if(label==='Delete'&&t){undoToast(ttl(c)||'It');return}if(t)c.isConnected?say(m,t):toast(t)}catch(e){c.isConnected?say(m,e.message,1):toast(e.message,1)}},pri));return m}
+// a field the action needs: marked and focused, and the action stops with what to do
+function need(el,ok,msg){if(ok)return;el.classList.add('invalid');el.focus();throw new Error(msg)}
 
 // ---------- Overview ----------
 // the agent team on Home: one progress line while a plan is open, and each step a specialist left for the person's yes
@@ -760,7 +777,7 @@ async function usersPage(box){
  const r=await post('users');if(r.error){box.append(h('p','bad',r.error));return}const U=r.result,g=h('div','cards');box.append(g);
  const inv=card('Invite','ABI creates the account and emails a link to choose a password'),em=h('input','f');em.type='email';em.placeholder='name@company.com';inv.append(fld('Email',em));
  const ad=card('Add a person','no email needed: you choose a starting password and hand it over; they change it by clicking their name'),an=h('input','f'),ap=h('input','f');an.placeholder='e.g. maria';an.autocomplete='off';ap.type='password';ap.placeholder='at least 8 characters';ap.autocomplete='new-password';ad.append(fld('Name',an),fld('Starting password',ap));
- act(ad,'Add',async()=>{const x=await post('adduser',{name:an.value,password:ap.value});if(x.error)throw new Error(x.error);ap.value='';setTimeout(()=>show(CUR),1200);return 'Added. Give them a role below.'},1);g.append(ad);
+ act(ad,'Add',async()=>{need(an,/^[A-Za-z0-9._@+-]+$/.test(an.value),'A name is letters, digits and . _ - @ +, no spaces.');need(ap,ap.value.length>=8,'The starting password needs at least 8 characters.');const x=await post('adduser',{name:an.value,password:ap.value});if(x.error)throw new Error(x.error);ap.value='';setTimeout(()=>show(CUR),1200);return 'Added. Give them a role below.'},1);g.append(ad);
  act(inv,'Invite',async()=>{let x=await post('invite',{email:em.value});if(x.confirm){if(!await ask(x.confirm))return 'Not invited.';x=await fetch('/confirm/'+x.confirm.id,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(y=>y.json())}
   if(x.error)throw new Error(x.error);return 'Invited through ABI. Give them a role below.'},1);g.append(inv);
  const t=card(`People in ${U.project}`,'role: Viewer reads the published copy; Editor and Owner build (Developer)');t.style.gridColumn='1/-1';g.append(t);
@@ -881,10 +898,21 @@ function mailCard(rep){const f=(D.flows||[]).find(x=>x.id===('email_'+rep.id).sl
  const at=`${cr[1].padStart(2,'0')}:${cr[0].padStart(2,'0')}`,c=card('Email this report',f?`${f.enabled?'on':'off'} · ${at} ${f.trigger.timezone}`:'every page as one PDF, on the days you pick');
  const to=inpt('name@company.com, …',(was.to||[]).join(', ')),days=h('div','checks'),tm=inpt('',at,'time'),tz=inpt('time zone, e.g. Europe/Berlin',f?.trigger?.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'),on=new Set((cr[4]||'').split(',').map(Number));
  [[1,'Mon'],[2,'Tue'],[3,'Wed'],[4,'Thu'],[5,'Fri'],[6,'Sat'],[0,'Sun']].forEach(([v,l])=>{const x=h('label','chk'),i=h('input');i.type='checkbox';i.value=v;i.checked=on.has(v);x.append(i,h('span','',l));days.append(x)});
- c.append(lab('To'),to,lab('Days'),days,lab('At'),tm,lab('Time zone'),tz,h('p','file','ABI renders it when it sends, as you (your access to the data), and mails it from Settings › Email.'));
+ // the days as toggles with two presets, the time zone from a list, and the schedule said back in one sentence
+ days.classList.add('days');const pre=h('div','row seg'),setD=vs=>{days.querySelectorAll('input').forEach(i=>i.checked=vs.includes(+i.value));say0()};
+ [['Weekdays',[1,2,3,4,5]],['Every day',[0,1,2,3,4,5,6]]].forEach(([l,vs])=>{const b=h('button','chip',l);b.type='button';b.onclick=()=>setD(vs);pre.append(b)});
+ const zl=h('datalist');zl.id='tz-list';try{Intl.supportedValuesOf('timeZone').forEach(z=>zl.append(new Option(z)))}catch(e){}tz.setAttribute('list','tz-list');
+ const sum=h('p','sum'),mails=()=>to.value.split(',').map(s=>s.trim()).filter(Boolean),picked=()=>[...days.querySelectorAll('input:checked')].map(i=>+i.value);
+ const say0=()=>{const d=picked(),n=mails().length,dn=d.length===7?'every day':d.length===5&&!d.includes(0)&&!d.includes(6)?'every weekday':d.length?d.sort((a,b)=>((a+6)%7)-((b+6)%7)).map(x=>DOW[x]).join(', '):'';
+  sum.textContent=!d.length?'Pick at least one day.':`Sends ${dn} at ${tm.value||'08:00'} (${tz.value.trim()||'UTC'})${n?` to ${n===1?mails()[0]:n+' people'}`:''}: every page as one PDF.`};
+ [to,tm,tz].forEach(e=>e.addEventListener('input',say0));days.addEventListener('change',say0);say0();
+ c.append(lab('To'),to,lab('Days'),pre,days,h('div','two'),sum,h('p','file','ABI renders it when it sends, as you (your access to the data), and mails it from Settings › Email.'),zl);
+ {const two=c.querySelector(':scope>.two');two.append(fld('At',tm),fld('Time zone',tz))}
  const post=b=>fetch('/report/email',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({report:rep.id,...b})}).then(r=>r.json());
- act(c,'Save schedule',async()=>{const x=await confirmed(await post({to:to.value.split(',').map(s=>s.trim()).filter(Boolean),days:[...days.querySelectorAll('input:checked')].map(i=>+i.value),time:tm.value,timezone:tz.value.trim()}));
-  return x?'Saved in ABI: it emails on those days. Commit to keep it.':'Not saved.'},1);
+ act(c,'Save schedule',async m=>{const ms=mails();need(to,ms.length,'Add at least one email address.');const badm=ms.find(x=>!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x));need(to,!badm,`${badm} is not an email address.`);
+  need(days.querySelector('input'),picked().length,'Pick at least one day.');
+  const x=await confirmed(await post({to:ms,days:picked(),time:tm.value,timezone:tz.value.trim()}));
+  if(!x)return 'Not saved.';const cm=h('button','btn','Commit now');cm.onclick=()=>$('#changes').click();setTimeout(()=>{if(c.isConnected)m.append(' ',cm)});return `Saved in ABI. ${sum.textContent} Commit to keep it.`},1);
  if(f)act(c,'Stop emailing',async()=>(await confirmed(await post({off:true})))?'Stopped.':'Still on.');
  c.classList.add('editor');return c}
 function reportsPage(box){const bar=h('div','row bar top');bar.append(btn('New report',()=>{const c=editor('report',KIND.report.tpl,true);g.prepend(c)},1));box.append(bar);
@@ -1058,7 +1086,7 @@ function sources(box){const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),qr=
    h('label','l','Keys (workspace owners; stored encrypted for this bucket only, never shown again)'),ki,ks);lg.hidden=true;
   file.onchange=()=>{if(!t.value&&file.files[0])t.value='bronze_'+file.files[0].name.replace(/\.[^.]+$/,'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')};
   c.append(h('label','l','Table'),t,tabs,fg,lg);
-  act(c,'Add source',async m=>{if(!t.value)throw new Error('Name the table first.');const sheet=sh.value.trim();
+  act(c,'Add source',async m=>{need(t,t.value.trim(),'Name the table first, e.g. bronze_orders.');need(t,/^[a-z][a-z0-9_]*$/.test(t.value),'A table name is lowercase letters, digits and _ and starts with a letter.');const sheet=sh.value.trim();
    if(file.files[0]&&!/\.(csv|tsv|xlsx|json|jsonl|ndjson|parquet|avro)$/i.test(file.files[0].name))throw new Error(`${file.files[0].name} is not a file ABI reads: choose a CSV, TSV, Excel, JSON, Parquet or Avro file.`);
    if(file.files[0]){const x=await loaded(await upload(t.value,file.files[0],sheet),m,`Uploaded and loaded into ${t.value}.`);return x+' Next: stage or model it under Tables, or ask the agent to build a report from it.'}
    if(!loc.value)throw new Error('Choose a file, or give a location like s3://bucket/folder/*.csv.');
@@ -1271,8 +1299,10 @@ const lab=t=>h('label','l',t),MS=()=>D.measures.map(m=>[m.id,m.name||m.id]),CMPS
 function flowForm(c){const nm=inpt('e.g. Morning refresh'),de=inpt('what it is for'),tr=sel([['schedule','On a schedule'],['after_refresh','After a table refreshes'],['data_quality','When data quality finds a problem'],['data_condition','When a measure crosses a value'],['manual','Only when run by hand']]),tb=h('div');
  const draw=()=>{tb.innerHTML='';const v=tr.value;
   if(v==='schedule'){const fq=sel([['d','Every day'],['w','Every week on'],['m','Every month on day']]),dw=sel([['1','Monday'],['2','Tuesday'],['3','Wednesday'],['4','Thursday'],['5','Friday'],['6','Saturday'],['0','Sunday']]),dm=inpt('1','1','number'),tm=inpt('','07:00','time'),tz=inpt('time zone',Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC');
-   const vis=()=>{dw.hidden=fq.value!=='w';dm.hidden=fq.value!=='m'};fq.onchange=vis;vis();const r=h('div','row');r.append(fq,dw,dm,lab('at'),tm,tz);tb.append(r);
-   tb.get=()=>{const [H,M]=(tm.value||'07:00').split(':').map(Number);return {type:'schedule',cron:`${M} ${H} ${fq.value==='m'?Math.min(28,Math.max(1,+dm.value||1)):'*'} * ${fq.value==='w'?dw.value:'*'}`,timezone:tz.value||'UTC'}}}
+   const sm=h('p','sum'),upd=()=>{try{const g=tb.get();sm.textContent=`Runs ${cronWords(g.cron).replace(/^Every/,'every').replace(/^Day/,'on day')} (${g.timezone}).`}catch(e){sm.textContent=''}};
+   const vis=()=>{dw.hidden=fq.value!=='w';dm.hidden=fq.value!=='m';upd()};fq.onchange=vis;tz.setAttribute('list','tz-list2');const zl=h('datalist');zl.id='tz-list2';try{Intl.supportedValuesOf('timeZone').forEach(z=>zl.append(new Option(z)))}catch(e){}
+   [dw,dm,tm,tz].forEach(e=>{e.addEventListener('input',upd);e.addEventListener('change',upd)});const r=h('div','row');r.append(fq,dw,dm,lab('at'),tm,tz);tb.append(r,sm,zl);
+   tb.get=()=>{const [H,M]=(tm.value||'07:00').split(':').map(Number);return {type:'schedule',cron:`${M} ${H} ${fq.value==='m'?Math.min(28,Math.max(1,+dm.value||1)):'*'} * ${fq.value==='w'?dw.value:'*'}`,timezone:tz.value||'UTC'}};vis()}
   else if(v==='after_refresh'){const t=multi([...new Set([...D.sources,...D.tables])],[]);tb.append(lab('Tables (any of them)'),t);tb.get=()=>{const x=[...t.selectedOptions].map(o=>o.value);if(!x.length)throw new Error('Pick at least one table.');return {type:'after_refresh',tables:x}}}
   else if(v==='data_quality')tb.get=()=>({type:'data_quality'});
   else if(v==='data_condition'){const m=sel(MS()),op=sel(CMPS),val=inpt('value','','number');const r=h('div','row');r.append(m,op,val);tb.append(r);
@@ -1291,7 +1321,8 @@ function flowForm(c){const nm=inpt('e.g. Morning refresh'),de=inpt('what it is f
   else{const t=inpt('what they approve');row.append(t);get=()=>{if(!t.value)throw new Error('Say what they approve.');return {type:'approval',message:t.value}}}
   row.get=get;x.onclick=()=>row.remove();row.append(x);list.append(row)};
  c.append(lab('Name'),nm,lab('Description'),de,lab('Starts'),tr,tb,lab('Steps, in order'),list,add);
- return ()=>{if(!nm.value.trim())throw new Error('Give it a name.');const st=[...list.children].map((r,i)=>({id:`step_${i+1}`,...r.get()}));if(!st.length)throw new Error('Add at least one step.');
+ list.classList.add('flowsteps');
+ return ()=>{need(nm,nm.value.trim(),'Give it a name, e.g. Morning refresh.');const st=[...list.children].map((r,i)=>({id:`step_${i+1}`,...r.get()}));need(add,st.length,'Add at least one step: pick one under Steps, in order.');
   return {$schema:'https://schema.abi.invalid/v1/flow.json',id:slug(nm.value,'flow'),name:nm.value.trim(),description:de.value,enabled:false,trigger:tb.get(),steps:st}}}
 function mlForm(c){const nm=inpt('e.g. Daily revenue forecast'),task=sel([['forecast','Forecast a measure'],['regression','Predict a number'],['classification','Predict a category'],['clustering','Group similar rows'],['anomaly','Find unusual days']]),ds=sel([['','A new query from these fields'],...(D.datasets||[]).map(d=>[d.id,d.name||d.id])]),f=h('div');
  const meas=sel(MS()),time=sel(D.dims.filter(d=>d.startsWith('calendar.')),'calendar.day'),hz=inpt('days ahead','28','number'),feats=multi(D.measures.map(m=>m.id),[]),k=inpt('groups (blank: automatic)','','number'),meth=sel(['auto','lightgbm','ets','seasonal','random_forest','kmeans','gmm','isolation_forest']);
@@ -1440,6 +1471,9 @@ function security(box){const g=h('div','cards');box.append(g);const r=D.rls||{},
  const c=card('Row-level rules','Viewers see only their rows');if(!(r.rules||[]).length)c.append(h('p','empty','None yet: ask the agent, e.g. "user X sees only region North".'));
  (r.rules||[]).forEach(x=>{const k=h('div','kv');k.style.marginBottom='12px';k.append(h('b','','rule'),h('span','',x.id||x.name||'(unnamed)'),h('b','','rows of'),h('span','',`${x.table}.${x.column}`));
   (Array.isArray(x.users)?x.users.map(u=>[u.name||who[u.id]||u.id,u.values]):Object.entries(x.users||{}).map(([u,v])=>[who[u]||u,v])).forEach(([u,v])=>k.append(h('b','',u),h('span','',(v||[]).join(', ')||'no rows')));c.append(k)});g.append(c);
+ // a new rule is a model change the agent makes in ABI (AGENTS.md rule 4): say who sees which rows
+ if(MODE==='developer'){const ta=h('textarea','f ask0');ta.rows=2;ta.placeholder='e.g. viewer1 sees only the South region';c.append(h('label','l','Add or change a rule'),ta);
+  act(c,'Ask the agent',async()=>{need(ta,ta.value.trim(),'Say who should see which rows.');openChat(true);inp.value='Set a row-level security rule in ABI: '+ta.value.trim();sendChat();return 'Asked: follow it in the chat; the rule shows here once ABI has it.'},1)}
  const cr=card('Hidden columns','hidden from Viewers');const cols=r.columns||[];if(!cols.length)cr.append(h('p','empty','None.'));cols.forEach(x=>cr.append(h('span','chip',typeof x==='string'?x:`${x.table}: ${(x.columns||[]).join(', ')}`)));g.append(cr);
  const ro=card('Roles','set in ABI\'s app (a person\'s click)');const k=h('div','kv');(r.accounts||[]).forEach(a=>k.append(h('b','',a.name),h('span','',a.role||'no role')));ro.append((r.accounts||[]).length?k:h('p','empty','Only owners see who has which role: Users & access lists them.'));g.append(ro)}
 
@@ -1650,7 +1684,10 @@ async function switcher(){let d=$('#switcher');if(d){d.remove();return}
  // a popover under the crumb: a click outside or Escape closes it
  const off=e=>{if(e.type==='keydown'?e.key==='Escape':!d.contains(e.target)&&!e.target.closest('#switch,.proj')){d.remove();document.removeEventListener('mousedown',off);document.removeEventListener('keydown',off)}};
  setTimeout(()=>{document.addEventListener('mousedown',off);document.addEventListener('keydown',off)})}
-function toast(t,bad){const x=h('div','toast'+(bad?' bad':''),t);x.setAttribute('role',bad?'alert':'status');document.body.append(x);setTimeout(()=>x.remove(),bad?9000:6000)}
+function toast(t,bad,action){const x=h('div','toast'+(bad?' bad':''),t);x.setAttribute('role',bad?'alert':'status');
+ if(action){const b=h('button','tact',action[0]);b.onclick=async()=>{x.remove();await action[1]()};x.append(b)}document.body.append(x);setTimeout(()=>x.remove(),action?12000:bad?9000:6000)}
+// a delete is one uncommitted change in ABI: the toast after it offers to take it back (the Changes dialog's Undo)
+function undoToast(what){toast(`${what} deleted.`,0,['Undo',async()=>{try{const r=await api('undo',{});toast(`Back: ${r.undone||what}.`)}catch(e){toast(e.message,1)}}])}
 function highlight(item){if(!item)return;const want=String(item).toLowerCase();
  const c=[...document.querySelectorAll('main .card')].find(c=>c.textContent.toLowerCase().includes(want));if(c){c.classList.add('hl');c.scrollIntoView({behavior:'smooth',block:'center'});setTimeout(()=>c.classList.remove('hl'),4000)}}
 const chatBox=$('#chat'),log=$('#chat .log'),inp=$('#chat textarea'),busy=$('#chat .busy');
