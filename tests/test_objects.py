@@ -3,13 +3,16 @@ key order, cast to the key's types) with its properties, one-to-one properties, 
 its neighbors along links; list_objects filters a type on its own properties and on properties reached through link
 chains, each object once. Every read is the person's (row-level security views, rls.check): a hidden object answers
 like a missing one, a hidden column is absent. The owner's sql_query is the reference for every set of rows."""
+import contextlib
 import copy
+import json
 import secrets
 import time
 
 import pytest
 from conftest import drop
 from test_ontology import ONTO
+from test_engine import engine
 from test_ontology_nobreak import brew
 from test_pages import sure
 
@@ -206,3 +209,95 @@ def test_restricted_sql_passes_rls_check(objs):
     cafes = {x[0] for ln in r["links"] if ln["link"] == "visited" for x in ln["rows"]}
     assert cafes and cafes <= {x[0] for x in sql("SELECT cafe_id FROM cafes WHERE region = 'North'")}
     assert viewer(objs, "list_objects", type="cafe", order=[{"property": "seats", "desc": True}], search="%")["rows"]
+
+
+# ---------- what the reader can't read: hidden join and key columns, one-to-one tables, tables not loaded ----------
+
+@contextlib.contextmanager
+def hiding(table: str, columns: list[str]):
+    """A column rule for this block only: Viewers don't see `columns` of `table`."""
+    sure("set_column_rule", project=P, id="pi_hide", table=table, columns=columns)
+    try:
+        yield
+    finally:
+        sure("delete_rls_rule", project=P, id="pi_hide")
+
+
+def test_hidden_join_column_reads_like_missing(objs):
+    cust, cat = sql("SELECT min(customer_id) FROM orders")[0][0], sql("SELECT min(category) FROM products")[0][0]
+    bought = [{"link": "bought", "property": "category", "op": "=", "value": cat}]
+    with hiding("orders", ["product_id"]):
+        listed = refused(400, "list_objects", objs["viewer"], type="customer", filters=bought)
+        got = refused(400, "get_object", objs["viewer"], type="customer", key=[cust], links=["bought"])
+        assert listed["message"] == got["message"] == "Link 'bought' joins on a column you can't read.", (listed, got)
+        assert abi.call("list_objects", project=P, type="customer", filters=bought, limit=1)["rows"], "the owner walks it"
+
+
+def test_hidden_one_to_one_property_skipped(objs):
+    c = objs["north"]
+    with hiding("cafe_contacts", ["cafe_id"]):
+        assert "cafe_contacts.manager" not in viewer(objs, "get_object", type="cafe", key=[c])["columns"], "its join column is hidden"
+        assert row(abi.call("get_object", project=P, type="cafe", key=[c]))["cafe_contacts.manager"] == "Ada Example"
+
+
+def test_hidden_key_refused_plainly(objs):
+    c = objs["north"]
+    with hiding("cafe_targets", ["month"]):
+        for action, args in (("get_object", {"key": [c, 2]}), ("list_objects", {})):
+            body = refused(403, action, objs["viewer"], type="target", **args)
+            assert "identifies them is hidden" in body["message"] and "month" not in body["message"], body
+        assert row(abi.call("get_object", project=P, type="target", key=[c, 2]))["target"] == 200
+
+
+NOT_LOADED = r"""
+import json, sys
+import abi.app  # noqa: F401
+from abi import actions, db, security
+from abi.semantic import model
+P = json.loads(sys.stdin.read())["project"]
+with db.connect() as c:
+    owner = security.user(c, c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"])
+real = model.lake_columns
+model.lake_columns = lambda p, *a: {t: v for t, v in real(p, *a).items() if t != "cafe_targets"}  # as before its first load
+out = []
+for name, args in (("get_object", {"type": "target", "key": ["x", 1]}), ("list_objects", {"type": "target"})):
+    try:
+        actions.run(name, {"project": P, **args}, owner, "rest")
+        out.append(None)
+    except actions.ActionFailed as e:
+        out.append([e.status, str(e)])
+print(json.dumps(out))
+"""
+
+
+def test_table_not_loaded_says_so(objs):
+    r = engine(NOT_LOADED, timeout=300, stdin=json.dumps({"project": P}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    for status, message in json.loads(r.stdout.splitlines()[-1]):
+        assert status == 404 and "aren't loaded yet" in message and "cafe_targets" in message, message
+
+
+WALK2 = r"""
+import json
+import duckdb, sqlglot
+from abi.semantic import ontology, rls
+c = duckdb.connect()
+c.execute("CREATE TABLE t (cafe_id VARCHAR, month INTEGER, target INTEGER); INSERT INTO t VALUES ('A', 1, 10), ('A', 2, 20), ('B', 1, 30)")
+c.execute("CREATE TABLE n (cafe_id VARCHAR, month INTEGER, note VARCHAR); INSERT INTO n VALUES ('A', 2, 'x'), ('A', 2, 'y'), ('B', 2, 'z')")
+r = {"id": "n-cafe_id-month", "from": {"table": "n", "columns": ["cafe_id", "month"]}, "to": {"table": "t", "columns": ["cafe_id", "month"]}}
+hops = ontology.walk({"relationships": [r], "tables": []}, "n", [r["id"]])
+sql = f"SELECT cafe_id, month, target FROM t WHERE {ontology._semi(hops, 'n', 'note IN (' + chr(39) + 'x' + chr(39) + ', ' + chr(39) + 'y' + chr(39) + ')')} ORDER BY 1, 2"
+back = f"SELECT note FROM n WHERE {ontology._semi([(x, not a) for x, a in reversed(hops)], 't', 'target >= 20')} ORDER BY 1"
+print(json.dumps({"rows": c.execute(sql).fetchall(), "back": c.execute(back).fetchall(), "sql": sql,
+                  "refused": sorted(rls.refused_calls(sql, sqlglot.parse_one(sql, read="duckdb")))}))
+"""
+
+
+def test_two_column_relationship_walk():
+    """A relationship on two columns walks as a tuple IN semi-join, both ways: the target with two notes once, and back
+    from targets to their notes; rls.check's function allow-list passes it."""
+    r = engine(WALK2)
+    assert r.returncode == 0, r.stderr[-2000:]
+    out = json.loads(r.stdout.splitlines()[-1])
+    assert '("cafe_id", "month") IN (SELECT "cafe_id", "month" FROM "n"' in out["sql"], out["sql"]
+    assert out["rows"] == [["A", 2, 20]] and out["back"] == [["x"], ["y"]] and out["refused"] == [], out

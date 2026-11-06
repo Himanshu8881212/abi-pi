@@ -673,8 +673,8 @@ def test_a_page_read_grounds_each_visuals_figures():
 # ---------- 1.2.6 M2 #12: objects ground like query rows (get_object, list_objects as ABI returns them) ----------
 
 OBJ = {"type": "cafe", "name": "Café", "key": ["CF009"], "title": "Bremen Süd",
-       "columns": ["cafe_id", "cafe_name", "city", "region", "seats", "format", "cafe_contacts.manager", "revenue", "orders_rows"],
-       "rows": [["CF009", "Bremen Süd", "Bremen", "North", 42, "station", "Ada Example", "1586.08", 31]],
+       "columns": ["cafe_id", "cafe_name", "city", "region", "seats", "format", "revenue", "orders_rows"],
+       "rows": [["CF009", "Bremen Süd", "Bremen", "North", 42, "station", "1586.08", 31]],  # Ada Example: only a neighbor's title
        "measures": {"revenue": "Revenue", "orders_rows": "orders_rows"},
        "links": [{"link": "contact_cafe", "to": "contact", "columns": ["cafe_id", "manager"], "rows": [["CF009", "Ada Example"]], "more": False}]}
 LIST = {"type": "cafe", "name": "Cafés", "key": ["cafe_id"], "title": "cafe_name", "columns": ["cafe_id", "cafe_name", "seats"],
@@ -711,8 +711,8 @@ def _engine_cases(cases: list) -> dict:
 
 
 def test_object_title_grounds():
-    """An object's title, its property texts and its neighbors' titles ground names in both copies; an invented café
-    doesn't. The engine's scope takes an object type's plural from model/ontology.json as the model's own word."""
+    """An object's title, its property texts and its neighbors' titles (Ada Example, only in links[].rows) ground names
+    in both copies; an invented café doesn't. The engine's scope takes an object type's plural from model/ontology.json as the model's own word."""
     assert [(lambda o: o["numbers"] + o["names"])(ground.check(t, [OBJ, LIST])) for t, _ in TITLES] == [w for _, w in TITLES]
     out = _engine_cases(TITLES)
     assert out["cases"] == [w for _, w in TITLES] and out["plural"], out
