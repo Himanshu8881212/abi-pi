@@ -843,6 +843,13 @@ nav().filter(([gname])=>gname!=='Start'&&line[gname]).forEach(([gname,items])=>{
 var RFLT={},v0odd=null;  // each report's filters, kept across ABI's redraws
 // Viewer reads the published version: said under the page's head (a report, an object's page)
 function pubNote(box){const ro=(window.ME||{}).role,all=ro==='owner'||ro==='editor'||(window.ME||{}).admin,n=h('p','file pubnote',all?`Published version · you see every row: ${ro==='editor'?'editors':'owners'} aren't limited by row rules.`:'Published version, as your access allows.');setTimeout(()=>{const hd=box.querySelector('.pghead');hd?hd.after(n):box.prepend(n)})}
+// A report page's grid has fixed rows on a computer: a text, or a card whose content is taller than its rows (a KPI's
+// note, a long title), takes as many rows as it needs, so it never runs over the card below it.
+function rowsFit(grid){const fit=()=>{if(MOBILE||!grid.isConnected)return;const cs=getComputedStyle(grid),rh=parseFloat(cs.gridAutoRows)||54,gap=parseFloat(cs.rowGap)||16,rows=x=>Math.max(1,Math.ceil((x+gap)/(rh+gap)));
+  [...grid.children].forEach(el=>{if(el.classList.contains('rtext')){const n=rows(el.offsetHeight);if(el.style.gridRow!==`span ${n}`)el.style.gridRow=`span ${n}`;return}
+   const cur=+(/span (\d+)/.exec(el.style.gridRow)||[])[1]||0;if(cur&&el.scrollHeight>el.clientHeight+2){const n=rows(el.scrollHeight);if(n>cur)el.style.gridRow=`span ${n}`}})};
+ let q=0;const soon=()=>{cancelAnimationFrame(q);q=requestAnimationFrame(fit)},ro=new ResizeObserver(soon);
+ new MutationObserver(()=>{ro.disconnect();[...grid.children].forEach(c=>{ro.observe(c);[...c.children].forEach(x=>ro.observe(x))});soon()}).observe(grid,{childList:true})}
 function report(box,rep){let flt=PENDING.filters||RFLT[rep.id]||[];PENDING.filters=null;
  if(MODE==='viewer')pubNote(box);
  {const tb=h('div','row bar top');let ed=null;tb.append(btn('Edit report',()=>{if(ed){ed.remove();ed=null;return}ed=editor('report',rep.spec||{id:rep.id,name:rep.name},false);box.querySelector('.pghead').after(ed)}));box.append(tb)}
@@ -850,7 +857,7 @@ function report(box,rep){let flt=PENDING.filters||RFLT[rep.id]||[];PENDING.filte
   let mc=null;tb.append(btn('Email this report',()=>{if(mc){mc.remove();mc=null;return}mc=mailCard(rep);act(mc,'Cancel',()=>{mc.remove();mc=null});box.querySelector('.pghead').after(mc)}));
   if((window.ME||{admin:true}).admin&&!MOBILE){const sh=btn('Share',()=>shareDialog(rep));sh.classList.add('w');sh.prepend(ic('people'));tb.append(sh)}
   const dr=btn('Delete report',async()=>{ASK_WHAT=rep.name||rep.id;try{await KIND.report.del({id:rep.id});undoToast(rep.name||rep.id);show('reports')}catch(e){if(!/declined/.test(e.message))toast(e.message,1)}});dr.classList.add('mi');dr.setAttribute('role','menuitem');more(tb).append(dr)}const top=h('div','fbar'),chips=h('span','fchips'),addb=h('button','btn fadd','+ Filter'),clr=h('button','flink','Clear all');clr.hidden=!flt.length;
- top.append(chips,addb,clr);if(MOBILE)top.append(box.querySelector(':scope>.bar.top .fexp')||h('span'));const tabs=h('nav','tabs'),grid=h('div','grid'),msg=h('div','msg');box.append(top,msg,tabs,grid);
+ top.append(chips,addb,clr);if(MOBILE)top.append(box.querySelector(':scope>.bar.top .fexp')||h('span'));const tabs=h('nav','tabs'),grid=h('div','grid'),msg=h('div','msg');rowsFit(grid);box.append(top,msg,tabs,grid);
 
  // filters: one per column, a list of members ("in"); a chart click or a slicer sets it, the bar shows and edits it
  const vals=c=>{const f=flt.find(f=>f.column===c);return f?[].concat(f.value):[]};
@@ -896,7 +903,7 @@ function report(box,rep){let flt=PENDING.filters||RFLT[rep.id]||[];PENDING.filte
   vs.forEach(v=>{if(v.form){formCard(v);return}if(v.text!==undefined){const t=h('p','rtext',v.text);t.dataset.lk=v.id;t.dataset.w=12;t.style.gridColumn='span 12';grid.append(t);return}
    const c=h('div','card'),cw=span[v.id]||Math.min(12,v.layout.w||6);let ch=kp(v)?Math.min(2,v.layout.h||2):v.layout.h;
    // a few rows (a filter, a viewer's region) don't keep a card sized for many: alone on its row or on a phone, it shrinks to them
-   {const dd=v.live||v.data,n=(dd?.rows||[]).length,ty=dd?.type||v.type,one=Object.keys(dd?.measures||{}).length===1&&(dd?.columns||[]).length===2;if(ch&&(MOBILE||cw===12)&&n&&n<=6&&(one&&['bar','map'].includes(ty)||ty==='slicer'))ch=Math.min(ch,Math.max(2,Math.ceil((60+n*(ty==='slicer'?46:36))/70)))}c.style.gridColumn=`span ${cw}`;c.dataset.lk=v.id;c.dataset.w=cw;if(ch){c.dataset.h=ch*70-16;c.style.gridRow=`span ${ch}`}if(MOBILE&&v.id===v0odd)c.classList.add('pair');if(kp(v))c.classList.add('kcard');
+   {const dd=v.live||v.data,n=(dd?.rows||[]).length,ty=dd?.type||v.type,one=Object.keys(dd?.measures||{}).length===1&&(dd?.columns||[]).length===2;if(ch&&(MOBILE||cw===12)&&n&&n<=6&&(one&&['bar','map'].includes(ty)||ty==='slicer'))ch=Math.min(ch,Math.max(3,Math.ceil((60+n*(ty==='slicer'?46:36))/70)))}c.style.gridColumn=`span ${cw}`;c.dataset.lk=v.id;c.dataset.w=cw;if(ch){c.dataset.h=ch*70-16;c.style.gridRow=`span ${ch}`}if(MOBILE&&v.id===v0odd)c.classList.add('pair');if(kp(v))c.classList.add('kcard');
    c.innerHTML=`<h3><span></span><span class="tools"><button data-a="t">Table</button><button data-a="c">CSV</button><button data-a="h">How</button></span></h3><div class="body"></div><pre class="how" hidden></pre>`;
    $('h3 span',c).textContent=v.title||v.id;if(v.text===undefined)$('h3',c).append(pinBtn({kind:'visual',ref:{report:rep.id,page:p.id,visual:v.id},title:v.title||v.id}));grid.append(c);const body=$('.body',c),d=v.live||v.data;
    if(!d||d.error||v.error){body.append(h('div','bad',plainErr(d?.error||v.error||'no data')));return}

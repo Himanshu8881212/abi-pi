@@ -1129,6 +1129,44 @@ print(json.dumps(out))
     assert out["bar"] == {"opts": [["South", True], ["North", False]], "chips": ["Region: South"]}, out
 
 
+def test_a_long_text_card_never_runs_over_the_card_below(srv):
+    """Live 1.2.5 (owner, 7 Nov): a report page's long notes, above and below a KPI, ran past their row on a computer
+    (the grid's rows are a fixed height) and the KPI and chart cards were drawn over their last lines. Every card and
+    text of the page, light and dark, at 1440 and 390 px: no two overlap."""
+    port, key, _ = srv
+    amt = next(m["id"] for m in abi.call("semantic_model", project=P)["measures"] if m["expression"] == "SUM(orders.amount)")
+    long = " ".join(["This note explains how the forecast is made, what it leaves out and how to read the band."] * 9)
+    rep = {"id": "notes", "name": "Notes", "pages": [{"id": "all", "name": "All", "visuals": [
+        {"id": "above", "type": "text", "text": long, "layout": {"x": 0, "y": 0, "w": 12, "h": 1}},
+        {"id": "kpi", "type": "kpi", "title": "Amount", "query": {"measures": [amt]}, "layout": {"x": 0, "y": 1, "w": 4, "h": 2}},
+        {"id": "below", "type": "text", "text": long + "\n\n" + long, "layout": {"x": 0, "y": 3, "w": 12, "h": 1}},
+        {"id": "bars", "type": "bar", "title": "Bars", "query": {"measures": [amt], "dimensions": ["orders.region"]},
+         "layout": {"x": 0, "y": 4, "w": 12, "h": 4}}]}]}
+    code, r = post(port, "/api/save_report", {"project": P, "report": rep}, key)
+    assert code == 200, r
+    out = _chromium("""
+import json, sys
+from playwright.sync_api import sync_playwright
+out = {}
+with sync_playwright() as p:
+    b = p.chromium.launch()
+    for scheme in ("light", "dark"):
+        for w in (1440, 390):
+            pg = b.new_page(locale="en-US", viewport={"width": w, "height": 900}, color_scheme=scheme)
+            pg.goto(sys.argv[1]); pg.wait_for_selector("aside button.it, .mtop, main"); pg.evaluate("show('rep:notes')")
+            pg.wait_for_selector("[data-lk=bars] rect[data-r]"); pg.wait_for_timeout(600)
+            out[f"{scheme} {w}"] = pg.evaluate('''() => { const r = [...document.querySelectorAll('main .grid > *')].map(e => [e.dataset.lk, e.getBoundingClientRect()]);
+              const hit = [];
+              r.forEach(([a, x], i) => r.slice(i + 1).forEach(([b, y]) => { if (x.left < y.right - 1 && y.left < x.right - 1 && x.top < y.bottom - 1 && y.top < x.bottom - 1) hit.push(a + ' / ' + b) }));
+              return {n: r.length, hit} }''')
+            pg.close()
+    b.close()
+print(json.dumps(out))
+""", f"http://127.0.0.1:{port}/")
+    for k, o in out.items():
+        assert o["n"] == 4 and o["hit"] == [], (k, o)
+
+
 def test_page_layouts_are_a_draft_until_publish(srv):
     """Layout edits land in layouts.json "draft"; Publish copies them to "published", which Viewer reads."""
     port, key, _ = srv
