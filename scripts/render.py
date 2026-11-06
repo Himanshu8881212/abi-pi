@@ -123,7 +123,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
    const t=el('text',{x:x1+16,y:y+rh/2+4,class:'val'},svg);t.textContent=tick(v,m);if(typeof v2==='number'){const u=el('tspan',{fill:'var(--mute)'},t);u.textContent=' · '+tick(v2,m2)}});
   el('text',{x:x0,y:T+n*rh+14,class:'ax'},svg).textContent=`bars: ${N(m)} · dots: ${N(m2)}, on its own scale`};
  const hb=(rs,m,note)=>{const n=rs.length;if(!n)return;const top=note?18:4,rh=Math.max(14,Math.min(52,(H-top-4)/n)),bh=Math.max(8,Math.min(26,rh*.62)),y0=top+Math.max(0,(H-top-4-rh*n)/2),lw=Math.min(W*.34,Math.max(...rs.map(i=>String(d.rows[i][0]??'—').length))*6.6+10),x0=lw+10,x1=W-64,mx=Math.max(1e-9,...rs.map(i=>Math.abs(val(i,m))));
-  if(note)el('text',{x:0,y:11},svg).textContent=note;svg.setAttribute('viewBox',`0 0 ${W} ${Math.max(H,top+n*rh+4)}`);
+  if(note)fit(el('text',{x:0,y:11},svg),note,W);  /* the note within the chart's width */svg.setAttribute('viewBox',`0 0 ${W} ${Math.max(H,top+n*rh+4)}`);
   rs.forEach((i,k)=>{const y=y0+k*rh,v=val(i,m),w=Math.max(1,(x1-x0)*Math.abs(v)/(mx||1));fit(el('text',{x:lw,y:y+rh/2+4,'text-anchor':'end'},svg),String(d.rows[i][0]??'Not given'),lw-4);
    mk(el('rect',{x:x0,y:y+(rh-bh)/2,width:w,height:bh,rx:Math.min(3,bh/4),fill:d.rows[i][0]==null?'var(--c4)':COL[0]},svg),i,[m]);el('text',{x:x0+w+6,y:y+rh/2+4,class:'val'},svg).textContent=tick(v,m)})};
  if(type==='map'){const m=ms[0],ng=idx.filter(i=>d.rows[i][0]==null&&num(i,m)).reduce((a,i)=>a+val(i,m),0);hb(idx.filter(i=>num(i,m)&&d.rows[i][0]!=null).sort((i,j)=>val(j,m)-val(i,m)),m,`${dimLabel(c[0])}, ranked by ${N(m)}${ng?` · not given: ${tick(ng,m)}, not drawn`:''} (the PDF draws the map)`);return}
@@ -191,7 +191,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
   const w=t.getComputedTextLength()/2,x=Math.min(X(k),W-w-2);if(x-w<edge)return t.remove();t.setAttribute('x',x);edge=x+w+6});
  if(type==='waterfall'){S[0].v.forEach((v,k)=>{if(v==null)return;const [p,q]=cum[k];  // each step floats from the running total; the tooltip shows the row's own value
    mk(el('rect',{x:L+step*k+step*.15,y:Math.min(y(p),y(q)),width:Math.max(step*.7,1),height:Math.max(Math.abs(y(p)-y(q)),1),rx:2,fill:v<0?'var(--signal)':'var(--ink)'},svg),S[0].r[k],[S[0].m]);
-   if(step>=34){const t=el('text',{x:X(k),y:Math.min(y(p),y(q))-5,'text-anchor':'middle',class:'val'},svg);t.textContent=(v>0&&k?'+':'')+tick(v,S[0].m)}
+   if(step>=34){const t=el('text',{x:X(k),y:Math.max(12,Math.min(y(p),y(q))-5),'text-anchor':'middle',class:'val'},svg);t.textContent=(v>0&&k?'+':'')+tick(v,S[0].m)}
    k&&el('line',{x1:X(k-1)+step*.35,x2:X(k)-step*.35,y1:y(p),y2:y(p),stroke:'var(--mute)','stroke-dasharray':'2 2'},svg)});return}
  const SW=Math.min(step*.8,120);if(stack)cats.forEach((_,k)=>{let p=0,q=0;S.forEach((s,j)=>{const v=s.v[k];if(v==null)return;const a=v<0?q:p,b=a+v;v<0?q=b:p=b;
   mk(el('rect',{x:L+step*k+(step-SW)/2,y:Math.min(y(a),y(b)),width:Math.max(SW,1),height:Math.abs(y(a)-y(b)),fill:COL[j%6]},svg),s.r[k],[s.m])})});
@@ -206,7 +206,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
   dot||el('path',{d:ln,fill:'none',stroke:COL[j%6],'stroke-width':step<4?1.25:2,'stroke-linejoin':'round','stroke-linecap':'round',...(step<2?{opacity:.6}:{}),...(/forecast|prediction/i.test(N(s.m))&&j?{'stroke-dasharray':'5 4'}:{})},svg);
   pts.forEach((p,k)=>p&&mk(el('circle',{cx:p[0],cy:p[1],r:dot?4:Math.max(2,Math.min(4,step/3)),fill:COL[j%6],opacity:dot?1:.01},svg),s.r[k],[s.m],dot?.7:1));
   // a line ends on its latest value, marked and labelled
-  if(!dot&&type==='line'&&S.length<=2&&run.length){const kk=s.v.map((v,k)=>v==null?-1:k).filter(k=>k>=0).at(-1),[lx,ly]=pts[kk];el('circle',{cx:lx,cy:ly,r:3.5,fill:COL[j%6],stroke:'var(--card)','stroke-width':1.5},svg);
+  if(!dot&&type==='line'&&S.length<=2&&run.length&&R>=40){  /* the end value only where the chart kept room for it */const kk=s.v.map((v,k)=>v==null?-1:k).filter(k=>k>=0).at(-1),[lx,ly]=pts[kk];el('circle',{cx:lx,cy:ly,r:3.5,fill:COL[j%6],stroke:'var(--card)','stroke-width':1.5},svg);
    let yy0=Math.max(T+9,Math.min(H-B-4,ly+(S.length>1&&j===0?14:-13)));  /* off the last point: above it; with two lines the first one's below */const g=el('g',{},svg),t=el('text',{x:lx+16,y:0,class:'endv'},g);t.textContent=tick(s.v[kk],s.m);const tw=t.getComputedTextLength()||30;
    for(const b of ENDS)if(lx+10<b.x+b.w&&lx+10+tw+12>b.x&&Math.abs(yy0-b.y)<20)yy0=b.y+(yy0>=b.y?20:-20);ENDS.push({x:lx+10,w:tw+12,y:yy0});t.setAttribute('y',yy0+4);
    el('rect',{x:lx+10,y:yy0-8.5,width:tw+12,height:17,rx:4,class:'endb'},g).after(t);g.append(t)}});

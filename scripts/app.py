@@ -1340,7 +1340,7 @@ async function upload(table,file,sheet){const id=[...crypto.getRandomValues(new 
 // 1.2 M3.2: a big load answers at once with its run (status queued) and loads on the server: queued, then rows so far,
 // then done or failed with ABI's error, in the card's message (each check is a short call; the page follows when it is in)
 async function loaded(r,m,text){if(!r||r.status!=='queued')return text;
- for(let x=r;;){say(m,x.status==='queued'?`${x.table}: queued, it starts when the loads ahead of it are done…`:`${x.table}: loading, about ${fmt(x.rows||0)} rows so far…`);m.className='msg prog';
+ for(let x=r;;){say(m,x.status==='queued'?`${x.table}: queued, it starts when the loads ahead of it are done…`:`${x.table}: loading, about ${fmt(x.rows||0)} rows so far…`);if(m)m.className='msg prog';
   await wait(2000);x=(await api('load_runs',{run:r.run})).runs[0];if(x.status==='done')return `${text} ${fmt(x.rows)} rows.`;if(x.status==='failed')throw new Error(x.error)}}
 function sources(box){const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),qr=Object.fromEntries((q.rows||[]).map(r=>[r[ix('table')],r]));
  const g=h('div','cards'),bar=h('div','row bar top');box.append(bar,g);
