@@ -156,7 +156,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
   const ln=pts.map((p,k)=>p?(pts[k-1]?'L':'M')+p:'').join(''),run=pts.filter(Boolean);
   // one series: a faint area under it; a dense one (a point every few pixels, e.g. per day) a thinner line
   if(!dot&&S.length===1&&type==='line'&&run.length>1&&pts.every(Boolean))el('path',{d:`${ln}L${run.at(-1)[0]},${H-B}L${run[0][0]},${H-B}Z`,fill:COL[j%6],opacity:.05},svg);
-  dot||el('path',{d:ln,fill:'none',stroke:COL[j%6],'stroke-width':step<4?1.25:2,'stroke-linejoin':'round','stroke-linecap':'round'},svg);
+  dot||el('path',{d:ln,fill:'none',stroke:COL[j%6],'stroke-width':step<4?1.25:2,'stroke-linejoin':'round','stroke-linecap':'round',...(step<2?{opacity:.6}:{})},svg);
   pts.forEach((p,k)=>p&&mk(el('circle',{cx:p[0],cy:p[1],r:dot?4:Math.max(2,Math.min(4,step/3)),fill:COL[j%6],opacity:dot?1:.01},svg),s.r[k],[s.m],dot?.7:1))})}
 function csv(d){const q=v=>v===null?'':/[",\n]/.test(String(v))?'"'+String(v).replace(/"/g,'""')+'"':String(v);
  const blob=new Blob([[d.columns.join(','),...d.rows.map(r=>r.map(q).join(','))].join('\n')],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=d.id+'.csv';a.click()}

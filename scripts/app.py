@@ -315,8 +315,8 @@ button.pin.on{background:color-mix(in srgb,var(--signal) 10%,var(--sheet));borde
 .pinned .acts{display:none}.pinned>h3{margin-bottom:10px}.pinned .body .kpi .v{margin-top:6px}
 .kpi .v{font-feature-settings:"tnum","ss01"}
 /* async parts: a skeleton until their rows arrive */
-.card .body:empty{min-height:72px;border-radius:var(--r);background:linear-gradient(100deg,var(--hover) 30%,color-mix(in srgb,var(--hover) 35%,var(--sheet)) 50%,var(--hover) 70%) 0 0/300% 100%;animation:shim 1.4s ease-in-out infinite}
-.card.wide .body:empty,.grid>.card:not([style*="span 3"]) .body:empty{min-height:180px}
+.pinned .body:empty,.grid>.card>.body:empty{min-height:72px;border-radius:var(--r);background:linear-gradient(100deg,var(--hover) 30%,color-mix(in srgb,var(--hover) 35%,var(--sheet)) 50%,var(--hover) 70%) 0 0/300% 100%;animation:shim 1.4s ease-in-out infinite}
+.pinned.wide .body:empty,.grid>.card:not([style*="span 3"])>.body:empty{min-height:180px}
 @keyframes shim{from{background-position:100% 0}to{background-position:0 0}}
 /* messages: an error reads as one, a success as one */
 .msg.bad,.card .bad{color:var(--red)}.msg.ok{color:var(--ok)}
@@ -392,6 +392,36 @@ p.note,.card .note{margin:0;padding:10px 12px;border-radius:var(--r);background:
 .grid>.card>h3{flex-wrap:nowrap}.grid>.card>h3>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 aside button.proj{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;cursor:pointer;color:var(--ink);font:600 14px var(--text);text-align:left;margin:0 0 14px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-lg);font-weight:600;background:var(--sheet)}aside button.proj .lb{flex:1}aside button.proj .ic:last-child{color:var(--mute)}
 dialog .acts{justify-content:flex-end}
+/* in a card's action row, Edit and Delete are icons (their word is the name and the tooltip) */
+.card>.acts .btn.quiet{width:34px;padding:0;font-size:0;gap:0}.card>.acts .btn.quiet .ic{margin:0;width:15px;height:15px}.mobile .card>.acts .btn.quiet{width:44px}
+.card>.acts{gap:6px}
+.rowcard textarea.f{field-sizing:content;min-height:38px;max-height:132px;resize:none}
+.mobile .grid{grid-template-columns:repeat(2,minmax(0,1fr))}.mobile .grid>.card[data-w="3"],.mobile .grid>.card[data-w="2"]{grid-column:auto!important}
+.mobile .grid>.card[data-w="3"]{padding:14px}
+/* aligned rows (Measures, Glossary...): read as a table, edit in place: a field shows its box on hover and focus */
+.rowcard .f{border-color:transparent;background:transparent;box-shadow:none}.rowcard:hover .f{border-color:var(--line);background:var(--sheet)}
+.rowcard .f:focus{border-color:var(--ink);background:var(--sheet)}.rowcard textarea.f.code{font:12.5px/1.6 var(--mono)}
+.rowcard .fld .file{font:11.5px var(--mono);color:var(--mute);padding-left:12px}.rows>.rowcard{padding-block:10px}
+.rowcard>.acts .btn:not(.pri){opacity:.0;transition:opacity .12s}.rowcard:hover>.acts .btn,.rowcard:focus-within>.acts .btn,.mobile .rowcard>.acts .btn{opacity:1}
+.home>.card>p.bad,.home>.card>p.ok{margin:0;font-weight:500}.home>.card>.flink{margin-top:6px}.home>.card>.acts{padding-top:6px}
+/* the Chat page fits the screen: its title, then the conversation (no page scroll behind a sticky header) */
+main:has(#chat.full) .pghead .ttl p{display:none}main:has(#chat.full) .pg{gap:16px}#chat.full{height:calc(100dvh - 180px);min-height:380px;border-radius:var(--r-lg);box-shadow:var(--shadow)}
+#chat.full header{padding:10px 12px 10px 16px}#chat.full .compose{padding:12px 16px 16px}#chat .hello .sg{border-radius:10px;padding:8px 14px}
+/* lists of things (reports, models): one primary on the page, so a row's Open is secondary; the row lifts on hover */
+.stack>.card .acts .btn.pri{background:var(--sheet);color:var(--ink);border-color:var(--line);box-shadow:0 1px 1px rgb(11 11 11/.03)}
+.stack>.card .acts .btn.pri:hover{background:var(--hover);border-color:var(--line-strong)}.stack>.card{transition:border-color .12s,box-shadow .12s}.stack>.card:hover{border-color:var(--line-strong);box-shadow:0 2px 8px -2px rgb(11 11 11/.08)}
+.stack>.card>h3 .file{font:11.5px var(--mono);color:var(--mute)}.stack>.card>p{font-size:13.5px}
+#switcher{position:fixed;top:60px;left:72px;width:min(380px,calc(100vw - 32px));z-index:30;box-shadow:var(--shadow-pop);border-radius:12px;animation:pop .16s cubic-bezier(.2,.8,.2,1)}
+#switcher .areas{grid-template-columns:1fr;gap:6px}#switcher .lk{min-height:0;padding:10px 12px}#switcher .lk.on{border-color:var(--ink);box-shadow:inset 3px 0 0 var(--signal)}
+.mobile #switcher{left:16px;top:64px}
+.card>.grp>label.l:first-child{margin-top:4px}.card>.grp>.f,.card>.grp>input{display:block;width:100%;margin-top:6px}.card>.row.seg{margin-top:16px}
+input[type=file].f{padding:6px 8px}input[type=file].f::file-selector-button{font:500 13px var(--text);border:1px solid var(--line);border-radius:var(--r);background:var(--hover);color:var(--ink);padding:5px 10px;margin-right:10px;cursor:pointer}
+.card>.btn,.card>input.f+.btn,.card>.f+.btn{margin-top:18px!important}.card>.checks{margin-top:8px}
+.person:not(.dirty) .ptop .btn.pri{background:var(--sheet);color:var(--ink);border-color:var(--line);box-shadow:0 1px 1px rgb(11 11 11/.03)}
+.card>.srow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;margin:0;border-top:1px solid var(--line)}.card>h3+.srow{border-top:0;padding-top:0}
+.srow .sname{min-width:0}.srow .sname b{display:block;font-weight:500;font-size:13.5px}.srow .sname .file{margin:2px 0 0}
+p.state{height:auto;padding:5px 10px;display:inline-flex;align-self:flex-start;line-height:1.3}.card>h4{font-size:13.5px;margin:4px 0 0}.card>h4+p{margin-top:6px}
+body[data-mode=viewer] .card>.acts:not(:has(>:not(.w))){display:none}body[data-mode=viewer] .ed{padding-left:0}
 """
 
 JS = r"""
@@ -456,7 +486,7 @@ function fld(label,el,note){const d=h('div','fld');d.append(h('label','l',label)
 function rowcard(c,...fields){c.classList.add('rowcard');c.append(...fields);c.oninput=()=>c.classList.add('dirty');return c}
 function rowhead(...cols){const r=h('div','rowhead');cols.forEach(t=>r.append(h('span','',t)));return r}
 const W=/^(Save|Create|Delete|Edit report|New report|Reload |Run now|Enable|Disable|Train|Score|New |Ask$|Add |Remove|Edit|Publish|Save steps|Upload|Email this|Alert with)/;
-function btn(label,fn,pri){const b=h('button','btn'+(pri?' pri':'')+(W.test(label)?' w':'')+(/^(Delete|Remove|Revoke)/.test(label)?' danger':''),label);{const m=BIC.find(([r])=>r.test(label));if(m)b.prepend(ic(m[1]));if(label.startsWith('+ '))b.lastChild.textContent=label.slice(2)}b.onclick=async()=>{b.disabled=true;const t=setTimeout(()=>b.classList.add('busy'),150);try{await fn()}finally{clearTimeout(t);b.disabled=false;b.classList.remove('busy')}};return b}
+function btn(label,fn,pri){const b=h('button','btn'+(pri?' pri':'')+(W.test(label)?' w':'')+(/^(Delete|Remove|Revoke)/.test(label)?' danger':''),label);if(/^(Delete|Remove|Revoke|Edit)$/.test(label)){b.title=label;b.classList.add('quiet')}{const m=BIC.find(([r])=>r.test(label));if(m)b.prepend(ic(m[1]));if(label.startsWith('+ '))b.lastChild.textContent=label.slice(2)}b.onclick=async()=>{b.disabled=true;const t=setTimeout(()=>b.classList.add('busy'),150);try{await fn()}finally{clearTimeout(t);b.disabled=false;b.classList.remove('busy')}};return b}
 const cell=v=>v!==null&&typeof v==='object'?JSON.stringify(v):typeof v==='string'&&/^\d{4}-\d\d-\d\dT\d\d:\d\d/.test(v)?new Date(v).toLocaleString():v;
 function rows(box,d){box.innerHTML='';box.classList.add('out');if(!(d&&d.columns&&Array.isArray(d.rows))){box.append(h('pre','',JSON.stringify(d,null,1)));return}
  const rs=d.rows.map(r=>(Array.isArray(r)?r:d.columns.map(c=>r[c])).map(cell));table(box,{measures:d.measures||{},format:d.format||{},columns:d.columns,rows:rs})}
@@ -604,9 +634,12 @@ function slicer(box,d,on,set){const ms=d.columns.slice(1),w=h('div','slicer'),op
   b.onclick=()=>{sel=sel.includes(r[0])?sel.filter(x=>x!==r[0]):[...sel,r[0]];set(sel)};opts.append(b)});
  w.append(opts);if(sel.length){const x=h('button','flink',`Clear (${sel.length})`);x.onclick=()=>set([]);w.append(x)}box.append(w)}
 // a multiple <select> shown as toggles (no Ctrl-click): the select stays the value, so forms read it as before
-function pickList(sel){const w=h('div','mpick');w.setAttribute('role','group');sel.hidden=true;w.append(sel);
- const bs=[...sel.options].map(o=>{const b=h('button','sl');b.type='button';b.append(h('span','',o.text));b.onclick=()=>{o.selected=!o.selected;w.sync()};w.append(b);return [o,b]});
- w.sync=()=>bs.forEach(([o,b])=>{b.classList.toggle('on',o.selected);b.setAttribute('aria-pressed',o.selected)});w.sync();return w}
+function pickList(sel){if(sel.dataset.pk)return sel.parentElement;sel.dataset.pk=1;const w=h('div','mpick');w.setAttribute('role','group');w.hidden=sel.hidden;if(sel.parentElement)sel.replaceWith(w);sel.style.display='none';w.append(sel);
+ const draw=()=>{w.querySelectorAll(':scope>.sl').forEach(b=>b.remove());[...sel.options].forEach(o=>{const b=h('button','sl'+(o.selected?' on':''));b.type='button';b.setAttribute('aria-pressed',o.selected);b.append(h('span','',o.text));
+  b.onclick=()=>{o.selected=!o.selected;sel.dispatchEvent(new Event('change',{bubbles:true}));draw()};w.append(b)})};
+ w.sync=draw;new MutationObserver(r=>{if(r.some(x=>x.type==='attributes'))w.hidden=sel.hidden;else draw()}).observe(sel,{childList:true,attributes:true,attributeFilter:['hidden']});draw();return w}
+// every multiple select a page draws becomes toggles
+new MutationObserver(()=>document.querySelectorAll('main select.f[multiple]:not([data-pk])').forEach(pickList)).observe(document.body,{childList:true,subtree:true});
 function multi(opts,sel){const m=h('select','f ed');m.multiple=true;m.size=Math.min(8,Math.max(3,opts.length));opts.forEach(o=>{const op=new Option(o,o);op.selected=(sel||[]).includes(o);m.append(op)});return m}
 const ALLCOLS=()=>Object.entries(D.columns||{}).flatMap(([t,cols])=>Object.keys(cols).map(c=>`${t}.${c}`)).sort();
 function dsForm(d,isNew){const c=card(isNew?'New query':(d.name||d.id),isNew?'':`model/datasets.json · ${d.id}`),id=h('input','f ed'),nm=h('input','f ed'),de=h('input','f ed');
@@ -688,7 +721,7 @@ function boardPage(box){const g=h('div','cards');box.append(g);const P=D.app?.pa
  if(MODE==='developer'){const c=card('Prepare a board pack','the board-pack agent picks, checks, writes and renders; you send'),ta=h('textarea','f ed');ta.rows=4;
   ta.value='For the board review: the executive overview and monetization for the last complete months, a one-pager, the channel table as Excel, and a short explainer video. Commentary on what moved and what is open.';
   c.append(ta);act(c,'Ask the agent',async()=>{openChat(true);inp.value='Use the board-pack specialist to prepare a board pack: '+ta.value;sendChat();return 'Asked: follow it in the chat; the pack appears here.'},1);g.append(c)}
- if(!P.length)g.append(h('p','empty','No board packs yet. Describe the review below and the board-pack agent prepares the documents, data and video.'));
+ if(!P.length)g.append(h('p','empty','No board packs yet. Describe the review and press Ask the agent: the board-pack agent prepares the documents, data and video, and they show here.'));
  P.slice().reverse().forEach(m=>{const c=card(m.title||m.id,`${m.status} · made ${cell(m.made)}${m.audience?' · for '+m.audience:''}`);
   c.append(h('p',m.notes_grounded?'ok':'bad',m.notes_grounded?'Every number in the notes is in the pack\'s report views.':'Notes not checked.'));
   const fl=h('div','areas');[...m.items,{file:'notes.md',kind:'notes',status:'ok'}].forEach(it=>{const b=h('button','lk');b.append(h('b','',it.kind),h('span','',it.status==='ok'?it.file:'not made: '+(it.error||'')));
@@ -697,8 +730,8 @@ function boardPage(box){const g=h('div','cards');box.append(g);const P=D.app?.pa
 async function usersPage(box){
  const post=(op,b)=>fetch('/admin/'+op,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json());
  const r=await post('users');if(r.error){box.append(h('p','bad',r.error));return}const U=r.result,g=h('div','cards');box.append(g);
- const inv=card('Invite','ABI creates the account and emails a link to choose a password'),em=h('input','f');em.type='email';em.placeholder='name@company.com';inv.append(em);
- const ad=card('Add a person','no email needed: you choose a starting password and hand it over; they change it by clicking their name'),an=h('input','f'),ap=h('input','f');an.placeholder='name';an.autocomplete='off';ap.type='password';ap.placeholder='starting password (8+ characters)';ap.autocomplete='new-password';ad.append(an,ap);
+ const inv=card('Invite','ABI creates the account and emails a link to choose a password'),em=h('input','f');em.type='email';em.placeholder='name@company.com';inv.append(fld('Email',em));
+ const ad=card('Add a person','no email needed: you choose a starting password and hand it over; they change it by clicking their name'),an=h('input','f'),ap=h('input','f');an.placeholder='e.g. maria';an.autocomplete='off';ap.type='password';ap.placeholder='at least 8 characters';ap.autocomplete='new-password';ad.append(fld('Name',an),fld('Starting password',ap));
  act(ad,'Add',async()=>{const x=await post('adduser',{name:an.value,password:ap.value});if(x.error)throw new Error(x.error);ap.value='';setTimeout(()=>show(CUR),1200);return 'Added. Give them a role below.'},1);g.append(ad);
  act(inv,'Invite',async()=>{let x=await post('invite',{email:em.value});if(x.confirm){if(!await ask(x.confirm))return 'Not invited.';x=await fetch('/confirm/'+x.confirm.id,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(y=>y.json())}
   if(x.error)throw new Error(x.error);return 'Invited through ABI. Give them a role below.'},1);g.append(inv);
@@ -715,7 +748,7 @@ async function usersPage(box){
   const setp=btn('Set password',async()=>{try{const x=await confirmed(await post('setpass',{user:u.name,password:np.value}));np.value='';if(x)say(m,'Set: hand it over; they are signed out everywhere.')}catch(e){say(m,e.message,1)}});
   const rmf=btn('Reset two-step',async()=>{try{const x=await confirmed(await post('mfa/reset',{user:u.name}));if(x)say(m,'Reset: their two-step sign-in is off and they are signed out everywhere; where it is required they set it up again at their next sign-in.')}catch(e){say(m,e.message,1)}});
   // one line per person (who, their role, Save); what they see and their sign-in fold out under it
-  row.className='person';const top=h('div','ptop'),who=h('div','pwho'),det=h('details','pmore'),pw=h('div','row');
+  row.className='person';row.onchange=row.oninput=()=>row.classList.add('dirty');const top=h('div','ptop'),who=h('div','pwho'),det=h('details','pmore'),pw=h('div','row');
   who.append(h('span','av',u.name.slice(0,1).toUpperCase()),h('b','',u.name));if(u.workspace_owner)who.append(h('span','state on','Workspace owner · sees everything'));if(u.tenant)who.append(h('span','state','Tenant '+u.tenant));
   sel.setAttribute('aria-label','Role of '+u.name+' in this project');top.append(who,sel,save);pw.append(np,setp);
   det.append(h('summary','',`What ${u.name} sees, password and two-step`),h('label','l','Sections'),sx,h('label','l','Reports'),rx,h('label','l','Forgot their password?'),pw,h('label','l','Lost their authenticator app and recovery codes?'),rmf);
@@ -885,15 +918,15 @@ function monitorPage(box){const bar=h('div','row bar top');bar.append(btn('New m
  const fr=card('Data freshness',`ABI data quality; watched tables must load within ${M.fresh_within_hours} h (monitor.json)`),bad=rs.filter(r=>(r[ix('problems')]||[]).length||r[ix('missing_periods')]||old(r));
  fr.append(h('p',bad.length?'bad':'ok',bad.length?`${bad.length} of ${rs.length} tables have problems`:`All ${rs.length} tables without problems`));
  const t=h('table');t.insertRow().append(...['table','last load','rows','missing periods','problems'].map(x=>h('th','',x)));
- [...bad,...rs.filter(r=>watch(r[0])&&!bad.includes(r))].forEach(r=>{const tr=t.insertRow();[r[0],when(r[ix('last_load')]),fmt(r[ix('rows')]),r[ix('missing_periods')]||0,[...(r[ix('problems')]||[]).map(p=>p.message||p.kind||JSON.stringify(p)),...(old(r)?[`no load for over ${M.fresh_within_hours} h`]:[])].join('; ')||'—'].forEach(v=>tr.insertCell().textContent=v)});
+ [...bad,...rs.filter(r=>watch(r[0])&&!bad.includes(r))].forEach(r=>{const tr=t.insertRow();[r[0],when(r[ix('last_load')]),fmt(r[ix('rows')]),r[ix('missing_periods')]||0,[...(r[ix('problems')]||[]).map(p=>typeof p==='string'?p:p.message||p.kind||JSON.stringify(p)),...(old(r)?[`no load for over ${M.fresh_within_hours} h`]:[])].join('; ')||'—'].forEach(v=>tr.insertCell().textContent=v)});
  const sc=h('div','scroll');sc.append(t);fr.append(h('p','file','tables with problems, then the watched tables'),sc);
- const rd=D.readiness||{},mo=card('Model','readiness');mo.append(h('p',rd.ready?'ok':'bad',rd.ready?'Ready':'Not ready'),...(rd.missing||[]).map(m=>h('p','file',typeof m==='string'?m:JSON.stringify(m))));
+ const rd=D.readiness||{},mo=card('Model readiness');mo.append(h('p','state'+(rd.ready?' on':' bad'),rd.ready?'Ready: every table, join and measure checks out':'Not ready'),...(rd.missing||[]).map(m=>h('p','file',typeof m==='string'?m:JSON.stringify(m))));
  const ml=card('ML models','latest training and scoring');[[fr,'freshness'],[mo,'model'],[ml,'ml']].forEach(([c,r])=>c.querySelector('h3').append(pinBtn({kind:'status',ref:r,title:{freshness:'Data freshness',model:'Model readiness',ml:'ML models'}[r]})));if(!D.ml.length)ml.append(h('p','empty','No ML models yet.'));
  D.ml.forEach(m=>{const tr=m.latest_run||{},sc2=m.latest_score||{};ml.append(h('h4','',m.name||m.id),
   h('p',tr.status==='ok'?'ok':tr.status?'bad':'file',tr.status?`Trained: ${tr.status} · ${when(tr.finished||tr.created)}`:'Not trained yet'),h('p',sc2.status==='ok'?'ok':sc2.status?'bad':'file',sc2.status?`Scored: ${sc2.status} · ${when(sc2.finished||sc2.created)}`:'Not scored yet'))});
  const fl=card('Flows','switched on or off, last run');fl.querySelector('h3').append(pinBtn({kind:'status',ref:'flows',title:'Flows'}));if(!D.flows.length)fl.append(h('p','empty','No flows yet.'));
- D.flows.forEach(f=>{const l=h('p','file','last run: …');fl.append(h('h4','',f.name||f.id),h('p',f.enabled?'ok':'',f.enabled?'on':'off'),l);
-  api('flow_runs',{flow:f.id}).then(x=>{const r=(x.runs||[])[0];l.textContent=r?`last run: ${r.status} · ${when(r.finished||r.started||r.created)}`:'last run: never'}).catch(e=>l.textContent='last run: '+e.message)});
+ D.flows.forEach(f=>{const l=h('div','file','Last run: …'),r0=h('div','srow'),nm=h('div','sname');nm.append(h('b','',f.name||f.id),l);r0.append(nm,h('span','state'+(f.enabled?' on':''),f.enabled?'On':'Off'));fl.append(r0);
+  api('flow_runs',{flow:f.id}).then(x=>{const r=(x.runs||[])[0];l.textContent=r?`Last run: ${r.status} · ${when(r.finished||r.started||r.created)}`:'Not run yet'}).catch(e=>l.textContent='Last run: '+e.message)});
  g.append(fr,mo,ml,fl);fr.style.gridColumn='1/-1'}
 // Inbox: what flows posted to this project (Monitor alerts, scheduled posts), your subscriptions' new results and your test
 // runs, and its alerts (a failed flow, a data problem), as ABI shows them to you: under row-level security a Viewer gets
@@ -941,7 +974,7 @@ function explore(box){const q0=PENDING.explore||{};PENDING.explore=null;
  c.append(msg,out);const g=h('div','cards'),my=card('Saved analyses','kept with the project for everyone; numbers rerun from the model when opened'),list=h('div');my.append(list);c.style.gridColumn=my.style.gridColumn='1/-1';ms.style.width='100%';g.append(c,my);box.append(g);
  function mine(){list.innerHTML='';if(!MINE.length){list.append(h('p','empty','Nothing kept yet. Run an analysis and press Keep; charts the agent shows you land here too.'));return}
   MINE.forEach((a,i)=>{const r=h('div','row');const o=h('button','btn',a.name);o.onclick=()=>{[...ms.options].forEach(x=>x.selected=a.q.measures.includes(x.value));mp.sync();dm.value=a.q.dimensions[0]||'';ty.value=a.type;flt=a.q.filters||[];fc.value='';fv.hidden=true;run(a.q,a.type)};
-   const x=h('button','btn','forget');x.onclick=()=>{MINE.splice(i,1);saveMine();mine()};r.append(o,h('span','file',a.at||''),pinBtn({kind:'analysis',ref:{q:a.q,type:a.type},title:a.name}),x);list.append(r)})}
+   const x=ib('trash','Forget this analysis');x.onclick=()=>{MINE.splice(i,1);saveMine();mine()};r.append(o,h('span','file',a.at||''),pinBtn({kind:'analysis',ref:{q:a.q,type:a.type},title:a.name}),x);list.append(r)})}
  mine();if(q0.measures)run(query(),ty.value)}
 function measures(box){modelBar(box);const top=h('div','row bar top'),q=h('input','f');q.placeholder='Search measures';const list=h('div','cards rows');box.append(top,list);
  const edit=(m,isNew)=>{const c=card(isNew?'New measure':(m.name||m.id),isNew?'':m.id),name=h('input','f'),id=h('input','f'),ex=h('textarea','f'),de=h('input','f');
@@ -988,9 +1021,15 @@ function sources(box){const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),qr=
   const rg=h('input','f ed');rg.value='us-east-1';const ki=h('input','f ed');ki.placeholder='access key ID (blank for a public bucket)';ki.autocomplete='off';
   const ks=h('input','f ed');ks.type='password';ks.placeholder='secret access key';ks.autocomplete='new-password';
   const tl=h('label','chk'),tls=h('input');tls.type='checkbox';tls.checked=true;tl.append(tls,h('span','','HTTPS (untick for a plain-HTTP endpoint such as a local MinIO)'));
-  c.append(h('label','l','Table'),t,h('label','l','Upload a file'),file,h('label','l','Excel sheet'),sh,h('label','l','Or a location: an S3 file or folder (a glob, or a Delta or Iceberg table), or an https:// file'),loc,
+  // two ways in, one shown at a time: a file from this computer, or a location (S3 or https)
+  const fg=h('div','grp'),lg=h('div','grp'),tabs=h('div','row seg'),tb=(l,on)=>{const b=h('button','chip'+(on?' on':''),l);b.type='button';return b},t1=tb('Upload a file',1),t2=tb('S3 or a URL');
+  const pick=up=>{fg.hidden=!up;lg.hidden=up;t1.classList.toggle('on',up);t2.classList.toggle('on',!up);if(up)loc.value=''};t1.onclick=()=>pick(true);t2.onclick=()=>pick(false);tabs.append(t1,t2);
+  fg.append(h('label','l','File (CSV, TSV, Excel, JSON, Parquet, Avro)'),file,h('label','l','Excel sheet (optional)'),sh);
+  lg.append(h('label','l','Location: an S3 file or folder (a glob, or a Delta or Iceberg table), or an https:// file'),loc,
    h('label','l','Format'),fm,h('label','l','Region'),rg,h('label','l','S3 endpoint'),ep,tl,
-   h('label','l','Keys (workspace owners; stored encrypted for this bucket only, never shown again)'),ki,ks);
+   h('label','l','Keys (workspace owners; stored encrypted for this bucket only, never shown again)'),ki,ks);lg.hidden=true;
+  file.onchange=()=>{if(!t.value&&file.files[0])t.value='bronze_'+file.files[0].name.replace(/\.[^.]+$/,'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')};
+  c.append(h('label','l','Table'),t,tabs,fg,lg);
   act(c,'Add source',async m=>{if(!t.value)throw new Error('Name the table first.');const sheet=sh.value.trim();
    if(file.files[0])return loaded(await upload(t.value,file.files[0],sheet),m,`Uploaded and loaded into ${t.value}.`);
    if(!loc.value)throw new Error('Choose a file, or give a location like s3://bucket/folder/*.csv.');
@@ -1557,7 +1596,10 @@ async function switcher(){let d=$('#switcher');if(d){d.remove();return}
  d=h('div','card');d.id='switcher';const ws=h('select','f'),list=h('div','areas');Object.keys(r.workspaces).forEach(w=>ws.append(new Option(w,w)));ws.value=r.workspace;
  const fill=()=>{list.innerHTML='';(r.workspaces[ws.value]||[]).forEach(p=>{const b=h('button','lk');b.append(h('b','',p.id),h('span','',p.name===p.id?'':p.name));
   if(p.id===r.current)b.classList.add('on');b.onclick=()=>{location.href='/?p='+encodeURIComponent(p.id)+'#home'};list.append(b)})};ws.onchange=fill;fill();
- d.append(h('label','l','Workspace'),ws,h('label','l','Projects in it'),list);document.body.append(d)}
+ d.append(h('h3','','Switch project'),h('label','l','Workspace'),ws,h('label','l','Projects in it'),list);document.body.append(d);ws.focus();
+ // a popover under the crumb: a click outside or Escape closes it
+ const off=e=>{if(e.type==='keydown'?e.key==='Escape':!d.contains(e.target)&&!e.target.closest('#switch,.proj')){d.remove();document.removeEventListener('mousedown',off);document.removeEventListener('keydown',off)}};
+ setTimeout(()=>{document.addEventListener('mousedown',off);document.addEventListener('keydown',off)})}
 function toast(t,bad){const x=h('div','toast'+(bad?' bad':''),t);x.setAttribute('role',bad?'alert':'status');document.body.append(x);setTimeout(()=>x.remove(),bad?9000:6000)}
 function highlight(item){if(!item)return;const want=String(item).toLowerCase();
  const c=[...document.querySelectorAll('main .card')].find(c=>c.textContent.toLowerCase().includes(want));if(c){c.classList.add('hl');c.scrollIntoView({behavior:'smooth',block:'center'});setTimeout(()=>c.classList.remove('hl'),4000)}}
