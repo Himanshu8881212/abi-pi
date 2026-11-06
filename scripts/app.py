@@ -446,6 +446,7 @@ dialog .card>h4+.srow{border-top:0;padding-top:6px}dialog .card>h4+label.l{margi
 dialog .two .f{margin-top:6px}dialog .two label.l{margin:0}
 .node span{font:12px var(--text)}.node{border-radius:8px;box-shadow:var(--shadow)}.node b{font-size:13.5px}
 .rowcard textarea.desc{max-height:62px;overflow:hidden;font:13.5px/1.5 var(--text)}.rowcard textarea.desc:focus{max-height:220px;overflow:auto}.rowcard{align-items:start}
+body[data-mode=viewer] .tcard label.l:has(input[type=checkbox]:not(:checked)){display:none}body[data-mode=viewer] .tcard label.l input[type=checkbox]{pointer-events:none}
 """
 
 JS = r"""
@@ -979,8 +980,8 @@ function explore(box){const q0=PENDING.explore||{};PENDING.explore=null;
  const c=card('New analysis','measures by a dimension, from the model'),ms=multi(D.measures.map(m=>m.id),q0.measures),dm=h('select','f'),ty=h('select','f'),
   fc=h('select','f'),fv=h('select','f'),out=h('div','body'),msg=h('div','msg');ms.classList.remove('ed');fv.multiple=true;fv.hidden=true;
  ms.querySelectorAll('option').forEach(o=>o.text=D.measures.find(m=>m.id===o.value)?.name||o.value);
- dm.append(new Option('— total only —',''));fc.append(new Option('no filter',''));D.dims.forEach(d=>{dm.append(new Option(d,d));fc.append(new Option(d,d))});dm.value=(q0.dimensions||[])[0]||'';
- ['bar','line','table'].forEach(t=>ty.append(new Option(t,t)));ty.value=q0.chart||'bar';let flt=q0.filters||[];
+ dm.append(new Option('Total only',''));fc.append(new Option('No filter',''));D.dims.forEach(d=>{const l=`${colName(d)} · ${d.split('.')[0]}`;dm.append(new Option(l,d));fc.append(new Option(l,d))});dm.value=(q0.dimensions||[])[0]||'';
+ [['bar','Bars'],['line','Line'],['table','Table']].forEach(([t,l])=>ty.append(new Option(l,t)));ty.value=q0.chart||'bar';let flt=q0.filters||[];
  fc.onchange=async()=>{fv.innerHTML='';fv.hidden=!fc.value;if(!fc.value)return;
   try{const r=await api('semantic_query',{measures:[D.measures[0]?.id],dimensions:[fc.value],order_by:[{field:fc.value}],limit:500});
    r.rows.forEach(x=>fv.append(new Option(String(x[0]),JSON.stringify(x[0]))));fv.size=Math.min(6,r.rows.length)}catch(e){say(msg,e.message,1)}};
@@ -988,7 +989,7 @@ function explore(box){const q0=PENDING.explore||{};PENDING.explore=null;
   return {measures:[...ms.selectedOptions].map(o=>o.value),dimensions:dm.value?[dm.value]:[],filters:f}};
  async function run(q,type){out.innerHTML='';msg.textContent='';if(!q.measures.length){say(msg,'Pick at least one measure.',1);return}
   try{const d=await api('semantic_query',{...q,...(q.dimensions.length?{order_by:[{field:q.dimensions[0]}]}:{}),limit:500});d.format=d.format||{};d.type=type;d.id='analysis';
-   out.append(h('p','file',(q.filters||[]).map(f=>`${f.column} ${f.op} ${[].concat(f.value).join(', ')}`).join(' · ')||'no filter'));
+   out.append(h('p','file',(q.filters||[]).map(f=>`${colName(f.column)} ${f.op==='in'?'is':f.op} ${[].concat(f.value).join(', ')}`).join(' · ')||'All rows, no filter'));
    const b=h('div');out.append(b);requestAnimationFrame(()=>type==='table'?table(b,d):chart(b,d));return d}catch(e){say(msg,e.message,1)}}
  const fr=h('div','formrow'),ff=fld('Filter',fc);ff.append(fv);const mp=pickList(ms);fr.append(fld('Measures',mp),fld('By',dm),ff,fld('Chart',ty));c.append(fr);
  act(c,'Run',async()=>{await run(query(),ty.value)},1);
@@ -1015,7 +1016,7 @@ function measures(box){modelBar(box);const top=h('div','row bar top'),q=h('input
   act(c,'Test',async msg=>{say(msg,'Testing…');const t0=Date.now(),r=await api('semantic_query',{measures:[id.value]}),v=r.rows?.[0]?.[0];
    return `${r.measures?.[id.value]||id.value} = ${fmt(v,r.format?.[id.value])} · total over all data, ${((Date.now()-t0)/1000).toFixed(1)} s`+(c.classList.contains('dirty')?' · this is the saved version: Save to test your change':'')});
   if(!isNew)act(c,'Delete',async()=>{await api('delete_measure',{id:id.value});D.measures=D.measures.filter(x=>x!==m);show('measures')});return c};
- const fill=()=>{list.innerHTML='';list.append(rowhead('Measure','MEL','Description',''));D.measures.filter(nmMeasure).filter(m=>!q.value||JSON.stringify(m).toLowerCase().includes(q.value.toLowerCase())).forEach(m=>list.append(edit(m)))};
+ const fill=()=>{list.innerHTML='';list.append(rowhead('Measure','Formula (MEL)','Description',''));D.measures.filter(nmMeasure).filter(m=>!q.value||JSON.stringify(m).toLowerCase().includes(q.value.toLowerCase())).forEach(m=>list.append(edit(m)))};
  top.append(q,btn('New measure',()=>list.firstChild.after(edit({},true)),1));q.oninput=fill;fill()}
 function glossary(box){const list=h('div','cards rows');box.append(list);
  const edit=(t,isNew)=>{const c=card(isNew?'New term':(t.term||t.id)),term=h('input','f'),def=h('textarea','f'),ms=h('input','f');[term,def,ms].forEach(e=>e.classList.add('ed'));term.value=t.term||'';def.value=t.definition||'';ms.value=(t.measures||[]).join(', ');
@@ -1112,7 +1113,7 @@ function newStaged(box){if(box.querySelector('.stform'))return;const c=card('New
  c.append(out);(box.querySelector('.pghead')||box).after(c);look().catch(()=>{})}
 function stagedPage(box){const sv=(D.layers||[]).filter(t=>t.layer==='silver').sort((a,b)=>a.table.localeCompare(b.table));
  const bar=h('div','row bar top');bar.append(btn('New staged table',()=>newStaged(box),1));box.append(bar);
- const g=h('div','cards');box.append(g);if(!sv.length){box.append(h('p','empty','Nothing staged yet: New staged table cleans a source here, or ask the agent.'));return}
+ const g=h('div','cards');box.append(g);if(!sv.length){box.append(h('p','empty',MODE==='viewer'?'Nothing staged: the sources go straight to the final tables.':'Nothing staged yet: New staged table cleans a source here, or ask the agent.'));return}
  sv.forEach(t=>{const c=card(t.table,`${fmt(t.rows)} rows · hidden from the model`);const st=(D.table_steps||{})[t.table]||[];
   const reads=st.filter(x=>x.type==='source'||x.type==='append'||x.type==='merge').map(x=>x.source||(x.tables||[]).join(', ')||x.table).filter(Boolean);
   if(reads.length)c.append(h('div','file','reads '+reads.join(', ')));
@@ -1177,7 +1178,7 @@ function canvasKit(box,onArrange){const tools=h('div','row cvtools'),wrap=h('div
  svg.classList.add('links');stage.append(svg);sizer.append(stage);wrap.append(sizer);const kit={z:1,w:0,ht:0,wrap,stage,svg,draw:()=>{}};
  const pct=h('span','pct','100%'),size=()=>{sizer.style.width=kit.w*kit.z+'px';sizer.style.height=kit.ht*kit.z+'px';stage.style.width=kit.w+'px';stage.style.height=kit.ht+'px';
   stage.style.transform=`scale(${kit.z})`;wrap.style.height=Math.max(320,Math.min(kit.ht*kit.z+24,innerHeight*.78))+'px';pct.textContent=Math.round(kit.z*100)+'%'};
- kit.setZ=z=>{kit.z=Math.min(2,Math.max(.25,Math.round(z*100)/100));size();kit.draw()};kit.extent=(w,ht)=>{kit.w=w;kit.ht=ht;size()};
+ kit.setZ=z=>{kit.z=Math.min(2,Math.max(.25,Math.round(z*100)/100));size();kit.draw()};kit.extent=(w,ht)=>{kit.w=w;kit.ht=ht;size();if(MOBILE&&!kit.fit&&w>0){kit.fit=1;requestAnimationFrame(()=>kit.setZ(Math.min(1,(wrap.clientWidth-24)/Math.max(1,kit.w))))}};  // a phone starts fitted to its width
  const b=(t,title,fn)=>{const x=h('button','btn',t);x.title=title;x.onclick=fn;return x};
  tools.append(b('−','Zoom out',()=>kit.setZ(kit.z-.1)),pct,b('+','Zoom in',()=>kit.setZ(kit.z+.1)),b('Fit','Fit to the window',()=>kit.setZ(Math.min(1,(wrap.clientWidth-24)/Math.max(1,kit.w),(innerHeight*.78)/Math.max(1,kit.ht)))),
   b('Auto arrange','Lay the boxes out again',onArrange));
@@ -1391,7 +1392,7 @@ function cronWords(c){const [mi,hr,dm,mo,dw]=String(c||'').split(' ');if(!/^\d+$
 function trigWords(t){const m=t.measure&&(D.measures.find(x=>x.id===t.measure)?.name||t.measure);
  return t.type==='schedule'?cronWords(t.cron)+(t.timezone?` (${t.timezone})`:''):t.type==='data_condition'?`When ${m} ${t.op} ${t.value}`:t.type==='after_refresh'?`After ${t.table||'a table'} refreshes`:
   t.type==='data_quality'?'When data quality finds a problem':t.type?t.type.replace(/_/g,' '):'Run by hand'}
-function flows(box){newBtn(box,'flow');const g=h('div','cards');box.append(g);if(!D.flows.length)box.append(h('p','empty','No flows yet: New flow, or ask the agent.'));
+function flows(box){newBtn(box,'flow');const g=h('div','cards');box.append(g);if(!D.flows.length)box.append(h('p','empty',MODE==='viewer'?'No automations here: the project\'s builders set them up.':'No flows yet: New flow, or ask the agent.'));
  D.flows.forEach(f=>{const t=f.trigger||{},c=card(f.name||f.id);{const b=h('span','state'+(f.enabled?' on':''),f.enabled?'On':'Off');c.querySelector('h3').append(b)}
   {const w=h('div','when');w.append(ic(t.type==='schedule'?'history':'monitor'),h('span','',trigWords(t)));w.title=`flows/${f.id}.json`+(t.cron?` · ${t.cron}`:'');c.append(w)}
   const st=h('div','stepchips');(f.steps||[]).forEach((s,i)=>{if(i)st.append(h('span','arr','→'));st.append(h('span','chip',(s.action||s.type||s.id).replace(/_/g,' ')))});const tr=h('ol','trace');c.append(st,tr);
@@ -1409,13 +1410,13 @@ function ml(box){newBtn(box,'ml');const g=h('div','cards');box.append(g);if(!D.m
    for(let i=0;i<60;i++){await wait(3000);const x=(await api('ml_models',{})).models.find(y=>y.id===m.id);if(x){Object.assign(m,x);lr()}
     if(['ok','failed'].includes(m.latest_run?.status)&&m.latest_run?.finished)return `${m.latest_run.kind}: ${m.latest_run.status}`}return 'still running'};
   act(c,'Train',m2=>follow('train_model',m2),1);act(c,'Score',m2=>follow('score_model',m2));editBtns(c,'ml',m);g.append(c)})}
-function tools(box){newBtn(box,'tool');const g=h('div','cards');box.append(g);if(!D.tools.length)box.append(h('p','empty','No tools yet. A tool is a calculation your agents can call, such as a margin or a forecast check: press New tool, or ask the agent to write one.'));
+function tools(box){newBtn(box,'tool');const g=h('div','cards');box.append(g);if(!D.tools.length)box.append(h('p','empty',MODE==='viewer'?'No tools here: a tool is a calculation the agents can call, set up by the project\'s builders.':'No tools yet. A tool is a calculation your agents can call, such as a margin or a forecast check: press New tool, or ask the agent to write one.'));
  D.tools.forEach(t=>{const c=card(t.name||t.id,`tools/${t.id}.json · ${t.status||''}`);c.append(h('div','',t.description||''));const ins={};
   Object.entries(t.inputs?.properties||{}).forEach(([k,s])=>{const i=h('input','f');i.placeholder=s.description||'';ins[k]=i;c.append(h('label','l',k),i)});
   const out=h('div');
   act(c,'Run',async()=>{rows(out,await api('run_tool',{tool:t.id,inputs:Object.fromEntries(Object.entries(ins).filter(([,i])=>i.value).map(([k,i])=>[k,i.value]))}))},1);
   act(c,'Run its tests',async()=>{rows(out,await api('test_tool',{tool:t.id}))});editBtns(c,'tool',t);c.append(out);g.append(c)})}
-function agents(box){newBtn(box,'agent');const g=h('div','cards');box.append(g);if(!D.agents.length)box.append(h('p','empty','No custom agents yet. An agent answers one kind of question with your measures and tools, for example a store manager assistant: press New agent, or ask the agent to set one up.'));
+function agents(box){newBtn(box,'agent');const g=h('div','cards');box.append(g);if(!D.agents.length)box.append(h('p','empty',MODE==='viewer'?'No custom agents here yet: ask the main agent your question (Ask the agent).':'No custom agents yet. An agent answers one kind of question with your measures and tools, for example a store manager assistant: press New agent, or ask the agent to set one up.'));
  D.agents.forEach(a=>{const c=card(a.name||a.id,`agents/${a.id}.json · ${a.status||''}`);c.append(h('div','file',(a.purpose||a.instructions||'').slice(0,240)));
   const q=h('input','f');q.placeholder='e.g. revenue in North?';const out=h('div','msg');c.append(h('label','l','Question'),q);
   act(c,'Ask',async()=>{const r=await api('run_agent',{agent:a.id,question:q.value});out.textContent=r.answer||JSON.stringify(r,null,1)},1);

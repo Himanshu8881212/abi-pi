@@ -70,6 +70,7 @@ const NS='http://www.w3.org/2000/svg';function el(t,a,p){const e=document.create
 // neighbours always differ in tone: ink, signal, light grey, mid grey, signal tint, dark grey
 const COL=['var(--ink)','var(--c2)','var(--c4)','var(--c3)','var(--c5)','var(--mute)'];
 const dimLabel=c=>{const k=String(c).split('.').pop().replace(/_/g,' ');return k.charAt(0).toUpperCase()+k.slice(1)};  // products.product_name: Product name
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];  // a (year, month) axis reads Jan 2023
 const PLAIN=/(^|\.)(year|week_year|quarter|month|week|day_of_week)$/;  // calendar numbers: 2023, not 2,023
 function table(box,d){const t=document.createElement('table');const cols=d.columns;let sort=null,desc=false;
  function draw(){t.innerHTML='';const h=t.insertRow();cols.forEach((c,i)=>{const th=document.createElement('th');th.textContent=(d.measures[c]||dimLabel(c))+(sort===i?(desc?' ↓':' ↑'):'');th.title=c;if(typeof d.rows[0]?.[i]==='number')th.className='n';th.onclick=()=>{desc=sort===i?!desc:true;sort=i;draw()};h.appendChild(th)});
@@ -109,7 +110,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
  // drawn for its box: a card made wider, narrower or (sized) taller draws again rather than stretching its text
  if(window.ResizeObserver){const ro=new ResizeObserver(()=>{if(svg.parentNode!==box)return ro.disconnect();if(Math.abs(box.clientWidth-W)>8||(sz&&Math.abs(box.clientHeight-H)>8)){ro.disconnect();svg.remove();chart(box,d)}});ro.observe(box)}
  const at=m=>c.indexOf(m),N=m=>d.measures[m]||m,val=(i,m)=>d.rows[i][at(m)],num=(i,m)=>typeof val(i,m)==='number',idx=d.rows.map((r,i)=>i),
-  key=r=>!per?r[0]:c[1-yi].endsWith('.month')?`${r[yi]}-${String(r[1-yi]).padStart(2,'0')}`:`${r[yi]} Q${r[1-yi]}`,tick=(v,m)=>fmt(v,{...d.format[m],compact:true,decimals:2}),
+  key=r=>!per?r[0]:c[1-yi].endsWith('.month')?`${MON[r[1-yi]-1]||r[1-yi]} ${r[yi]}`:`Q${r[1-yi]} ${r[yi]}`,tick=(v,m)=>fmt(v,{...d.format[m],compact:true,decimals:2}),
   mk=(e,i,ks,o)=>mark(e,per?null:i,[...(per?[key(d.rows[i])]:d.rows[i].slice(0,nd).map(x=>x??'—')),...ks.map(m=>`${N(m)}: ${fmt(val(i,m),{...d.format[m],compact:false})}`)].join(' · '),o);
  if(type==='pie'){const m=ms[0],rs=idx.filter(i=>val(i,m)>0),tot=rs.reduce((s,i)=>s+val(i,m),0),T=legend(svg,W,rs.map(i=>d.rows[i][0])),
    R=Math.max(8,Math.min(W-16,H-T-8)/2),r=R*.57,cx=W/2,cy=(H+T)/2,p=(a,q)=>`${cx+q*Math.sin(a)},${cy-q*Math.cos(a)}`;let a=0;

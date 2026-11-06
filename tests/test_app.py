@@ -999,7 +999,7 @@ def test_each_chart_type_draws_its_own_shape_from_its_rows(srv, tmp_path):
     for k, o in res["out"].items():
         name = k.split(" | ")[0]
         if name == "period":
-            assert not o["marks"] and "circle" in o["shapes"] and "2026-05" in o["text"], k
+            assert not o["marks"] and "circle" in o["shapes"] and re.search(r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) 2026", o["text"]), k  # 1.2.5: a month reads May 2026
             continue
         d, shapes = cases[name]
         if shapes is None:
