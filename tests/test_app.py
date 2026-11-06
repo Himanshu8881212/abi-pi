@@ -1234,3 +1234,11 @@ def test_s3_keys_become_secrets_bound_to_the_bucket_host_and_never_come_back(srv
             except abi.ActionError as e:
                 if e.status == 409 and (e.body or {}).get("confirm_token"):
                     abi.call("delete_secret", confirm=e.body["confirm_token"], name=n)
+
+
+def test_a_share_link_never_points_at_a_loopback_address():
+    """1.2.5: Share copied http://127.0.0.1:8790/... (the container's own address): nobody else can open it."""
+    assert app.public_base("https://abi.example.com/", "127.0.0.1:8790") == "https://abi.example.com"
+    assert app.public_base("", "abi.lan:8790") == "http://abi.lan:8790"
+    assert app.public_base("", "abi.example.com", "https") == "https://abi.example.com"
+    assert all(app.public_base("", h) == "" for h in ("127.0.0.1:8790", "localhost:8790", "[::1]:8790", "0.0.0.0", ""))

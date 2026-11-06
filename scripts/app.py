@@ -194,7 +194,7 @@ body.laying .lay>*{outline:1px dashed var(--signal);outline-offset:-1px;cursor:g
 .mobile .layers{grid-template-columns:1fr}
 .hits{display:flex;flex-direction:column;gap:12px;margin-top:12px}.hit{border-left:2px solid var(--signal);padding:2px 0 2px 12px;white-space:pre-wrap}.hit .file{margin:0 0 4px}
 .toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--sheet);padding:10px 16px;border-radius:6px;font-size:13px;z-index:9;max-width:calc(100vw - 32px)}
-.card.hl,.person.hl,.rowcard.hl{outline:0;animation:hlf 2.4s ease-out}@keyframes hlf{0%,40%{background-color:color-mix(in srgb,var(--signal) 9%,var(--sheet));box-shadow:0 0 0 1px color-mix(in srgb,var(--signal) 35%,transparent)}100%{}}
+.card.hl,.person.hl,.rowcard.hl{outline:0;animation:hlf 2.4s ease-out}@keyframes hlf{0%,45%{background-color:var(--hover);box-shadow:inset 3px 0 0 var(--ink)}100%{}}.person.just{box-shadow:inset 3px 0 0 var(--ink);padding-left:12px}.state.new{color:var(--ink);background:var(--hover)}.state.new::before{background:var(--ink);opacity:1}
 .cards.rows{grid-template-columns:1fr;gap:0;border:1px solid var(--line);border-radius:var(--r);background:var(--sheet);overflow:hidden}
 .rows>.card{border:0;border-radius:0;border-top:1px solid var(--line)}.rows>.card:first-child,.rows>.rowhead+.card{border-top:0}
 .rows>.rowcard,.rowhead{display:grid;grid-template-columns:minmax(160px,1fr) minmax(200px,1.5fr) minmax(200px,1.5fr) 200px;gap:16px;align-items:start;padding:12px 16px}
@@ -512,7 +512,7 @@ th,.card table th{font-size:12px;letter-spacing:0;font-weight:500;font-feature-s
 dialog.done{width:min(480px,calc(100vw - 32px))}.done .dhead{display:flex;align-items:center;gap:12px;margin-bottom:6px}.done .dhead h3{margin:0}
 .done .dmark{display:inline-grid;place-items:center;width:32px;height:32px;border-radius:50%;background:color-mix(in srgb,var(--ok) 12%,var(--sheet));color:var(--ok);flex:none}.done .dmark .ic{width:18px;height:18px;stroke-width:2.25}
 .done p{margin:8px 0 0;line-height:1.55;color:color-mix(in srgb,var(--ink) 82%,var(--mute))}.done p+p{color:var(--mute);font-size:13.5px}
-#publish.live{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 35%,var(--line));opacity:1}#publish.live .ic{color:var(--ok)}#publish.live:disabled{opacity:1}
+#publish.live{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 35%,var(--line));opacity:1}#publish.live .ic{color:var(--ink)}#publish.live:disabled{opacity:1}
 /* masked by row-level security, said in words */
 .masked{display:inline-flex;align-items:center;gap:5px;padding:1px 8px;border-radius:999px;background:var(--hover);color:var(--mute);font-size:12.5px;white-space:nowrap;vertical-align:1px}.masked .ic{width:12px;height:12px}
 .masked-row textarea::placeholder{font-style:italic}
@@ -550,11 +550,19 @@ dialog .row.foot{justify-content:flex-end;gap:8px}dialog .row.foot .sp{flex:1}
 p.note.warn{display:flex;gap:8px;align-items:flex-start;background:color-mix(in srgb,var(--signal) 8%,var(--sheet))}p.note.warn .ic{color:var(--signal-ink);margin-top:1px}
 /* configuration notes are notes, not errors: neutral, with an info line */
 p.note,.card .note{background:var(--paper);border-color:var(--line)}
-.card .scroll.all{max-height:none}.mobile body[data-mode=viewer] .rows>.rowcard .fld:first-child .f{font-weight:600}.mobile body[data-mode=viewer] .rows>.rowcard{padding:12px 16px}.mobile body[data-mode=viewer] .rowcard textarea.f.code{font-size:13px}dialog .card>.row.acts{margin-top:14px}.card>.formrow+label.l,.card>.formrow+.mpick{margin-top:18px!important}.mlchart{margin-top:4px}.slicer.list .opts{flex-direction:column;flex-wrap:nowrap;gap:4px;mask-image:none}.slicer.list .sl{display:flex;justify-content:space-between;width:100%;border-radius:8px;padding:8px 12px;font-size:13.5px;
+.card .scroll.all{max-height:none}.cards.vault>.card{max-width:none!important}.card label.l+.checks{margin-top:8px}.card label.l+.checks+label.l{margin-top:18px}
+body:not(.mobile) .pg:has(>.cards.pins) .pghead{flex-wrap:nowrap}
+.slicer.list{height:100%}.slicer.list .opts{flex:1;justify-content:flex-start;gap:6px}.slicer.list .sl{min-height:42px;align-items:center}.more>.btn.mbtn{color:color-mix(in srgb,var(--ink) 80%,var(--mute))}.acts button.pin,.srow .acts button.pin{height:34px;padding:0 12px;opacity:1!important;color:var(--ink)}
+.mobile .card h3 button.pin,.mobile .grid>.card>h3 button.pin{width:auto!important;padding:0 10px!important;font-size:12px!important;gap:4px!important;min-height:32px}
+.mobile .pinned .kpi .v,.mobile .cards.pins .kpi .v{font-size:clamp(22px,8.5vw,30px);letter-spacing:-.03em}
+.hist .srow{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid var(--line)}.hist .srow:first-child{border-top:0}.hist .cnt:not(:empty){padding:1px 8px;border-radius:999px;background:var(--hover);color:var(--mute);font-size:11.5px;align-self:center}
+.rowcard .fld .file{font:12px var(--text)!important}.tcard .chip,.tcard .chip *{font-family:var(--text)!important}.card table td{vertical-align:middle}
+.rowhead>span{padding-left:12px}.rows>.rowcard{align-items:center}.rows>.rowcard>.acts{align-self:center}.card h3>svg.ic{width:15px;height:15px;color:var(--mute);flex:none;margin-right:-2px}.card h3>svg.ic+span{flex:1 1 auto;min-width:0}.card>.item>.file{display:flex;align-items:center;gap:6px}.card>.item>.file .ic{width:13px;height:13px}
+.card>.item.new::before{background:var(--ink)}.card>.item.sev-info.new::before{background:var(--signal)}dialog h3{justify-content:flex-start!important}.node>span{white-space:normal!important;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.4}.pg>.canvas,.canvas{background:radial-gradient(circle,color-mix(in srgb,var(--faint) 70%,transparent) 1px,transparent 1.2px) 0 0/20px 20px,var(--paper)}.mobile body[data-mode=viewer] .rows>.rowcard .fld:first-child .f{font-weight:600}.mobile body[data-mode=viewer] .rows>.rowcard{padding:12px 16px}.mobile body[data-mode=viewer] .rowcard textarea.f.code{font-size:13px}dialog .card>.row.acts{margin-top:14px}.card>.formrow+label.l,.card>.formrow+.mpick{margin-top:18px!important}.mlchart{margin-top:4px}.slicer.list .opts{flex-direction:column;flex-wrap:nowrap;gap:4px;mask-image:none}.slicer.list .sl{display:flex;justify-content:space-between;width:100%;border-radius:8px;padding:8px 12px;font-size:13.5px;
  background:linear-gradient(90deg,color-mix(in srgb,var(--signal) 13%,var(--sheet)) var(--p),var(--sheet) var(--p))}.slicer.list .sl small{font-size:12px}.slicer.list .sl.on{background:var(--ink)}
 .kv .rbar{display:block;height:3px;margin-top:4px;border-radius:2px;background:linear-gradient(90deg,var(--c3) var(--p),var(--hover) var(--p));max-width:180px}
 /* one accent: green only as a status dot; the words stay ink */
-.state.on{color:var(--ink);background:var(--hover)}.state.on::before{background:var(--ok);opacity:1}#publish.live{color:var(--ink);border-color:var(--line)}#publish.live .ic{color:var(--ok)}
+.state.on{color:var(--ink);background:var(--hover)}.state.on::before{background:var(--ok);opacity:1}#publish.live{color:var(--ink);border-color:var(--line)}#publish.live .ic{color:var(--ink)}
 .msg.ok,p.ok,div.ok,li.ok{color:var(--ink)}.msg.ok::before{background:var(--ok)}p.ok::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--ok);margin:0 8px 1px 0}
 .kv span.ok{color:var(--ink)}.kv span.ok::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ok);margin:0 6px 1px 0}
 p.note.warn{background:var(--paper);border-color:var(--line-strong)}
@@ -626,7 +634,7 @@ const IC={home:'M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3z',chat:'M21 12a8 8 0 0 1-11.6 
  mail:'M3 5h18v14H3zM3 6l9 7 9-7',trash:'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13',play:'M7 4l13 8-13 8z',down:'M6 9l6 6 6-6',check:'M4 12l5 5L20 6',
  refresh:'M20 11a8 8 0 0 0-14.6-4.5L4 8M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5L20 16M20 20v-4h-4',upload:'M12 16V4M7 9l5-5 5 5M4 20h16',user:'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0',
  dots:'M4.5 12a.75.75 0 1 0 1.5 0 .75.75 0 1 0-1.5 0M11.25 12a.75.75 0 1 0 1.5 0 .75.75 0 1 0-1.5 0M18 12a.75.75 0 1 0 1.5 0 .75.75 0 1 0-1.5 0',
- info:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v5M12 8h.01',alert:'M12 4 2.5 20h19zM12 10v4M12 17h.01',lock:'M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3',key:'M8 14a4 4 0 1 1 3.9-5H21v3h-2v2h-3v-2h-4.1A4 4 0 0 1 8 14zM7 10h.01',env:'M4 5h16v5H4zM4 14h16v5H4zM7.5 7.5h.01M7.5 16.5h.01M11 7.5h6M11 16.5h6'};
+ info:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v5M12 8h.01',alert:'M12 4 2.5 20h19zM12 10v4M12 17h.01',lock:'M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3',copy:'M9 9h11v11H9zM5 15V4h11',key:'M8 14a4 4 0 1 1 3.9-5H21v3h-2v2h-3v-2h-4.1A4 4 0 0 1 8 14zM7 10h.01',env:'M4 5h16v5H4zM4 14h16v5H4zM7.5 7.5h.01M7.5 16.5h.01M11 7.5h6M11 16.5h6'};
 function ic(n){const s=document.createElementNS('http://www.w3.org/2000/svg','svg');s.setAttribute('viewBox','0 0 24 24');s.setAttribute('class','ic');s.setAttribute('aria-hidden','true');
  const p=document.createElementNS('http://www.w3.org/2000/svg','path');p.setAttribute('d',IC[n]||'');s.append(p);return s}
 // an icon button: the word is its accessible name and tooltip
@@ -658,7 +666,7 @@ async function api(action,args){
 let PEND_T=null;function refreshPending(){clearTimeout(PEND_T);PEND_T=setTimeout(async()=>{try{D.pending=await (await fetch('/api/changes',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({project:D.project})})).json().then(x=>x.result||D.pending);vc()}catch(e){}},400)}
 let ASK_WHAT='';  // what the person is deleting, for ABI's confirmation
 function ask(c){return new Promise(res=>{const d=$('#confirm'),bad=/\b(delet|remov|drop|revok|stop|disabl|overwrit)/i.test((c.title||'')+' '+(c.message||''));$('#c-yes').classList.toggle('danger-solid',bad);$('#c-yes').textContent=c.yes||(bad?(ASK_WHAT?'Delete':'Yes, go ahead'):'Confirm');$('#confirm h3').textContent=bad&&ASK_WHAT?`Delete “${ASK_WHAT}”?`:c.title||(c.id?'Confirm this change':'Confirm');
- $('#c-msg').textContent=bad&&ASK_WHAT?`“${ASK_WHAT}” leaves the project. It stays an uncommitted change, so Undo in the toast or under Changes takes it back.`:c.lead||people(c.message);$('#c-abi').textContent=bad&&ASK_WHAT||c.lead?people(c.message||''):'';$('#c-abi').hidden=!$('#c-abi').textContent;ASK_WHAT='';const pv=plainPreview(c.preview||'');$('#c-prev').textContent=pv;$('#c-prev').hidden=!pv;$('#c-prev').classList.toggle('plain',pv!==(c.preview||''));
+ $('#c-msg').textContent=bad&&ASK_WHAT?`“${ASK_WHAT}” leaves the project. It stays an uncommitted change, so Undo in the toast or under Changes takes it back.`:c.lead||people(c.message);$('#c-abi').textContent=c.lead?people(c.message||''):'';$('#c-abi').hidden=!$('#c-abi').textContent;ASK_WHAT='';const pv=plainPreview(c.preview||'');$('#c-prev').textContent=pv;$('#c-prev').hidden=!pv;$('#c-prev').classList.toggle('plain',pv!==(c.preview||''));
  d.showModal();$('#c-yes').onclick=()=>{d.close();res(true)};$('#c-no').onclick=()=>{d.close();res(false)}})}
 // ABI's preview of what it will do, in words where it is a known shape (a role change: "editor1: Viewer → Editor")
 function plainPreview(t){t=String(t||'');const who=Object.fromEntries([...(D.rls?.accounts||[]).map(a=>[String(a.id),a.name]),...(window.ME?.id?[[String(ME.id),ME.name]]:[])]),R=x=>x?x[0].toUpperCase()+x.slice(1):'No access',nm=u=>who[String(u)]||'a person';
@@ -669,21 +677,23 @@ function plainPreview(t){t=String(t||'');const who=Object.fromEntries([...(D.rls
  else if(j&&typeof j==='object'&&!Array.isArray(j)&&Object.values(j).every(v=>v===null||typeof v!=='object'))out=Object.entries(j).map(([a,v])=>`${colName(a)}: ${v??'—'}`).join('\n');
  return out==null?people(t):[people(head),out].filter(Boolean).join('\n\n')}
 // "as user 1" in ABI's words: the person's name
-function people(t){const who=Object.fromEntries([...(D.rls?.accounts||[]).map(a=>[String(a.id),a.name]),...(window.ME?.id?[[String(ME.id),ME.name]]:[])]);return String(t||'').replace(/\buser (\d+)\b/g,(m,u)=>who[u]?who[u]:'a person').replace(/project '[a-z0-9_-]+_pub'/g,'the published version').replace(new RegExp(`project '${D.project}'`,'g'),'this project')}
-function plainErr(m){return String(m||'').replace(/^.*?rejected by the MEL compile:\s*\d+ error\(s\):?\s*/i,'The formula has an error: ').replace(/\(DECISIONS [A-Z]-\d+\)/g,'').replace(/\buser (\d+)\b/g,'a person').trim()}
+function people(t){const who=Object.fromEntries([...(D.rls?.accounts||[]).map(a=>[String(a.id),a.name]),...(window.ME?.id?[[String(ME.id),ME.name]]:[])]);return String(t||'').replace(/\s*Confirm to proceed\.?/g,'').replace(/\b(flow|report|ML model|tool|agent) '([a-z0-9_]+)'/g,(m,k,id)=>`${k} “${idsToNames(id)===id?id.replace(/_/g,' ').replace(/^./,c=>c.toUpperCase()):idsToNames(id)}”`).replace(/\buser (\d+)\b/g,(m,u)=>who[u]?who[u]:'a person').replace(/project '[a-z0-9_-]+_pub'/g,'the published version').replace(new RegExp(`project '${D.project}'`,'g'),'this project')}
+function plainErr(m){return String(m||'').replace(/^.*?rejected by the MEL compile:\s*\d+ error\(s\):?\s*/i,'The formula has an error: ').replace(/The formula has an error:\s*[;.]\s*/,'The formula has an error, so nothing changed. Check its column names and brackets; ').replace(/\(DECISIONS [A-Z]-\d+\)/g,'').replace(/\buser (\d+)\b/g,'a person').trim()}
 // an id in ABI's text (a measure, a flow, a report) as its name
 function idsToNames(t){const M=new Map([...(D.measures||[]),...(D.flows||[]),...(D.reports||[]),...(D.ml||[]),...(D.datasets||[])].filter(x=>x.id&&x.name).map(x=>[x.id,x.name]));return String(t??'').replace(/\b[a-z][a-z0-9_]{2,}\b/g,w=>M.get(w)||w)}
 // Share a report: its link (for anyone who already has access) and who that is; access is changed in Users & access
-async function shareDialog(rep){const d=h('dialog'),c=h('div','card'),url=`${location.origin}/?p=${encodeURIComponent(D.project)}#rep:${encodeURIComponent(rep.id)}`,li=h('input','f'),cp=btn('Copy link',async()=>{try{await navigator.clipboard.writeText(url)}catch(e){li.select()}toast('Link copied.')},1),ppl=h('div');
- li.readOnly=true;li.value=url;li.setAttribute('aria-label','Link to the report');const r=h('div','row qrow');r.append(li,cp);cp.prepend(ic('open'));
- c.append(h3i('people',`Share ${rep.name||rep.id}`),h('p','file','The link opens the report for people who have access to it; Viewers see the published version.'),r,h('h4','','Who can open it'),ppl);
+async function shareDialog(rep){const d=h('dialog'),c=h('div','card'),base=window.ME?.base||'',path=`/?p=${encodeURIComponent(D.project)}#rep:${encodeURIComponent(rep.id)}`,url=base+path,li=h('input','f'),cp=btn('Copy link',async()=>{try{await navigator.clipboard.writeText(url)}catch(e){li.select()}cp.replaceChildren(ic('check'),'Copied');cp.classList.add('done');setTimeout(()=>{cp.replaceChildren(ic('copy'),'Copy link');cp.classList.remove('done')},2200)},1),ppl=h('div');
+ li.readOnly=true;li.value=url;li.setAttribute('aria-label','Link to the report');const r=h('div','row qrow');r.append(li,cp);cp.prepend(ic('copy'));
+ c.append(h3i('people',`Share ${rep.name||rep.id}`),h('p','file','The link opens the report for people who have access to it; Viewers see the published version.'),r,...(base?[]:[h('p','note','This app is reached at a local address here, so the link is only its path. Set ABI_PUBLIC_URL (the address people open) and restart, and Share gives the full link.')]),h('h4','','Who can open it'),ppl);
  const x=await fetch('/admin/users',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(y=>y.json()).catch(()=>({}));const U=x.result;
  if(U)U.users.forEach(u=>{const a=U.access[u.name]||{},role=(u.roles||{})[U.project],can=u.workspace_owner||(role&&role!=='none'&&(!a.reports||a.reports.includes(rep.id))),row=h('div','srow'),n=h('div','pwho');
   n.append(h('span','av',u.name.slice(0,1).toUpperCase()),h('b','',u.name));row.append(n,h('span','state'+(can?' on':''),can?(u.workspace_owner?'Owner':'Can open'):'No access'));ppl.append(row)});
  const f=h('div','row foot'),mg=btn('Manage access',()=>{d.close();PENDING.share=rep.id;show('people')}),cl=btn('Done',()=>d.close());f.append(mg,h('span','sp'),cl);c.append(f);d.append(c);d.onclose=()=>d.remove();document.body.append(d);d.showModal()}
+function plur(t){return String(t??'').replace(/(\d[\d,]*) ([a-z]+)\(s\)/gi,(m,n,w)=>n==='1'?`${n} ${w}`:`${n} ${w}s`).replace(/\b([a-z]+)\(s\)/gi,'$1s')}
 function h3i(i,t){const x=h('h3');x.append(ic(i),t);return x}
 function say(box,text,bad){box.textContent=text;box.className='msg '+(bad?'bad':'ok')}
-function card(title,sub){const c=h('div','card'),t=h('h3');t.append(h('span','',title));if(sub&&(/\s/.test(sub)||/\.json$/.test(sub)))t.title=sub;else if(sub)t.append(h('span','file',sub));c.append(t);return c}
+const CARDIC={'Rows':'tables','Edit history':'history','Waiting for approval':'check','Agent':'agents','Usage':'reports','Email':'mail','Single sign-on':'lock','Connect a provider':'plus','Messages':'inbox','Alerts':'alert','Data freshness':'refresh','Model readiness':'model','ML models':'ml','Flows':'flows','Row-level rules':'security','Hidden columns':'lock','Roles':'people','Restrict rows for a person':'filter','Two-step sign-in':'lock','What this controls':'info','Export':'dataexport','Import':'upload','Commits':'history','Search the vault':'search','Saved analyses':'explore','New analysis':'explore','Add a person':'user','Invite':'mail'};
+function card(title,sub){const c=h('div','card'),t=h('h3');if(CARDIC[title])t.append(ic(CARDIC[title]));t.append(h('span','',title));if(sub&&(/\s/.test(sub)||/\.json$/.test(sub)))t.title=sub;else if(sub)t.append(h('span','file',sub));c.append(t);return c}
 // a list of editable items as aligned rows under one header (rows mode); a field is its label (shown on phones) and input
 function fld(label,el,note){const d=h('div','fld');d.append(h('label','l',label),el);if(note)d.append(h('div','file',note));return d}
 function rowcard(c,...fields){c.classList.add('rowcard');c.append(...fields);c.oninput=()=>c.classList.add('dirty');return c}
@@ -697,7 +707,7 @@ const cell=v=>v!==null&&typeof v==='object'?JSON.stringify(v):typeof v==='string
 function rows(box,d){box.innerHTML='';box.classList.add('out');if(!(d&&d.columns&&Array.isArray(d.rows))){box.append(h('pre','',JSON.stringify(d,null,1)));return}
  const rs=d.rows.map(r=>(Array.isArray(r)?r:d.columns.map(c=>r[c])).map(cell));table(box,{measures:d.measures||{},format:d.format||{},columns:d.columns,rows:rs})}
 // an admin action ABI wants confirmed: the person's own click in ABI's dialog, then the server runs it (null: they said no)
-async function confirmed(x){if(x.confirm){if(!await ask(x.confirm))return null;x=await fetch('/confirm/'+x.confirm.id,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(y=>y.json())}if(x.error)throw new Error(x.error);return x}
+async function confirmed(x){if(x.confirm){if(!await ask(x.confirm))return null;x=await fetch('/confirm/'+x.confirm.id,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(y=>y.json())}if(x.error)throw new Error(plainErr(x.error));refreshPending();return x}
 function act(c,label,fn,pri){const m=c.querySelector(':scope>.msg')||c.appendChild(h('div','msg'));
  if(!c.dataset.clr){c.dataset.clr=1;c.addEventListener('input',()=>{if(m.classList.contains('bad'))m.textContent=''})}  /* an error goes once the person fixes the field */
  let r=c.querySelector(':scope>.acts');if(!r){r=h('div','row acts');c.insertBefore(r,m)}
@@ -816,10 +826,10 @@ function report(box,rep){let flt=PENDING.filters||RFLT[rep.id]||[];PENDING.filte
   // the columns this report already slices by, one click each; every column in the list under them
   const used=[...new Set((rep.spec?.pages||[]).flatMap(p=>p.visuals||[]).flatMap(v=>v.query?.dimensions||[]).filter(c=>D.dims.includes(c)&&!c.startsWith('calendar.')))].slice(0,6),quick=h('div','row seg');
   used.forEach(c=>{const b=h('button','chip',colName(c));b.type='button';b.onclick=()=>{col.value=c;quick.querySelectorAll('.chip').forEach(x=>x.classList.toggle('on',x===b));col.onchange()};quick.append(b)});
-  ft.append(ok,no);ft.style.justifyContent='flex-end';pop.append(...(used.length?[h('div','file','Filter by'),quick]:[]),col,q,list,ft);top.append(pop);no.onclick=close;
+  ft.append(ok,no);ft.style.justifyContent='flex-end';ok.disabled=!c0;const rl=(D.rls?.restricted?D.rls.rules||[]:[]).filter(x=>(x.values||[]).length);if(rl.length){const n=h('p','note');n.append(ic('lock'),h('span','',`You already see only ${rl.map(x=>`${colName(x.column)} ${x.values.join(', ')}`).join('; ')}.`));pop.append(n)}pop.append(...(used.length?[h('div','file','Filter by'),quick]:[]),col,q,list,ft);top.append(pop);no.onclick=close;
   ok.onclick=()=>{if(col.value)setVals(col.value,[...list.querySelectorAll('input:checked')].map(i=>JSON.parse(i.value)));close()};
   q.oninput=()=>{const t=q.value.toLowerCase();list.querySelectorAll('label').forEach(l=>l.hidden=!l.textContent.toLowerCase().includes(t))};
-  col.onchange=async()=>{list.textContent='';q.hidden=true;if(!col.value)return;list.append(h('p','msg','Loading…'));
+  col.onchange=async()=>{list.textContent='';q.hidden=true;ok.disabled=!col.value;if(!col.value)return;list.append(h('p','msg','Loading…'));
    try{const r=await api('semantic_query',{measures:[measFor(col.value)],dimensions:[col.value],order_by:[{field:col.value}],limit:500}),on=vals(col.value);list.textContent='';
     r.rows.forEach(x=>{const l=h('label','fopt'),i=h('input');i.type='checkbox';i.value=JSON.stringify(x[0]);i.checked=on.includes(x[0]);l.append(i,h('span','',x[0]===null?'(blank)':String(x[0])));if(typeof x[1]==='number')l.append(h('small','',fmt(x[1],{compact:true,decimals:1})));list.append(l)});
     q.hidden=r.rows.length<8;if(!q.hidden)q.focus()}catch(e){list.textContent='';list.append(h('p','msg',e.message))}};
@@ -899,11 +909,11 @@ function editsPage(box){const T=D.model?.tables||{},keyed=Object.keys(T).filter(
    if(MODE==='developer'&&!key.includes(cols[i])){td.className='ed-cell';td.title='click to edit';td.onclick=()=>{if(td.querySelector('input'))return;const inp=h('input','f');inp.value=v??'';td.textContent='';td.append(inp);inp.focus();
     const done=()=>{const nv=inp.value;td.textContent=nv||'—';if((nv||null)!==(v===null?null:String(v))){staged=staged.filter(x=>!(x.column===cols[i]&&JSON.stringify(x.key)===JSON.stringify(key.map(k=>row[cols.indexOf(k)]))));
      staged.push({key:key.map(k=>row[cols.indexOf(k)]),column:cols[i],value:nv===''?null:nv,old:v});td.classList.add('changed');sv()}};inp.onblur=done;inp.onkeydown=e=>{if(e.key==='Enter')inp.blur()}}}})});
-  if(MODE==='developer'){const tr=tb.insertRow(),ins=cols.map(c=>{const i=h('input','f');i.placeholder=c;tr.insertCell().append(i);return i});
+  if(MODE==='developer'){const tr=tb.insertRow(),ins=cols.map(c=>{const i=h('input','f');i.placeholder='new '+c;i.setAttribute('aria-label','New row: '+c);tr.insertCell().append(i);return i});
    tr.insertCell().append(btn('Add row',async()=>{const row=Object.fromEntries(cols.map((c,i)=>[c,ins[i].value===''?null:ins[i].value]));
     try{await api('edit_cells',{table:sel.value,add:[row],comment:'row added in the app'});say(msg,'Row added through ABI.');await rowsPage();await history()}catch(e){say(msg,e.message,1)}}))}
   const sc=h('div','scroll all');sc.append(tb);body.append(sc);pager.append(h('span','file',`rows ${off+1}–${off+d.rows.length} of ${d.total}`),
-   btn('Previous',async()=>{off=Math.max(0,off-25);await rowsPage()}),btn('Next',async()=>{if(off+25<d.total){off+=25;await rowsPage()}}))}
+   btn('Previous',async()=>{off=Math.max(0,off-25);await rowsPage()}),btn('Next',async()=>{if(off+25<d.total){off+=25;await rowsPage()}}));{const [pv,nx]=pager.querySelectorAll('.btn');pv.disabled=off===0;nx.disabled=off+25>=d.total;pv.prepend(ic('left'));nx.append(ic('right'))}}
  function sv(){save.innerHTML='';if(!staged.length)return;const cm=h('input','f');cm.placeholder='why (kept in the history)';
   save.append(h('span','',`${staged.length} change${staged.length>1?'s':''} not saved`),cm,btn('Save edits',async()=>{try{await api('edit_cells',{table:sel.value,edits:staged,comment:cm.value||null});say(msg,'Saved through ABI. Every query now sees the edit.');await rowsPage();await history()}catch(e){say(msg,e.message,1)}}))}
  async function history(){hist.querySelectorAll(':scope>:not(h3)').forEach(x=>x.remove());let r;try{r=await api('edit_history',{table:sel.value,limit:50})}catch(e){hist.append(h('p','bad',e.message));return}
@@ -916,9 +926,12 @@ function editsPage(box){const T=D.model?.tables||{},keyed=Object.keys(T).filter(
   list.forEach(p=>{const c=h('div','hit');c.append(h('div','',`${p.table} · ${p.changes?.length||p.rows?.length||''} change(s) · ${p.user||''} · ${p.comment||''}`));
    if(MODE==='developer')c.append(btn('Approve',async()=>{try{await api('approve_edit',{table:p.table,batch:p.batch});await proposals();await rowsPage()}catch(e){toast(e.message)}},1),btn('Reject',async()=>{try{await api('reject_edit',{table:p.table,batch:p.batch});await proposals()}catch(e){toast(e.message)}}));prop.append(c)})}
  if(MODE==='developer'){const it=card('New input table','rows entered by people only, e.g. targets or a budget'),nm=h('input','f ed'),cs=h('input','f ed'),ky=h('input','f ed');
-  nm.placeholder='targets_2026';cs.placeholder='region:VARCHAR, month:DATE, target_revenue:DOUBLE';ky.placeholder='region, month';it.append(h('label','l','Name'),nm,h('label','l','Columns (name:TYPE, …)'),cs,h('label','l','Key'),ky);it.style.gridColumn='1/-1';
-  act(it,'Create',async()=>{const columns=cs.value.split(',').map(x=>x.trim()).filter(Boolean).map(x=>{const[n,t]=x.split(':').map(y=>y.trim());return{name:n,type:t||'VARCHAR'}});
-   await api('create_input_table',{table:nm.value.trim(),columns,key:ky.value.split(',').map(x=>x.trim()).filter(Boolean)});return 'Created through ABI. Pick it above and add its rows.'});g.append(it)}
+  nm.placeholder='e.g. targets_2026';it.querySelector('h3').prepend(ic('plus'));const colsL=h('div','stlist'),TY=[['VARCHAR','Text'],['DOUBLE','Number'],['INTEGER','Whole number'],['DATE','Date'],['BOOLEAN','Yes or no']];
+  const addCol=(n,t,k)=>{const r=h('div','row strow'),ni=h('input','f'),ti=sel(TY,t||'VARCHAR'),kl=h('label','chk'),kc=h('input');kc.type='checkbox';kc.checked=!!k;kl.append(kc,h('span','','Key'));ni.placeholder='column name';ni.value=n||'';ni.setAttribute('aria-label','Column name');ti.setAttribute('aria-label','Column type');
+   const x=ib('x','Remove this column',()=>r.remove());r.append(ni,ti,kl,x);r.get=()=>({name:ni.value.trim(),type:ti.value,key:kc.checked});colsL.append(r)};addCol('region','VARCHAR',1);addCol('month','DATE',1);addCol('target','DOUBLE');
+  it.append(fld('Name',nm),lab('Columns'),colsL,btn('+ Add a column',()=>addCol()));it.style.gridColumn='1/-1';
+  act(it,'Create',async()=>{need(nm,/^[a-z][a-z0-9_]*$/.test(nm.value.trim()),'A table name is lowercase letters, digits and _, starting with a letter.');const cs2=[...colsL.children].map(r=>r.get()).filter(c=>c.name);
+   if(!cs2.length)throw new Error('Add at least one column.');await api('create_input_table',{table:nm.value.trim(),columns:cs2.map(({name,type})=>({name,type})),key:cs2.filter(c=>c.key).map(c=>c.name)});toast(`Created ${nm.value.trim()}: pick it under Table and add its rows.`);return 'Created through ABI.'},1);g.append(it)}
  sel.onchange=()=>{off=0;rowsPage();history()};if(keyed.length){rowsPage();history();proposals()}else box.append(h('p','empty','No keyed tables: a table needs a key to be edited.'))}
 // ---------- Export ----------
 const dl=(blob,name)=>{const a=h('a');a.href=URL.createObjectURL(blob);a.download=name;a.click()};
@@ -930,7 +943,7 @@ function documentsPage(box){const g=h('div','cards'),c=card('Document','rendered
 function onePagerPage(box){const g=h('div','cards top'),c=card('Make a one-pager','the board-pack agent builds it as an ABI report');g.append(c);box.append(g);
  if(MODE==='developer'){const ta=h('textarea','f ed');ta.rows=3;ta.value='A one-pager for the board: the headline numbers for the last complete months, the trend by month, the biggest movers, and the caveats.';
   c.append(ta);act(c,'Ask the agent',async()=>{openChat(true);inp.value='Use the board-pack specialist to build a one-pager report in ABI: '+ta.value;sendChat();return 'Asked: follow it in the chat.'},1)}
- else c.append(h('p','empty',MOBILE||!['editor','owner'].includes(window.ME?.role)?'A builder of this project makes one-pagers in Developer, on a computer. The ones made show below.':'Switch to Developer to have one made.'));
+ else c.append(h('p','empty',MOBILE||!['editor','owner'].includes(window.ME?.role)?'A builder of this project makes one-pagers in Developer, on a computer.':'Switch to Developer to have one made.'));
  const ex=card('Export a one-pager','reports with a single page');repPicker(ex,(slot,r)=>{const e=exportCard(r,()=>[],()=>r.pages[0]);e.classList.add('flat');slot.append(e)},r=>r.pages.length===1);g.append(ex)}
 function dataExportPage(box){const g=h('div','cards top'),c=card('A view\'s rows','ABI\'s export_visual: the same rows the view shows');g.append(c);box.append(g);
  repPicker(c,(slot,r)=>{const pg=h('select','f'),vs=h('select','f'),fm=h('select','f');r.pages.forEach(p=>pg.append(new Option(p.name||p.id,p.id)));['csv','xlsx'].forEach(f=>fm.append(new Option(f.toUpperCase(),f)));
@@ -968,7 +981,7 @@ async function usersPage(box){
  act(inv,'Invite',async()=>{let x=await post('invite',{email:em.value});if(x.confirm){if(!await ask(x.confirm))return 'Not invited.';x=await fetch('/confirm/'+x.confirm.id,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(y=>y.json())}
   if(x.error)throw new Error(x.error);toast(`Invited ${em.value}: ABI emailed them a link to choose a password.`);return 'Invited through ABI. Give them a role below.'},1);g.append(inv);
  {const bar=h('div','row bar top'),open=(c,f)=>{[ad,inv].forEach(x=>x.hidden=x!==c);c.classList.add('hl');setTimeout(()=>c.classList.remove('hl'),1600);f.focus()};ad.hidden=inv.hidden=true;
-  const b1=btn('Add a person',()=>open(ad,an),1);b1.prepend(ic('plus'));bar.append(b1,btn('Invite by email',()=>open(inv,em)));(box.querySelector(':scope>.pghead')||box).append(bar);[ad,inv].forEach(c=>act(c,'Cancel',()=>{c.hidden=true}))}
+  const b1=btn('Add a person',()=>open(ad,an),1);bar.append(b1,btn('Invite by email',()=>open(inv,em)));(box.querySelector(':scope>.pghead')||box).append(bar);[ad,inv].forEach(c=>act(c,'Cancel',()=>{c.hidden=true}))}
  const t=card(`People in ${U.project}`,'role: Viewer reads the published copy; Editor and Owner build (Developer)');t.style.gridColumn='1/-1';g.append(t);
  U.users.forEach(u=>{const row=h('div','hit'),role=(u.roles||{})[U.project]||'none',sel=h('select','f');['none','viewer','editor','owner'].forEach(x=>sel.append(new Option(x==='none'?(u.workspace_owner?'Workspace owner':'No access'):x[0].toUpperCase()+x.slice(1),x)));sel.value=role;
   const a=U.access[u.name]||{},sx=h('div','checks'),rx=h('div','checks'),m=h('div','msg');
@@ -988,11 +1001,11 @@ async function usersPage(box){
   det.append(h('summary','',`What ${u.name} sees, password and two-step`),h('label','l','Sections'),sx,h('label','l','Reports'),rx,h('label','l','Forgot their password?'),pw,h('label','l','Lost their authenticator app and recovery codes?'),rmf);
   row.append(top,det,m);t.append(row);
   // from a report's Share: each person's reports open, that report marked
-  if(PENDING.added===u.name){setTimeout(()=>{row.scrollIntoView({block:'center',behavior:'smooth'});row.classList.add('hl');setTimeout(()=>row.classList.remove('hl'),2500)},300)}
+  if(PENDING.added===u.name){row.classList.add('just');who.append(h('span','state new','Just added'));setTimeout(()=>{row.scrollIntoView({block:'center',behavior:'smooth'});row.classList.add('hl');setTimeout(()=>row.classList.remove('hl'),2500)},300)}
   if(PENDING.share){const l=[...rx.querySelectorAll('label')].find(x=>x.querySelector('input').value===PENDING.share);if(l){det.open=true;l.classList.add('hl')}}});if(PENDING.share)setTimeout(()=>box.querySelector('label.chk.hl')?.scrollIntoView({block:'center',behavior:'smooth'}),300);PENDING.share=null;PENDING.added=null;
  const mf=card('Two-step sign-in','a code from an authenticator app after the password; each person turns it on by clicking their name');g.append(mf);
  mf.append(h('p','',U.tenants.length?'Require it for everyone in a tenant: the password sessions and personal tokens of its people without it end at once, and at their next sign-in they add the key to an authenticator app before they get in. Single sign-on is not affected.'
-  :'ABI requires it per tenant and this workspace has no tenants: each person can still turn it on for themselves.'));
+  :'Each person turns it on for themselves: click your name, then Two-step sign-in. Requiring it for a whole group of people needs tenants, which this workspace does not use.'));
  U.tenants.forEach(x=>act(mf,(x.mfa_required?'Stop requiring it in ':'Require it for everyone in ')+x.name,async()=>{const y=await post('mfa/require',{tenant:x.id,on:!x.mfa_required});if(y.error)throw new Error(y.error);
   setTimeout(()=>show(CUR),1500);return x.mfa_required?'No longer required in '+x.name+'.':`Required in ${x.name}: ${y.result.signed_out} password session(s) ended; they set it up at their next sign-in.`}));
  const note=card('What this controls','and what it does not');note.append(h('p','','Role, sign-in and row-level security are ABI\'s: they decide what data a person can read or change, everywhere. Sections and reports decide what this app shows them and the app\'s own routes refuse the rest. Row and column rules are on the Security page.'));g.append(note)}
@@ -1021,13 +1034,13 @@ async function settingsPage(box){
    // each model's prices, US dollars per million tokens: Pi computes every answer's cost from them; none: tokens only
    const F=['input','output','cacheRead','cacheWrite'],pt=h('table','prices'),pin=p.models.map(m=>{const tr=pt.insertRow();tr.insertCell().textContent=m;
     return F.map(k=>{const i=h('input','f');i.type='number';i.min='0';i.step='any';i.value=p.prices?.[m]?.[k]??'';i.setAttribute('aria-label',`${m}: ${k} price`);tr.insertCell().append(i);return i})});
-   pt.createTHead().innerHTML='<tr><th>$ per 1M tokens</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th></tr>';c.append(pt);
+   pt.createTHead().innerHTML='<tr><th>Model (US $ per 1M tokens)</th><th>Input $</th><th>Output $</th><th>Cache read $</th><th>Cache write $</th></tr>';c.append(pt);
    act(c,'Save prices',async()=>{const prices={};p.models.forEach((m,j)=>{const v=Object.fromEntries(F.map((k,x)=>[k,pin[j][x].value]).filter(([,v])=>v!=='').map(([k,v])=>[k,+v]));if(Object.keys(v).length)prices[m]=v});
     const x=await post('settings/provider',{provider:{...p,prices}});if(x.error)throw new Error(x.error);S=x.result;return 'Saved: new chats count the cost of these models.'});
    act(c,'Test connection',async()=>{const x=await post('settings/test',{id:p.id});if(x.error)throw new Error(x.error);if(!x.result.ok)throw new Error(x.result.message);return x.result.message});
    act(c,'Remove',async()=>{const x=await post('settings/remove',{id:p.id});S=x.result;draw()});g.append(c)});
   const add=card('Connect a provider','OpenAI, Anthropic, OpenRouter, Ollama, Gemini or any OpenAI-compatible endpoint'),pre=h('select','f'),id=h('input','f'),nm=h('input','f'),api=h('select','f'),base=h('input','f'),key=h('input','f'),mods=h('input','f');
-  Object.entries(PRESETS).forEach(([k,v])=>pre.append(new Option(v[0],k)));Object.entries(S.apis).forEach(([k,v])=>api.append(new Option(v,k)));key.type='password';key.autocomplete='off';key.placeholder='API key (stored encrypted; leave empty to keep the stored one)';mods.placeholder='model IDs, comma separated';
+  Object.entries(PRESETS).forEach(([k,v])=>pre.append(new Option(v[0],k)));Object.entries(S.apis).forEach(([k,v])=>api.append(new Option(v,k)));key.type='password';key.autocomplete='off';key.placeholder='stored encrypted; empty keeps the stored key';mods.placeholder='model IDs, comma separated';
   const pick=h('div','checks mlist');mods.type='hidden';
   const fill=()=>{const v=PRESETS[pre.value];id.value=pre.value==='custom'?'':pre.value;nm.value=v[0];api.value=v[1];base.value=v[2];mods.value='';pick.innerHTML='<p class=file>Fetch models to pick from the provider\'s list.</p>'};pre.onchange=fill;fill();
   const fetchM=async()=>{const x=await post('settings/models',{provider:{id:id.value.trim(),api:api.value,base_url:base.value.trim()},key:key.value});if(x.error)throw new Error(x.error);
@@ -1105,7 +1118,7 @@ function mailCard(rep){const f=(D.flows||[]).find(x=>x.id===('email_'+rep.id).sl
  {const two=c.querySelector(':scope>.two');two.append(fld('At',tm),fld('Time zone',tz))}
  // no mail server yet: say so before it is saved (it would fail at its first send)
  if((window.ME||{admin:true}).admin)fetch('/admin/sso',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(r=>r.json()).then(r=>{if(r.result&&!r.result.mail?.host){const n=h('p','note');n.append('Email is not set up yet, so a send would fail. ');const go=h('button','flink','Set it up in Settings › Email');go.onclick=()=>show('settings');n.append(go);c.querySelector(':scope>h3').after(n)}}).catch(()=>{});
- const post=b=>fetch('/report/email',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({report:rep.id,...b})}).then(r=>r.json());
+ const post=b=>fetch('/report/email',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({report:rep.id,...b})}).then(r=>r.json()).finally(refreshPending);
  act(c,'Save schedule',async m=>{const ms=mails();need(to,ms.length,'Add at least one email address.');const badm=ms.find(x=>!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x));need(to,!badm,`${badm} is not an email address.`);
   need(days.querySelector('input'),picked().length,'Pick at least one day.');
   const x=await confirmed(await post({to:ms,days:picked(),time:tm.value,timezone:tz.value.trim()}));
@@ -1167,20 +1180,20 @@ function newMonitor(box,ck){box.querySelector('.monform')?.remove();ck=ck||{};co
   if(await monPost({action:'save',check:nc,email:em.value.trim()})){show('monitor');setTimeout(()=>highlight(nc.name),300);toast(`${ck.id?'Saved':'Created'} “${nc.name}”: ABI checks it every minute and posts to the Inbox when it starts to hold.`)}},1);act(c,'Cancel',()=>c.remove());(box.querySelector('.pghead')||box).after(c)}
 // a check and its flow in ABI (/monitor asks ABI's confirmation for the flow, then keeps the check); null: they said no
 const monFlow=ck=>(D.flows||[]).find(x=>x.id===('monitor_'+ck.id).slice(0,63)),monMail=ck=>monFlow(ck||{})?.steps?.find(s=>s.action==='send_email')?.input?.to?.[0];
-async function monPost(b){const r=await confirmed(await fetch('/monitor',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b)}).then(x=>x.json()));
+async function monPost(b){setTimeout(refreshPending,1500);const r=await confirmed(await fetch('/monitor',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b)}).then(x=>x.json()));
  if(r&&Array.isArray(r.result))D.app.monitor.checks=r.result;return r}
 function monitorPage(box){const bar=h('div','row bar top');bar.append(btn('New monitor',()=>newMonitor(box),1));box.append(bar);
  const mine=h('div','cards');box.append(mine);(D.app?.monitor?.checks||[]).forEach(ck=>{const c=card(ck.name);c.querySelector('h3').append(pinBtn({kind:'monitor',ref:ck.id,title:ck.name}));const st=h('p','file','checking…');c.append(st);mine.append(c);
   const bd=h('span','state','Checking');c.querySelector('h3').append(bd);
-  monEval(ck).then(x=>{bd.className='state '+(x.ok?'on':'warn');bd.textContent=x.ok?'Quiet':'Alerting';st.className='mtext';st.textContent=x.text}).catch(e=>{bd.className='state bad';bd.textContent='Error';st.className='bad';st.textContent=e.message});
-  const fl=monFlow(ck);if(MODE==='developer'&&ck.condition)c.append(h('p','file',fl?(fl.enabled?`Checked in the background; alerts go to the Inbox${monMail(ck)?' and to '+monMail(ck):''}`:'Background checks are off: checked only while this page is open.'):'Checked only while this page is open.'));
+  monEval(ck).then(x=>{bd.className='state '+(x.ok?'':'warn');bd.textContent=x.ok?'Quiet':'Holds now';st.className='mtext';st.textContent=x.text}).catch(e=>{bd.className='state bad';bd.textContent='Error';st.className='bad';st.textContent=e.message});
+  const fl=monFlow(ck);if(MODE==='developer'&&ck.condition)c.append(h('p','file',fl?(fl.enabled?`ABI checks it every minute, also with this page closed; when it starts to hold it posts to the Inbox${monMail(ck)?' and emails '+monMail(ck):''}.`:'Background checks are off: checked only while this page is open.'):'Checked only while this page is open.'));
   if(MODE==='developer'&&ck.condition&&!fl)act(c,'Alert with the page closed',async()=>{if(await monPost({action:'save',check:ck,email:''}))show('monitor')});
   if(MODE==='developer')act(c,'Edit',()=>newMonitor(box,ck));if(MODE==='developer')act(c,'Delete',async()=>{if(await monPost({action:'delete',id:ck.id}))show('monitor')})});
  const g=h('div','cards top');box.append(g);const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),rs=q.rows||[],when=t=>t?when2(t):'—';
  const M=D.app?.monitor||{watch:[],fresh_within_hours:36},watch=t=>M.watch?.length?M.watch.includes(t):/stream/.test(t),old=r=>watch(r[0])&&(!r[ix('last_load')]||Date.now()-Date.parse(r[ix('last_load')])>M.fresh_within_hours*3600e3);
  const fr=card('Data freshness',`ABI data quality; watched tables must load within ${M.fresh_within_hours} h (monitor.json)`),bad=rs.filter(r=>(r[ix('problems')]||[]).length||r[ix('missing_periods')]||old(r));
  fr.append(h('p',bad.length?'bad':q.masked?'':'ok',bad.length?`${bad.length} of ${rs.length} tables have problems`:q.masked?`${rs.length} tables loaded`:`All ${rs.length} tables without problems`));
- const t=h('table'),shown=[...bad,...rs.filter(r=>watch(r[0])&&!bad.includes(r))],probs=r=>[...(r[ix('problems')]||[]).map(p=>typeof p==='string'?p:p.message||p.kind||JSON.stringify(p)),...(old(r)?[`no load for over ${M.fresh_within_hours} h`]:[])].join('; ');
+ const t=h('table'),shown=[...bad,...rs.filter(r=>watch(r[0])&&!bad.includes(r))],probs=r=>plur([...(r[ix('problems')]||[]).map(p=>typeof p==='string'?p:p.message||p.kind||JSON.stringify(p)),...(old(r)?[`no load for over ${M.fresh_within_hours} h`]:[])].join('; '));
  t.insertRow().append(...['Table','Last load','Rows','Missing periods','Problems'].map(x=>h('th','',x)));
  shown.forEach(r=>{const tr=t.insertRow();[r[0],when(r[ix('last_load')]),r[ix('rows')]==null?'not shown':fmt(r[ix('rows')]),r[ix('missing_periods')]??(q.masked?'not shown':0),probs(r)||'—'].forEach((v,i)=>{const td=tr.insertCell();td.textContent=v;if(i===2||i===3)td.className='n'})});
  if(!shown.length)fr.append(h('p','file',q.masked?'The details of each table are not shown with your access.':'No table is watched for freshness yet: every table loaded without problems.'));
@@ -1204,19 +1217,21 @@ async function inboxCount(){const r=await ipost().catch(()=>({}));if(!r.result)r
 async function inboxPage(box){const r=await ipost();if(r.error){box.append(h('p','bad',r.error));return}const {messages:M,alerts:A}=r.result,s=seen(),g=h('div','cards');box.append(g);
  const mc=card('Messages','posted by flows and Monitor, your subscriptions and your test runs');mc.classList.add('wide');
  if(!M.length)mc.append(h('p','empty','No messages yet. A Monitor check posts here when it starts to hold; flows can post here too.'));
- M.forEach(m=>{const d=h('div','item'+(m.id>s?' new':''));d.append(h('div','file',`${cell(m.at)} · ${m.sender}`),txt(m.text));
+ let lastM=null,foldM=null;M.forEach(m=>{const d=h('div','item'+(m.id>s?' new':'')),fl=h('div','file');fl.append(ic(/^Monitor/.test(m.text)?'monitor':/^Flow/.test(m.text)?'flows':'inbox'),`${cell(m.at)} · ${m.sender}`);d.append(fl,txt(m.text));
   if(m.data?.columns){const t=h('div','mdata'),y=m.data.columns.filter(c=>/(^|[._])year$/.test(c));  // a year reads 2026, not 2,026
    if((m.data.rows||[]).length===1&&m.data.columns.length<=4){const r=m.data.rows[0],f=h('div','figs');m.data.columns.forEach(c=>{const v=Array.isArray(r)?r[m.data.columns.indexOf(c)]:r[c],x=h('span','fig');x.append(h('b','',m.data.measures?.[c]||colName(c)),h('span','',typeof v==='number'&&!y.includes(c)?fmt(v,m.data.format?.[c]):String(v??'—')));f.append(x)});d.append(f)}
-   else{rows(t,{...m.data,rows:m.data.rows.map(r=>({...r,...Object.fromEntries(y.map(c=>[c,r[c]==null?r[c]:String(r[c])]))}))});d.append(t)}}if(m.snapshot){const a=h('a','',`Open the ${m.snapshot.split('.').pop().toUpperCase()}`);a.href=m.snapshot;a.target='_blank';d.append(a)}mc.append(d)});
+   else{rows(t,{...m.data,rows:m.data.rows.map(r=>({...r,...Object.fromEntries(y.map(c=>[c,r[c]==null?r[c]:String(r[c])]))}))});d.append(t)}}if(m.snapshot){const a=h('a','',`Open the ${m.snapshot.split('.').pop().toUpperCase()}`);a.href=m.snapshot;a.target='_blank';d.append(a)}
+  if(lastM&&lastM.text===m.text){if(!foldM){foldM=h('details','more');foldM.append(h('summary',''));mc.append(foldM)}foldM.append(d);foldM.querySelector('summary').textContent=`${foldM.children.length-1} earlier like it`}else{mc.append(d);foldM=null}lastM=m});
  const ac=card('Alerts','failed flows and data problems, as ABI reported them'),un=A.filter(a=>!a.read);if(!A.length)ac.append(h('p','empty','No alerts. ABI posts here when the model or the data needs a look.'));
  ac.classList.add('wide');
  // alerts that say the same thing (same opening, e.g. 'Semantic model is not Ready') fold under the newest one
  const key=a=>String(a.message||'').split(':')[0].slice(0,60);let last=null,fold=null;const sev=t=>/\b(not ready|fail|failed|error|missing|problem|could not|refused)\b/i.test(t)?'bad':/\b(is ready|recovered|succeeded|finished)\b/i.test(t)?'okay':'info';
- A.filter(a=>MODE!=='viewer'||!/^(Semantic model|Flow )/i.test(a.message||'')).forEach(a=>{const d=h('div','item sev-'+sev(a.message)+(a.read?'':' new'));d.append(h('div','file',cell(a.at)),txt(a.message));
+ A.filter(a=>MODE!=='viewer'||!/^(Semantic model|Flow )/i.test(a.message||'')).forEach(a=>{const d=h('div','item sev-'+sev(a.message)+(a.read?'':' new')),fl=h('div','file');fl.append(ic(/^Semantic model/.test(a.message)?'model':/^Flow/.test(a.message)?'flows':/^Monitor/.test(a.message)?'monitor':'alert'),cell(a.at));d.append(fl,txt(a.message));
   if((window.ME||{admin:true}).admin&&!MOBILE&&/\b(smtp|mail server|send_email|email)\b/i.test(a.message||'')){const go=h('button','flink','Check the mail server in Settings › Email');go.onclick=()=>show('settings');d.append(go)}
   if(last&&key(last)===key(a)){if(!fold){fold=h('details','more');fold.append(h('summary',''));ac.append(fold)}fold.append(d);fold.querySelector('summary').textContent=`${fold.children.length-1} earlier like it`}
   else{ac.append(d);fold=null}last=a});
- if(un.length||M.some(m=>m.id>s))act(ac,'Mark all read',async()=>{if(un.length)await ipost({read:un.map(a=>a.id)});try{localStorage.setItem(SEEN,String(Math.max(0,...M.map(m=>m.id))))}catch(e){}await inboxCount();show('inbox')});
+ if(!ac.querySelector('.item'))ac.querySelector('.empty')||ac.append(h('p','empty',MODE==='viewer'?'No alerts for you: the builders get the model and flow alerts.':'No alerts.'));
+ if(un.length||M.some(m=>m.id>s)){const bar=h('div','row bar top'),b=btn('Mark all read',async()=>{if(un.length)await ipost({read:un.map(a=>a.id)});try{localStorage.setItem(SEEN,String(Math.max(0,...M.map(m=>m.id))))}catch(e){}await inboxCount();show('inbox')});b.prepend(ic('check'));bar.append(b);(box.querySelector(':scope>.pghead')||box).append(bar)}
  g.append(mc,ac)}
 // Explore: anyone's own analysis on the governed model (reads only, so Viewer can use it); kept analyses stay in this browser
 let MINE=D.app?.analyses||[];if(!MINE.length)try{MINE=JSON.parse(localStorage.getItem('abi-explore')||'[]');if(MINE.length)setTimeout(saveMine,0)}catch(e){}
@@ -1271,8 +1286,8 @@ function measures(box){modelBar(box);const top=h('div','row bar top'),q=h('input
   act(c,isNew?'Create':'Save',async()=>{await api('set_measure',{id:id.value,name:name.value,expression:ex.value,description:de.value||null}).catch(e=>{ex.classList.add('invalid');ex.focus();if(!isNew&&m.expression)setTimeout(()=>{const ms=c.querySelector(':scope>.msg'),b=h('button','flink','Put the saved formula back');b.onclick=()=>{ex.value=m.expression;ex.classList.remove('invalid');ms.textContent='';c.classList.remove('dirty')};ms?.append(' ',b)});throw e});
    Object.assign(m,{id:id.value,name:name.value,expression:ex.value,description:de.value});
    if(isNew){D.measures.push(m);show('measures');setTimeout(()=>highlight(m.name||m.id),300);const mid=m.id;
-    doneDialog('Measure created',[`${m.name||m.id} (${mid}) is saved in ABI: it checked the formula like an import.`,'It is in the list, highlighted. It stays an uncommitted change until you commit.'],
-     [['Close'],['Try it in Explore',()=>{PENDING.explore={measures:[mid],dimensions:[],filters:[]};show('explore')}]]);return}return 'Saved through ABI (checked like an import).'},1);
+    doneDialog('Measure created',[`${m.name||m.id} (${mid}) is saved in ABI, which checked the formula first.`,'It is in the list, highlighted. It stays an uncommitted change until you commit.'],
+     [['Close'],['Try it in Explore',()=>{PENDING.explore={measures:[mid],dimensions:[],filters:[]};show('explore')}]]);return}return 'Saved through ABI, which checked the formula first.'},1);
   // Test: the measure's total through ABI. ABI runs saved measures only, so an edit not yet saved is not what it tests
   act(c,'Test',async msg=>{say(msg,'Testing…');const t0=Date.now(),r=await api('semantic_query',{measures:[id.value]}),v=r.rows?.[0]?.[0];
    return `${r.measures?.[id.value]||id.value} = ${fmt(v,r.format?.[id.value])} · total over all data, ${((Date.now()-t0)/1000).toFixed(1)} s`+(c.classList.contains('dirty')?' · this is the saved version: Save to test your change':'')});
@@ -1289,7 +1304,9 @@ function measures(box){modelBar(box);const top=h('div','row bar top'),q=h('input
 function glossary(box){const list=h('div','cards rows');box.append(list);
  const edit=(t,isNew)=>{const c=card(isNew?'New term':(t.term||t.id)),term=h('input','f'),def=h('textarea','f'),ms=h('input','f');[term,def,ms].forEach(e=>e.classList.add('ed'));term.value=t.term||'';def.value=t.definition||'';ms.value=(t.measures||[]).join(', ');
   term.placeholder='business term';def.placeholder='what it means';ms.placeholder=isNew?'e.g. revenue, units':'no measure: a word for a column';
-  if(t.term===MASK){term.value=colName(t.id||'term');def.value='';def.placeholder='Not shown with your access: it may quote data.';c.classList.add('masked-row')}
+  if(t.term===MASK){term.value=colName(t.id||'term');def.value='';def.placeholder='Not shown with your access: it may quote data.';c.classList.add('masked-row');
+   // the business definition from the vault (the documents everyone here may read) in its place
+   vpost('search',{query:term.value,k:1}).then(hs=>{const x=hs?.[0];if(!x)return;def.value=String(x.text).replace(/\s+/g,' ').trim().slice(0,260);def.placeholder='';const n=h('div','file vsrc');n.append(ic('vault'),`From the vault: ${x.document}${x.section?' · '+x.section:''}`);def.closest('.fld')?.append(n)}).catch(()=>{})}
   if(isNew)c.append(h('label','l','Term'),term,h('label','l','Definition'),def,h('label','l','Implemented by (measure IDs)'),ms);
   else{def.rows=1;rowcard(c,fld('Term',term),fld('Definition',def),fld('Implemented by',ms))}
   act(c,isNew?'Create':'Save',async()=>{await api('set_glossary_term',{term:term.value,definition:def.value,measures:ms.value.split(',').map(x=>x.trim()).filter(Boolean),columns:t.columns||[]});
@@ -1360,7 +1377,7 @@ function sources(box){const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),qr=
   const mxr=Math.max(1,...(q.rows||[]).map(x=>+x[ix('rows')]||0)),age=t=>{const m=(Date.now()-Date.parse(t))/6e4;return !t||isNaN(m)?'':m<2?'just now':m<90?Math.round(m)+' min ago':m<36*60?Math.round(m/60)+' h ago':Math.round(m/1440)+' days ago'};
   [['source',up?'Uploaded file · '+loc.split('/').pop():loc],['format',sp.format||'from the file'],['refresh',rf[rv]||rv||'—'],...(hid&&r[ix('rows')]===null?[]:[['rows',r&&r[ix('rows')]!==null?fmt(r[ix('rows')]):r?'not shown with your access':'—']]),['last load',r?`${cell(r[ix('last_load')])}${age(r[ix('last_load')])?' · '+age(r[ix('last_load')]):''}`:'—'],...(hid?[[r[ix('rows')]===null?'rows, health':'health','not shown with your access']]:[])]
    .forEach(([a,b])=>{const v=h('span','',String(b));if(a==='source')v.title=loc;if(a==='rows'&&r&&r[ix('rows')]!=null){const bar=h('i','rbar');bar.style.setProperty('--p',Math.max(2,Math.round(+r[ix('rows')]/mxr*100))+'%');v.append(bar)}k.append(h('b','',a),v)});c.append(k);
-  if(p.length)c.append(h('div','bad',p.map(x=>typeof x==='string'?x:x.message||JSON.stringify(x)).join('; ')));
+  if(p.length)c.append(h('div','bad',plur(p.map(x=>typeof x==='string'?x:x.message||JSON.stringify(x)).join('; '))));
   act(c,'Reload',async m=>loaded(await api('refresh',{table:id}),m,'Reloaded: a new snapshot.'));act(c,'Delete',async()=>{await api('delete_source',{source:id});return 'Deleted.'});g.append(c)})}
 // New staged table: a source, steps picked from a menu (each a small JSON line, filled with the source's columns), a
 // preview of the rows, then set_steps and hidden (staged tables stay out of the model); or the cleaning in words, to the agent
@@ -1442,7 +1459,7 @@ function modelsPage(box){const bar=h('div','row bar top');bar.append(btn('New mo
   c.append(h('p','',desc||''),h('p','file',`${n} table${n===1?'':'s'} · ${j} join${j===1?'':'s'}: ${tables.join(', ')}`));act(c,'Open',async()=>{show(key)},1);g.append(c);return c};
  row('mdl:all','Whole model','Every model table and join of the project.',Object.keys(T));
  (D.models||[]).forEach(m=>{const date=D.model?.date_table?.table,c=row('mdl:'+m.id,m.name,m.description,[...m.tables,...(date&&!m.tables.includes(date)?[date]:[])]);
-  if(MODE==='developer')act(c,'Delete',async()=>{await api('delete_model',{id:m.id});D.models=D.models.filter(x=>x.id!==m.id);if(NM===m.id)pickNM('');sidebar();show('model')})});if(!(D.models||[]).length&&!MOBILE){pickNM('');box.append(h('h4','sub','The whole model'));modelCanvas(box)}}
+  if(MODE==='developer')act(c,'Delete',async()=>{await api('delete_model',{id:m.id});D.models=D.models.filter(x=>x.id!==m.id);if(NM===m.id)pickNM('');sidebar();show('model')})});if(!(D.models||[]).length&&!MOBILE){pickNM('');box.append(h('h4','sub','The whole model'));modelCanvas(box,1)}}
  // no named models yet: the whole model's diagram right here, not one row on a blank page
 
 function modelBar(box){if(!(D.models||[]).length)return;const bar=h('div','row bar lead seg');
@@ -1452,7 +1469,7 @@ function openModel(box,id){pickNM(id);const bar=h('div','row bar lead');bar.appe
 function canvasKit(box,onArrange){const tools=h('div','row cvtools'),wrap=h('div','canvas'),sizer=h('div','sizer'),stage=h('div','stage'),svg=document.createElementNS(NS,'svg');
  svg.classList.add('links');stage.append(svg);sizer.append(stage);wrap.append(sizer);const kit={z:1,w:0,ht:0,wrap,stage,svg,draw:()=>{}};
  const pct=h('span','pct','100%'),size=()=>{sizer.style.width=kit.w*kit.z+'px';sizer.style.height=kit.ht*kit.z+'px';stage.style.width=kit.w+'px';stage.style.height=kit.ht+'px';
-  stage.style.transform=`scale(${kit.z})`;wrap.style.height=Math.max(180,Math.min(kit.ht*kit.z+40,innerHeight*.78))+'px';pct.textContent=Math.round(kit.z*100)+'%'};
+  stage.style.transform=`scale(${kit.z})`;wrap.style.height=Math.max(140,Math.min(kit.ht*kit.z+28,innerHeight*.78))+'px';pct.textContent=Math.round(kit.z*100)+'%'};
  kit.setZ=z=>{kit.z=Math.min(2,Math.max(.25,Math.round(z*100)/100));size();kit.draw()};kit.extent=(w,ht)=>{kit.w=w;kit.ht=ht;size();if(MOBILE&&!kit.fit&&w>0){kit.fit=1;requestAnimationFrame(()=>kit.setZ(Math.min(1,(wrap.clientWidth-24)/Math.max(1,kit.w))))}};  // a phone starts fitted to its width
  const b=(t,title,fn)=>{const x=h('button','btn',t);x.title=title;x.onclick=fn;return x};
  tools.append(b('−','Zoom out',()=>kit.setZ(kit.z-.1)),pct,b('+','Zoom in',()=>kit.setZ(kit.z+.1)),b('Fit','Fit to the window',()=>kit.setZ(Math.min(1,(wrap.clientWidth-24)/Math.max(1,kit.w),(innerHeight*.78)/Math.max(1,kit.ht)))),
@@ -1461,7 +1478,7 @@ function canvasKit(box,onArrange){const tools=h('div','row cvtools'),wrap=h('div
  // a point of the stage, in stage units, from a screen point
  kit.local=(x,y)=>{const r=stage.getBoundingClientRect();return[(x-r.left)/kit.z,(y-r.top)/kit.z]};
  box.append(tools,wrap);return kit}
-function modelCanvas(box){const T=D.model?.tables||{},R=(D.model?.relationships||[]).filter(r=>nmTable(r.from.table)&&nmTable(r.to.table)),names=Object.keys(T).filter(nmTable);
+function modelCanvas(box,fit){const T=D.model?.tables||{},R=(D.model?.relationships||[]).filter(r=>nmTable(r.from.table)&&nmTable(r.to.table)),names=Object.keys(T).filter(nmTable);
  if(!names.length){box.append(h('p','empty','No tables yet: add a source first.'));return}
  // a phone reads the model as a list: each table, its kind and columns, and what it joins to
  if(MOBILE){const g=h('div','cards mlist2');names.sort((a,b)=>(T[b].kind==='fact')-(T[a].kind==='fact')).forEach(t=>{const c=card(t);c.querySelector('h3').append(h('span','state'+(T[t].kind==='fact'?' on':''),T[t].kind==='fact'?'Fact':'Dimension'));
@@ -1508,7 +1525,7 @@ function modelCanvas(box){const T=D.model?.tables||{},R=(D.model?.relationships|
    if(!await ask({message:`Join ${a} to ${b}?`,preview:`Many rows of ${from.dataset.t} to one row of ${tgt.dataset.t}. ${tgt.dataset.t} becomes a dimension keyed on ${tgt.dataset.c}.`}))return;
    try{await api('add_relationship',{from:a,to:b});toast('Joined')}catch(e){toast(e.message)}};
   window.addEventListener('pointermove',mv);window.addEventListener('pointerup',up)});
- requestAnimationFrame(draw);new ResizeObserver(()=>draw()).observe(kit.wrap)}
+ requestAnimationFrame(draw);new ResizeObserver(()=>draw()).observe(kit.wrap);if(fit)requestAnimationFrame(()=>requestAnimationFrame(()=>kit.setZ(Math.min(1,(kit.wrap.clientWidth-24)/Math.max(1,kit.w),(innerHeight*.78)/Math.max(1,kit.ht)))))}
 const SERVER_KEYS=['owner','status','version','disabled','error','latest_run','latest_score','active_run','evaluation','sharing','last_runs','tokens'];
 const KIND={
  flow:{label:'flow',save:o=>api('save_flow',{flow:o}),del:o=>api('delete_flow',{flow:o.id}),
@@ -1648,12 +1665,12 @@ function reportForm(c){const nm=inpt('e.g. Sales overview'),de=inpt('what it ans
   return {$schema:'https://schema.abi.invalid/v1/report.json',id,name:nm.value.trim(),...(de.value.trim()?{description:de.value.trim()}:{}),pages:[{id:'main',name:'Main',visuals:vs}]}}}
 const FORMS={flow:[flowForm,'flows'],ml:[mlForm,'ml'],tool:[toolForm,'tools'],agent:[agentForm,'agents'],report:[reportForm,'reports']};
 function newBtn(box,kind){const bar=box.querySelector(':scope>.bar.top')||h('div','row bar top'),L=KIND[kind].label;
- bar.append(btn(`New ${L}`,()=>{if(box.querySelector('.newkind'))return;const c=card(`New ${L}`,'fill it in and create it; it is checked by ABI like everything else');c.classList.add('newkind','wide','editor');
+ bar.append(btn(`New ${L}`,()=>{if(box.querySelector('.newkind'))return;const c=card(`New ${L}`,'fill it in and create it; ABI checks it before it saves');c.classList.add('newkind','wide','editor');
   const get=FORMS[kind][0](c);
-  act(c,`Create ${L}`,async()=>{const o=await get();await KIND[kind].save(o);
+  act(c,`Create ${L}`,async()=>{const o=await get();{const first=c.querySelector('input');const dup=kind!=='report'&&(D[FORMS[kind][1]==='flows'?'flows':kind==='ml'?'ml':kind+'s']||[]).find(x=>x.id===o.id||(x.name||'').toLowerCase()===String(o.name||'').toLowerCase());need(first,!dup,`A ${L} called “${dup?.name||o.name}” exists: give this one its own name, or edit that one.`)}await KIND[kind].save(o);
    if(kind==='report'){PENDING.open=o.id;if(PAGES['rep:'+o.id]){PENDING.open=null;show('rep:'+o.id)}else c.querySelector(':scope>.msg').textContent='Created: it opens in a moment…';toast(`Created ${o.name}. It is an uncommitted change until you commit.`);return}
    show(FORMS[kind][1]);setTimeout(()=>highlight(o.name),300);
-   doneDialog(`${L[0].toUpperCase()+L.slice(1)} created`,[`${o.name} is saved in ABI, checked like an import.`,kind==='flow'?'It is off: switch it on on its card when you want it to run.':kind==='ml'?'Next: train it on its card.':kind==='tool'?'Next: run its tests, then publish it.':'Next: run its evaluation set on its card.','It stays an uncommitted change until you commit.'],
+   doneDialog(`${L[0].toUpperCase()+L.slice(1)} created`,[`${o.name} is saved in ABI, which checked it first.`,kind==='flow'?'It is off: switch it on on its card when you want it to run.':kind==='ml'?'Next: train it on its card.':kind==='tool'?'Next: run its tests, then publish it.':'Next: run its evaluation set on its card.','It stays an uncommitted change until you commit.'],
     [['Close'],...(kind==='flow'?[['Open its canvas',()=>show('flw:'+o.id)]]:[])])},1);
   act(c,'Describe it to the agent instead',()=>{openChat(true);inp.value=`Create a ${L} in this project: `;inp.focus()});
   act(c,'Start from JSON',()=>{const e=editor(kind,KIND[kind].tpl,true);c.after(e);e.querySelector('textarea').focus()});
@@ -1669,7 +1686,7 @@ function flowPage(box,f){const bar=h('div','row bar lead');bar.append(btn('← F
  const what=x=>x.table||x.tool||x.agent||x.action||x.model||x.report||(x.measure?`${x.measure} ${x.op} ${x.value}`:'')||(x.changed?'data changed':'')||(x.message||'').slice(0,40);
  const nodes=[{id:T0,title:t.type==='schedule'?'On a schedule':t.type==='data_condition'?'When a check holds':t.type==='after_refresh'?'After a refresh':'Trigger',sub:trigWords(t)+(t.tables?' · '+t.tables.join(', '):''),icon:t.type==='schedule'?'history':'monitor'},
   ...steps.map(x=>{const [ti,icn]=stepWords(x);return {id:x.id,title:ti,sub:stepWhat(x),when:x.when,icon:icn}})];
- const H=x=>x.when?104:80,key='abi-flow2-'+D.project+'-'+f.id;let pos={};try{pos=JSON.parse(localStorage.getItem(key)||'{}')}catch(e){}
+ const H=x=>x.when?118:96,key='abi-flow2-'+D.project+'-'+f.id;let pos={};try{pos=JSON.parse(localStorage.getItem(key)||'{}')}catch(e){}
  const save=()=>{try{localStorage.setItem(key,JSON.stringify(pos))}catch(e){}};
  // columns by depth, as many to a row as the canvas fits: a long chain wraps like lines of text
  const layout=()=>{const per=Math.max(2,Math.floor(((kit.wrap.clientWidth||1100)-24)/280)),cols={};nodes.forEach(n=>(cols[depth[n.id]]??=[]).push(n));const tall={};Object.entries(cols).forEach(([d,list])=>{const r=Math.floor(d/per);tall[r]=Math.max(tall[r]||0,list.reduce((a,n)=>a+H(n)+28,0))});
@@ -1755,10 +1772,10 @@ function docs(box){if(D.docs==null){const sk=h('div','skel');sk.append(h('div','
  const bar=h('div','row bar top'),toc=h('nav','toc');toc.setAttribute('aria-label','Sections');box.append(bar,toc);const secs=[];
  (d.sections||[]).forEach((s,i)=>{const c=h('details','card dsec'),su=h('summary');su.append(h('span','dn',String(i+1)),h('span','dt',s.title),h('span','file',`${(s.items||[]).length} item${(s.items||[]).length===1?'':'s'}`));c.append(su);c.open=!MOBILE&&i===0;c.id='doc-'+i;
   (s.items||[]).forEach(it=>{c.append(h('h4','',it.title));const t=h('table','facts');
-  (it.facts||[]).forEach(([k,v])=>{const r=t.insertRow();r.insertCell().textContent=k;r.insertCell().textContent=idsToNames(typeof v==='string'?v:JSON.stringify(v))});c.append(t)});box.append(c);secs.push(c);
+  (it.facts||[]).forEach(([k,v])=>{const r=t.insertRow();r.insertCell().textContent=k;const tv=plur(idsToNames(typeof v==='string'?v:JSON.stringify(v))),cl=r.insertCell();if(/ \| /.test(tv)){const ul=h('ul','list');tv.split(/ \| /).forEach(x=>ul.append(h('li','',x.replace(/^\d+\.\s*/,''))));cl.append(ul)}else cl.textContent=tv});c.append(t)});box.append(c);secs.push(c);
   const go=h('button','chip',s.title);go.onclick=()=>{secs.forEach(x=>x.open=x===c);c.scrollIntoView({behavior:'smooth',block:'start'})};toc.append(go)});
  {const all=h('button','flink','Open all');all.onclick=()=>{const o=secs.some(x=>!x.open);secs.forEach(x=>x.open=o);all.textContent=o?'Fold all':'Open all'};toc.append(all)}
- bar.append(btn('Download PDF',async()=>{try{await pdf();toast('Downloaded the documentation PDF.')}catch(e){toast(e.message,1)}},1),btn('Regenerate',async()=>{D.docs=await api('docs',{});show('docs')}));
+ bar.append(btn('Download PDF',async()=>{try{await pdf();toast('Downloaded the documentation PDF.')}catch(e){toast(e.message,1)}},1),(()=>{const b=btn('Regenerate',async()=>{D.docs=await api('docs',{});show('docs')});b.classList.add('w');b.title='Write the documentation again from the project\'s definitions';return b})());
  const pdf=async()=>{const r=await fetch('/docs/pdf',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'});
   if(!r.ok)throw new Error('The PDF could not be made: '+((await r.json().catch(()=>({}))).error||r.status));const a=h('a');a.href=URL.createObjectURL(await r.blob());a.download=D.project+'-documentation.pdf';a.click()}}
 const VERB={add_data:'Loaded a source',refresh:'Reloaded a source',delete_source:'Removed a source',set_steps:'Changed a table\'s steps',set_table:'Changed a table',delete_table:'Deleted a table',build_model:'Built the model',
@@ -1769,15 +1786,15 @@ const VERB={add_data:'Loaded a source',refresh:'Reloaded a source',delete_source
 // a commit message in words: [what, where] ('Loaded a source', 'bronze_trial'); a person's own message stays theirs
 function plainCommit(m){const ps=String(m||'').split(/\n+|(?<=\.json)(?=[a-z_]+: )/).map(s=>s.trim()).filter(Boolean),one=ps.map(p=>{const x=/^(\w+): (.+)$/.exec(p);if(!x||!VERB[x[1]])return null;
   return [VERB[x[1]],x[2].split(/,\s*/).map(q=>{const r=plainFile('M',q);return idsToNames(r[1]||r[0])}).join(', ')]});
- if(ps.length&&one.every(Boolean)){const w=[...new Set(one.map(x=>x[0]))];return [w.join(' · '),[...new Set(one.map(x=>x[1]))].join(', ')]}return [ps[0]||'',ps.length>1?`and ${ps.length-1} more`:'']}
-function commits(box){const c=card('Commits','every change is a commit in ABI\'s Git history');const t=h(MOBILE?'div':'table','hist');c.append(t);box.append(c);
+ if(ps.length&&one.every(Boolean)){const w=[...new Set(one.map(x=>x[0]))];return [w.join(' · '),[...new Set(one.map(x=>x[1]))].join(', ')||'—']}return [idsToNames(String(ps[0]||'').replace(/\bSecuritys rls\b/g,'Row rules').replace(/\brls\b/g,'row rules')),ps.length>1?`and ${ps.length-1} more`:'—']}
+function commits(box){const c=card('Commits','every change is a commit in ABI\'s Git history');if(MODE==='viewer')c.append(h('p','file','The published version\'s history: each publish brings the builders\' commits since the last one.'));const t=h(MOBILE?'div':'table','hist');c.append(t);box.append(c);
  const when=x=>when2(new Date(x.time*1000).toISOString()),who=x=>x.author+(x.by==='agent'?' (agent)':'');
  const fill=()=>{t.innerHTML='';if(!(D.history||[]).length){t.append(h('p','empty','No commits yet.'));return}
   if(MOBILE){let last=null;(D.history||[]).forEach(x=>{const [w,f]=plainCommit(x.message),k=[w,f,who(x)].join('|');if(last&&last.k===k&&Math.abs(last.t-x.time)<900){last.n++;last.c.textContent=`${last.n} times`;return}
    const r=h('div','srow'),n=h('div','sname'),c=h('span','cnt');n.append(h('b','',w),h('div','file',[f,who(x),when(x)].filter(Boolean).join(' · ')));r.append(n,c);r.title=x.message;t.append(r);last={k,t:x.time,n:1,c}});return}
   const hd=t.createTHead().insertRow();['What','Where','Who','When','Version'].forEach(x=>hd.append(h('th','',x)));const tb=t.createTBody();
   // a run of the same change (17 measures saved by the seed) is one row with its count
-  let last=null;(D.history||[]).forEach(x=>{const [w,f]=plainCommit(x.message),k=[w,f,who(x)].join('|');if(last&&last.k===k&&Math.abs(last.t-x.time)<900){last.n++;last.c.textContent=`${last.n} times`;last.v.textContent=`${last.id}…${x.id.slice(0,7)}`;return}
+  let last=null;(D.history||[]).forEach(x=>{const [w,f]=plainCommit(x.message),k=[w,f,who(x)].join('|');if(last&&last.k===k&&Math.abs(last.t-x.time)<900){last.n++;last.c.textContent=`${last.n} times`;last.v.textContent=`${last.id} +${last.n-1}`;last.v.title='and the '+(last.n-1)+' before it';return}
    const r=tb.insertRow();[w,f,who(x),when(x),x.id.slice(0,7)].forEach((v,i)=>{const td=r.insertCell();td.textContent=v;if(i===4)td.className='code'});r.title=x.message;const c=h('span','cnt');r.cells[0].append(c);last={k,t:x.time,n:1,c,v:r.cells[4],id:x.id.slice(0,7)}})};fill();
  act(c,'Reload',async()=>{D.history=(await api('history',{})).commits;fill()})}
 
@@ -1790,8 +1807,8 @@ function security(box){const g=h('div','cards top');box.append(g);const r=D.rls|
    (Array.isArray(x.users)?x.users:Object.entries(x.users||{}).map(([id,values])=>({id,name:(acc.find(a=>String(a.id)===id)||{}).name||'A person',values}))).forEach(u=>{const row=h('div','srow'),n=h('div','sname');n.append(h('b','',u.name||'A person'));const vs=h('div','stepchips');(u.values||[]).forEach(v=>vs.append(h('span','chip',String(v))));if(!(u.values||[]).length)vs.append(h('span','file','no rows'));row.append(n,vs);k.append(row)});c.append(k)})}
  g.append(c);
  const cr=card('Hidden columns','hidden from Viewers');const cols=r.columns||[];if(!cols.length)cr.append(h('p','empty','None: Viewers see every column of the tables they may read.'));cols.forEach(x=>cr.append(h('span','chip',typeof x==='string'?x:`${x.table}: ${(x.columns||[]).join(', ')}`)));g.append(cr);
- const ro=card('Roles','set in Users & access');if(acc.length){acc.forEach(a=>{const row=h('div','srow'),n=h('div','sname');n.append(h('b','',a.name));row.append(n,h('span','state',R(a.role)));ro.append(row)})}
- else ro.append(h('p','empty','Only owners see who has which role: Users & access lists them.'));g.append(ro);
+ const ro=card('Roles','set in Users & access');if(acc.length&&MODE!=='viewer'){acc.forEach(a=>{const row=h('div','srow'),n=h('div','sname');n.append(h('b','',a.name));row.append(n,h('span','state',R(a.role)));ro.append(row)})}
+ else ro.append(h('p','empty',MODE==='viewer'&&acc.length?'Who has which role is in Users & access, on a computer.':'Only owners see who has which role: Users & access lists them.'));g.append(ro);
  // a row rule as a form: the person, the column, the members they may see (picked from the data); ABI confirms it
  if(MODE==='developer'&&acc.length){const rr=card('Restrict rows for a person','ABI asks you to confirm, then the rule applies to every page, report and answer');rr.classList.add('wide');
   const ppl=acc.filter(a=>a.role!=='owner'),pw=sel(ppl.map(a=>[String(a.id),a.name])),RANK=['region','country','segment','categor','team','state','city'],rk=x=>{const i=RANK.findIndex(w=>x.includes(w));return i<0?99:i},
@@ -1815,12 +1832,12 @@ function vaultPage(box){
  bar.append(file,btn('Add document',()=>file.click(),1));box.append(bar);
  file.onchange=async()=>{for(const f of file.files){const data=await new Promise(r=>{const fr=new FileReader();fr.onload=()=>r(fr.result.split(',')[1]);fr.readAsDataURL(f)});
   try{const r=await vpost('add',{name:f.name,data});toast(`Added ${r.name}: ${r.chunks} passages`)}catch(e){toast(e.message)}}file.value=''};
- const sc=card('Search the vault','the passages the agents read'),q=h('input','f');q.placeholder='e.g. how is net revenue defined?';q.id='vault-q';
+ const sc=card('Search the vault','the passages the agents read'),q=h('input','f');q.placeholder=MOBILE?'e.g. net revenue':'e.g. how is net revenue defined?';q.id='vault-q';q.setAttribute('aria-label','Search the vault');
  const out=h('div','hits'),qr=h('div','row qrow');qr.append(q);sc.append(qr,out);box.append(sc);
  const go=async()=>{out.innerHTML='';if(!q.value.trim())return;const hits=await vpost('search',{query:q.value,k:6});if(!hits.length){out.append(h('p','empty','No passage matches.'));return}
   hits.forEach(x=>{const d=h('div','hit');d.append(h('div','file',`${x.document}${x.section?' · '+x.section:''}`),h('div','',x.text));out.append(d)})};
  q.onkeydown=e=>{if(e.key==='Enter')go()};{const b=btn('Search',go,1);b.prepend(ic('search'));qr.append(b)}
- const g=h('div','cards');box.append(g);if(!VAULT.length)box.append(h('p','empty','No documents yet. Add the definitions your measures must follow (.md, .txt, .html, .docx).'));
+ const g=h('div','cards vault');box.append(g);if(!VAULT.length)box.append(h('p','empty','No documents yet. Add the definitions your measures must follow (.md, .txt, .html, .docx).'));
  VAULT.forEach(d=>{const c=card(d.name,`${Math.max(1,Math.round(d.bytes/1024))} KB · ${d.chunks} passages`);
   if(d.sections.length){const k=h('div');d.sections.forEach(x=>k.append(h('span','chip',x)));c.append(k)}
   const pre=h('pre');pre.hidden=true;c.append(pre);
@@ -1843,14 +1860,14 @@ const VLEDE={sources:'Bronze: the data as it landed, one source per file or buck
  ml:'Forecasts, segments and anomaly models, with their latest runs.',tools:'Calculations your agents can call.',agents:'Custom agents for this project: ask one a question.',
  edits:'Corrections to the gold tables, applied on top of the loaded data; every query sees them.',glossary:'What the business words mean and which measures implement them.',
  datasets:'Saved questions to the model (measures by dimensions, with filters): each run returns a fresh table.',model:'The data models: open one to see its tables and how they join.'};
-function nav(){const all=navAll(),me=window.ME||{admin:true};return all.filter(([g])=>g==='Start'||!me.sections||me.sections.includes(g))}
+function nav(){const all=navAll(),me=window.ME||{admin:true};return all.filter(([g,items])=>items.length&&(g==='Start'||!me.sections||me.sections.includes(g)))}
 function navAll(){return [['Start',[['home','Home',home],['chat','Chat',chatPage]]],
  ['Data',[...(MODE==='viewer'?[]:[['sources','Sources',sources,D.sources.length],['staged','Staged',stagedPage,(D.layers||[]).filter(t=>t.layer==='silver').length]]),['tables','Tables',tablesPage,(D.model?Object.keys(D.model.tables||{}).length:D.tables.length)],...(MODE==='viewer'?[]:[['edits','Edits',editsPage]])]],
  ['Data Model',[['model','Data models',modelsPage,(D.models||[]).length+1],['measures','Measures',measures,D.measures.length],
  ['glossary','Glossary',glossary,D.glossary.length],['datasets','Queries',datasets,D.datasets.length]]],
  ['Visualizations',[['reports','Reports',reportsPage,D.reports.length],['monitor','Monitor',monitorPage],['inbox','Inbox',inboxPage,INBOXN],['explore','Explore',explore,MINE.length||'']]],
  ['Export',[['boardpack','Board pack',boardPage,(D.app?.packs||[]).length],['documents','Documents',documentsPage],['onepager','One-pager',onePagerPage],['dataexport','Data',dataExportPage],['video','Video',videoPage],['transfer','Project',transferPage]]],
- ['Automate',[['flows','Flows',flows,D.flows.length],['ml','ML models',ml,D.ml.length],['tools','Tools',tools,D.tools.length],['agents','Agents',agents,D.agents.length]]],
+ ['Automate',[['flows','Flows',flows,D.flows.length],['ml','ML models',ml,D.ml.length],['tools','Tools',tools,D.tools.length],['agents','Agents',agents,D.agents.length]].filter(x=>MODE!=='viewer'||x[3])],
  ['Knowledge',[['vault','Vault',vaultPage,(VAULT||[]).length],['docs','Docs',docs]]],
  ['Govern',[['security','Security',security],['environments','Environments',b=>{const x=(D.sections.Environments||'').trim(),tmp=h('div');tmp.insertAdjacentHTML('beforeend',x);const has=tmp.innerText.trim().replace(/none yet\.?/i,'').length>10;if(has)b.insertAdjacentHTML('beforeend',x);else b.append(emptyBox('environments','No environments yet','A dev and prod pair lets you try a change on dev data before it reaches production. Each environment says where its sources read from.',MODE==='developer'?['Ask the agent',()=>{openChat(true);inp.value='Set up a dev and a prod environment for this project in ABI.';inp.focus()}]:null))}],['history','History',commits,(D.history||[]).length],...((window.ME||{admin:true}).admin&&!MOBILE?[['people','Users & access',usersPage],['settings','Settings',settingsPage]]:[])]]]}
 let MODE='developer',VAULT=[],MODEL='';
@@ -1868,14 +1885,14 @@ function sidebar(){side.innerHTML='';PAGES={};side.setAttribute('aria-label','Pa
  if(window.ME?.source){const a=h('a','src',`ABI-PI ${ME.version} · source code (AGPL-3.0)`);a.href=ME.source;a.target='_blank';a.rel='noopener';side.append(a)}}
 let PREV='home';
 function show(k){if(!PAGES[k]){if(MOBILE&&k&&k!=='home'&&/^(people|settings|flw:|staged|tools|agents|sources|edits)/.test(k))window.__redir='That page opens on a computer, in Developer: a phone shows the published project.';k='home'}if(k!=='chat'&&CUR!=='chat')PREV=k;else if(k==='chat'&&CUR!=='chat')PREV=CUR;{const cb=$('#chat');if(cb.classList.contains('full')){cb.classList.remove('full');wideT(0);document.body.append(cb);cb.classList.remove('open');document.body.classList.remove('chat-open')}}CUR=k;setTimeout(ctx);const sk=k.startsWith('rep:')?'reports':k.startsWith('mdl:')?'model':k.startsWith('flw:')?'flows':k;side.querySelectorAll('button.it').forEach(b=>{b.classList.toggle('on',b.dataset.k===sk);b.toggleAttribute('aria-current',b.dataset.k===sk)});
- const act=side.querySelector('button.it.on');if(act){act.closest('.sec').classList.remove('folded');requestAnimationFrame(()=>{const y=act.getBoundingClientRect().top-side.getBoundingClientRect().top+side.scrollTop;side.scrollTop=y<side.clientHeight-72?0:Math.max(0,y-side.clientHeight/2)})}
+ const act=side.querySelector('button.it.on');if(act){act.closest('.sec').classList.remove('folded');requestAnimationFrame(()=>{const y=act.getBoundingClientRect().top-side.getBoundingClientRect().top+side.scrollTop;side.scrollTop=y<side.clientHeight-72?0:Math.max(0,y-side.clientHeight+140)})}
  const box=$('main');box.innerHTML='';const pg=h('div','pg'),head=h('div','pghead'),pn=$('#pgname');pn.textContent=PAGES[k][0];document.title=PAGES[k][0]+' · '+D.project;
  pn.title=(k.startsWith('rep:')?'Filter the report or click a bar to filter by it. Every number comes from ABI.':LEDE[k])||'';
  // the page says what it is and what it is for, above its actions (the header's crumb says where it sits)
  {const tt=h('div','ttl'),rp=k.startsWith('rep:')&&D.reports.find(r=>'rep:'+r.id===k),sec=nav().find(([,its])=>its.some(([x])=>x===(k.startsWith('rep:')?'reports':k.startsWith('mdl:')?'model':k.startsWith('flw:')?'flows':k)))?.[0];
   if(sec&&sec!=='Start')tt.append(h('div','eyebrow',sec));tt.append(h('h1','',PAGES[k][0]));const ld=rp?(rp.spec?.description||rp.description||'Filter it, or click a bar or a slice to filter by that member. Every number comes from ABI.'):(MODE==='viewer'&&VLEDE[k])||LEDE[k];
   if(ld)tt.append(h('p','',ld));head.append(tt)}
- pg.append(head);if(window.__redir){const n=h('p','note');n.append(ic('info'),h('span','',window.__redir));pg.append(n);window.__redir=''}box.append(pg);{const r=PAGES[k][1](pg);if(r?.then){const sk=h('div','skel');sk.append(h('div','sk w40'),h('div','sk'),h('div','sk w70'));pg.append(sk);r.finally(()=>sk.remove())}}setTimeout(()=>names(pg),60);new MutationObserver(()=>{clearTimeout(pg._nm);pg._nm=setTimeout(()=>names(pg),120)}).observe(pg,{childList:true,subtree:true});lay(pg,k);new MutationObserver(()=>lay(pg,k)).observe(pg,{childList:true,subtree:true});
+ {const h0=box.offsetHeight;if(h0)box.style.minHeight=h0+'px'}pg.append(head);if(window.__redir){const n=h('p','note');n.append(ic('info'),h('span','',window.__redir));pg.append(n);window.__redir=''}box.append(pg);{const r=PAGES[k][1](pg);if(r?.then){const sk=h('div','skel');sk.append(h('div','sk w40'),h('div','sk'),h('div','sk w70'));const tm=setTimeout(()=>pg.append(sk),350);r.finally(()=>{clearTimeout(tm);sk.remove();box.style.minHeight=''})}else requestAnimationFrame(()=>box.style.minHeight='')}setTimeout(()=>names(pg),60);new MutationObserver(()=>{clearTimeout(pg._nm);pg._nm=setTimeout(()=>names(pg),120)}).observe(pg,{childList:true,subtree:true});lay(pg,k);new MutationObserver(()=>lay(pg,k)).observe(pg,{childList:true,subtree:true});
  const top=pg.querySelector(':scope>.bar.top'),lead=pg.querySelector(':scope>.bar.lead');if(lead)lead.classList.contains('seg')?head.append(lead):head.querySelector('.ttl').prepend(lead);if(top)head.append(top);if(MODE==='viewer')pg.querySelectorAll('.ed').forEach(e=>e.readOnly=true);
  try{localStorage.setItem('abi-app-'+D.project,k)}catch(e){}try{window.history.replaceState(null,'','#'+k)}catch(e){}}
 // ---------- layout: Layout (Developer, desktop) lets you drag a card to move it and drag its corner to resize it (12
@@ -1939,7 +1956,7 @@ function vc(){const n=D.pending?.files?.length||0,cb=$('#changes'),pb=$('#publis
  pb.title=n?'Commit first: Publish sends the last commit.':head===pubc?(ld?'Show the new page layouts to Viewer.':'Viewer already shows the last commit.'):'Make the last commit what Viewer sees.'}
 $('#changes').onclick=()=>{const d=$('#commit'),f=$('.files',d);f.innerHTML='';const fl=D.pending?.files||[];
  $('h3',d).replaceChildren(ic('commit'),fl.length?`${fl.length} change${fl.length>1?'s':''} not committed yet`:'Everything is committed');$('#c-commit').hidden=!fl.length;$('#c-message').hidden=$('label[for=c-message]').hidden=!fl.length;
- if(!fl.length)f.append(h('p','empty','Nothing to commit: every change is in ABI\'s history. Undo still takes back the last one.'));fl.forEach(x=>{const det=h('details','chg'),su=h('summary'),[k,n,v]=plainFile(x.status,x.path);su.append(h('span','what',`${k} ${n}`),h('span','state'+(v==='deleted'?' bad':v==='added'?' on':''),v));su.title=x.path;det.append(su,h('pre','',x.patch||''));f.append(det)});
+ if(!fl.length)f.append(h('p','empty',D.pending?.can_undo?'Nothing to commit: every change is in ABI\'s history. Undo last change takes back the last one.':'Nothing to commit or undo: every change is in ABI\'s history.'));fl.forEach(x=>{const det=h('details','chg'),su=h('summary'),[k,n,v]=plainFile(x.status,x.path);su.append(h('span','what',`${k} ${n}`),h('span','state'+(v==='deleted'?' bad':v==='added'?' on':''),v));su.title=x.path;det.append(su,h('pre','',x.patch||''));f.append(det)});
  $('#c-message').value=commitMsg(fl)||'Changes from the app';$('.msg',d).textContent='';$('#c-undo').disabled=!D.pending?.can_undo;$('#c-undo').title=D.pending?.can_undo?'Take back the last change':'Nothing to undo: no change since the last commit';d.showModal()};
 $('#c-close').onclick=()=>$('#commit').close();
 // a changed file in words: Source bronze_trial · changed (the Git path one hover away, the diff one click)
@@ -1948,7 +1965,7 @@ function plainFile(st,p){const m=/^([^/]+)\/(.+?)(\.json|\.md|\.ya?ml)?$/.exec(p
   M={measures:'Measures',glossary:'Glossary',datasets:'Queries',models:'Data models',model:'Model',relationships:'Joins',calendar:'Calendar'},
   v={M:'changed',A:'added',D:'deleted',R:'renamed','??':'added'}[String(st||'').trim()]||'changed';
  const T={rls:'Row rules',roles:'Roles',project:'Project settings',descriptions:'Descriptions',security:'Security',environments:'Environments'};
- return !dir?[T[name.replace(/\.json$/,'')]||'File',T[name.replace(/\.json$/,'')]?'':p,v]:dir==='model'?[M[name]||'Model',M[name]?'':name,v]:(dir==='docs'||dir==='security')&&T[name]?[T[name],'',v]:[K[dir]||'File',K[dir]?name:p,v]}
+ return !dir?[T[name.replace(/\.json$/,'')]||'File',T[name.replace(/\.json$/,'')]?'':p,v]:dir==='model'?[M[name]||'Model',M[name]?'':name,v]:(dir==='docs'||dir==='security')&&T[name]?[T[name],'',v]:[K[dir]||'File',K[dir]?idsToNames(name):p,v]}
 function commitMsg(fl){const g={};fl.forEach(x=>{const [k,n,v]=plainFile(x.status,x.path),key=k+'|'+v;(g[key]||=[]).push(n)});
  return Object.entries(g).map(([key,ns])=>{const [k,v]=key.split('|'),xs=ns.filter(Boolean),pl=xs.length>1&&!/s$|Security|Docs|Data models|Glossary|Model/.test(k)?k+'s':k;
   return `${pl}${xs.length?' '+(xs.length>2?xs.slice(0,-1).join(', ')+' and '+xs.at(-1):xs.join(' and ')):''} ${v}`}).join('; ').replace(/^./,c=>c.toUpperCase())}
@@ -1992,7 +2009,7 @@ function tokDialog(){const d=h('dialog'),c=h('div','card'),list=h('div'),nm=h('i
    btn('Revoke',async()=>{if(!confirm(`Revoke "${t.name}"? Anything signed in with it stops at once.`))return;const x=await post({op:'revoke',id:t.id});if(x.error)say(m,x.error,1);fill()}));list.append(row)})};
  const make=btn('Make a token',async()=>{const r=await post({op:'mint',name:nm.value.trim(),days:+dy.value||90});if(r.error){say(m,r.error,1);return}
   const out=h('input','f');out.readOnly=true;out.value=r.result.token;c.insertBefore(out,m);out.select();nm.value='';
-  say(m,'Copy it now: it is shown only this once. It signs in as you, only to read: the SQL endpoint\'s password and an MCP client\'s bearer token.');fill()});
+  say(m,'Copy it now: it is shown only this once. It signs in as you, only to read: the SQL endpoint\'s password and an MCP client\'s bearer token.');fill()},1);
  const row=h('div','row acts'),two=h('div','two');row.append(make,btn('Close',()=>{d.close();d.remove()}));two.append(fld('What it is for',nm),fld('Expires after (days)',dy));
  c.append(h3i('key','Personal tokens'),h('p','file','Read-only sign-in as you for SQL clients (psql, DBeaver, BI tools) and MCP clients: only your rows, nothing changes. Never share one.'),list,h('h4','','Make a token'),two,row,m);
  d.append(c);document.body.append(d);d.showModal();fill()}
@@ -2066,7 +2083,7 @@ function hello(){const d=h('div','hello'),pg=PAGES[CUR]?.[0]||'this page';d.appe
   :'Ask a question, ask where something is, or say what to build or change. Changes stay uncommitted until you commit them.'));
  [`What is on ${pg}, and what should I look at?`,...(MODE==='viewer'?['What changed last month, and why?','Where do I see revenue by country?']
   :['What is still open in this project?','Where are the flows, and what do they do?'])].forEach(t=>{const b=h('button','sg',t);b.onclick=()=>{inp.value=t;sendChat()};d.append(b)});return d}
-function ctx(){const c=$('#chat .ctx'),g=log.querySelector('.hello');if(c)c.textContent=`${MODE==='viewer'?'Viewer · read-only':'Developer'} · on ${PAGES[CUR]?.[0]||CUR}${MODEL?' · '+MODEL:''}`;if(g&&CUR!=='chat')g.replaceWith(hello())}
+function ctx(){const c=$('#chat .ctx'),g=log.querySelector('.hello');if(c)c.textContent=`${MODE==='viewer'?'Viewer · read-only':'Developer'} · on ${PAGES[CUR]?.[0]||CUR}`;if(g&&CUR!=='chat')g.replaceWith(hello())}
 const INTRO='';log.append(hello());
 async function cpost(u,b){return fetch(u,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json())}
 async function chats(sel){const r=await cpost('/chat/list'),pk=$('#chat-pick');pk.innerHTML='';
@@ -2757,6 +2774,20 @@ def changed(project: str) -> None:
     threading.Thread(target=go, daemon=True).start()
 
 
+LOOPBACK = re.compile(r"^(localhost|127\.\d+\.\d+\.\d+|\[?::1\]?|0\.0\.0\.0)(:\d+)?$", re.I)
+
+
+def public_base(public: str, host: str, proto: str = "") -> str:
+    """The address other people open this app at, for a link to share: ABI_PUBLIC_URL when set, else the request's own
+    Host; never a loopback address (nobody else can open it): then "" and the page says to set ABI_PUBLIC_URL."""
+    if public:
+        return public.rstrip("/")
+    host = host.strip()
+    if not host or LOOPBACK.match(host):
+        return ""
+    return f"{'https' if proto.lower() == 'https' else 'http'}://{host}"
+
+
 def source_url() -> str:
     """AGPL-3.0 §13: where everyone using this app gets its source; a changed build sets ABI_SOURCE_URL to its own."""
     return os.environ.get("ABI_SOURCE_URL") or "https://github.com/Himanshu8881212/abi-pi"
@@ -3298,7 +3329,8 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
             opening(p)
             me = {"name": self.sess["name"] if self.sess else None, "admin": bool(not self.sess or self.sess["admin"]), "signin": signin,
                   "role": role_of(self.sess, p), **access(self.sess, p), "source": source_url(), "version": VERSION,
-                  "novideo": video.missing()}
+                  "novideo": video.missing(), "base": public_base(os.environ.get("ABI_PUBLIC_URL", ""), self.headers.get("Host", ""),
+                                                                   self.headers.get("X-Forwarded-Proto", ""))}
             # the page's data as this person (their row-level security, sections and reports); live, never the synced file
             # a person who can't edit reads only the published copy, from the first page on (release run 31 Oct: the first
             # page came from the working project, uncommitted work included, and only later requests went to the copy)

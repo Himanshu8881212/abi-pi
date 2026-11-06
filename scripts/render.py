@@ -117,7 +117,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
   if(note)el('text',{x:0,y:11},svg).textContent=note;svg.setAttribute('viewBox',`0 0 ${W} ${Math.max(H,top+n*rh+4)}`);
   rs.forEach((i,k)=>{const y=top+k*rh,v=val(i,m),w=Math.max(1,(x1-x0)*Math.abs(v)/(mx||1));fit(el('text',{x:lw,y:y+rh/2+4,'text-anchor':'end'},svg),String(d.rows[i][0]??'Not given'),lw-4);
    mk(el('rect',{x:x0,y:y+(rh-bh)/2,width:w,height:bh,rx:Math.min(3,bh/4),fill:d.rows[i][0]==null?'var(--c4)':k?COL[0]:'var(--signal)'},svg),i,[m]);el('text',{x:x0+w+6,y:y+rh/2+4,class:'val'},svg).textContent=tick(v,m)})};
- if(type==='map'){const m=ms[0];hb(idx.filter(i=>num(i,m)).sort((i,j)=>(d.rows[i][0]==null)-(d.rows[j][0]==null)||val(j,m)-val(i,m)),m,`${dimLabel(c[0])}, ranked by ${N(m)} (the PDF draws the map)`);return}
+ if(type==='map'){const m=ms[0],ng=idx.filter(i=>d.rows[i][0]==null&&num(i,m)).reduce((a,i)=>a+val(i,m),0);hb(idx.filter(i=>num(i,m)&&d.rows[i][0]!=null).sort((i,j)=>val(j,m)-val(i,m)),m,`${dimLabel(c[0])}, ranked by ${N(m)}${ng?` · not given: ${tick(ng,m)}, not drawn`:''} (the PDF draws the map)`);return}
  // a heatmap: one dimension down, one across, the measure as the cell's shade of the signal colour
  if(type==='heatmap'){const m=ms[0],ys=[...new Set(d.rows.map(r=>r[0]))],xs=[...new Set(d.rows.map(r=>r[1]))],vs=idx.filter(i=>num(i,m)).map(i=>val(i,m)),lo=Math.min(...vs),hi=Math.max(...vs),
    lw=Math.min(W*.3,Math.max(...ys.map(v=>String(v??'—').length))*6.6+10),top=20,cw=(W-lw-4)/Math.max(xs.length,1),chh=Math.max(14,Math.min(44,(H-top-4)/Math.max(ys.length,1)));
@@ -148,7 +148,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
    gs=two?[...new Set(rs.map(i=>d.rows[i][0]))].map(g=>rs.filter(i=>d.rows[i][0]===g)).sort((a,b)=>sum(b)-sum(a)):rs.map(i=>[i]),T=two?legend(svg,W,gs.map(g=>d.rows[g[0]][0])):0;
   sq(gs.map(sum),0,T,W,H-T).forEach(([x,y,w,h],k)=>sq(gs[k].map(i=>val(i,m)),x+1,y+1,Math.max(w-2,0),Math.max(h-2,0)).forEach(([x,y,w,h],j)=>{const i=gs[k][j];if(w<3||h<3)return;  // too small to draw: in the rows
    mk(el('rect',{x:x+1,y:y+1,width:Math.max(w-2,0),height:Math.max(h-2,0),fill:COL[k%6]},svg),i,[m]);
-   if(w>36&&h>18){const t=el('text',{x:x+7,y:y+16,class:'tl'},svg);if(dark(k))t.style.fill='var(--sheet)';let ok=fit(t,String(d.rows[i][nd-1]??'—'),w-12,1);if(!ok&&w>30){const t3=el('text',{x:x+5,y:y+14,class:'tl'},svg);t3.style.fontSize='10px';if(dark(k))t3.style.fill='var(--sheet)';ok=fit(t3,String(d.rows[i][nd-1]??'—'),w-8,1)}if(ok&&h>36){const u=el('text',{x:x+7,y:y+31,class:'tv'},svg);if(dark(k))u.style.fill='var(--sheet)';fit(u,tick(val(i,m),m),w-12,1)}}}));return}
+   if(w>36&&h>18){const t=el('text',{x:x+7,y:y+16,class:'tl'},svg);if(dark(k))t.style.fill='var(--sheet)';let ok=fit(t,String(d.rows[i][nd-1]??'—'),w-12,1);if(!ok&&h>w&&h>44&&w>=16){const tv=el('text',{x:x+w/2+4,y:y+h-6,class:'tl',transform:`rotate(-90 ${x+w/2+4} ${y+h-6})`},svg);tv.style.fontSize='10.5px';if(dark(k))tv.style.fill='var(--sheet)';ok=fit(tv,String(d.rows[i][nd-1]??'—'),h-12,1)}if(!ok&&w>30){const t3=el('text',{x:x+5,y:y+14,class:'tl'},svg);t3.style.fontSize='10px';if(dark(k))t3.style.fill='var(--sheet)';ok=fit(t3,String(d.rows[i][nd-1]??'—'),w-8,1)}if(ok&&h>36){const u=el('text',{x:x+7,y:y+31,class:'tv'},svg);if(dark(k))u.style.fill='var(--sheet)';fit(u,tick(val(i,m),m),w-12,1)}}}));return}
  const L=60;let B=40;
  if(type==='scatter'&&ms.length>1){const [mx,my]=ms,rs=idx.filter(i=>num(i,mx)&&num(i,my)),g=two?[...new Set(rs.map(i=>d.rows[i][1]))]:[],T=(two?legend(svg,W,g):8)+16,R=20;
   if(!rs.length)return;const sc=(m,a,b,n)=>{const vs=rs.map(i=>val(i,m)),k=nice(Math.min(...vs),Math.max(...vs),n);return [v=>a+(v-k.lo)/(k.hi-k.lo)*(b-a),k.t]},
@@ -164,7 +164,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
  if(!S.length)return;
  {const lw=Math.max(...cats.map(v=>Math.min(11,String(v??'—').length)))*6.2+8;if(type==='bar'&&!two&&!per&&S.length===1&&cats.length<=24&&cats.length*lw>W-68){hb(ord,S[0].m);return}}
  const rot=!per&&cats.length>3&&cats.length<=24&&cats.length*(Math.max(...cats.map(v=>Math.min(11,String(v??'—').length)))*6.2+8)>W-L-(type==='combo'?60:8);if(rot)B=Math.min(80,24+Math.max(...cats.map(v=>Math.min(16,String(v??'—').length)))*4.6);
- const stack=type==='bar'&&two&&!per,combo=type==='combo'&&S.length>1,R=combo?60:8,PC=S.length===2&&/_prev$/.test(S[1].m)&&S[1].m.startsWith(S[0].m.replace(/_prev$/,''))?['var(--c1)','var(--c3)']:COL,T=S.length>1&&type!=='waterfall'?legend(svg,W,S.map(s=>two&&!per?s.n:N(s.m)),PC):10,cum=[];  // a measure against its previous period: now in ink, before in grey
+ const stack=type==='bar'&&two&&!per,combo=type==='combo'&&S.length>1,R=combo?60:type==='line'&&S.length<=2&&!two?58:8,PC=S.length===2&&/_prev$/.test(S[1].m)&&S[1].m.startsWith(S[0].m.replace(/_prev$/,''))?['var(--c1)','var(--c3)']:COL,T=S.length>1&&type!=='waterfall'?legend(svg,W,S.map(s=>two&&!per?s.n:N(s.m)),PC):10,cum=[];  // a measure against its previous period: now in ink, before in grey
  let run=0;if(type==='waterfall')S[0].v.forEach(v=>cum.push([run,run+=v||0]));
  const ax=(vs,m,x,an)=>{const {lo,hi,t}=nice(Math.min(0,...vs),Math.max(0,...vs),Math.max(2,Math.floor((H-B-T)/28))),y=v=>H-B-(v-lo)/(hi-lo)*(H-B-T);
   t.forEach(v=>{an==='end'&&el('line',{x1:L,x2:W-R,y1:y(v),y2:y(v),stroke:'var(--line)'},svg);el('text',{x,y:y(v)+4,'text-anchor':an},svg).textContent=tick(v,m)});return y};
@@ -188,12 +188,12 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
   const ln=pts.map((p,k)=>p?(pts[k-1]?'L':'M')+p:'').join(''),run=pts.filter(Boolean);
   // one series: a faint area under it; a dense one (a point every few pixels, e.g. per day) a thinner line
   if(!dot&&S.length===1&&type==='line'&&run.length>1&&pts.every(Boolean))el('path',{d:`${ln}L${run.at(-1)[0]},${y(0)}L${run[0][0]},${y(0)}Z`,fill:COL[j%6],opacity:.06},svg);
-  dot||el('path',{d:ln,fill:'none',stroke:COL[j%6],'stroke-width':step<4?1.25:2,'stroke-linejoin':'round','stroke-linecap':'round',...(step<2?{opacity:.6}:{})},svg);
+  dot||el('path',{d:ln,fill:'none',stroke:COL[j%6],'stroke-width':step<4?1.25:2,'stroke-linejoin':'round','stroke-linecap':'round',...(step<2?{opacity:.6}:{}),...(/forecast|prediction/i.test(N(s.m))&&j?{'stroke-dasharray':'5 4'}:{})},svg);
   pts.forEach((p,k)=>p&&mk(el('circle',{cx:p[0],cy:p[1],r:dot?4:Math.max(2,Math.min(4,step/3)),fill:COL[j%6],opacity:dot?1:.01},svg),s.r[k],[s.m],dot?.7:1));
   // a line ends on its latest value, marked and labelled
   if(!dot&&type==='line'&&S.length<=2&&run.length){const kk=s.v.map((v,k)=>v==null?-1:k).filter(k=>k>=0).at(-1),[lx,ly]=pts[kk];el('circle',{cx:lx,cy:ly,r:3.5,fill:COL[j%6],stroke:'var(--card)','stroke-width':1.5},svg);
-   const up=ly-T>30,g=el('g',{},svg),t=el('text',{x:lx-8,y:up?ly-14:ly+22,'text-anchor':'end',class:'endv'},g);t.textContent=tick(s.v[kk],s.m);const tw=t.getComputedTextLength()||30;
-   el('rect',{x:lx-tw-14,y:(up?ly-14:ly+22)-12,width:tw+12,height:17,rx:4,class:'endb'},g).after(t);g.append(t)}});
+   const g=el('g',{},svg),yy0=Math.max(T+9,Math.min(H-B-4,ly+(S.length>1?(j?9:-9):0))),t=el('text',{x:lx+12,y:yy0+4,class:'endv'},g);t.textContent=tick(s.v[kk],s.m);const tw=t.getComputedTextLength()||30;
+   el('rect',{x:lx+6,y:yy0-8.5,width:tw+12,height:17,rx:4,class:'endb'},g).after(t);g.append(t)}});
  // a line over time: a guide follows the pointer to the nearest period and the tooltip has every series there
  if(type==='line'&&(!two||per)){const g=el('line',{y1:T,y2:H-B,stroke:'var(--mute)','stroke-dasharray':'3 3',opacity:0,'pointer-events':'none'},svg);
   svg.addEventListener('mousemove',e=>{const r=svg.getBoundingClientRect();if(!r.width)return;const k=Math.round(((e.clientX-r.left)*W/r.width-L-step/2)/step);if(k<0||k>=n){g.setAttribute('opacity',0);return}
