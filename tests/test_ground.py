@@ -668,3 +668,59 @@ def test_a_page_read_grounds_each_visuals_figures():
     out = ground.check("Total revenue is 425,548.61. West is highest at 111,213.76, then East at 110,441.85.", [page])
     assert out["numbers"] == [] and out["names"] == []
     assert ground.check("Total revenue is 999.99.", [page])["numbers"] == ["999.99"]  # still only what the rows hold
+
+
+# ---------- 1.2.6 M2 #12: objects ground like query rows (get_object, list_objects as ABI returns them) ----------
+
+OBJ = {"type": "cafe", "name": "Café", "key": ["CF009"], "title": "Bremen Süd",
+       "columns": ["cafe_id", "cafe_name", "city", "region", "seats", "format", "cafe_contacts.manager", "revenue", "orders_rows"],
+       "rows": [["CF009", "Bremen Süd", "Bremen", "North", 42, "station", "Ada Example", "1586.08", 31]],
+       "measures": {"revenue": "Revenue", "orders_rows": "orders_rows"},
+       "links": [{"link": "contact_cafe", "to": "contact", "columns": ["cafe_id", "manager"], "rows": [["CF009", "Ada Example"]], "more": False}]}
+LIST = {"type": "cafe", "name": "Cafés", "key": ["cafe_id"], "title": "cafe_name", "columns": ["cafe_id", "cafe_name", "seats"],
+        "rows": [["CF001", "Bremen Mitte", 30], ["CF009", "Bremen Süd", 42]], "offset": 0, "more": False}
+TITLES = [("Of these, Bremen Süd in Bremen is a station café that Ada Example manages, beside Bremen Mitte.", []),
+          ("Of these, Bremen Nord is managed by Ada Example.", ["Bremen Nord"])]
+VALUES = [("Bremen Süd has 42 seats and took 1,586.08 in 31 orders; Bremen Mitte has 30 seats.", []),
+          ("Bremen Süd has 48 seats.", ["48"])]
+SCOPE = r"""
+import json, pathlib, sys, tempfile
+from abi import semantic
+from abi.agents import grounding as g
+from abi.project import git
+from abi.semantic import model
+d = pathlib.Path(tempfile.mkdtemp())
+(d / "model").mkdir()
+(d / "model/ontology.json").write_text(json.dumps({"objects": [{"id": "cafe", "table": "outlets", "name": "Café", "plural": "Cafés", "title": "outlet_name"}]}))
+git.path, model.lake_columns, model._read = (lambda p: d), (lambda p: {}), (lambda p, f: {})
+model.load, semantic.locale, semantic.rls.hidden = (lambda p: {"tables": {}}), (lambda p: {"time_zone": "UTC"}), (lambda *a: {})
+vocab = g.scope("p")[0]
+a = json.load(sys.stdin)
+names = lambda o: o["numbers"] + o["names"]
+print(json.dumps({"cases": [names(g.check(t, a["results"])) for t in a["texts"]], "plural": "Cafés" in vocab,
+                  "with": names(g.check("Here are the Cafés you can see.", [], vocab)),
+                  "without": names(g.check("Here are the Cafés you can see.", [], vocab - {"Cafés"}))}))
+"""
+
+
+def _engine_cases(cases: list) -> dict:
+    from test_engine import engine
+    r = engine(SCOPE, stdin=json.dumps({"results": [OBJ, LIST], "texts": [t for t, _ in cases]}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    return json.loads(r.stdout.strip().splitlines()[-1])
+
+
+def test_object_title_grounds():
+    """An object's title, its property texts and its neighbors' titles ground names in both copies; an invented café
+    doesn't. The engine's scope takes an object type's plural from model/ontology.json as the model's own word."""
+    assert [(lambda o: o["numbers"] + o["names"])(ground.check(t, [OBJ, LIST])) for t, _ in TITLES] == [w for _, w in TITLES]
+    out = _engine_cases(TITLES)
+    assert out["cases"] == [w for _, w in TITLES] and out["plural"], out
+    assert (out["with"], out["without"]) == ([], ["Cafés"]), out
+
+
+def test_object_value_number_grounds():
+    """A property value (seats), a measure filtered to the object and a listed object's value ground figures as query
+    rows do, in both copies; a figure no object row holds stays flagged."""
+    assert [ground.check(t, [OBJ, LIST])["numbers"] for t, _ in VALUES] == [w for _, w in VALUES]
+    assert _engine_cases(VALUES)["cases"] == [w for _, w in VALUES]
