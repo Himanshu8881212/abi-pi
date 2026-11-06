@@ -97,8 +97,10 @@
    "tests/test_pages.py::test_object_page_renders",
    "tests/test_pages.py::test_viewer_sees_only_visible",
    "tests/test_pages.py::test_action_form_confirms",
-   "tests/test_pages.py::test_object_graph_has_every_link"
-  ]
+   "tests/test_pages.py::test_object_graph_has_every_link",
+   "tests/test_pages.py::test_report_click_opens_object_page"
+  ],
+  "note": "25 also covers a report visual's member opening its object page (click-through), when the dimension belongs to an object type"
  },
  "M8": {
   "items": [
