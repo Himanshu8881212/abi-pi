@@ -11,17 +11,17 @@ CSS = """
 /* Swiss signal: white (or near-black) ground, hairline rules, an 8-pt grid, Inter Tight for words and IBM Plex Mono for
    code and figures, one red-orange signal colour for what is live or active; radius 4, no shadows */
 :root{--paper:#f7f7f5;--sheet:#ffffff;--ink:#0b0b0b;--mute:#62625e;--faint:#e4e4e1;--line:#e4e4e1;--hover:#f1f1ee;
- --signal:#ff4f1f;--signal-ink:#c2380f;--red:#c8311a;--ok:#1d7a45;--c2:#ff4f1f;--c3:#7a7a75;--c4:#c4c4bf;
+ --signal:#ff4f1f;--signal-ink:#c2380f;--red:#c8311a;--ok:#1d7a45;--c2:#ff4f1f;--c3:#8a8a84;--c4:#c9c9c3;--c5:#ffb49c;
  --display:"Inter Tight","Inter",system-ui,-apple-system,"Segoe UI",sans-serif;--text:var(--display);
  --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;--r:6px;--r-lg:10px;--line-strong:#d2d2cd;
  --shadow:0 1px 2px rgb(11 11 11/.04),0 1px 3px rgb(11 11 11/.03);--shadow-pop:0 16px 40px -12px rgb(11 11 11/.22),0 4px 12px rgb(11 11 11/.06);
  --bg:var(--paper);--card:var(--sheet);--acc:var(--ink);--acc2:var(--c2);--bad:var(--red);color-scheme:light}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--paper:#0b0b0b;--sheet:#141414;--ink:#f2f2ef;--mute:#9b9b96;
- --faint:#2a2a28;--line:#2a2a28;--hover:#1c1c1b;--signal:#ff6a3d;--signal-ink:#ff8a63;--red:#ff6b55;--ok:#4cc27f;--c2:#ff6a3d;--c3:#8f8f8a;--c4:#4d4d4a;color-scheme:dark;
+ --faint:#2a2a28;--line:#2a2a28;--hover:#1c1c1b;--signal:#ff6a3d;--signal-ink:#ff8a63;--red:#ff6b55;--ok:#4cc27f;--c2:#ff6a3d;--c3:#8f8f8a;--c4:#4d4d4a;--c5:#9a4a30;color-scheme:dark;
  --line-strong:#3b3b38;--shadow:0 1px 2px rgb(0 0 0/.4);--shadow-pop:0 16px 40px -12px rgb(0 0 0/.7),0 0 0 1px #2a2a28}}
 :root[data-theme="dark"]{--paper:#0b0b0b;--sheet:#141414;--ink:#f2f2ef;--mute:#9b9b96;--faint:#2a2a28;--line:#2a2a28;--hover:#1c1c1b;
  --line-strong:#3b3b38;--shadow:0 1px 2px rgb(0 0 0/.4);--shadow-pop:0 16px 40px -12px rgb(0 0 0/.7),0 0 0 1px #2a2a28;
- --signal:#ff6a3d;--signal-ink:#ff8a63;--red:#ff6b55;--ok:#4cc27f;--c2:#ff6a3d;--c3:#8f8f8a;--c4:#4d4d4a;color-scheme:dark}
+ --signal:#ff6a3d;--signal-ink:#ff8a63;--red:#ff6b55;--ok:#4cc27f;--c2:#ff6a3d;--c3:#8f8f8a;--c4:#4d4d4a;--c5:#9a4a30;color-scheme:dark}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}[hidden]{display:none!important}
 body{margin:0;font:14px/1.5 var(--text);background:var(--paper);color:var(--ink);-webkit-font-smoothing:antialiased;font-feature-settings:"ss01","cv11"}
 header{display:flex;gap:16px;align-items:center;flex-wrap:wrap;padding-block:12px;padding-left:max(24px,env(safe-area-inset-left,0px));
@@ -67,7 +67,8 @@ function fmt(v,f){if(v===null||v===undefined)return'—';if(typeof v!=='number')
  if(f.style==='currency'&&f.currency)return new Intl.NumberFormat(undefined,{...o,style:'currency',currency:f.currency}).format(v);
  return new Intl.NumberFormat(undefined,o).format(v)}
 const NS='http://www.w3.org/2000/svg';function el(t,a,p){const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);p&&p.appendChild(e);return e}
-const COL=['var(--ink)','var(--c2)','var(--c3)','var(--c4)','var(--mute)','var(--faint)'];
+// neighbours always differ in tone: ink, signal, light grey, mid grey, signal tint, dark grey
+const COL=['var(--ink)','var(--c2)','var(--c4)','var(--c3)','var(--c5)','var(--mute)'];
 const dimLabel=c=>{const k=String(c).split('.').pop().replace(/_/g,' ');return k.charAt(0).toUpperCase()+k.slice(1)};  // products.product_name: Product name
 const PLAIN=/(^|\.)(year|week_year|quarter|month|week|day_of_week)$/;  // calendar numbers: 2023, not 2,023
 function table(box,d){const t=document.createElement('table');const cols=d.columns;let sort=null,desc=false;
@@ -147,14 +148,14 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
  if(type==='waterfall'){S[0].v.forEach((v,k)=>{if(v==null)return;const [p,q]=cum[k];  // each step floats from the running total; the tooltip shows the row's own value
    mk(el('rect',{x:L+step*k+step*.15,y:Math.min(y(p),y(q)),width:Math.max(step*.7,1),height:Math.max(Math.abs(y(p)-y(q)),1),fill:v<0?'var(--red)':'var(--ok)'},svg),S[0].r[k],[S[0].m]);
    k&&el('line',{x1:X(k-1)+step*.35,x2:X(k)-step*.35,y1:y(p),y2:y(p),stroke:'var(--mute)','stroke-dasharray':'2 2'},svg)});return}
- if(stack)cats.forEach((_,k)=>{let p=0,q=0;S.forEach((s,j)=>{const v=s.v[k];if(v==null)return;const a=v<0?q:p,b=a+v;v<0?q=b:p=b;
-  mk(el('rect',{x:L+step*k+step*.1,y:Math.min(y(a),y(b)),width:Math.max(step*.8,1),height:Math.abs(y(a)-y(b)),fill:COL[j%6]},svg),s.r[k],[s.m])})});
- else{const bs=type==='bar'?S:type==='combo'?S.slice(0,1):[],bw=step/Math.max(bs.length,1)*.8;
-  cats.forEach((_,k)=>bs.forEach((s,j)=>{const v=s.v[k];if(v!=null)mk(el('rect',{x:L+step*k+step*.1+bw*j,y:Math.min(y(v),y(0)),width:Math.max(bw,1),height:Math.abs(y(v)-y(0)),fill:COL[j%6]},svg),s.r[k],[s.m])}))}
+ const SW=Math.min(step*.8,120);if(stack)cats.forEach((_,k)=>{let p=0,q=0;S.forEach((s,j)=>{const v=s.v[k];if(v==null)return;const a=v<0?q:p,b=a+v;v<0?q=b:p=b;
+  mk(el('rect',{x:L+step*k+(step-SW)/2,y:Math.min(y(a),y(b)),width:Math.max(SW,1),height:Math.abs(y(a)-y(b)),fill:COL[j%6]},svg),s.r[k],[s.m])})});
+ else{const bs=type==='bar'?S:type==='combo'?S.slice(0,1):[],gw=Math.min(step*.8,72*Math.max(bs.length,1)),bw=gw/Math.max(bs.length,1);  // a few wide categories: bars keep a bar's width
+  cats.forEach((_,k)=>bs.forEach((s,j)=>{const v=s.v[k];if(v!=null)mk(el('rect',{x:L+step*k+(step-gw)/2+bw*j,y:Math.min(y(v),y(0)),width:Math.max(bw,1),height:Math.abs(y(v)-y(0)),fill:COL[j%6],rx:Math.min(2,bw/6)},svg),s.r[k],[s.m])}))}
  (type==='combo'?S.slice(1):type==='line'||type==='scatter'?S:[]).forEach(s=>{const j=S.indexOf(s),yy=combo?y2:y,dot=type==='scatter',pts=s.v.map((v,k)=>v==null?null:[X(k),yy(v)]);
   const ln=pts.map((p,k)=>p?(pts[k-1]?'L':'M')+p:'').join(''),run=pts.filter(Boolean);
   // one series: a faint area under it; a dense one (a point every few pixels, e.g. per day) a thinner line
-  if(!dot&&S.length===1&&type==='line'&&run.length>1&&pts.every(Boolean))el('path',{d:`${ln}L${run.at(-1)[0]},${H-B}L${run[0][0]},${H-B}Z`,fill:COL[j%6],opacity:.06},svg);
+  if(!dot&&S.length===1&&type==='line'&&run.length>1&&pts.every(Boolean))el('path',{d:`${ln}L${run.at(-1)[0]},${H-B}L${run[0][0]},${H-B}Z`,fill:COL[j%6],opacity:.05},svg);
   dot||el('path',{d:ln,fill:'none',stroke:COL[j%6],'stroke-width':step<4?1.25:2,'stroke-linejoin':'round','stroke-linecap':'round'},svg);
   pts.forEach((p,k)=>p&&mk(el('circle',{cx:p[0],cy:p[1],r:dot?4:Math.max(2,Math.min(4,step/3)),fill:COL[j%6],opacity:dot?1:.01},svg),s.r[k],[s.m],dot?.7:1))})}
 function csv(d){const q=v=>v===null?'':/[",\n]/.test(String(v))?'"'+String(v).replace(/"/g,'""')+'"':String(v);
