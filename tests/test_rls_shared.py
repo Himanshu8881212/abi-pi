@@ -521,3 +521,36 @@ def test_shared_builds_log_inbound_text_redacted_and_stay_within_their_budget(br
     assert r["rows"] and r["built"] >= 1 and r["clear"] == [], r
     r = brew["drv"]("budget", who="one", rows=10_000, more=5, n=secrets.token_hex(3))
     assert r == {"first": True, "second": None, "logged": [6], "more": 5}, r
+
+
+FOLLOW = {"objects": [{"id": "cafe", "table": "cafes", "name": "Café", "plural": "Cafés", "title": "cafe_name"},
+                      {"id": "customer", "table": "customers", "name": "Customer", "plural": "Customers", "title": "customer_id"}],
+          "links": [{"id": "visited", "from": "customer", "to": "cafe", "name": "visited", "inverse": "visitors",
+                     "via": ["orders-customer_id", "orders-cafe_id"], "rls": "follow"}]}
+BY_CUSTOMER = [  # customers as the fact (their filter reads their key) and as a dimension of orders (never back along via)
+    {"measures": ["customer_rows"], "dimensions": ["customers.segment"]},
+    {"measures": ["customer_rows"]},
+    {"measures": ["revenue", "orders_rows"], "dimensions": ["customers.segment"]},
+    {"measures": ["revenue", "customers"], "dimensions": ["cafes.city", "customers.loyalty_member"]},
+]
+
+
+def test_a_follow_link_keeps_every_read_each_persons_own(brew):
+    """1.2.6 M3: with customers following the cafés rule (rls: follow), every visual and query, the ones over customers
+    too, is each person's own read with shared partials and without; customers are fewer, orders are not."""
+    drv = brew["drv"]
+    abi.call("set_measure", project=P, id="customer_rows", name="customer_rows", expression="COUNT(customers.customer_id)")
+    try:
+        before = drv("check", queries=QUERIES + WAS + BY_CUSTOMER)
+        sure("save_ontology", project=P, ontology=FOLLOW)
+        r = drv("check", queries=QUERIES + WAS + BY_CUSTOMER)
+        assert r["n"] > 30 and not r["diff"], r["diff"][:3]  # exact(), but customers' partials (grouped by their key) are too big to share
+        assert len(r["names"]) >= 5 and r["sliced"] > (r["n"] - len(WHO) * len(BY_CUSTOMER)) / 2 and not r["old"] and set(r["names"]) <= set(r["have"]), r
+        n = len(QUERIES + WAS)
+        for w in ("one", "several"):
+            assert r["rows"][f"{w} q:{n + 1}"][1][0][0] < before["rows"][f"{w} q:{n + 1}"][1][0][0], "fewer customers"
+            assert r["rows"][f"{w} q:0"] == before["rows"][f"{w} q:0"], "the same orders (anonymous ones too)"
+        assert r["rows"]["none q:1"][1] == [], "a rule no row passes: still nothing"
+    finally:
+        sure("save_ontology", project=P, ontology={})
+        sure("delete_measure", project=P, id="customer_rows")

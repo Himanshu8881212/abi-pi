@@ -123,7 +123,8 @@ def test_hidden_row_404_same_as_missing(objs):
 
 
 def test_hidden_column_absent(objs):
-    cust = sql("SELECT min(customer_id) FROM customers")[0][0]
+    # a customer the North Viewer sees: one who visited a North café (customers follow the cafés rule, 1.2.6 M3)
+    cust = sql("SELECT min(customer_id) FROM orders JOIN cafes USING (cafe_id) WHERE region = 'North'")[0][0]
     assert "home_country" in row(abi.call("get_object", project=P, type="customer", key=[cust]))
     mine = viewer(objs, "get_object", type="customer", key=[cust])
     assert "home_country" not in mine["columns"] and "segment" in mine["columns"] and mine["key"] == [cust]
@@ -198,7 +199,7 @@ def test_m2m_no_duplicates(objs):
 
 def test_restricted_sql_passes_rls_check(objs):
     """As the North Viewer: the semi-joins and ILIKE pass rls.check (no 403) and read through their views, so a walk
-    through orders sees only North cafés' orders (customers themselves are not filtered before 1.2.6 M3)."""
+    through orders sees only North cafés' orders (and, since 1.2.6 M3, customers follow visited: only North cafés' visitors)."""
     north = {"link": "visited", "property": "region", "op": "=", "value": "North"}
     args = {"type": "customer", "filters": [north], "search": "c0001"}
     mine, owners = every(objs["viewer"], **args), every(**args)
