@@ -44,7 +44,7 @@ th{cursor:pointer;user-select:none;color:var(--mute);font-weight:500;font-size:1
 td.n{text-align:right;font:13px var(--text);font-variant-numeric:tabular-nums;letter-spacing:-.005em}tr:hover td{background:var(--hover)}
 .scroll th{position:sticky;top:0;z-index:1}
 .scroll{max-height:400px;overflow:auto}svg text{fill:var(--mute);font:11px var(--text);font-variant-numeric:tabular-nums}
-svg text.on{fill:var(--ink);stroke:var(--card);stroke-width:3px;paint-order:stroke;stroke-linejoin:round;pointer-events:none}
+svg text.val{fill:var(--ink);font-weight:500;font-size:10.5px}svg text.on{fill:var(--ink);stroke:var(--card);stroke-width:3px;paint-order:stroke;stroke-linejoin:round;pointer-events:none}
 .tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--sheet);padding:7px 10px;border-radius:var(--r);font-size:12px;line-height:1.4;display:none;z-index:40;box-shadow:var(--shadow-pop);font-variant-numeric:tabular-nums;max-width:320px}
 code,pre{font:12.5px/1.6 var(--mono)}pre{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);padding:12px 16px;overflow:auto;max-height:320px}
 .file{color:var(--mute);font:12px var(--mono);margin-top:8px}
@@ -151,7 +151,9 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
  const SW=Math.min(step*.8,120);if(stack)cats.forEach((_,k)=>{let p=0,q=0;S.forEach((s,j)=>{const v=s.v[k];if(v==null)return;const a=v<0?q:p,b=a+v;v<0?q=b:p=b;
   mk(el('rect',{x:L+step*k+(step-SW)/2,y:Math.min(y(a),y(b)),width:Math.max(SW,1),height:Math.abs(y(a)-y(b)),fill:COL[j%6]},svg),s.r[k],[s.m])})});
  else{const bs=type==='bar'?S:type==='combo'?S.slice(0,1):[],gw=Math.min(step*.8,72*Math.max(bs.length,1)),bw=gw/Math.max(bs.length,1);  // a few wide categories: bars keep a bar's width
-  cats.forEach((_,k)=>bs.forEach((s,j)=>{const v=s.v[k];if(v!=null)mk(el('rect',{x:L+step*k+(step-gw)/2+bw*j,y:Math.min(y(v),y(0)),width:Math.max(bw,1),height:Math.abs(y(v)-y(0)),fill:COL[j%6],rx:Math.min(2,bw/6)},svg),s.r[k],[s.m])}))}
+  cats.forEach((_,k)=>bs.forEach((s,j)=>{const v=s.v[k];if(v!=null)mk(el('rect',{x:L+step*k+(step-gw)/2+bw*j,y:Math.min(y(v),y(0)),width:Math.max(bw,1),height:Math.abs(y(v)-y(0)),fill:COL[j%6],rx:Math.min(2,bw/6)},svg),s.r[k],[s.m])}));
+  // one series of a few bars: each bar's value over it, compact (the tooltip has it in full)
+  if(type==='bar'&&bs.length===1&&n<=16&&step>=34)bs[0].v.forEach((v,k)=>{if(v==null)return;const t=el('text',{x:X(k),y:Math.min(y(v),y(0))-5,'text-anchor':'middle',class:'val'},svg);t.textContent=tick(v,bs[0].m);if(+t.getAttribute('y')<10)t.remove()})}
  (type==='combo'?S.slice(1):type==='line'||type==='scatter'?S:[]).forEach(s=>{const j=S.indexOf(s),yy=combo?y2:y,dot=type==='scatter',pts=s.v.map((v,k)=>v==null?null:[X(k),yy(v)]);
   const ln=pts.map((p,k)=>p?(pts[k-1]?'L':'M')+p:'').join(''),run=pts.filter(Boolean);
   // one series: a faint area under it; a dense one (a point every few pixels, e.g. per day) a thinner line

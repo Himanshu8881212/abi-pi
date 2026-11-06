@@ -359,9 +359,9 @@ with sync_playwright() as pw:
     ctx.add_cookies([{"name": "abi_u", "value": sid, "url": base}])
     pg = ctx.new_page(); pg.on("pageerror", lambda e: errors.append(str(e)[:200]))
     pg.goto(f"{base}/?p={p}#monitor")
-    pg.wait_for_function("() => [...document.querySelectorAll('main .card p')].filter(x => /^(OK|Alert) · /.test(x.textContent)).length >= 2")
+    pg.wait_for_function("() => [...document.querySelectorAll('main .card h3 .state')].filter(x => /^(OK|Alert)$/.test(x.textContent)).length >= 2")
     out["monitor"] = pg.eval_on_selector_all("main .card", "cs => cs.map(c => c.innerText)")
-    pg.evaluate("location.hash = 'inbox'"); pg.wait_for_selector("main .hit")
+    pg.evaluate("location.hash = 'inbox'"); pg.wait_for_selector("main .item")
     out["inbox"] = pg.inner_text("main"); out["badge"] = pg.inner_text("aside button.it[data-k='inbox']")
     pg.evaluate("location.hash = 'rep:overview'"); pg.click("button:has-text('Email this report')"); pg.wait_for_selector("text=Save schedule")
     out["to"] = pg.eval_on_selector("input[placeholder^='name@company.com, ']", "e => e.value")
@@ -376,9 +376,10 @@ print(json.dumps({"out": out, "errors": errors}))
 """, f"http://127.0.0.1:{w['srv'].server_address[1]}", ann.sid.split("=", 1)[1], P)
     assert out["errors"] == [], out["errors"]
     mon = "\n".join(out["out"]["monitor"])
-    assert "Alert · 1 of 2 region is above 3,500: North" in mon, mon
-    assert "Alert · Amount: 2,464 in month 5 of 2026, -34.29% on month 4 of 2026 (3,750) · alerts when the change is below -10%" in mon, mon
-    assert "With this page closed: on, alerts go to the Inbox and ann@alerts.example.test" in mon, mon
+    # 1.2.5: the state is a badge in the card's head (OK / Alert), the figures the line under it
+    assert mon.count("Alert") >= 2 and "1 of 2 region is above 3,500: North" in mon, mon
+    assert "Amount: 2,464 in month 5 of 2026, -34.29% on month 4 of 2026 (3,750) · alerts when the change is below -10%" in mon, mon
+    assert "Checked in the background; alerts go to the Inbox and to ann@alerts.example.test" in mon, mon
     inbox = out["out"]["inbox"]
     assert "Monitor: A region above 3500" in inbox and "3,578" in inbox and "Test run: email to" in inbox, inbox
     assert out["out"]["to"] == "cfo@example.test, ops@example.test" and re.search(r"\d", out["out"]["badge"]), out["out"]

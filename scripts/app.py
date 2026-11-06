@@ -279,9 +279,7 @@ form.so{display:contents}.brand{font-size:16px}.crumb{padding:4px 8px;margin-lef
 .btn .ic{width:15px;height:15px;margin-left:-3px;opacity:.85}.btn.icon{width:34px;padding:0}.btn.icon .ic{margin:0;opacity:1}
 .btn.danger:hover{color:var(--red);border-color:color-mix(in srgb,var(--red) 45%,var(--line));background:color-mix(in srgb,var(--red) 6%,var(--sheet))}
 .btn:focus-visible,.crumb:focus-visible,aside button:focus-visible,.modes button:focus-visible,button.pin:focus-visible,nav.tabs button:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
-.btn.busy{color:transparent!important;position:relative}.btn.busy .ic{opacity:0}
-.btn.busy::after{content:"";position:absolute;width:14px;height:14px;border-radius:50%;border:2px solid currentColor;border-color:var(--mute) transparent var(--mute) var(--mute);animation:spin .7s linear infinite}
-.btn.pri.busy::after{border-color:var(--sheet) transparent var(--sheet) var(--sheet)}
+.btn.busy .ic{display:none}.btn.busy::before{content:"";width:13px;height:13px;margin-left:-2px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:spin .7s linear infinite;flex:none;opacity:.8}
 @keyframes spin{to{transform:rotate(360deg)}}
 .btn:disabled{opacity:.4}.btn.busy:disabled{opacity:.8}
 /* sidebar */
@@ -422,6 +420,26 @@ input[type=file].f{padding:6px 8px}input[type=file].f::file-selector-button{font
 .srow .sname{min-width:0}.srow .sname b{display:block;font-weight:500;font-size:13.5px}.srow .sname .file{margin:2px 0 0}
 p.state{height:auto;padding:5px 10px;display:inline-flex;align-self:flex-start;line-height:1.3}.card>h4{font-size:13.5px;margin:4px 0 0}.card>h4+p{margin-top:6px}
 body[data-mode=viewer] .card>.acts:not(:has(>:not(.w))){display:none}body[data-mode=viewer] .ed{padding-left:0}
+dialog .pwho{margin-bottom:4px}dialog h4{font:600 12px var(--display);letter-spacing:.06em;text-transform:uppercase;color:var(--mute);margin:22px 0 0!important}
+dialog .srow{border-top:1px solid var(--line)}dialog h4+.srow{border-top:0}dialog .foot{justify-content:space-between;margin-top:22px;padding-top:16px;border-top:1px solid var(--line)}
+dialog .foot form.so{display:block}
+.areas .lk b{display:flex;align-items:center;gap:8px}.areas .lk b .ic{color:var(--mute)}.areas .lk:hover b .ic{color:var(--signal)}.areas .lk:hover b::after{content:none}
+.areas .lk::after{content:"";position:absolute}.areas .lk{position:relative}
+/* a visual's Table / CSV / How take no room until the card is hovered or focused: the title keeps its width */
+.grid>.card>h3 .tools{max-width:0;overflow:hidden;opacity:0;transition:max-width .18s,opacity .12s}
+.grid>.card:hover>h3 .tools,.grid>.card:focus-within>h3 .tools{max-width:220px;opacity:1}.mobile .grid>.card>h3 .tools{display:none}
+.grid>.card.sized:has(.kpi)>.body{display:flex;flex-direction:column;justify-content:center;padding-bottom:12px}
+.mobile .grid .kpi .v{font-size:clamp(20px,13cqi,32px)}
+.stack>.card.editor{flex-direction:column;align-items:stretch;padding:20px 22px}.stack>.card.editor>*+*{margin-top:10px!important}.stack>.card.editor>h3{flex:none}
+.stack>.card.editor>.row{justify-content:flex-start;margin-left:0!important}
+/* Go to: a sidebar entry and a palette */
+aside button.goto{display:flex;align-items:center;gap:10px;width:100%;height:34px;margin:0 0 14px;padding:0 10px;border:1px solid var(--line);border-radius:var(--r);background:var(--paper);color:var(--mute);font:13px var(--text);cursor:pointer;transition:border-color .12s,color .12s}
+aside button.goto:hover{border-color:var(--line-strong);color:var(--ink)}aside button.goto .lb{flex:1;text-align:left}aside kbd,#goto kbd{font:500 11px var(--text);padding:2px 6px;border:1px solid var(--line);border-radius:4px;background:var(--sheet);color:var(--mute)}
+.mobile aside button.goto{height:44px}
+#goto{padding:0;width:min(600px,calc(100vw - 32px));margin-top:14vh;overflow:hidden}#goto>input.f{margin:0;border:0;border-bottom:1px solid var(--line);border-radius:0;padding:16px 18px;font-size:15px;box-shadow:none;min-height:54px}
+.golist{max-height:min(420px,60vh);overflow:auto;padding:6px}.goit{display:flex;align-items:center;gap:12px;width:100%;padding:10px 12px;border:0;border-radius:var(--r);background:none;color:var(--ink);font:14px var(--text);cursor:pointer;text-align:left}
+.goit .ic{color:var(--mute)}.goit .lb{flex:1}.goit .file{margin:0}.goit.on,.goit:hover{background:var(--hover)}.goit.on .ic{color:var(--signal)}
+@media (hover:none){.btn:hover{background:var(--sheet);border-color:var(--line)}.btn.pri:hover{background:var(--ink);border-color:var(--ink)}.btn:active:not(:disabled){background:var(--hover)}.btn.pri:active:not(:disabled){background:color-mix(in srgb,var(--ink) 84%,var(--sheet))}}
 """
 
 JS = r"""
@@ -569,7 +587,7 @@ function home(box){pinsHome(box);const rd=D.readiness||{},q=D.quality||{},ix=c=>
   Knowledge:pl((VAULT||[]).length,'vault document'),Govern:`${D.pending?.files?.length?pl(D.pending.files.length,'uncommitted change'):'All committed'} · ${D.published?.at?'published '+cell(D.published.at):'not published yet'}`};
  const map=card('Where things stand','one line per area; open it to go there'),tb=h('div','areas');
  line['Data Model']=(rd.ready?'Ready':'Not ready')+` · ${D.measures.length} measures`;
-nav().filter(([gname])=>gname!=='Start'&&line[gname]).forEach(([gname,items])=>{const b=h('button','lk');b.append(h('b','',gname),h('span','',line[gname]||''));b.onclick=()=>show(items[0][0]);tb.append(b)});
+nav().filter(([gname])=>gname!=='Start'&&line[gname]).forEach(([gname,items])=>{const b=h('button','lk'),t=h('b');t.append(ic({Data:'sources','Data Model':'model',Visualizations:'reports',Automate:'flows',Knowledge:'vault',Govern:'security'}[gname]||'home'),gname);b.append(t,h('span','',line[gname]||''));b.onclick=()=>show(items[0][0]);tb.append(b)});
  map.append(tb);at.classList.add('full');map.classList.add('full');g.append(map)}
 
 // ---------- Analyze: one report per entry; filters and cross-filter ----------
@@ -1031,7 +1049,7 @@ function sources(box){const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),qr=
   file.onchange=()=>{if(!t.value&&file.files[0])t.value='bronze_'+file.files[0].name.replace(/\.[^.]+$/,'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')};
   c.append(h('label','l','Table'),t,tabs,fg,lg);
   act(c,'Add source',async m=>{if(!t.value)throw new Error('Name the table first.');const sheet=sh.value.trim();
-   if(file.files[0])return loaded(await upload(t.value,file.files[0],sheet),m,`Uploaded and loaded into ${t.value}.`);
+   if(file.files[0]){const x=await loaded(await upload(t.value,file.files[0],sheet),m,`Uploaded and loaded into ${t.value}.`);return x+' Next: stage or model it under Tables, or ask the agent to build a report from it.'}
    if(!loc.value)throw new Error('Choose a file, or give a location like s3://bucket/folder/*.csv.');
    const s3=loc.value.startsWith('s3://')?{region:rg.value.trim()||'us-east-1',...(ep.value?{endpoint:ep.value.trim(),url_style:'path'}:{}),...(tls.checked?{}:{use_ssl:false})}:null;
    if(s3&&(ki.value||ks.value)){const r=await fetch('/s3key',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({table:t.value,location:loc.value,...s3,key_id:ki.value,secret:ks.value})}).then(x=>x.json());
@@ -1409,10 +1427,10 @@ function commits(box){const c=card('Commits','every change is a commit in ABI\'s
 
 function security(box){const g=h('div','cards');box.append(g);const r=D.rls||{},who=Object.fromEntries((r.accounts||[]).map(a=>[a.id,a.name]));
  const c=card('Row-level rules','Viewers see only their rows');if(!(r.rules||[]).length)c.append(h('p','empty','None yet: ask the agent, e.g. "user X sees only region North".'));
- (r.rules||[]).forEach(x=>{const k=h('div','kv');k.style.marginBottom='12px';k.append(h('b','','rule'),h('span','',x.id),h('b','','rows of'),h('span','',`${x.table}.${x.column}`));
+ (r.rules||[]).forEach(x=>{const k=h('div','kv');k.style.marginBottom='12px';k.append(h('b','','rule'),h('span','',x.id||x.name||'(unnamed)'),h('b','','rows of'),h('span','',`${x.table}.${x.column}`));
   (Array.isArray(x.users)?x.users.map(u=>[u.name||who[u.id]||u.id,u.values]):Object.entries(x.users||{}).map(([u,v])=>[who[u]||u,v])).forEach(([u,v])=>k.append(h('b','',u),h('span','',(v||[]).join(', ')||'no rows')));c.append(k)});g.append(c);
  const cr=card('Hidden columns','hidden from Viewers');const cols=r.columns||[];if(!cols.length)cr.append(h('p','empty','None.'));cols.forEach(x=>cr.append(h('span','chip',typeof x==='string'?x:`${x.table}: ${(x.columns||[]).join(', ')}`)));g.append(cr);
- const ro=card('Roles','set in ABI\'s app (a person\'s click)');const k=h('div','kv');(r.accounts||[]).forEach(a=>k.append(h('b','',a.name),h('span','',a.role||'no role')));ro.append(k);g.append(ro)}
+ const ro=card('Roles','set in ABI\'s app (a person\'s click)');const k=h('div','kv');(r.accounts||[]).forEach(a=>k.append(h('b','',a.name),h('span','',a.role||'no role')));ro.append((r.accounts||[]).length?k:h('p','empty','Only owners see who has which role: Users & access lists them.'));g.append(ro)}
 
 // ---------- Knowledge: the vault ----------
 async function vpost(op,body){const r=await fetch('/vault/'+op,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(body||{})}).then(r=>r.json());
@@ -1457,7 +1475,7 @@ function navAll(){return [['Start',[['home','Home',home],['chat','Chat',chatPage
  ['Govern',[['security','Security',security],['environments','Environments',b=>{const x=(D.sections.Environments||'').trim();if(x&&!/^<p[^>]*>\s*<\/p>$/.test(x))b.insertAdjacentHTML('beforeend',x);if(b.innerText.trim().length<10)b.append(h('p','empty','No environments yet: a dev/prod pair lets you test changes before they reach production. Ask the agent to set one up.'))}],['history','History',commits,(D.history||[]).length],...((window.ME||{admin:true}).admin&&!MOBILE?[['people','Users & access',usersPage],['settings','Settings',settingsPage]]:[])]]]}
 let MODE='developer',VAULT=[],MODEL='';
 let FOLD={};try{FOLD=JSON.parse(localStorage.getItem('abi-fold')||'{}')}catch(e){}
-function sidebar(){side.innerHTML='';PAGES={};
+function sidebar(){side.innerHTML='';PAGES={};side.setAttribute('aria-label','Pages');{const g=h('button','goto');g.append(ic('search'),h('span','lb','Go to…'),h('kbd','',/Mac|iPhone|iPad/.test(navigator.platform)?'⌘K':'Ctrl K'));g.onclick=()=>goTo();side.append(g)}
  // a phone has no header crumb: the drawer opens with the workspace and project, which switches them
  if(MOBILE){const sw=$('#switch'),b=h('button','proj');b.append(ic('transfer'),h('span','lb',sw.textContent.replace('▾','').replace('/',' / ')),ic('down'));b.onclick=()=>{document.body.classList.remove('menu-open');sw.click()};side.append(b)}nav().forEach(([g,items])=>{const sec=h('div','sec'),hd=h('button','grp'),list=h('div','items');
  hd.append(h('span','',g),h('span','car'));hd.setAttribute('aria-expanded',String(!FOLD[g]));sec.classList.toggle('folded',!!FOLD[g]);
@@ -1469,7 +1487,7 @@ function sidebar(){side.innerHTML='';PAGES={};
  // AGPL-3.0 §13: every page offers the running version's source (ABI_SOURCE_URL for a changed build)
  if(window.ME?.source){const a=h('a','src',`ABI-PI ${ME.version} · source code (AGPL-3.0)`);a.href=ME.source;a.target='_blank';a.rel='noopener';side.append(a)}}
 let PREV='home';
-function show(k){if(!PAGES[k])k='home';if(k!=='chat'&&CUR!=='chat')PREV=k;else if(k==='chat'&&CUR!=='chat')PREV=CUR;{const cb=$('#chat');if(cb.classList.contains('full')){cb.classList.remove('full');$('#chat .wide-t').textContent='Full page';document.body.append(cb);cb.classList.remove('open');document.body.classList.remove('chat-open')}}CUR=k;setTimeout(ctx);const sk=k.startsWith('rep:')?'reports':k.startsWith('mdl:')?'model':k.startsWith('flw:')?'flows':k;side.querySelectorAll('button.it').forEach(b=>b.classList.toggle('on',b.dataset.k===sk));
+function show(k){if(!PAGES[k])k='home';if(k!=='chat'&&CUR!=='chat')PREV=k;else if(k==='chat'&&CUR!=='chat')PREV=CUR;{const cb=$('#chat');if(cb.classList.contains('full')){cb.classList.remove('full');wideT(0);document.body.append(cb);cb.classList.remove('open');document.body.classList.remove('chat-open')}}CUR=k;setTimeout(ctx);const sk=k.startsWith('rep:')?'reports':k.startsWith('mdl:')?'model':k.startsWith('flw:')?'flows':k;side.querySelectorAll('button.it').forEach(b=>{b.classList.toggle('on',b.dataset.k===sk);b.toggleAttribute('aria-current',b.dataset.k===sk)});
  const act=side.querySelector('button.it.on');if(act)act.closest('.sec').classList.remove('folded');
  const box=$('main');box.innerHTML='';const pg=h('div','pg'),head=h('div','pghead'),pn=$('#pgname');pn.textContent=PAGES[k][0];document.title=PAGES[k][0]+' · '+D.project;
  pn.title=(k.startsWith('rep:')?'Filter the report or click a bar to filter by it. Every number comes from ABI.':LEDE[k])||'';
@@ -1517,6 +1535,15 @@ async function layStore(reset){const k=CUR,pg=$('main .pg'),out={};
 function layMode(on){LAYING=on;document.body.classList.toggle('laying',on);const b=$('#layout');b.classList.toggle('on',on);b.replaceChildren(ic(on?'check':'layout'),on?'Done':'Layout');$('#layreset').hidden=!on}
 $('#layout').onclick=()=>{layMode(!LAYING);show(CUR);if(LAYING)toast('Drag a card to move it, its corner to resize it. Publish shows it to Viewer.')};
 $('#layreset').onclick=()=>{if(CUR.startsWith('rep:')){toast('A report\'s layout is in the report: undo it under Changes.');return}layStore(true)};
+// Go to (Ctrl/⌘ K): every page, report, model and flow by name; arrows move, Enter opens
+function goTo(){if($('#goto'))return;const d=h('dialog'),q=h('input','f'),list=h('div','golist');d.id='goto';q.placeholder='Go to a page, report, model or flow…';q.setAttribute('aria-label','Go to');
+ const groups=Object.fromEntries(nav().flatMap(([g,its])=>its.map(([k])=>[k,g])));let sel=0,hits=[];
+ const draw=()=>{const t=q.value.trim().toLowerCase();hits=Object.entries(PAGES).filter(([k,[l]])=>!t||l.toLowerCase().includes(t)||k.toLowerCase().includes(t)).slice(0,12);sel=Math.min(sel,Math.max(0,hits.length-1));list.innerHTML='';
+  hits.forEach(([k,[l]],i)=>{const b=h('button','goit'+(i===sel?' on':'')),base=k.split(':')[0];b.append(ic(IC[k]?k:{rep:'reports',mdl:'model',flw:'flows'}[base]||'open'),h('span','lb',l),h('span','file',groups[k]||{rep:'Report',mdl:'Model',flw:'Flow'}[base]||''));
+   b.onclick=()=>{d.close();d.remove();show(k)};list.append(b)});if(!hits.length)list.append(h('p','empty pad','Nothing by that name.'))};
+ q.oninput=()=>{sel=0;draw()};q.onkeydown=e=>{if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();sel=(sel+(e.key==='ArrowDown'?1:-1)+hits.length)%Math.max(1,hits.length);draw()}
+  else if(e.key==='Enter'&&hits[sel]){d.close();d.remove();show(hits[sel][0])}};d.onclose=()=>d.remove();d.append(q,list);document.body.append(d);d.showModal();draw();q.focus()}
+document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();goTo()}});
 const boot=loadVault();sidebar();
 const R=document.documentElement,TB=$('#theme');const dark=()=>R.dataset.theme?R.dataset.theme==='dark':matchMedia('(prefers-color-scheme: dark)').matches;
 const setTheme=t=>{if(t)R.dataset.theme=t;const d=dark();TB.classList.add('icon');TB.replaceChildren(ic(d?'sun':'moon'));TB.setAttribute('aria-label',d?'Light theme':'Dark theme');TB.title=d?'Switch to the light theme':'Switch to the dark theme'};try{setTheme(localStorage.getItem('abi-theme'))}catch(e){setTheme()}
@@ -1532,7 +1559,7 @@ function vc(){const n=D.pending?.files?.length||0,cb=$('#changes'),pb=$('#publis
 $('#changes').onclick=()=>{const d=$('#commit'),f=$('.files',d);f.innerHTML='';const fl=D.pending?.files||[];
  $('h3',d).textContent=fl.length?`${fl.length} change${fl.length>1?'s':''} not committed yet`:'Everything is committed';$('#c-commit').disabled=!fl.length;$('#c-message').disabled=!fl.length;
  if(!fl.length)f.append(h('p','empty','Nothing to commit: every change is in ABI\'s history. Undo still takes back the last one.'));fl.forEach(x=>{const det=h('details');const su=h('summary','',`${x.status}  ${x.path}`);det.append(su,h('pre','',x.patch||''));f.append(det)});
- $('#c-message').value=D.pending?.proposed_message||'';$('.msg',d).textContent='';$('#c-undo').disabled=!D.pending?.can_undo;d.showModal()};
+ $('#c-message').value=D.pending?.proposed_message||'';$('.msg',d).textContent='';$('#c-undo').disabled=!D.pending?.can_undo;$('#c-undo').title=D.pending?.can_undo?'Take back the last change':'Nothing to undo: no change since the last commit';d.showModal()};
 $('#c-close').onclick=()=>$('#commit').close();
 $('#c-commit').onclick=async()=>{try{await api('commit',{message:$('#c-message').value||'Changes from the app'});$('#commit').close();toast('Committed')}catch(e){say($('#commit .msg'),e.message,1)}};
 $('#c-undo').onclick=async()=>{try{const r=await api('undo',{});say($('#commit .msg'),`Undone: ${r.undone}`);D.pending=await api('changes',{});$('#changes').onclick()}catch(e){say($('#commit .msg'),e.message,1)}};
@@ -1549,9 +1576,15 @@ $('#switch').onclick=switcher;
 function pwDialog(){const d=h('dialog'),c=h('div','card'),cur=h('input','f'),nw=h('input','f'),m=h('div','msg');c.append(h('h3','','Change your password'));
  cur.type=nw.type='password';cur.placeholder='';cur.autocomplete='current-password';nw.placeholder='at least 8 characters';nw.autocomplete='new-password';
  const ok=btn('Change',async()=>{const r=await fetch('/password',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({current:cur.value,password:nw.value})}).then(x=>x.json()).catch(e=>({error:e.message}));
-  cur.value=nw.value='';if(r.error){say(m,r.error,1);return}say(m,'Changed. Sign in again with the new one.');setTimeout(()=>location.reload(),1500)},1),no=btn('Cancel',()=>{d.close();d.remove()});
- const row=h('div','row acts');row.append(ok,btn('Personal tokens',()=>{d.close();d.remove();tokDialog()}),btn('Two-step sign-in',()=>{d.close();d.remove();mfaDialog()}),no);cur.id='pw-cur';nw.id='pw-new';const lc=h('label','l','Current password'),ln=h('label','l','New password');lc.htmlFor='pw-cur';ln.htmlFor='pw-new';
- c.append(h('p','file',`Signed in as ${(window.ME||{}).name||''}`),lc,cur,ln,nw,row,m);d.append(c);document.body.append(d);d.showModal();
+  cur.value=nw.value='';if(r.error){say(m,r.error,1);return}say(m,'Changed. Sign in again with the new one.');setTimeout(()=>location.reload(),1500)},1),no=btn('Close',()=>{d.close();d.remove()});
+ // your account: who you are, the password, then tokens and two-step as their own rows, and Sign out
+ const row=h('div','row acts');row.append(ok);cur.id='pw-cur';nw.id='pw-new';const lc=h('label','l','Current password'),ln=h('label','l','New password');lc.htmlFor='pw-cur';ln.htmlFor='pw-new';
+ const me=h('div','pwho');me.append(h('span','av',((window.ME||{}).name||'?').slice(0,1).toUpperCase()),h('b','',(window.ME||{}).name||''),h('span','state',(window.ME||{}).role||''));
+ const more=(t,sub,b)=>{const r=h('div','srow'),n=h('div','sname');n.append(h('b','',t),h('div','file',sub));r.append(n,b);return r};
+ const so=h('form','so');so.method='post';so.action='/signout';{const b=h('button','btn danger','Sign out');b.prepend(ic('out'));so.append(b)}const foot=h('div','row foot');foot.append(so,no);
+ c.querySelector('h3').textContent='Your account';
+ c.append(me,h('h4','','Change your password'),lc,cur,ln,nw,row,m,h('h4','','Sign-in'),more('Personal tokens','read-only sign-in for SQL and MCP clients, as you',btn('Personal tokens',()=>{d.close();d.remove();tokDialog()})),
+  more('Two-step sign-in','a code from an authenticator app after your password',btn('Two-step sign-in',()=>{d.close();d.remove();mfaDialog()})),foot);d.append(c);document.body.append(d);d.showModal();
  fetch('/signin/sso').then(r=>r.json()).then(L=>{if(!L.length)return;const l=h('div','row acts');c.insertBefore(h('h3','','Sign in with your company account'),m);c.insertBefore(l,m);
   L.forEach(x=>l.append(btn('Link '+x.name,async()=>{const r=await fetch('/api/oidc/'+encodeURIComponent(x.id)+'/start',{method:'POST',headers:{'Content-Type':'application/json'},body:'{"link":true}'}).then(y=>y.json());
    if(r.url)location.href=r.url;else say(m,r.error||'Not available.',1)})))}).catch(()=>{})}
@@ -1584,7 +1617,7 @@ function mfaDialog(){const d=h('dialog'),c=h('div','card'),b=h('div'),m=h('div',
    ...(s.on?(s.required?[]:[btn('Turn off',off)]):[btn('Turn on',on,1)]),btn('Close',close))};
  c.append(h('h3','','Two-step sign-in'),b,m);d.append(c);document.body.append(d);d.showModal();fill()}
 {const q=new URLSearchParams(location.search).get('signin');if(q){setTimeout(()=>toast({linked:'Linked: you can sign in with it now.',conflict:'That account is linked to another person here.'}[q]||'Linking didn\'t work: try again.'));history.replaceState(null,'',location.pathname+location.hash)}}
-if(window.ME?.signin){const w=h('button','btn who');w.append(h('span','av',(ME.name||'?').slice(0,1).toUpperCase()),h('span','nm',ME.name));w.title='Your password, personal tokens and two-step sign-in';w.onclick=pwDialog;const f=h('form');f.method='post';f.action='/signout';f.className='so';f.append(ib('out','Sign out'));const r0=$('header .right');r0.prepend(w,f)}
+if(window.ME?.signin){const w=h('button','btn who');w.append(h('span','av',(ME.name||'?').slice(0,1).toUpperCase()),h('span','nm',ME.name));w.title='Your password, personal tokens and two-step sign-in';w.onclick=pwDialog;const f=h('form');f.method='post';f.action='/signout';f.className='so';f.hidden=true;f.append(ib('out','Sign out'));const r0=$('header .right');r0.prepend(w,f)}
 if(window.ME&&!['editor','owner'].includes(ME.role))$('.modes').hidden=true;/* Viewer access only: no switch at all */$('#m-dev').onclick=()=>pickMode('developer');$('#m-view').onclick=()=>pickMode('viewer');
 let first=decodeURIComponent(location.hash.slice(1));if(!first)try{first=localStorage.getItem('abi-app-'+D.project)}catch(e){}setTimeout(()=>show(first||'home'));  // after the whole script: the chat page's parts are declared further down
 boot.then(()=>{sidebar();show(CUR);inboxCount()});setMode('developer');vc();
@@ -1624,7 +1657,7 @@ function md(t){const C=[],I=x=>x.replace(/`([^`\n]+)`/g,'<code>$1</code>').repla
 function bubble(cls,text){const b=h('div','m '+cls);if(cls==='ai')b.innerHTML=md(text);else b.textContent=text;log.append(b);log.scrollTop=log.scrollHeight;return b}
 let steps=null;
 // Chat page: the same conversation as the side panel, full width; leaving the page (or the agent showing one) puts it back at the side
-function chatPage(box){$('#chat .wide-t').textContent='Side panel';chatBox.classList.add('full','open');document.body.classList.remove('chat-open');box.append(chatBox);chats();inp.focus()}
+function chatPage(box){wideT(1);chatBox.classList.add('full','open');document.body.classList.remove('chat-open');box.append(chatBox);chats();inp.focus()}
 function openChat(on){const was=chatBox.classList.contains('open');chatBox.classList.toggle('open',on??!was);if(!was&&chatBox.classList.contains('open'))chats();document.body.classList.toggle('chat-open',chatBox.classList.contains('open'));if(chatBox.classList.contains('open'))inp.focus()}
 const STEP={abi_show:'opened a page',semantic_query:'asked the model',visual_data:'read a chart',abi_vault:'searched the vault',abi_tools:'picked tools',
  semantic_model:'read the model',readiness:'checked readiness',data_quality:'checked data quality',how_calculated:'looked up a formula',set_measure:'saved a measure',
@@ -1646,6 +1679,9 @@ function paint(c){log.innerHTML='';steps=null;(c.messages||[]).forEach(m=>bubble
 $('#chat-new').onclick=async()=>{const c=await cpost('/chat/new');paint(c);chats(c.id);inp.focus()};
 $('#chat-pick').onchange=async e=>{if(!e.target.value)return;const c=await cpost('/chat/open',{id:e.target.value});paint(c);chats(c.id)};
 $('#chat-toggle').onclick=()=>openChat();$('#chat .wide-t').onclick=()=>{if(chatBox.classList.contains('full')){show(PREV||'home');openChat(true)}else show('chat')};$('#chat .x').onclick=()=>openChat(false);
+// the chat's header: icon buttons, their words as names and tooltips
+function wideT(full){const b=$('#chat .wide-t');b.classList.add('icon');b.replaceChildren(ic(full?'narrow':'wide'));b.setAttribute('aria-label',full?'Side panel':'Full page');b.title=full?'Back to the side panel':'Open the chat as a full page'}
+{const n=$('#chat-new'),x=$('#chat .x');n.classList.add('icon');n.replaceChildren(ic('plus'));n.setAttribute('aria-label','New chat');n.title='New chat';x.classList.add('icon');x.replaceChildren(ic('x'));x.setAttribute('aria-label','Close');x.title='Close the chat';wideT($('#chat').classList.contains('full'))}
 async function sendChat(){const t=inp.value.trim();if(!t)return;
  log.querySelector('.hello')?.remove();bubble('me',t);inp.value='';steps=null;
  await fetch('/chat',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({message:t,page:CUR})})}
@@ -1655,7 +1691,7 @@ $('#chat .stop').onclick=()=>fetch('/chat/stop',{method:'POST',headers:{'X-Abi-A
  es.onerror=()=>{if(es.readyState===2)stale()};  // the stream was refused: a restart or an ended session
  es.onmessage=async ev=>{const e=JSON.parse(ev.data);
   if(e.type==='show'){PENDING.filters=e.filters||null;if(e.page==='explore'&&e.query){const q={measures:e.query.measures||[],dimensions:(e.query.dimensions||[]).slice(0,1),filters:e.query.filters||[]};PENDING.explore={...q,chart:e.chart};MINE.unshift({name:'Agent: '+q.measures.join(', ')+(q.dimensions[0]?' by '+q.dimensions[0]:''),q,type:e.chart||'bar',at:new Date().toISOString().slice(0,16).replace('T',' ')});saveMine();sidebar()}const nv=h('div','m nav','→ '+(e.page==='report'?'report '+e.report:e.page)+(e.note?' · '+e.note:''));nv.onclick=()=>show(e.page==='report'?'rep:'+e.report:e.page);log.append(nv);log.scrollTop=log.scrollHeight;const wasFull=chatBox.classList.contains('full');const k=e.page==='report'?'rep:'+e.report:e.page;show(k);if(wasFull)openChat(true);setTimeout(()=>highlight(e.item),400);if(e.note)toast('Agent: '+e.note)}
-  else if(e.type==='data'){Object.assign(D,e.data);normQ(D.quality);const k=CUR;sidebar();show(k);vc()}
+  else if(e.type==='data'){Object.assign(D,e.data);normQ(D.quality);const k=CUR,keep=[...document.querySelectorAll('main .card.editor')];sidebar();show(k);{const hd=$('main .pghead');if(hd)keep.reverse().forEach(c=>hd.after(c))}vc()}  // a form being filled in survives the redraw
   else if(e.type==='busy'){busy.hidden=!e.on;$('#chat .stop').hidden=!e.on}
   else if(e.type==='step'){if(!steps){steps=h('div','m steps');log.append(steps)}const last=[...steps.children].reverse().find(x=>x.dataset.t===e.tool&&x.dataset.s==='run');
    if(e.state==='run'||!last){const l=h('div','',`${e.state==='run'?'…':e.state==='ok'?'✓':'✗'} ${stepName(e.tool)}`);l.dataset.t=e.tool;l.dataset.s=e.state;steps.append(l)}
