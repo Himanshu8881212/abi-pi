@@ -434,11 +434,14 @@ def starter_report(project: str) -> str:
     sm = call("semantic_model", project=project)
     names = {m["id"]: m.get("name") or m["id"] for m in sm.get("measures", []) if isinstance(m, dict)
              and not re.search(r"\b(YTD|QTD|MTD|PREVIOUS_YEAR|PREVIOUS_PERIOD|ROLLING)\s*\(", m.get("expression") or "", re.I)}
-    measures = list(names)[:4]  # a KPI has no date to step back from
+    # a KPI has no date to step back from; a summed price, rate or discount means nothing as a total (1.2.5)
+    flat = r"(^|_)(unit_)?(price|rate|pct|percent|ratio|discount|avg|average|cost_per)(_|$)"
+    measures = [m for m in names if not re.search(flat, m, re.I)][:4] or list(names)[:4]
     if not measures:
         raise ActionError(400, {"message": "No measures to report."})
     cols, kinds = sm.get("columns") or {}, {t: i.get("kind") for t, i in (sm.get("tables") or {}).items()}
     day = "calendar.day" if "day" in cols.get("calendar", {}) else None
+    month = {"year", "month"} <= set(cols.get("calendar", {}))  # a daily line over years is too dense to read: per month
     good = r"categor|country|region|segment|type|status|group|channel|brand|product|store|city|state"
     dims = sorted((f"{t}.{c}" for t in cols if t != "calendar" for c, typ in cols[t].items()
                    if (typ == "VARCHAR" and not re.search(r"(^|_)(id|key|link|url|description|tags|title|time|date)$", c.lower()))
@@ -453,7 +456,10 @@ def starter_report(project: str) -> str:
                         "query": {"measures": [main], "dimensions": [dims[0]], "limit": 20,
                                   "order_by": [{"field": main, "desc": True}]},
                         "layout": {"x": 0, "y": 3, "w": 6, "h": 5}})
-    if day:
+    if month:
+        visuals.append({"id": "by-month", "type": "line", "title": f"{names[main]} per month",
+                        "query": {"measures": [main], "dimensions": ["calendar.year", "calendar.month"]}, "layout": {"x": 6, "y": 3, "w": 6, "h": 5}})
+    elif day:
         visuals.append({"id": "by-day", "type": "line", "title": f"{names[main]} per day",
                         "query": {"measures": [main], "dimensions": [day]}, "layout": {"x": 6, "y": 3, "w": 6, "h": 5}})
     report = {"id": "overview", "name": "Overview", "pages": [{"id": "overview", "name": "Overview", "visuals": visuals}]}

@@ -9,7 +9,7 @@ the container; bench/ux_shots.sh does it from the Mac.
 ABI_UX_ACCOUNTS holds bench/ux_seed.py's output ({role: {name, password}}), never the command line. A step is one of
     {"goto": "measures"}                 a page of the app by its key (rep:overview, mdl:all, flw:<id>...); "/path" a URL
     {"click": "css selector"}            or {"text": "visible text"} to click by text
-    {"type": "selector", "value": "x"}   fill an input
+    {"type": "selector", "value": "x"}   fill an input; {"select": "selector", "value": "x"} pick an option
     {"upload": "input[type=file]", "file": "/tmp/x.csv"}   choose a file (on the container) in a file input
     {"key": "Escape"}                    press a key
     {"wait": 800} | {"wait": "selector"} milliseconds, or until the selector shows
@@ -101,6 +101,12 @@ class Shot:
                 pg.wait_for_timeout(s.get("settle", SETTLE))
             elif "text" in s:
                 pg.get_by_text(s["text"], exact=s.get("exact", False)).first.click()
+                pg.wait_for_timeout(s.get("settle", SETTLE))
+            elif "select" in s:  # a native <select>: its option by value or by label
+                try:
+                    pg.select_option(s["select"], s["value"])
+                except Exception:  # noqa: BLE001
+                    pg.select_option(s["select"], label=s["value"])
                 pg.wait_for_timeout(s.get("settle", SETTLE))
             elif "type" in s:
                 pg.fill(s["type"], s.get("value", ""))

@@ -13,11 +13,14 @@ CSS = """
 :root{--paper:#f7f7f5;--sheet:#ffffff;--ink:#0b0b0b;--mute:#62625e;--faint:#e4e4e1;--line:#e4e4e1;--hover:#f1f1ee;
  --signal:#ff4f1f;--signal-ink:#c2380f;--red:#c8311a;--ok:#1d7a45;--c2:#ff4f1f;--c3:#7a7a75;--c4:#c4c4bf;
  --display:"Inter Tight","Inter",system-ui,-apple-system,"Segoe UI",sans-serif;--text:var(--display);
- --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;--r:4px;
+ --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;--r:6px;--r-lg:10px;--line-strong:#d2d2cd;
+ --shadow:0 1px 2px rgb(11 11 11/.04),0 1px 3px rgb(11 11 11/.03);--shadow-pop:0 16px 40px -12px rgb(11 11 11/.22),0 4px 12px rgb(11 11 11/.06);
  --bg:var(--paper);--card:var(--sheet);--acc:var(--ink);--acc2:var(--c2);--bad:var(--red);color-scheme:light}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--paper:#0b0b0b;--sheet:#141414;--ink:#f2f2ef;--mute:#9b9b96;
- --faint:#2a2a28;--line:#2a2a28;--hover:#1c1c1b;--signal:#ff6a3d;--signal-ink:#ff8a63;--red:#ff6b55;--ok:#4cc27f;--c2:#ff6a3d;--c3:#8f8f8a;--c4:#4d4d4a;color-scheme:dark}}
+ --faint:#2a2a28;--line:#2a2a28;--hover:#1c1c1b;--signal:#ff6a3d;--signal-ink:#ff8a63;--red:#ff6b55;--ok:#4cc27f;--c2:#ff6a3d;--c3:#8f8f8a;--c4:#4d4d4a;color-scheme:dark;
+ --line-strong:#3b3b38;--shadow:0 1px 2px rgb(0 0 0/.4);--shadow-pop:0 16px 40px -12px rgb(0 0 0/.7),0 0 0 1px #2a2a28}}
 :root[data-theme="dark"]{--paper:#0b0b0b;--sheet:#141414;--ink:#f2f2ef;--mute:#9b9b96;--faint:#2a2a28;--line:#2a2a28;--hover:#1c1c1b;
+ --line-strong:#3b3b38;--shadow:0 1px 2px rgb(0 0 0/.4);--shadow-pop:0 16px 40px -12px rgb(0 0 0/.7),0 0 0 1px #2a2a28;
  --signal:#ff6a3d;--signal-ink:#ff8a63;--red:#ff6b55;--ok:#4cc27f;--c2:#ff6a3d;--c3:#8f8f8a;--c4:#4d4d4a;color-scheme:dark}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}[hidden]{display:none!important}
 body{margin:0;font:14px/1.5 var(--text);background:var(--paper);color:var(--ink);-webkit-font-smoothing:antialiased;font-feature-settings:"ss01","cv11"}
@@ -31,17 +34,18 @@ nav.tabs{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 24px;border-bottom:1px s
 nav.tabs button{border:0;border-bottom:2px solid transparent;background:none;color:var(--mute);padding:8px 12px;margin-bottom:-1px;cursor:pointer;font:500 13px var(--text)}
 nav.tabs button:hover{color:var(--ink)}nav.tabs button.on{color:var(--ink);border-bottom-color:var(--signal)}
 .grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:16px}
-.card{background:var(--sheet);border:1px solid var(--line);border-radius:var(--r);padding:20px 24px 24px;min-width:0}
+.card{background:var(--sheet);border:1px solid var(--line);border-radius:var(--r-lg);padding:20px 24px 24px;min-width:0;box-shadow:var(--shadow)}
 .card h3{margin:0 0 16px;font:600 15px/1.3 var(--display);display:flex;justify-content:space-between;align-items:baseline;gap:12px}
 .card h3 .tools{display:flex;gap:4px;flex-shrink:0}.card h3 .tools button{font:500 12px var(--text);border:1px solid transparent;border-radius:var(--r);background:none;color:var(--mute);padding:2px 8px;cursor:pointer}
 .card h3 .tools button:hover{border-color:var(--line);color:var(--ink)}
-.kpi .v{font:600 40px/1 var(--display);letter-spacing:-.03em;font-variant-numeric:tabular-nums;margin:4px 0 8px}.kpi .l{color:var(--mute);font-size:13px}
+.kpi .v{font:600 38px/1.05 var(--display);letter-spacing:-.035em;font-variant-numeric:tabular-nums;margin:2px 0 6px}.kpi .l{color:var(--mute);font-size:13px}
 table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:8px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
-th{cursor:pointer;user-select:none;color:var(--mute);font-weight:500;font-size:12px;white-space:nowrap}
-td.n{text-align:right;font:13px var(--mono);font-variant-numeric:tabular-nums}tr:hover td{background:var(--hover)}
-.scroll{max-height:400px;overflow:auto}svg text{fill:var(--mute);font:11px var(--text)}
+th{cursor:pointer;user-select:none;color:var(--mute);font-weight:500;font-size:12px;white-space:nowrap;background:var(--card)}th:hover{color:var(--ink)}th.n{text-align:right}
+td.n{text-align:right;font:13px var(--text);font-variant-numeric:tabular-nums;letter-spacing:-.005em}tr:hover td{background:var(--hover)}
+.scroll th{position:sticky;top:0;z-index:1}
+.scroll{max-height:400px;overflow:auto}svg text{fill:var(--mute);font:11px var(--text);font-variant-numeric:tabular-nums}
 svg text.on{fill:var(--ink);stroke:var(--card);stroke-width:3px;paint-order:stroke;stroke-linejoin:round;pointer-events:none}
-.tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--sheet);padding:6px 10px;border-radius:var(--r);font-size:12px;display:none;z-index:9}
+.tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--sheet);padding:7px 10px;border-radius:var(--r);font-size:12px;line-height:1.4;display:none;z-index:40;box-shadow:var(--shadow-pop);font-variant-numeric:tabular-nums;max-width:320px}
 code,pre{font:12.5px/1.6 var(--mono)}pre{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);padding:12px 16px;overflow:auto;max-height:320px}
 .file{color:var(--mute);font:12px var(--mono);margin-top:8px}
 .chip{display:inline-block;padding:2px 8px;border:1px solid var(--line);border-radius:999px;margin:2px 4px 2px 0;font-size:12px;background:none}
@@ -49,7 +53,7 @@ section{margin-bottom:40px}section>h2{font:600 18px var(--display);margin:0 0 16
 input.search{padding:8px 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--sheet);color:var(--ink);font:inherit;width:280px;max-width:100%}
 a{color:var(--ink);text-underline-offset:3px;text-decoration-color:var(--signal)}.empty{color:var(--mute)}.steps li{margin:2px 0}.ok{color:var(--ok)}.bad{color:var(--red)}
 :focus-visible{outline:2px solid var(--signal);outline-offset:2px}
-@media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
 """
 
 JS = r"""
@@ -64,10 +68,12 @@ function fmt(v,f){if(v===null||v===undefined)return'—';if(typeof v!=='number')
  return new Intl.NumberFormat(undefined,o).format(v)}
 const NS='http://www.w3.org/2000/svg';function el(t,a,p){const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);p&&p.appendChild(e);return e}
 const COL=['var(--ink)','var(--c2)','var(--c3)','var(--c4)','var(--mute)','var(--faint)'];
+const dimLabel=c=>{const k=String(c).split('.').pop().replace(/_/g,' ');return k.charAt(0).toUpperCase()+k.slice(1)};  // products.product_name: Product name
+const PLAIN=/(^|\.)(year|week_year|quarter|month|week|day_of_week)$/;  // calendar numbers: 2023, not 2,023
 function table(box,d){const t=document.createElement('table');const cols=d.columns;let sort=null,desc=false;
- function draw(){t.innerHTML='';const h=t.insertRow();cols.forEach((c,i)=>{const th=document.createElement('th');th.textContent=(d.measures[c]||c)+(sort===i?(desc?' ▼':' ▲'):'');th.onclick=()=>{desc=sort===i?!desc:true;sort=i;draw()};h.appendChild(th)});
+ function draw(){t.innerHTML='';const h=t.insertRow();cols.forEach((c,i)=>{const th=document.createElement('th');th.textContent=(d.measures[c]||dimLabel(c))+(sort===i?(desc?' ↓':' ↑'):'');th.title=c;if(typeof d.rows[0]?.[i]==='number')th.className='n';th.onclick=()=>{desc=sort===i?!desc:true;sort=i;draw()};h.appendChild(th)});
   let rows=d.rows.slice();if(sort!==null)rows.sort((a,b)=>((a[sort]>b[sort])-(a[sort]<b[sort]))*(desc?-1:1));
-  rows.forEach(r=>{const tr=t.insertRow();tr.dataset.r=d.rows.indexOf(r);r.forEach((v,i)=>{const td=tr.insertCell();td.textContent=fmt(v,d.format[cols[i]]);if(typeof v==='number')td.className='n'})})}
+  rows.forEach(r=>{const tr=t.insertRow();tr.dataset.r=d.rows.indexOf(r);r.forEach((v,i)=>{const td=tr.insertCell();td.textContent=PLAIN.test(cols[i])&&typeof v==='number'?String(v):fmt(v,d.format[cols[i]]);if(typeof v==='number')td.className='n'})})}
  draw();const s=document.createElement('div');s.className='scroll';s.appendChild(t);box.appendChild(s)}
 const cut=(s,n)=>{s=String(s??'—');return s.length>n?s.slice(0,Math.max(1,n-1))+'…':s};
 // a mark is one visual_data row: data-r is the row (a click cross-filters on its first dimension), the tooltip its values
@@ -146,7 +152,10 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
  else{const bs=type==='bar'?S:type==='combo'?S.slice(0,1):[],bw=step/Math.max(bs.length,1)*.8;
   cats.forEach((_,k)=>bs.forEach((s,j)=>{const v=s.v[k];if(v!=null)mk(el('rect',{x:L+step*k+step*.1+bw*j,y:Math.min(y(v),y(0)),width:Math.max(bw,1),height:Math.abs(y(v)-y(0)),fill:COL[j%6]},svg),s.r[k],[s.m])}))}
  (type==='combo'?S.slice(1):type==='line'||type==='scatter'?S:[]).forEach(s=>{const j=S.indexOf(s),yy=combo?y2:y,dot=type==='scatter',pts=s.v.map((v,k)=>v==null?null:[X(k),yy(v)]);
-  dot||el('path',{d:pts.map((p,k)=>p?(pts[k-1]?'L':'M')+p:'').join(''),fill:'none',stroke:COL[j%6],'stroke-width':2},svg);
+  const ln=pts.map((p,k)=>p?(pts[k-1]?'L':'M')+p:'').join(''),run=pts.filter(Boolean);
+  // one series: a faint area under it; a dense one (a point every few pixels, e.g. per day) a thinner line
+  if(!dot&&S.length===1&&type==='line'&&run.length>1&&pts.every(Boolean))el('path',{d:`${ln}L${run.at(-1)[0]},${H-B}L${run[0][0]},${H-B}Z`,fill:COL[j%6],opacity:.06},svg);
+  dot||el('path',{d:ln,fill:'none',stroke:COL[j%6],'stroke-width':step<4?1.25:2,'stroke-linejoin':'round','stroke-linecap':'round'},svg);
   pts.forEach((p,k)=>p&&mk(el('circle',{cx:p[0],cy:p[1],r:dot?4:Math.max(2,Math.min(4,step/3)),fill:COL[j%6],opacity:dot?1:.01},svg),s.r[k],[s.m],dot?.7:1))})}
 function csv(d){const q=v=>v===null?'':/[",\n]/.test(String(v))?'"'+String(v).replace(/"/g,'""')+'"':String(v);
  const blob=new Blob([[d.columns.join(','),...d.rows.map(r=>r.map(q).join(','))].join('\n')],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=d.id+'.csv';a.click()}

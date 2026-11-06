@@ -257,10 +257,132 @@ select.f{max-width:100%;min-width:0}.card h3{flex-wrap:wrap}.file,.kv span{overf
  html:not(.mobile) aside button.it.on::before{display:none}html:not(.mobile) aside button.it.on{background:var(--ink);color:var(--sheet);border-color:var(--ink)}
  main{padding:20px max(16px,env(safe-area-inset-right,0px)) 48px max(16px,env(safe-area-inset-left,0px))}body.chat-open main{padding-right:16px}
  .cards{grid-template-columns:1fr}.pghead h2{font-size:24px}#chat{top:0}}
+/* 1.2.5: the same Swiss signal, finished as a tool. Every page says what it is (eyebrow, title, one line of purpose) above
+   one primary action; icons sit beside words; card controls stay quiet until hover; async parts show a skeleton;
+   errors read as errors; on a phone every target is 44 px and the drawer has a backdrop */
+body{background:linear-gradient(90deg,var(--sheet) 0 247px,var(--line) 247px 248px,var(--paper) 248px)}
+body.side-off,.mobile body{background:var(--paper)}aside{border-right:0}
+.ic{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+/* header */
+header{gap:12px;padding-block:10px;box-shadow:0 1px 0 var(--line);border-bottom:0}
+header .right{gap:6px}header .right .btn{height:32px;padding:0 12px}header .right .btn.icon{width:32px;padding:0}
+.vc{gap:6px;padding-right:6px;margin-right:2px;border-right:1px solid var(--line)}
+header #chat-toggle{gap:6px;box-shadow:0 1px 2px color-mix(in srgb,var(--signal) 40%,transparent)}#chat-toggle .long{margin-left:-3px}
+.btn.who{gap:8px;padding:0 10px 0 4px!important}.btn.who .av{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--ink);color:var(--sheet);font:600 11px/1 var(--display)}
+form.so{display:contents}.brand{font-size:16px}.crumb{padding:4px 8px;margin-left:-8px;border-radius:var(--r);transition:background .12s}.crumb:hover{background:var(--hover)}
+.modes{border-radius:8px;padding:3px}.modes button{border-radius:5px;height:26px;padding:0 12px}.modes button.on{box-shadow:0 1px 2px rgb(0 0 0/.08),0 0 0 1px var(--line)}
+/* buttons: one height, one radius; primary ink, quiet secondary, danger only on hover, a spinner while busy */
+.btn{height:34px;padding:0 14px;gap:7px;border-radius:var(--r);border-color:var(--line);font:500 13px/1 var(--text);letter-spacing:-.005em;box-shadow:0 1px 1px rgb(11 11 11/.03);
+ transition:background .12s,border-color .12s,box-shadow .12s,color .12s,transform .08s;justify-content:center}
+.btn:hover{border-color:var(--line-strong);background:var(--hover)}.btn:active:not(:disabled){transform:translateY(1px)}
+.btn.pri{box-shadow:0 1px 2px rgb(11 11 11/.14)}.btn.pri:hover{background:color-mix(in srgb,var(--ink) 84%,var(--sheet));border-color:color-mix(in srgb,var(--ink) 84%,var(--sheet))}
+.btn .ic{width:15px;height:15px;margin-left:-3px;opacity:.85}.btn.icon{width:34px;padding:0}.btn.icon .ic{margin:0;opacity:1}
+.btn.danger:hover{color:var(--red);border-color:color-mix(in srgb,var(--red) 45%,var(--line));background:color-mix(in srgb,var(--red) 6%,var(--sheet))}
+.btn:focus-visible,.crumb:focus-visible,aside button:focus-visible,.modes button:focus-visible,button.pin:focus-visible,nav.tabs button:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+.btn.busy{color:transparent!important;position:relative}.btn.busy .ic{opacity:0}
+.btn.busy::after{content:"";position:absolute;width:14px;height:14px;border-radius:50%;border:2px solid currentColor;border-color:var(--mute) transparent var(--mute) var(--mute);animation:spin .7s linear infinite}
+.btn.pri.busy::after{border-color:var(--sheet) transparent var(--sheet) var(--sheet)}
+@keyframes spin{to{transform:rotate(360deg)}}
+.btn:disabled{opacity:.4}.btn.busy:disabled{opacity:.8}
+/* sidebar */
+aside{padding:14px 10px 40px}aside .sec{margin-bottom:10px}
+aside button.grp{padding:8px 10px 6px;font:600 10.5px/1 var(--display);letter-spacing:.07em;color:color-mix(in srgb,var(--mute) 85%,var(--sheet))}
+aside button.it{justify-content:flex-start;gap:10px;padding:6px 10px;font-size:13.5px;color:color-mix(in srgb,var(--ink) 86%,var(--mute));border-radius:var(--r)}
+aside button.it .ic{color:var(--mute);transition:color .12s}aside button.it .lb{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+aside button.it:hover{color:var(--ink)}aside button.it:hover .ic{color:var(--ink)}
+aside button.it.on{background:var(--hover);color:var(--ink);font-weight:600;box-shadow:inset 0 0 0 1px var(--line)}aside button.it.on .ic{color:var(--signal)}
+aside button.it.on::before{display:none}aside button.it .n{font:500 11px var(--text);font-variant-numeric:tabular-nums;color:var(--mute);min-width:18px;text-align:right}
+/* the page: eyebrow, title, purpose; actions on the right */
+main{padding:28px 40px 80px}.pg{gap:20px}
+.pghead{justify-content:space-between;align-items:flex-end;gap:16px 24px;padding-bottom:4px}
+.pghead .ttl{margin-right:auto;min-width:min(100%,280px);max-width:780px;display:flex;flex-direction:column;gap:4px}
+.pghead .eyebrow{font:600 11px/1 var(--display);letter-spacing:.07em;text-transform:uppercase;color:var(--mute)}
+.pghead h1{font:650 26px/1.15 var(--display);letter-spacing:-.025em;margin:2px 0 0;text-wrap:balance}
+.pghead .ttl p{margin:4px 0 0;color:var(--mute);font-size:14px;line-height:1.5;max-width:72ch;text-wrap:pretty}
+.pghead>.bar{flex-wrap:wrap;justify-content:flex-end}.pghead .bar.seg{flex-basis:100%;order:3;justify-content:flex-start}
+.ttl .bar.lead{margin:0 0 6px!important;order:-1}.ttl .bar.lead .btn{height:auto;padding:2px 0;border:0;background:none;box-shadow:none;color:var(--mute);font-size:12.5px}.ttl .bar.lead .btn:hover{color:var(--ink)}
+body[data-mode=viewer] .pghead{display:flex!important}body[data-mode=viewer] .pghead>.bar:not(:has(>:not(.w))){display:none}
+#pgname{display:none}
+/* cards */
+.card{padding:20px 22px 22px}.card>*+*{margin-top:14px}
+.card h3{font:600 14px/1.35 var(--display);letter-spacing:-.008em;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.card h3>span:first-child{flex:1 1 auto;min-width:0}.card h3 .file{order:5}.card h3 .tools,.card h3 button.pin{flex:none}
+.card h3 .tools{gap:2px}.card h3 .tools button{height:26px;padding:0 8px;border-radius:var(--r);font:500 12px var(--text)}
+.card h3 .tools .btn.icon{width:28px;height:28px;border-color:transparent;box-shadow:none;background:none;color:var(--mute)}.card h3 .tools .btn.icon:hover{background:var(--hover);color:var(--ink)}
+.card h3 button.pin:not(.on){opacity:0;transition:opacity .12s}.card:hover h3 button.pin,.card:focus-within h3 button.pin,.mobile .card h3 button.pin{opacity:1}
+button.pin{height:24px;padding:0 10px;font:500 11.5px/1 var(--text);border-color:var(--line)}
+button.pin.on{background:color-mix(in srgb,var(--signal) 10%,var(--sheet));border-color:color-mix(in srgb,var(--signal) 40%,var(--line));color:var(--signal-ink)}
+.pinned .acts{display:none}.pinned>h3{margin-bottom:10px}.pinned .body .kpi .v{margin-top:6px}
+.kpi .v{font-feature-settings:"tnum","ss01"}
+/* async parts: a skeleton until their rows arrive */
+.card .body:empty{min-height:72px;border-radius:var(--r);background:linear-gradient(100deg,var(--hover) 30%,color-mix(in srgb,var(--hover) 35%,var(--sheet)) 50%,var(--hover) 70%) 0 0/300% 100%;animation:shim 1.4s ease-in-out infinite}
+.card.wide .body:empty,.grid>.card:not([style*="span 3"]) .body:empty{min-height:180px}
+@keyframes shim{from{background-position:100% 0}to{background-position:0 0}}
+/* messages: an error reads as one, a success as one */
+.msg.bad,.card .bad{color:var(--red)}.msg.ok{color:var(--ok)}
+.msg.bad::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor;margin:0 8px 1px 0}
+.pg>p.bad{padding:14px 16px;border:1px solid color-mix(in srgb,var(--red) 30%,var(--line));border-radius:var(--r-lg);background:color-mix(in srgb,var(--red) 5%,var(--sheet))}
+.toast{border-radius:8px;padding:11px 16px;box-shadow:var(--shadow-pop);animation:rise .18s cubic-bezier(.2,.8,.2,1)}.toast.bad{background:var(--red);color:#fff}
+@keyframes rise{from{opacity:0;transform:translate(-50%,8px)}}
+/* empty states */
+.pg>p.empty,.cards>p.empty{padding:44px 24px;border:1px dashed var(--line-strong);border-radius:var(--r-lg);background:var(--sheet);color:var(--mute);font-size:14px;line-height:1.55}
+/* forms */
+input.f,textarea.f,select.f{border-radius:var(--r);min-height:36px}input.f::placeholder,textarea.f::placeholder{color:color-mix(in srgb,var(--mute) 80%,var(--sheet))}
+label.l{font:500 12.5px var(--text);color:color-mix(in srgb,var(--ink) 70%,var(--mute))}
+/* tables in cards */
+.card table th{font-size:11.5px;letter-spacing:.01em;padding-block:9px;border-bottom-color:var(--line)}.card table td{padding-block:9px}
+.card table tr:last-child td{border-bottom:0}
+/* dialogs: one surface, a soft pop */
+dialog{border-radius:14px;padding:26px 28px;box-shadow:var(--shadow-pop);width:min(560px,calc(100vw - 32px));max-width:calc(100vw - 32px)}
+dialog[open]{animation:pop .18s cubic-bezier(.2,.8,.2,1)}@keyframes pop{from{opacity:0;transform:translateY(8px) scale(.985)}}
+dialog>.card{border:0;box-shadow:none;padding:0;background:none}dialog>.card>*+*{margin-top:10px}
+dialog h3{font:650 18px/1.3 var(--display);letter-spacing:-.015em;margin:0 0 14px}dialog .row{margin-top:22px}dialog .acts{flex-wrap:wrap}
+dialog::backdrop{background:rgb(11 11 11/.36);backdrop-filter:blur(3px)}
+dialog input.f{display:block;width:100%;margin-top:6px}
+#commit{width:min(760px,calc(100vw - 32px))}#confirm{width:min(520px,calc(100vw - 32px))}
+/* filter bar and popover */
+.fpop{border-radius:12px;box-shadow:var(--shadow-pop);padding:14px}.btn.fadd{height:30px;border-style:dashed;border-color:var(--line-strong);box-shadow:none}
+.fchip{height:30px;border-color:var(--line-strong);background:var(--sheet);box-shadow:var(--shadow)}
+nav.tabs{gap:2px}nav.tabs button{padding:9px 12px;font-size:13px}
+/* Home */
+.areas .lk{border-radius:var(--r-lg);background:var(--sheet);transition:border-color .12s,box-shadow .12s}.areas .lk:hover{box-shadow:var(--shadow)}
+.lk:focus-visible,.sg:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+/* the chat */
+#chat{box-shadow:-12px 0 32px -20px rgb(11 11 11/.25)}#chat header .btn{height:32px}#chat .me{border-radius:14px 14px 4px 14px}
+#chat .compose textarea{border-radius:10px}#chat .send{height:46px}
+/* phone: 44 px targets, a header of icons, the drawer over a backdrop */
+.mobile header{padding-block:6px;gap:8px}.mobile header .right{gap:6px;flex-wrap:nowrap}
+.mobile .btn{height:44px;min-height:44px;padding:0 16px;font-size:14px}.mobile .btn.icon,.mobile header .right .btn.icon{width:44px;height:44px}
+.mobile header .right .btn{height:40px;min-height:40px}.mobile header .btn.icon{width:40px!important;height:40px}.mobile .btn.who{padding:0 8px!important}.mobile .btn.who .nm{display:none}.mobile .btn.who .av{width:26px;height:26px}
+.mobile .brand{font-size:0}.mobile .crumb{display:none}.mobile #pgname{display:block;font-size:15px}
+.mobile #chat-toggle{padding:0 14px}
+.mobile body.menu-open::after{content:"";position:fixed;inset:0;background:rgb(11 11 11/.38);z-index:7;animation:fade .2s}
+@keyframes fade{from{opacity:0}}
+.mobile aside{box-shadow:12px 0 32px -16px rgb(11 11 11/.3);top:0;padding-top:max(16px,env(safe-area-inset-top,0px));z-index:12}
+.mobile aside button.it{min-height:44px;font-size:15px}.mobile aside button.grp{min-height:36px}
+.mobile .pghead{align-items:stretch}.mobile .pghead>.bar{justify-content:flex-start}.mobile .pghead h1{font-size:23px}.mobile .pghead .ttl p{font-size:13.5px}
+.mobile .card h3 .tools .btn.icon{width:36px;height:36px}.mobile button.pin{height:32px;padding:0 12px}
+.mobile .sl,.mobile .fchip{min-height:36px}.mobile .btn.fadd{height:36px}.mobile nav.tabs button{min-height:44px}
+.mobile input.f,.mobile select.f{min-height:44px;font-size:16px}.mobile main{padding-top:20px}
+.mobile .side-close{display:flex}.side-close{display:none}
+@media (max-width:820px){body{background:var(--paper)}}
+/* status badges and plain-words lines (flows, sources) */
+.state{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 9px;border-radius:999px;font:500 11.5px/1 var(--text);color:var(--mute);background:var(--hover);flex:none}
+.state::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.6}.state.on{color:var(--ok);background:color-mix(in srgb,var(--ok) 10%,var(--sheet))}.state.on::before{opacity:1}
+.state.bad{color:var(--red);background:color-mix(in srgb,var(--red) 8%,var(--sheet))}
+.when{display:flex;align-items:center;gap:8px;font-size:13.5px}.when .ic{color:var(--mute)}
+.stepchips{display:flex;flex-wrap:wrap;align-items:center;gap:6px}.stepchips .chip{margin:0;font-size:12px;padding:3px 9px;background:var(--paper)}.stepchips .arr{color:var(--mute);font-size:12px}
+.chip{border-color:var(--line);color:color-mix(in srgb,var(--ink) 80%,var(--mute))}
 """
 
 JS = r"""
 const D=window.APP, KEY='__ABI_APP_KEY__';
+// row-level security masks some data-quality figures for a restricted reader ("not shown: …" in place of a list or a
+// count): the pages read a masked list as none and a masked count as unknown, instead of throwing
+function normQ(q){if(!q?.columns)return q;const i=c=>q.columns.indexOf(c),hid=v=>typeof v==='string'&&v.startsWith('not shown');
+ (q.rows||[]).forEach(r=>{['problems','gaps','null_rise'].forEach(c=>{const k=i(c);if(k>=0&&!Array.isArray(r[k]))r[k]=[]});
+  ['rows','missing_periods','period','volume_drop'].forEach(c=>{const k=i(c);if(k>=0&&hid(r[k]))r[k]=null})});return q}
+normQ(D.quality);
 const MOBILE=matchMedia('(max-width: 820px), (pointer: coarse) and (max-width: 1100px)').matches;
 let CID='';try{CID=localStorage.getItem('abi-client')||'';if(!CID){CID=Math.random().toString(36).slice(2,12);localStorage.setItem('abi-client',CID)}}catch(e){CID=Math.random().toString(36).slice(2,12)}
 {const f0=window.fetch.bind(window);window.fetch=(u,o={})=>{if(typeof u==='string'&&u.startsWith('/')){o.headers={...(o.headers||{}),'X-Abi-Client':CID,'X-Abi-Mobile':MOBILE?'1':'0','X-Abi-Project':D.project}}
@@ -270,6 +392,36 @@ function stale(){if(window.__stale)return;window.__stale=1;const b=document.crea
 if(MOBILE)document.documentElement.classList.add('mobile');
 const $=(s,r=document)=>r.querySelector(s), h=(t,c,x)=>{const e=document.createElement(t);if(c)e.className=c;if(x!==undefined)e.textContent=x;return e};
 const wait=ms=>new Promise(z=>setTimeout(z,ms));
+// one stroke icon set (24 grid, 1.75 stroke, round joins): beside a word, or alone with an aria-label
+const IC={home:'M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3z',chat:'M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z',
+ sources:'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3',
+ staged:'M12 3 3 7.5l9 4.5 9-4.5zM3 12l9 4.5 9-4.5M3 16.5 12 21l9-4.5',tables:'M3 4h18v16H3zM3 9h18M3 14.5h18M9 9v11',edits:'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4',
+ model:'M4 4h6v6H4zM14 14h6v6h-6zM14 4h6v6h-6zM10 7h4M17 10v4',measures:'M18 4H6l6 8-6 8h12',glossary:'M5 4.5A1.5 1.5 0 0 1 6.5 3H20v15H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H20v-3',
+ datasets:'M3 6h18M6 12h12M10 18h4',reports:'M4 20h16M7 16v-5M12 16V6M17 16v-8',monitor:'M3 12h4l3-8 4 16 3-8h4',inbox:'M3 13h5l1.5 3h5L16 13h5M5.5 5h13L21 13v6H3v-6z',
+ explore:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM15.5 8.5l-2 5-5 2 2-5z',boardpack:'M3 7h18v13H3zM8 7V4h8v3M3 12h18',documents:'M6 3h8l5 5v13H6zM14 3v5h5M9 13h7M9 17h7',
+ onepager:'M6 3h12v18H6zM9 7h6M9 11h6M9 15h3',dataexport:'M12 3v12M7 10l5 5 5-5M4 20h16',video:'M3 5h18v14H3zM10 9l5 3-5 3z',
+ transfer:'M3 7.5 12 3l9 4.5v9L12 21l-9-4.5zM3 7.5l9 4.5 9-4.5M12 12v9',flows:'M4 4h6v6H4zM14 14h6v6h-6zM7 10v4a3 3 0 0 0 3 3h4',
+ ml:'M6 6h12v12H6zM10 10h4v4h-4zM9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4',tools:'M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0M16 4v4M10 10v4M18 16v4',
+ agents:'M5 8h14v11H5zM12 4v4M9.5 13h0M14.5 13h0M2 13h3M19 13h3',vault:'M3 4h18v4H3zM5 8v12h14V8M10 12h4',
+ docs:'M3 5h6a3 3 0 0 1 3 3v12a2 2 0 0 0-2-2H3zM21 5h-6a3 3 0 0 0-3 3v12a2 2 0 0 1 2-2h7z',security:'M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6z',
+ environments:'M4 4h16v6H4zM4 14h16v6H4zM8 7h0M8 17h0',history:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2',
+ people:'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21v-1a6 6 0 0 1 12 0v1M16 3.5a4 4 0 0 1 0 7M22 21v-1a6 6 0 0 0-4-5.7',
+ settings:'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1',
+ menu:'M3 4h18v16H3zM9 4v16',sun:'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.4 1.4M17.6 17.6 19 19M5 19l1.4-1.4M17.6 6.4 19 5',
+ moon:'M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z',out:'M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10',layout:'M3 3h8v8H3zM13 3h8v5h-8zM13 10h8v11h-8zM3 13h8v8H3z',
+ commit:'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM2 12h6M16 12h6',publish:'M12 15V3M7 8l5-5 5 5M4 15v5h16v-5',
+ spark:'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z',
+ open:'M7 17 17 7M8 7h9v9',x:'M6 6l12 12M18 6 6 18',left:'M15 6l-6 6 6 6',right:'M9 6l6 6-6 6',wide:'M4 9V4h5M20 15v5h-5M4 4l6 6M20 20l-6-6',narrow:'M10 4v6H4M14 20v-6h6M4 4l6 6M20 20l-6-6',
+ plus:'M12 5v14M5 12h14',search:'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-4-4',pin:'M9 4h6l-1 6 4 4H6l4-4zM12 14v7',filter:'M3 5h18l-7 8v6l-4 2v-8z',
+ mail:'M3 5h18v14H3zM3 6l9 7 9-7',trash:'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13',play:'M7 4l13 8-13 8z',down:'M6 9l6 6 6-6',check:'M4 12l5 5L20 6',
+ refresh:'M20 11a8 8 0 0 0-14.6-4.5L4 8M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5L20 16M20 20v-4h-4',upload:'M12 16V4M7 9l5-5 5 5M4 20h16',user:'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0'};
+function ic(n){const s=document.createElementNS('http://www.w3.org/2000/svg','svg');s.setAttribute('viewBox','0 0 24 24');s.setAttribute('class','ic');s.setAttribute('aria-hidden','true');
+ const p=document.createElementNS('http://www.w3.org/2000/svg','path');p.setAttribute('d',IC[n]||'');s.append(p);return s}
+// an icon button: the word is its accessible name and tooltip
+function ib(n,label,fn){const b=h('button','btn icon');b.append(ic(n));b.setAttribute('aria-label',label);b.title=label;if(fn)b.onclick=fn;return b}
+// the icon a button's words mean, so the same action looks the same on every page
+const BIC=[[/^(New |\+ |Add )/,'plus'],[/^(Delete|Remove|Revoke)/,'trash'],[/^(Export|Download)/,'dataexport'],[/^(Edit)/,'edits'],[/^Run( now)?$/,'play'],[/^Email/,'mail'],
+ [/^Reload|^Check again|^Refresh/,'refresh'],[/^Open/,'open'],[/^Upload/,'upload'],[/^Ask the agent/,'spark'],[/^Publish/,'publish']];
 async function api(action,args){
  
  const post=(u,b)=>fetch(u,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json());
@@ -285,14 +437,14 @@ function fld(label,el,note){const d=h('div','fld');d.append(h('label','l',label)
 function rowcard(c,...fields){c.classList.add('rowcard');c.append(...fields);c.oninput=()=>c.classList.add('dirty');return c}
 function rowhead(...cols){const r=h('div','rowhead');cols.forEach(t=>r.append(h('span','',t)));return r}
 const W=/^(Save|Create|Delete|Edit report|New report|Reload |Run now|Enable|Disable|Train|Score|New |Ask$|Add |Remove|Edit|Publish|Save steps|Upload|Email this|Alert with)/;
-function btn(label,fn,pri){const b=h('button','btn'+(pri?' pri':'')+(W.test(label)?' w':''),label);b.onclick=async()=>{b.disabled=true;try{await fn()}finally{b.disabled=false}};return b}
+function btn(label,fn,pri){const b=h('button','btn'+(pri?' pri':'')+(W.test(label)?' w':'')+(/^(Delete|Remove|Revoke)/.test(label)?' danger':''),label);{const m=BIC.find(([r])=>r.test(label));if(m)b.prepend(ic(m[1]));if(label.startsWith('+ '))b.lastChild.textContent=label.slice(2)}b.onclick=async()=>{b.disabled=true;const t=setTimeout(()=>b.classList.add('busy'),150);try{await fn()}finally{clearTimeout(t);b.disabled=false;b.classList.remove('busy')}};return b}
 const cell=v=>v!==null&&typeof v==='object'?JSON.stringify(v):typeof v==='string'&&/^\d{4}-\d\d-\d\dT\d\d:\d\d/.test(v)?new Date(v).toLocaleString():v;
 function rows(box,d){box.innerHTML='';box.classList.add('out');if(!(d&&d.columns&&Array.isArray(d.rows))){box.append(h('pre','',JSON.stringify(d,null,1)));return}
  const rs=d.rows.map(r=>(Array.isArray(r)?r:d.columns.map(c=>r[c])).map(cell));table(box,{measures:d.measures||{},format:d.format||{},columns:d.columns,rows:rs})}
 // an admin action ABI wants confirmed: the person's own click in ABI's dialog, then the server runs it (null: they said no)
 async function confirmed(x){if(x.confirm){if(!await ask(x.confirm))return null;x=await fetch('/confirm/'+x.confirm.id,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(y=>y.json())}if(x.error)throw new Error(x.error);return x}
 function act(c,label,fn,pri){const m=c.querySelector(':scope>.msg')||c.appendChild(h('div','msg'));let r=c.querySelector(':scope>.acts');if(!r){r=h('div','row acts');c.insertBefore(r,m)}
- r.append(btn(label,async()=>{try{const t=await fn(m);if(t)say(m,t)}catch(e){say(m,e.message,1)}},pri));return m}
+ r.append(btn(label,async()=>{try{const t=await fn(m);if(t)c.isConnected?say(m,t):toast(t)}catch(e){c.isConnected?say(m,e.message,1):toast(e.message,1)}},pri));return m}
 
 // ---------- Overview ----------
 // the agent team on Home: one progress line while a plan is open, and each step a specialist left for the person's yes
@@ -313,11 +465,11 @@ async function pinsLoad(){if(PINS)return PINS;try{PINS=(await pinPost()).result|
 function pinBtn(pin){const b=h('button','pin','Pin');b.title='Pin to Home';const set=()=>{const on=(PINS||[]).some(x=>pinKey(x)===pinKey(pin));b.textContent=on?'Pinned':'Pin';b.classList.toggle('on',on)};
  pinsLoad().then(set);b.onclick=async e=>{e.stopPropagation();await pinsLoad();const k=pinKey(pin),on=PINS.some(x=>pinKey(x)===k);PINS=on?PINS.filter(x=>pinKey(x)!==k):[...PINS,pin];set();
   try{await pinPost({pins:PINS});toast(on?'Unpinned from Home.':'Pinned to Home.')}catch(x){toast('Could not save the pin.')}};return b}
-async function pinCard(p,c){const body=h('div','body'),go=h('button','btn','Open'),un=h('button','btn','Unpin');c.append(body);const tools=h('div','row acts');tools.append(go,un);c.append(tools);
+async function pinCard(p,c){const body=h('div','body'),go=ib('open','Open its page'),un=ib('x','Unpin from Home');c.append(body);const tools=h('span','tools');c.querySelector(':scope>h3').append(tools);
  // arrange: move left or right, wide or narrow (saved with the pins)
  const mv=async d=>{const i=PINS.findIndex(x=>pinKey(x)===pinKey(p)),j=i+d;if(i<0||j<0||j>=PINS.length)return;[PINS[i],PINS[j]]=[PINS[j],PINS[i]];await pinPost({pins:PINS});show('home')};
- const l=h('button','btn','←'),r2=h('button','btn','→'),wd=h('button','btn',p.wide?'Narrow':'Wide');l.title='Move left';r2.title='Move right';l.onclick=()=>mv(-1);r2.onclick=()=>mv(1);
- wd.onclick=async()=>{const x=PINS.find(x=>pinKey(x)===pinKey(p));x.wide=!x.wide;await pinPost({pins:PINS});show('home')};tools.append(l,r2,wd);
+ const l=ib('left','Move left'),r2=ib('right','Move right'),wd=ib(p.wide?'narrow':'wide',p.wide?'Make it narrow':'Make it wide');l.onclick=()=>mv(-1);r2.onclick=()=>mv(1);
+ wd.onclick=async()=>{const x=PINS.find(x=>pinKey(x)===pinKey(p));x.wide=!x.wide;await pinPost({pins:PINS});show('home')};tools.append(l,r2,wd,go,un);
  un.onclick=async()=>{PINS=PINS.filter(x=>pinKey(x)!==pinKey(p));await pinPost({pins:PINS});c.remove()};
  const r=p.ref,line=(t,cls)=>body.append(h('p',cls||'',t));
  try{if(p.kind==='visual'){go.onclick=()=>show('rep:'+r.report);const d=await api('visual_data',{report:r.report,page:r.page,visual:r.visual});requestAnimationFrame(()=>chart(body,d))}
@@ -356,16 +508,16 @@ function home(box){pinsHome(box);const rd=D.readiness||{},q=D.quality||{},ix=c=>
  if(MODE==='developer')team(at,al);
  if(!al.children.length)al.append(h('li','ok','Nothing: the model is ready and the data is fresh.'));at.append(al);
  // one summary line; the details open on demand (the team's steps arrive later, the line follows them)
- const sum=h('p'),tog=h('button','btn','Show details');al.hidden=true;al.before(sum);al.after(tog);
+ const sum=h('p'),tog=h('button','flink','Show details');al.hidden=true;al.before(sum);al.after(tog);
  const upd=()=>{const it=[...al.children],wait=it.filter(x=>/^Waiting for your yes/.test(x.textContent)).length,bad=it.filter(x=>x.classList.contains('bad')).length-wait;
   sum.className=bad||wait?'bad':'ok';sum.textContent=bad||wait?[bad&&`${bad} problem${bad>1?'s':''} in the data or model`,wait&&`${wait} step${wait>1?'s':''} wait for your yes`].filter(Boolean).join(' · '):'Nothing: the model is ready and the data is fresh.';tog.hidden=!(bad||wait)};
  tog.onclick=()=>{al.hidden=!al.hidden;tog.textContent=al.hidden?'Show details':'Hide details'};upd();new MutationObserver(upd).observe(al,{childList:true});
- act(at,'Check again',async()=>{D.quality=await api('data_quality',{});D.readiness=await api('readiness',{});show('home')});g.append(at);
+ act(at,'Check again',async()=>{D.quality=normQ(await api('data_quality',{}));D.readiness=await api('readiness',{});show('home')});g.append(at);
  // the map: every sidebar group with its pages and one line of status, in pipeline order
  const mlok=D.ml.filter(m=>m.latest_score?.status==='ok').length,on=D.flows.filter(f=>f.enabled).length,lastC=(D.history||[])[0];
- const line={Data:problems.length?`${problems.length} data problems`:`fresh · last load ${last?cell(last):'never'}`,'Data Model':rd.ready?'Ready':'Not ready',
-  Visualizations:`${D.reports.length} reports · ${MINE.length} of your analyses`,Automate:`${mlok} of ${D.ml.length} ML models scored · ${on} of ${D.flows.length} flows on`,
-  Knowledge:`${(VAULT||[]).length} vault documents`,Govern:`${D.pending?.files?.length||0} uncommitted · ${D.published?.at?'published '+cell(D.published.at):'not published'}${lastC?' · last: '+(lastC.message.length>70?lastC.message.slice(0,70)+'…':lastC.message):''}`};
+ const pl=(n,w)=>`${n} ${w}${n===1?'':'s'}`;const line={Data:problems.length?pl(problems.length,'data problem'):`fresh · last load ${last?cell(last):'never'}`,'Data Model':rd.ready?'Ready':'Not ready',
+  Visualizations:`${pl(D.reports.length,'report')} · ${pl(MINE.length,'saved analysis').replace('analysiss','analyses')}`,Automate:`${mlok} of ${D.ml.length} ML models scored · ${on} of ${D.flows.length} flows on`,
+  Knowledge:pl((VAULT||[]).length,'vault document'),Govern:`${D.pending?.files?.length?pl(D.pending.files.length,'uncommitted change'):'All committed'} · ${D.published?.at?'published '+cell(D.published.at):'not published yet'}`};
  const map=card('Where things stand','one line per area; open it to go there'),tb=h('div','areas');
  line['Data Model']=(rd.ready?'Ready':'Not ready')+` · ${D.measures.length} measures`;
 nav().filter(([gname])=>gname!=='Start'&&line[gname]).forEach(([gname,items])=>{const b=h('button','lk');b.append(h('b','',gname),h('span','',line[gname]||''));b.onclick=()=>show(items[0][0]);tb.append(b)});
@@ -412,7 +564,7 @@ function report(box,rep){let flt=PENDING.filters||[];PENDING.filters=null;
   grid.classList.remove('busy');page(cur)}
  function page(p){cur=p;grid.dataset.page=p.id;[...tabs.children].forEach(b=>b.classList.toggle('on',b.dataset.id===p.id));grid.innerHTML='';
   p.visuals.slice().sort((a,b)=>(a.layout.y-b.layout.y)||(a.layout.x-b.layout.x)).forEach(v=>{const c=h('div','card');c.style.gridColumn=`span ${Math.min(12,v.layout.w||6)}`;c.dataset.lk=v.id;c.dataset.w=Math.min(12,v.layout.w||6);if(v.layout.h)c.dataset.h=v.layout.h*70-10;
-   c.innerHTML=`<h3><span></span><span class="tools"><button data-a="t">table</button><button data-a="c">csv</button><button data-a="h">how</button></span></h3><div class="body"></div><pre class="how" hidden></pre>`;
+   c.innerHTML=`<h3><span></span><span class="tools"><button data-a="t">Table</button><button data-a="c">CSV</button><button data-a="h">How</button></span></h3><div class="body"></div><pre class="how" hidden></pre>`;
    $('h3 span',c).textContent=v.title||v.id;if(v.text===undefined)$('h3',c).append(pinBtn({kind:'visual',ref:{report:rep.id,page:p.id,visual:v.id},title:v.title||v.id}));grid.append(c);const body=$('.body',c),d=v.live||v.data;
    if(v.text!==undefined){$('.tools',c).remove();body.textContent=v.text;body.style.whiteSpace='pre-wrap';return}
    if(!d||d.error||v.error){body.append(h('div','bad',d?.error||v.error||'no data'));return}
@@ -513,7 +665,7 @@ function boardPage(box){const g=h('div','cards');box.append(g);const P=D.app?.pa
  if(MODE==='developer'){const c=card('Prepare a board pack','the board-pack agent picks, checks, writes and renders; you send'),ta=h('textarea','f ed');ta.rows=4;
   ta.value='For the board review: the executive overview and monetization for the last complete months, a one-pager, the channel table as Excel, and a short explainer video. Commentary on what moved and what is open.';
   c.append(ta);act(c,'Ask the agent',async()=>{openChat(true);inp.value='Use the board-pack specialist to prepare a board pack: '+ta.value;sendChat();return 'Asked: follow it in the chat; the pack appears here.'},1);g.append(c)}
- if(!P.length)g.append(h('p','empty','No board packs yet.'));
+ if(!P.length)g.append(h('p','empty','No board packs yet. Describe the review below and the board-pack agent prepares the documents, data and video.'));
  P.slice().reverse().forEach(m=>{const c=card(m.title||m.id,`${m.status} · made ${cell(m.made)}${m.audience?' · for '+m.audience:''}`);
   c.append(h('p',m.notes_grounded?'ok':'bad',m.notes_grounded?'Every number in the notes is in the pack\'s report views.':'Notes not checked.'));
   const fl=h('div','areas');[...m.items,{file:'notes.md',kind:'notes',status:'ok'}].forEach(it=>{const b=h('button','lk');b.append(h('b','',it.kind),h('span','',it.status==='ok'?it.file:'not made: '+(it.error||'')));
@@ -728,7 +880,7 @@ async function inboxPage(box){const r=await ipost();if(r.error){box.append(h('p'
  M.forEach(m=>{const d=h('div','hit');d.append(h('div','file',`${cell(m.at)} · ${m.sender}${m.id>s?' · new':''}`),h('div','',m.text));
   if(m.data?.columns){const t=h('div'),y=m.data.columns.filter(c=>/(^|[._])year$/.test(c));  // a year reads 2026, not 2,026
    rows(t,{...m.data,rows:m.data.rows.map(r=>({...r,...Object.fromEntries(y.map(c=>[c,r[c]==null?r[c]:String(r[c])]))}))});d.append(t)}if(m.snapshot){const a=h('a','',`Open the ${m.snapshot.split('.').pop().toUpperCase()}`);a.href=m.snapshot;a.target='_blank';d.append(a)}mc.append(d)});
- const ac=card('Alerts','failed flows and data problems, as ABI reported them'),un=A.filter(a=>!a.read);if(!A.length)ac.append(h('p','empty','No alerts.'));
+ const ac=card('Alerts','failed flows and data problems, as ABI reported them'),un=A.filter(a=>!a.read);if(!A.length)ac.append(h('p','empty','No alerts. ABI posts here when the model or the data needs a look.'));
  A.forEach(a=>{const d=h('div','hit');d.append(h('div','file',`${cell(a.at)}${a.read?'':' · new'}`),h('div','',a.message));ac.append(d)});
  if(un.length||M.some(m=>m.id>s))act(ac,'Mark all read',async()=>{if(un.length)await ipost({read:un.map(a=>a.id)});try{localStorage.setItem(SEEN,String(Math.max(0,...M.map(m=>m.id))))}catch(e){}await inboxCount();show('inbox')});
  g.append(mc,ac)}
@@ -834,10 +986,12 @@ function sources(box){const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),qr=
     database:{table:(sc.value.trim()?sc.value.trim()+'.':'')+tb.value.trim(),...r.result,...(col?{incremental:col}:{})}}),m,`Loaded ${t.value}.`)},1);return c};
  bar.append(btn('Add source',()=>g.prepend(add()),1),...((window.ME||{admin:true}).admin?[btn('Add a database table',()=>g.prepend(addDb()))]:[]));  // its login is a workspace owner's (/admin/dbkey)
  if(!D.sources.length)box.append(h('p','empty','No sources yet: upload a file, add a folder on S3 or a database table.'));
- D.sources.forEach(id=>{const sp=D.source_specs?.[id]||{},r=qr[id],c=card(id,`sources/${id}.json`),k=h('div','kv');
-  [['location',sp.location||'—'],['format',sp.format||'from the file'],['refresh',sp.refresh||(r?r[ix('refresh')]:'—')],['rows',r?fmt(r[ix('rows')]):'—'],['last load',r?cell(r[ix('last_load')]):'—']]
-   .forEach(([a,b])=>k.append(h('b','',a),h('span','',String(b))));c.append(k);
-  const p=r?(r[ix('problems')]||[]):[];if(p.length)c.append(h('div','bad',p.join('; ')));
+ D.sources.forEach(id=>{const sp=D.source_specs?.[id]||{},r=qr[id],c=card(id),k=h('div','kv'),p=r?(r[ix('problems')]||[]):[];
+  c.querySelector('h3').title=`sources/${id}.json`;c.querySelector('h3').append(h('span','state'+(p.length?' bad':r?' on':''),p.length?'Needs a look':r?'Loaded':'Not loaded'));
+  const loc=String(sp.location||'—'),up=/^uploads\/[0-9a-f]{16,}\//.test(loc),rf={on_change:'when the file changes',daily:'daily',hourly:'hourly',manual:'by hand'},rv=sp.refresh||(r?r[ix('refresh')]:'');
+  [['source',up?'Uploaded file · '+loc.split('/').pop():loc],['format',sp.format||'from the file'],['refresh',rf[rv]||rv||'—'],['rows',r&&r[ix('rows')]!==null?fmt(r[ix('rows')]):r?'hidden by row-level security':'—'],['last load',r?cell(r[ix('last_load')]):'—']]
+   .forEach(([a,b])=>{const v=h('span','',String(b));if(a==='source')v.title=loc;k.append(h('b','',a),v)});c.append(k);
+  if(p.length)c.append(h('div','bad',p.map(x=>typeof x==='string'?x:x.message||JSON.stringify(x)).join('; ')));
   act(c,'Reload '+id,async m=>loaded(await api('refresh',{table:id}),m,'Reloaded: a new snapshot.'));act(c,'Delete',async()=>{await api('delete_source',{source:id});return 'Deleted.'});g.append(c)})}
 // New staged table: a source, steps picked from a menu (each a small JSON line, filled with the source's columns), a
 // preview of the rows, then set_steps and hidden (staged tables stay out of the model); or the cleaning in words, to the agent
@@ -1127,10 +1281,18 @@ function flowPage(box,f){const bar=h('div','row bar lead');bar.append(btn('← F
  kit.draw=draw;extent();requestAnimationFrame(draw);new ResizeObserver(()=>draw()).observe(kit.wrap);
  api('flow_runs',{flow:f.id}).then(x=>{const one=x.runs?.[0]||x;(one.steps||[]).forEach(r=>els[r.step||r.id]?.classList.add(r.status));
   if(one.status)box.querySelector('.cvtools').append(h('span','file',`last run: ${one.status}${one.started?' · '+cell(one.started):''}`))}).catch(()=>{})}
+// a flow's trigger in words: "Mondays at 07:00", "when Revenue < -20", not cron and action names
+const DOW=['Sundays','Mondays','Tuesdays','Wednesdays','Thursdays','Fridays','Saturdays'];
+function cronWords(c){const [mi,hr,dm,mo,dw]=String(c||'').split(' ');if(!/^\d+$/.test(mi||'')||!/^\d+$/.test(hr||''))return c;const at=`${hr.padStart(2,'0')}:${mi.padStart(2,'0')}`;
+ if(dm==='*'&&mo==='*'&&dw==='*')return `Every day at ${at}`;if(dm==='*'&&mo==='*'&&/^[0-6](,[0-6])*$/.test(dw))return `${dw.split(',').map(d=>DOW[+d]).join(', ')} at ${at}`;
+ if(dm==='*'&&mo==='*'&&dw==='1-5')return `Weekdays at ${at}`;if(/^\d+$/.test(dm)&&mo==='*'&&dw==='*')return `Day ${dm} of each month at ${at}`;return c}
+function trigWords(t){const m=t.measure&&(D.measures.find(x=>x.id===t.measure)?.name||t.measure);
+ return t.type==='schedule'?cronWords(t.cron)+(t.timezone?` (${t.timezone})`:''):t.type==='data_condition'?`When ${m} ${t.op} ${t.value}`:t.type==='after_refresh'?`After ${t.table||'a table'} refreshes`:
+  t.type==='data_quality'?'When data quality finds a problem':t.type?t.type.replace(/_/g,' '):'Run by hand'}
 function flows(box){newBtn(box,'flow');const g=h('div','cards');box.append(g);if(!D.flows.length)box.append(h('p','empty','No flows yet: New flow, or ask the agent.'));
- D.flows.forEach(f=>{const t=f.trigger||{},c=card(f.name||f.id,f.enabled?'enabled':'disabled');
-  c.append(h('div','file',`${t.type||'manual'} trigger${t.cron?' · '+t.cron:''}${t.measure?` · ${t.measure} ${t.op} ${t.value}`:''} · flows/${f.id}.json`));
-  const st=h('div');(f.steps||[]).forEach(s=>st.append(h('span','chip',`${s.id}: ${s.action||s.type}`)));const tr=h('ol','trace');c.append(st,tr);
+ D.flows.forEach(f=>{const t=f.trigger||{},c=card(f.name||f.id);{const b=h('span','state'+(f.enabled?' on':''),f.enabled?'On':'Off');c.querySelector('h3').append(b)}
+  {const w=h('div','when');w.append(ic(t.type==='schedule'?'history':'monitor'),h('span','',trigWords(t)));w.title=`flows/${f.id}.json`+(t.cron?` · ${t.cron}`:'');c.append(w)}
+  const st=h('div','stepchips');(f.steps||[]).forEach((s,i)=>{if(i)st.append(h('span','arr','→'));st.append(h('span','chip',(s.action||s.type||s.id).replace(/_/g,' ')))});const tr=h('ol','trace');c.append(st,tr);
   act(c,'Run now',async m=>{tr.innerHTML='';const r=await api('run_flow',{flow:f.id});say(m,`run started: ${r.run}`);
    for(let i=0;i<150;i++){await wait(2000);const x=await api('flow_runs',{flow:f.id,run:r.run}),one=x.runs?.[0]||x;tr.innerHTML='';
     (one.steps||[]).forEach(s=>tr.append(h('li',s.status==='ok'?'ok':s.status==='failed'?'bad':'',`${s.step||s.id}: ${s.status}${s.error?' · '+s.error:''}`)));
@@ -1145,13 +1307,13 @@ function ml(box){newBtn(box,'ml');const g=h('div','cards');box.append(g);if(!D.m
    for(let i=0;i<60;i++){await wait(3000);const x=(await api('ml_models',{})).models.find(y=>y.id===m.id);if(x){Object.assign(m,x);lr()}
     if(['ok','failed'].includes(m.latest_run?.status)&&m.latest_run?.finished)return `${m.latest_run.kind}: ${m.latest_run.status}`}return 'still running'};
   act(c,'Train',m2=>follow('train_model',m2),1);act(c,'Score',m2=>follow('score_model',m2));editBtns(c,'ml',m);g.append(c)})}
-function tools(box){newBtn(box,'tool');const g=h('div','cards');box.append(g);if(!D.tools.length)box.append(h('p','empty','No tools yet.'));
+function tools(box){newBtn(box,'tool');const g=h('div','cards');box.append(g);if(!D.tools.length)box.append(h('p','empty','No tools yet. A tool is a calculation your agents can call, such as a margin or a forecast check: press New tool, or ask the agent to write one.'));
  D.tools.forEach(t=>{const c=card(t.name||t.id,`tools/${t.id}.json · ${t.status||''}`);c.append(h('div','',t.description||''));const ins={};
   Object.entries(t.inputs?.properties||{}).forEach(([k,s])=>{const i=h('input','f');i.placeholder=s.description||'';ins[k]=i;c.append(h('label','l',k),i)});
   const out=h('div');
   act(c,'Run',async()=>{rows(out,await api('run_tool',{tool:t.id,inputs:Object.fromEntries(Object.entries(ins).filter(([,i])=>i.value).map(([k,i])=>[k,i.value]))}))},1);
   act(c,'Run its tests',async()=>{rows(out,await api('test_tool',{tool:t.id}))});editBtns(c,'tool',t);c.append(out);g.append(c)})}
-function agents(box){newBtn(box,'agent');const g=h('div','cards');box.append(g);if(!D.agents.length)box.append(h('p','empty','No custom agents yet.'));
+function agents(box){newBtn(box,'agent');const g=h('div','cards');box.append(g);if(!D.agents.length)box.append(h('p','empty','No custom agents yet. An agent answers one kind of question with your measures and tools, for example a store manager assistant: press New agent, or ask the agent to set one up.'));
  D.agents.forEach(a=>{const c=card(a.name||a.id,`agents/${a.id}.json · ${a.status||''}`);c.append(h('div','file',(a.purpose||a.instructions||'').slice(0,240)));
   const q=h('input','f');q.placeholder='e.g. revenue in North?';const out=h('div','msg');c.append(h('label','l','Question'),q);
   act(c,'Ask',async()=>{const r=await api('run_agent',{agent:a.id,question:q.value});out.textContent=r.answer||JSON.stringify(r,null,1)},1);
@@ -1218,14 +1380,14 @@ function navAll(){return [['Start',[['home','Home',home],['chat','Chat',chatPage
  ['Export',[['boardpack','Board pack',boardPage,(D.app?.packs||[]).length],['documents','Documents',documentsPage],['onepager','One-pager',onePagerPage],['dataexport','Data',dataExportPage],['video','Video',videoPage],['transfer','Project',transferPage]]],
  ['Automate',[['flows','Flows',flows,D.flows.length],['ml','ML models',ml,D.ml.length],['tools','Tools',tools,D.tools.length],['agents','Agents',agents,D.agents.length]]],
  ['Knowledge',[['vault','Vault',vaultPage,(VAULT||[]).length],['docs','Docs',docs]]],
- ['Govern',[['security','Security',security],['environments','Environments',b=>{const x=(D.sections.Environments||'').trim();if(x&&!/^<p[^>]*>\s*<\/p>$/.test(x))b.insertAdjacentHTML('beforeend',x);if(b.innerText.trim().length<10)b.append(h('p','empty','No environments yet: a dev/prod pair lets you test changes before they reach production. Ask the agent to set one up.'))}],['history','History',commits,(D.history||[]).length],...((window.ME||{admin:true}).admin?[['people','Users & access',usersPage],['settings','Settings',settingsPage]]:[])]]]}
+ ['Govern',[['security','Security',security],['environments','Environments',b=>{const x=(D.sections.Environments||'').trim();if(x&&!/^<p[^>]*>\s*<\/p>$/.test(x))b.insertAdjacentHTML('beforeend',x);if(b.innerText.trim().length<10)b.append(h('p','empty','No environments yet: a dev/prod pair lets you test changes before they reach production. Ask the agent to set one up.'))}],['history','History',commits,(D.history||[]).length],...((window.ME||{admin:true}).admin&&!MOBILE?[['people','Users & access',usersPage],['settings','Settings',settingsPage]]:[])]]]}
 let MODE='developer',VAULT=[],MODEL='';
 let FOLD={};try{FOLD=JSON.parse(localStorage.getItem('abi-fold')||'{}')}catch(e){}
 function sidebar(){side.innerHTML='';PAGES={};nav().forEach(([g,items])=>{const sec=h('div','sec'),hd=h('button','grp'),list=h('div','items');
  hd.append(h('span','',g),h('span','car'));hd.setAttribute('aria-expanded',String(!FOLD[g]));sec.classList.toggle('folded',!!FOLD[g]);
  hd.onclick=()=>{FOLD[g]=!FOLD[g];sec.classList.toggle('folded',FOLD[g]);hd.setAttribute('aria-expanded',String(!FOLD[g]));try{localStorage.setItem('abi-fold',JSON.stringify(FOLD))}catch(e){}};
  items.forEach(([k,label,fn,n])=>{PAGES[k]=[label,fn];const b=h('button','it');b.dataset.k=k;
-  b.append(h('span','',label));if(n!==undefined&&n!=='')b.append(h('span','n',String(n)));b.onclick=()=>show(k);list.append(b)});
+  b.append(ic(k),h('span','lb',label));if(n!==undefined&&n!=='')b.append(h('span','n',String(n)));b.onclick=()=>show(k);list.append(b)});
  sec.append(hd,list);side.append(sec)});D.reports.forEach(r=>PAGES['rep:'+r.id]=[r.name||r.id,b=>report(b,r)]);PAGES['mdl:all']=['Whole model',b=>openModel(b,'')];(D.flows||[]).forEach(f=>PAGES['flw:'+f.id]=[f.name||f.id,b=>flowPage(b,f)]);
  (D.models||[]).forEach(m=>PAGES['mdl:'+m.id]=[m.name,b=>openModel(b,m.id)]);
  // AGPL-3.0 §13: every page offers the running version's source (ABI_SOURCE_URL for a changed build)
@@ -1234,8 +1396,13 @@ let PREV='home';
 function show(k){if(!PAGES[k])k='home';if(k!=='chat'&&CUR!=='chat')PREV=k;else if(k==='chat'&&CUR!=='chat')PREV=CUR;{const cb=$('#chat');if(cb.classList.contains('full')){cb.classList.remove('full');$('#chat .wide-t').textContent='Full page';document.body.append(cb);cb.classList.remove('open');document.body.classList.remove('chat-open')}}CUR=k;setTimeout(ctx);const sk=k.startsWith('rep:')?'reports':k.startsWith('mdl:')?'model':k.startsWith('flw:')?'flows':k;side.querySelectorAll('button.it').forEach(b=>b.classList.toggle('on',b.dataset.k===sk));
  const act=side.querySelector('button.it.on');if(act)act.closest('.sec').classList.remove('folded');
  const box=$('main');box.innerHTML='';const pg=h('div','pg'),head=h('div','pghead'),pn=$('#pgname');pn.textContent=PAGES[k][0];document.title=PAGES[k][0]+' · '+D.project;
- pn.title=(k.startsWith('rep:')?'Filter the report or click a bar to filter by it. Every number comes from ABI.':LEDE[k])||'';pg.append(head);box.append(pg);PAGES[k][1](pg);lay(pg,k);new MutationObserver(()=>lay(pg,k)).observe(pg,{childList:true,subtree:true});
- const top=pg.querySelector(':scope>.bar.top'),lead=pg.querySelector(':scope>.bar.lead');if(lead)head.append(lead);if(top)head.append(top);if(!top&&!lead)head.remove();if(MODE==='viewer')pg.querySelectorAll('.ed').forEach(e=>e.readOnly=true);
+ pn.title=(k.startsWith('rep:')?'Filter the report or click a bar to filter by it. Every number comes from ABI.':LEDE[k])||'';
+ // the page says what it is and what it is for, above its actions (the header's crumb says where it sits)
+ {const tt=h('div','ttl'),rp=k.startsWith('rep:')&&D.reports.find(r=>'rep:'+r.id===k),sec=nav().find(([,its])=>its.some(([x])=>x===(k.startsWith('rep:')?'reports':k.startsWith('mdl:')?'model':k.startsWith('flw:')?'flows':k)))?.[0];
+  if(sec&&sec!=='Start')tt.append(h('div','eyebrow',sec));tt.append(h('h1','',PAGES[k][0]));const ld=rp?(rp.spec?.description||rp.description||'Filter it, or click a bar or a slice to filter by that member. Every number comes from ABI.'):LEDE[k];
+  if(ld)tt.append(h('p','',ld));head.append(tt)}
+ pg.append(head);box.append(pg);PAGES[k][1](pg);lay(pg,k);new MutationObserver(()=>lay(pg,k)).observe(pg,{childList:true,subtree:true});
+ const top=pg.querySelector(':scope>.bar.top'),lead=pg.querySelector(':scope>.bar.lead');if(lead)lead.classList.contains('seg')?head.append(lead):head.querySelector('.ttl').prepend(lead);if(top)head.append(top);if(MODE==='viewer')pg.querySelectorAll('.ed').forEach(e=>e.readOnly=true);
  try{localStorage.setItem('abi-app-'+D.project,k)}catch(e){}try{window.history.replaceState(null,'','#'+k)}catch(e){}}
 // ---------- layout: Layout (Developer, desktop) lets you drag a card to move it and drag its corner to resize it (12
 // columns, 20 px steps). A report keeps it in ABI's report (x, y, w, h: commit, then publish); every other page in the
@@ -1271,23 +1438,24 @@ async function layStore(reset){const k=CUR,pg=$('main .pg'),out={};
   try{await api('save_report',{report:spec});rep.spec=spec;toast('Saved in the report: commit, then publish, and Viewer sees it.')}catch(e){toast(e.message)}return}
  const r=await fetch('/layouts',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({page:k,layout:reset?null:out})}).then(x=>x.json()).catch(e=>({error:e.message}));
  if(r.error)toast(r.error);else{layFile().draft=r.result;vc();if(reset)show(k)}}
-function layMode(on){LAYING=on;document.body.classList.toggle('laying',on);const b=$('#layout');b.classList.toggle('on',on);b.textContent=on?'Done':'Layout';$('#layreset').hidden=!on}
+function layMode(on){LAYING=on;document.body.classList.toggle('laying',on);const b=$('#layout');b.classList.toggle('on',on);b.replaceChildren(ic(on?'check':'layout'),on?'Done':'Layout');$('#layreset').hidden=!on}
 $('#layout').onclick=()=>{layMode(!LAYING);show(CUR);if(LAYING)toast('Drag a card to move it, its corner to resize it. Publish shows it to Viewer.')};
 $('#layreset').onclick=()=>{if(CUR.startsWith('rep:')){toast('A report\'s layout is in the report: undo it under Changes.');return}layStore(true)};
 const boot=loadVault();sidebar();
 const R=document.documentElement,TB=$('#theme');const dark=()=>R.dataset.theme?R.dataset.theme==='dark':matchMedia('(prefers-color-scheme: dark)').matches;
-const setTheme=t=>{if(t)R.dataset.theme=t;TB.textContent=dark()?'Light':'Dark'};try{setTheme(localStorage.getItem('abi-theme'))}catch(e){setTheme()}
+const setTheme=t=>{if(t)R.dataset.theme=t;const d=dark();TB.classList.add('icon');TB.replaceChildren(ic(d?'sun':'moon'));TB.setAttribute('aria-label',d?'Light theme':'Dark theme');TB.title=d?'Switch to the light theme':'Switch to the dark theme'};try{setTheme(localStorage.getItem('abi-theme'))}catch(e){setTheme()}
 TB.onclick=()=>{const t=dark()?'light':'dark';setTheme(t);try{localStorage.setItem('abi-theme',t)}catch(e){}};
 
 function setMode(md){if(window.ME&&!['editor','owner'].includes(ME.role))md='viewer';MODE=md;if(md==='viewer'&&LAYING)layMode(false);setTimeout(()=>{ctx();const g=log.querySelector('.hello');if(g)g.replaceWith(hello())});document.body.dataset.mode=md;$('#m-dev').classList.toggle('on',md==='developer');$('#m-view').classList.toggle('on',md==='viewer');
  $('#chat textarea').placeholder=md==='viewer'?'Ask a question. In Viewer the agent only reads.':'Ask a question or for a change.'}
 async function pickMode(md){
  await fetch('/mode',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({mode:md})})}
-function vc(){const n=D.pending?.files?.length||0,cb=$('#changes'),pb=$('#publish');cb.textContent=n?`${n} change${n>1?'s':''}`:'No changes';cb.classList.toggle('pri',!!n);
+function vc(){const n=D.pending?.files?.length||0,cb=$('#changes'),pb=$('#publish');cb.replaceChildren(ic('commit'),n?`${n} change${n>1?'s':''}`:'No changes');cb.classList.toggle('pri',!!n);
  const head=(D.history||[])[0]?.id?.slice(0,7),pubc=(D.published?.commit||'').split(' ')[0];const L=D.app?.layouts||{},ld=JSON.stringify(L.draft||{})!==JSON.stringify(L.published||{});pb.disabled=!!n||!head||(head===pubc&&!ld);
  pb.title=n?'Commit first: Publish sends the last commit.':head===pubc?(ld?'Show the new page layouts to Viewer.':'Viewer already shows the last commit.'):'Make the last commit what Viewer sees.'}
 $('#changes').onclick=()=>{const d=$('#commit'),f=$('.files',d);f.innerHTML='';const fl=D.pending?.files||[];
- if(!fl.length)f.append(h('p','empty','Everything is committed.'));fl.forEach(x=>{const det=h('details');const su=h('summary','',`${x.status}  ${x.path}`);det.append(su,h('pre','',x.patch||''));f.append(det)});
+ $('h3',d).textContent=fl.length?`${fl.length} change${fl.length>1?'s':''} not committed yet`:'Everything is committed';$('#c-commit').disabled=!fl.length;$('#c-message').disabled=!fl.length;
+ if(!fl.length)f.append(h('p','empty','Nothing to commit: every change is in ABI\'s history. Undo still takes back the last one.'));fl.forEach(x=>{const det=h('details');const su=h('summary','',`${x.status}  ${x.path}`);det.append(su,h('pre','',x.patch||''));f.append(det)});
  $('#c-message').value=D.pending?.proposed_message||'';$('.msg',d).textContent='';$('#c-undo').disabled=!D.pending?.can_undo;d.showModal()};
 $('#c-close').onclick=()=>$('#commit').close();
 $('#c-commit').onclick=async()=>{try{await api('commit',{message:$('#c-message').value||'Changes from the app'});$('#commit').close();toast('Committed')}catch(e){say($('#commit .msg'),e.message,1)}};
@@ -1297,13 +1465,17 @@ $('#publish').onclick=async()=>{if(!await ask({message:'Publish the last commit?
  let r=await post('/publish');if(r.confirm){if(!await ask(r.confirm)){toast('Not published.');return}r=await post('/confirm/'+r.confirm.id)}
  toast(r.error?`Publish failed: ${r.error}`:`Published ${r.result.commit}`)};
 const sideOff=on=>{document.body.classList.toggle('side-off',on);try{localStorage.setItem('abi-side-off',on?'1':'')}catch(e){}};try{sideOff(localStorage.getItem('abi-side-off')==='1')}catch(e){}
-$('#menu').title='Show or hide the sidebar';$('#menu').onclick=()=>R.classList.contains('mobile')?document.body.classList.toggle('menu-open'):sideOff(!document.body.classList.contains('side-off'));side.addEventListener('click',e=>{if(e.target.closest('button.it'))document.body.classList.remove('menu-open')});
+$('#menu').title='Show or hide the sidebar';$('#menu').classList.add('icon');$('#menu').replaceChildren(ic('menu'));$('#publish').prepend(ic('publish'));$('#chat-toggle').prepend(ic('spark'));$('#menu').onclick=()=>R.classList.contains('mobile')?document.body.classList.toggle('menu-open'):sideOff(!document.body.classList.contains('side-off'));side.addEventListener('click',e=>{if(e.target.closest('button.it'))document.body.classList.remove('menu-open')});
+// the phone drawer: a tap on its backdrop or Escape closes it
+document.addEventListener('click',e=>{if(document.body.classList.contains('menu-open')&&!e.target.closest('aside,#menu')){e.preventDefault();e.stopPropagation();document.body.classList.remove('menu-open')}},true);
+document.addEventListener('keydown',e=>{if(e.key==='Escape')document.body.classList.remove('menu-open')});
 $('#switch').onclick=switcher;
 function pwDialog(){const d=h('dialog'),c=h('div','card'),cur=h('input','f'),nw=h('input','f'),m=h('div','msg');c.append(h('h3','','Change your password'));
- cur.type=nw.type='password';cur.placeholder='current password';cur.autocomplete='current-password';nw.placeholder='new password (8+ characters)';nw.autocomplete='new-password';
+ cur.type=nw.type='password';cur.placeholder='';cur.autocomplete='current-password';nw.placeholder='at least 8 characters';nw.autocomplete='new-password';
  const ok=btn('Change',async()=>{const r=await fetch('/password',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({current:cur.value,password:nw.value})}).then(x=>x.json()).catch(e=>({error:e.message}));
-  cur.value=nw.value='';if(r.error){say(m,r.error,1);return}say(m,'Changed. Sign in again with the new one.');setTimeout(()=>location.reload(),1500)}),no=btn('Cancel',()=>{d.close();d.remove()});
- const row=h('div','row acts');row.append(ok,btn('Personal tokens',()=>{d.close();d.remove();tokDialog()}),btn('Two-step sign-in',()=>{d.close();d.remove();mfaDialog()}),no);c.append(cur,nw,row,m);d.append(c);document.body.append(d);d.showModal();
+  cur.value=nw.value='';if(r.error){say(m,r.error,1);return}say(m,'Changed. Sign in again with the new one.');setTimeout(()=>location.reload(),1500)},1),no=btn('Cancel',()=>{d.close();d.remove()});
+ const row=h('div','row acts');row.append(ok,btn('Personal tokens',()=>{d.close();d.remove();tokDialog()}),btn('Two-step sign-in',()=>{d.close();d.remove();mfaDialog()}),no);cur.id='pw-cur';nw.id='pw-new';const lc=h('label','l','Current password'),ln=h('label','l','New password');lc.htmlFor='pw-cur';ln.htmlFor='pw-new';
+ c.append(h('p','file',`Signed in as ${(window.ME||{}).name||''}`),lc,cur,ln,nw,row,m);d.append(c);document.body.append(d);d.showModal();
  fetch('/signin/sso').then(r=>r.json()).then(L=>{if(!L.length)return;const l=h('div','row acts');c.insertBefore(h('h3','','Sign in with your company account'),m);c.insertBefore(l,m);
   L.forEach(x=>l.append(btn('Link '+x.name,async()=>{const r=await fetch('/api/oidc/'+encodeURIComponent(x.id)+'/start',{method:'POST',headers:{'Content-Type':'application/json'},body:'{"link":true}'}).then(y=>y.json());
    if(r.url)location.href=r.url;else say(m,r.error||'Not available.',1)})))}).catch(()=>{})}
@@ -1336,7 +1508,7 @@ function mfaDialog(){const d=h('dialog'),c=h('div','card'),b=h('div'),m=h('div',
    ...(s.on?(s.required?[]:[btn('Turn off',off)]):[btn('Turn on',on,1)]),btn('Close',close))};
  c.append(h('h3','','Two-step sign-in'),b,m);d.append(c);document.body.append(d);d.showModal();fill()}
 {const q=new URLSearchParams(location.search).get('signin');if(q){setTimeout(()=>toast({linked:'Linked: you can sign in with it now.',conflict:'That account is linked to another person here.'}[q]||'Linking didn\'t work: try again.'));history.replaceState(null,'',location.pathname+location.hash)}}
-if(window.ME?.signin){const w=h('button','btn who',ME.name);w.title='Your password, personal tokens and two-step sign-in';w.onclick=pwDialog;const f=h('form');f.method='post';f.action='/signout';f.append(h('button','btn','Sign out'));const r0=$('header .right');r0.prepend(w,f)}
+if(window.ME?.signin){const w=h('button','btn who');w.append(h('span','av',(ME.name||'?').slice(0,1).toUpperCase()),h('span','nm',ME.name));w.title='Your password, personal tokens and two-step sign-in';w.onclick=pwDialog;const f=h('form');f.method='post';f.action='/signout';f.className='so';f.append(ib('out','Sign out'));const r0=$('header .right');r0.prepend(w,f)}
 if(window.ME&&!['editor','owner'].includes(ME.role))$('.modes').hidden=true;/* Viewer access only: no switch at all */$('#m-dev').onclick=()=>pickMode('developer');$('#m-view').onclick=()=>pickMode('viewer');
 let first=decodeURIComponent(location.hash.slice(1));if(!first)try{first=localStorage.getItem('abi-app-'+D.project)}catch(e){}setTimeout(()=>show(first||'home'));  // after the whole script: the chat page's parts are declared further down
 boot.then(()=>{sidebar();show(CUR);inboxCount()});setMode('developer');vc();
@@ -1349,7 +1521,7 @@ async function switcher(){let d=$('#switcher');if(d){d.remove();return}
  const fill=()=>{list.innerHTML='';(r.workspaces[ws.value]||[]).forEach(p=>{const b=h('button','lk');b.append(h('b','',p.id),h('span','',p.name===p.id?'':p.name));
   if(p.id===r.current)b.classList.add('on');b.onclick=()=>{location.href='/?p='+encodeURIComponent(p.id)+'#home'};list.append(b)})};ws.onchange=fill;fill();
  d.append(h('label','l','Workspace'),ws,h('label','l','Projects in it'),list);document.body.append(d)}
-function toast(t){const x=h('div','toast',t);document.body.append(x);setTimeout(()=>x.remove(),6000)}
+function toast(t,bad){const x=h('div','toast'+(bad?' bad':''),t);x.setAttribute('role',bad?'alert':'status');document.body.append(x);setTimeout(()=>x.remove(),bad?9000:6000)}
 function highlight(item){if(!item)return;const want=String(item).toLowerCase();
  const c=[...document.querySelectorAll('main .card')].find(c=>c.textContent.toLowerCase().includes(want));if(c){c.classList.add('hl');c.scrollIntoView({behavior:'smooth',block:'center'});setTimeout(()=>c.classList.remove('hl'),4000)}}
 const chatBox=$('#chat'),log=$('#chat .log'),inp=$('#chat textarea'),busy=$('#chat .busy');
@@ -1404,7 +1576,7 @@ $('#chat .stop').onclick=()=>fetch('/chat/stop',{method:'POST',headers:{'X-Abi-A
  es.onerror=()=>{if(es.readyState===2)stale()};  // the stream was refused: a restart or an ended session
  es.onmessage=async ev=>{const e=JSON.parse(ev.data);
   if(e.type==='show'){PENDING.filters=e.filters||null;if(e.page==='explore'&&e.query){const q={measures:e.query.measures||[],dimensions:(e.query.dimensions||[]).slice(0,1),filters:e.query.filters||[]};PENDING.explore={...q,chart:e.chart};MINE.unshift({name:'Agent: '+q.measures.join(', ')+(q.dimensions[0]?' by '+q.dimensions[0]:''),q,type:e.chart||'bar',at:new Date().toISOString().slice(0,16).replace('T',' ')});saveMine();sidebar()}const nv=h('div','m nav','→ '+(e.page==='report'?'report '+e.report:e.page)+(e.note?' · '+e.note:''));nv.onclick=()=>show(e.page==='report'?'rep:'+e.report:e.page);log.append(nv);log.scrollTop=log.scrollHeight;const wasFull=chatBox.classList.contains('full');const k=e.page==='report'?'rep:'+e.report:e.page;show(k);if(wasFull)openChat(true);setTimeout(()=>highlight(e.item),400);if(e.note)toast('Agent: '+e.note)}
-  else if(e.type==='data'){Object.assign(D,e.data);const k=CUR;sidebar();show(k);vc()}
+  else if(e.type==='data'){Object.assign(D,e.data);normQ(D.quality);const k=CUR;sidebar();show(k);vc()}
   else if(e.type==='busy'){busy.hidden=!e.on;$('#chat .stop').hidden=!e.on}
   else if(e.type==='step'){if(!steps){steps=h('div','m steps');log.append(steps)}const last=[...steps.children].reverse().find(x=>x.dataset.t===e.tool&&x.dataset.s==='run');
    if(e.state==='run'||!last){const l=h('div','',`${e.state==='run'?'…':e.state==='ok'?'✓':'✗'} ${stepName(e.tool)}`);l.dataset.t=e.tool;l.dataset.s=e.state;steps.append(l)}
