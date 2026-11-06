@@ -550,7 +550,7 @@ dialog .row.foot{justify-content:flex-end;gap:8px}dialog .row.foot .sp{flex:1}
 p.note.warn{display:flex;gap:8px;align-items:flex-start;background:color-mix(in srgb,var(--signal) 8%,var(--sheet))}p.note.warn .ic{color:var(--signal-ink);margin-top:1px}
 /* configuration notes are notes, not errors: neutral, with an info line */
 p.note,.card .note{background:var(--paper);border-color:var(--line)}
-.card .scroll.all{max-height:none}.slicer.list .opts{flex-direction:column;flex-wrap:nowrap;gap:4px;mask-image:none}.slicer.list .sl{display:flex;justify-content:space-between;width:100%;border-radius:8px;padding:8px 12px;font-size:13.5px;
+.card .scroll.all{max-height:none}.card>.formrow+label.l,.card>.formrow+.mpick{margin-top:18px!important}.mlchart{margin-top:4px}.slicer.list .opts{flex-direction:column;flex-wrap:nowrap;gap:4px;mask-image:none}.slicer.list .sl{display:flex;justify-content:space-between;width:100%;border-radius:8px;padding:8px 12px;font-size:13.5px;
  background:linear-gradient(90deg,color-mix(in srgb,var(--signal) 13%,var(--sheet)) var(--p),var(--sheet) var(--p))}.slicer.list .sl small{font-size:12px}.slicer.list .sl.on{background:var(--ink)}
 .kv .rbar{display:block;height:3px;margin-top:4px;border-radius:2px;background:linear-gradient(90deg,var(--c3) var(--p),var(--hover) var(--p));max-width:180px}
 /* one accent: green only as a status dot; the words stay ink */
