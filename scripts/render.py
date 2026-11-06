@@ -160,7 +160,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
    /* a name whole or not at all: 11.5 px, 10 px, or on two lines; a tile too small for it is named under the chart */
    const nm=String(d.rows[i][nd-1]??'—'),tx=(yy,fs)=>{const t=el('text',{x:x+6,y:y+yy,class:'tl'},svg);t.style.fontSize=fs;if(dark(k))t.style.fill='var(--sheet)';return t};let ok=null,flat=false;
    if(w>20&&h>16){ok=fit(tx(16,'11.5px'),nm,w-12,1)||fit(tx(15,'10px'),nm,w-9,1);flat=!!ok;
-    const sp=nm.split(' ');if(!ok&&sp.length>1&&h>32){const a=sp.slice(0,Math.ceil(sp.length/2)).join(' '),b=sp.slice(Math.ceil(sp.length/2)).join(' '),t1=fit(tx(15,'10px'),a,w-9,1),t2=t1&&fit(tx(27,'10px'),b,w-9,1);if(t1&&!t2)t1.remove();ok=t2}}
+    const sp=nm.split(' ');if(!ok&&sp.length>1&&h>32){const a=sp.slice(0,Math.ceil(sp.length/2)).join(' '),b=sp.slice(Math.ceil(sp.length/2)).join(' '),t1=fit(tx(15,'10px'),a,w-9,1),t2=t1&&fit(tx(27,'10px'),b,w-9,1);if(t1&&!t2)t1.remove();ok=t2;if(ok&&h>50){const u=el('text',{x:x+6,y:y+42,class:'tv'},svg);if(dark(k))u.style.fill='var(--sheet)';fit(u,tick(val(i,m),m),w-12,1)}}}
    if(!ok)SMALL.push(nm);if(flat&&h>36){const u=el('text',{x:x+6,y:y+31,class:'tv'},svg);if(dark(k))u.style.fill='var(--sheet)';fit(u,tick(val(i,m),m),w-12,1)}}));
   if(SMALL.length){const t=el('text',{x:0,y:H-3},svg);fit(t,'Small tiles: '+SMALL.join(', '),W)}return}
  const L=60;let B=40;

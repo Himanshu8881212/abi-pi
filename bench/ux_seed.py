@@ -119,6 +119,12 @@ def build(o: perf.App) -> None:
     # the starter measure "Orders rows" reads as a count of rows; the business word is Orders (R5)
     ask(o, "/api/set_measure", {"project": P, "id": "orders_rows", "name": "Orders", "expression": "COUNT(orders.order_id)",
                                 "description": "The number of order lines."})
+    for rep in abi.call("list_reports", project=P).get("reports") or []:  # the starter report's card titles follow
+        vs = [v for pg in rep.get("pages") or [] for v in pg.get("visuals") or [] if v.get("title") == "Orders rows"]
+        if vs:
+            for v in vs:
+                v["title"] = "Orders"
+            ask(o, "/api/save_report", {"project": P, "report": {k: v for k, v in rep.items() if k != "owner"}})
     for term, text, ms in (("Revenue", "What the customer paid: quantity x unit price, less the discount (vault: Brewline KPI definitions).", ["revenue"]),
                            ("Order", "One line of the till: one product in one quantity.", ["orders_rows"]),
                            ("Region", "North, East, South or West: the café's city decides it.", [])):
