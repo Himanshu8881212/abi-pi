@@ -482,6 +482,8 @@ label.chk.hl{background:color-mix(in srgb,var(--signal) 12%,var(--sheet));box-sh
 button.pin{display:inline-flex;align-items:center;gap:5px}button.pin .ic{width:12px;height:12px}
 a.skip{position:fixed;left:12px;top:-60px;z-index:50;background:var(--ink);color:var(--sheet);padding:10px 14px;border-radius:8px;font:500 13px var(--text);text-decoration:none;transition:top .15s}a.skip:focus{top:10px}
 main:focus{outline:none}
+.card .f+.btn,.card select.f+.btn,.card .fld+.btn{margin-top:16px}
+.card>p.note+label.l{margin-top:14px!important}
 """
 
 JS = r"""
@@ -561,6 +563,8 @@ function act(c,label,fn,pri){const m=c.querySelector(':scope>.msg')||c.appendChi
  let r=c.querySelector(':scope>.acts');if(!r){r=h('div','row acts');c.insertBefore(r,m)}
  r.append(btn(label,async()=>{c.querySelectorAll('.invalid').forEach(x=>x.classList.remove('invalid'));ASK_WHAT=/^Delete/.test(label)?ttl(c):'';try{const t=await fn(m);if(label==='Delete'){undoToast(ttl(c)||'It');return}if(t)c.isConnected?say(m,t):toast(t)}catch(e){c.isConnected?say(m,e.message,1):toast(e.message,1)}},pri));return m}
 // a field the action needs: marked and focused, and the action stops with what to do
+// a builder on a phone reads the published project: say where the building happens
+function vEmpty(t){return MOBILE&&['editor','owner'].includes(window.ME?.role)?'This is built on a computer, in Developer: a phone shows the published project.':t}
 function need(el,ok,msg){if(ok)return;el.classList.add('invalid');el.addEventListener('input',()=>el.classList.remove('invalid'),{once:true});el.focus();throw new Error(msg)}
 
 // ---------- Overview ----------
@@ -641,7 +645,8 @@ nav().filter(([gname])=>gname!=='Start'&&line[gname]).forEach(([gname,items])=>{
  map.append(tb);at.classList.add('full');map.classList.add('full');g.append(map)}
 
 // ---------- Analyze: one report per entry; filters and cross-filter ----------
-function report(box,rep){let flt=PENDING.filters||[];PENDING.filters=null;
+var RFLT={};  // each report's filters, kept across ABI's redraws
+function report(box,rep){let flt=PENDING.filters||RFLT[rep.id]||[];PENDING.filters=null;
  {const tb=h('div','row bar top');let ed=null;tb.append(btn('Edit report',()=>{if(ed){ed.remove();ed=null;return}ed=editor('report',rep.spec||{id:rep.id,name:rep.name},false);box.querySelector('.pghead').after(ed)}),
   btn('Delete report',async()=>{try{await KIND.report.del({id:rep.id});toast('Deleted.')}catch(e){toast(e.message)}}));box.append(tb)}
  {const tb=box.querySelector(':scope>.bar.top');let ex=null;const eb=h('button','btn pri','Export');eb.onclick=()=>{if(ex){ex.remove();ex=null;return}ex=exportCard(rep,()=>flt,()=>cur);box.querySelector('.pghead').after(ex)};tb.prepend(eb)
@@ -674,7 +679,7 @@ function report(box,rep){let flt=PENDING.filters||[];PENDING.filters=null;
   if(c0)col.onchange();else col.focus()}
  addb.onclick=()=>pop?close():open();
  let cur=rep.pages[0];
- async function draw(){chips.innerHTML='';msg.textContent='';clr.hidden=flt.length<2;addb.textContent=flt.length?'+ Add filter':'+ Filter';
+ async function draw(){RFLT[rep.id]=flt;chips.innerHTML='';msg.textContent='';clr.hidden=flt.length<2;addb.textContent=flt.length?'+ Add filter':'+ Filter';
   flt.forEach(f=>{const vs=[].concat(f.value),c=h('span','fchip'),x=h('button','','×');x.title='Remove this filter';x.setAttribute('aria-label','Remove filter on '+colName(f.column));
    const t=f.op==='in'||f.op==='='?vs.slice(0,3).join(', ')+(vs.length>3?` +${vs.length-3}`:''):`${f.op} ${vs.join(', ')}`;
    c.append(h('b','',colName(f.column)),h('span','',t),x);c.title=`${f.column}: ${vs.join(', ')}`;x.onclick=e=>{e.stopPropagation();setVals(f.column,[])};c.onclick=()=>open(f.column);chips.append(c)});
@@ -927,6 +932,7 @@ function mailCard(rep){const f=(D.flows||[]).find(x=>x.id===('email_'+rep.id).sl
  const to=inpt('name@company.com, …',(was.to||[]).join(', ')),days=h('div','checks'),tm=inpt('',at,'time'),tz=inpt('time zone, e.g. Europe/Berlin',f?.trigger?.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'),on=new Set((cr[4]||'').split(',').map(Number));
  [[1,'Mon'],[2,'Tue'],[3,'Wed'],[4,'Thu'],[5,'Fri'],[6,'Sat'],[0,'Sun']].forEach(([v,l])=>{const x=h('label','chk'),i=h('input');i.type='checkbox';i.value=v;i.checked=on.has(v);x.append(i,h('span','',l));days.append(x)});
  // the days as toggles with two presets, the time zone from a list, and the schedule said back in one sentence
+ if(f)c.querySelector('h3').append(h('span','state'+(f.enabled?' on':''),f.enabled?'Scheduled':'Off'));
  days.classList.add('days');const pre=h('div','row seg'),setD=vs=>{days.querySelectorAll('input').forEach(i=>i.checked=vs.includes(+i.value));say0()};
  [['Weekdays',[1,2,3,4,5]],['Every day',[0,1,2,3,4,5,6]]].forEach(([l,vs])=>{const b=h('button','chip',l);b.type='button';b.onclick=()=>setD(vs);pre.append(b)});
  const zl=h('datalist');zl.id='tz-list';try{Intl.supportedValuesOf('timeZone').forEach(z=>zl.append(new Option(z)))}catch(e){}tz.setAttribute('list','tz-list');
@@ -1044,7 +1050,8 @@ async function inboxPage(box){const r=await ipost();if(r.error){box.append(h('p'
 // Explore: anyone's own analysis on the governed model (reads only, so Viewer can use it); kept analyses stay in this browser
 let MINE=D.app?.analyses||[];if(!MINE.length)try{MINE=JSON.parse(localStorage.getItem('abi-explore')||'[]');if(MINE.length)setTimeout(saveMine,0)}catch(e){}
 function saveMine(){MINE=MINE.slice(0,100);fetch('/analyses',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({analyses:MINE})}).catch(()=>{})}
-function explore(box){const q0=PENDING.explore||{};PENDING.explore=null;
+var EXQ=null;  // the analysis on screen: a redraw (ABI's data event) shows it again
+function explore(box){const q0=PENDING.explore||EXQ||{};PENDING.explore=null;
  const c=card('New analysis','measures by a dimension, from the model'),ms=multi(D.measures.map(m=>m.id),q0.measures),dm=h('select','f'),ty=h('select','f'),
   fc=h('select','f'),fv=h('select','f'),out=h('div','body'),msg=h('div','msg');ms.classList.remove('ed');fv.multiple=true;fv.hidden=true;
  ms.querySelectorAll('option').forEach(o=>o.text=D.measures.find(m=>m.id===o.value)?.name||o.value);
@@ -1055,7 +1062,7 @@ function explore(box){const q0=PENDING.explore||{};PENDING.explore=null;
    r.rows.forEach(x=>fv.append(new Option(String(x[0]),JSON.stringify(x[0]))));fv.size=Math.min(6,r.rows.length)}catch(e){say(msg,e.message,1)}};
  const query=()=>{const f=fc.value&&fv.selectedOptions.length?[{column:fc.value,op:'in',value:[...fv.selectedOptions].map(o=>JSON.parse(o.value))}]:flt;
   return {measures:[...ms.selectedOptions].map(o=>o.value),dimensions:dm.value?[dm.value]:[],filters:f}};
- async function run(q,type){out.innerHTML='';msg.textContent='';if(!q.measures.length){say(msg,'Pick at least one measure.',1);return}
+ async function run(q,type){out.innerHTML='';msg.textContent='';EXQ={...q,chart:type};if(!q.measures.length){say(msg,'Pick at least one measure.',1);return}
   try{const d=await api('semantic_query',{...q,...(q.dimensions.length?{order_by:[{field:q.dimensions[0]}]}:{}),limit:500});d.format=d.format||{};d.type=type;d.id='analysis';
    out.append(h('p','file',(q.filters||[]).map(f=>`${colName(f.column)} ${f.op==='in'?'is':f.op} ${[].concat(f.value).join(', ')}`).join(' · ')||'All rows, no filter'));
    const b=h('div');out.append(b);requestAnimationFrame(()=>type==='table'?table(b,d):chart(b,d));return d}catch(e){say(msg,e.message,1)}}
@@ -1186,7 +1193,7 @@ function newStaged(box){if(box.querySelector('.stform'))return;const c=card('New
  c.append(out);(box.querySelector('.pghead')||box).after(c);look().catch(()=>{})}
 function stagedPage(box){const sv=(D.layers||[]).filter(t=>t.layer==='silver').sort((a,b)=>a.table.localeCompare(b.table));
  const bar=h('div','row bar top');bar.append(btn('New staged table',()=>newStaged(box),1));box.append(bar);
- const g=h('div','cards');box.append(g);if(!sv.length){box.append(h('p','empty',MODE==='viewer'?'Nothing staged: the sources go straight to the final tables.':'Nothing staged yet: New staged table cleans a source here, or ask the agent.'));return}
+ const g=h('div','cards');box.append(g);if(!sv.length){box.append(h('p','empty',MODE==='viewer'?vEmpty('Nothing staged: the sources go straight to the final tables.'):'Nothing staged yet: New staged table cleans a source here, or ask the agent.'));return}
  sv.forEach(t=>{const c=card(t.table,`${fmt(t.rows)} rows · hidden from the model`);const st=(D.table_steps||{})[t.table]||[];
   const reads=st.filter(x=>x.type==='source'||x.type==='append'||x.type==='merge').map(x=>x.source||(x.tables||[]).join(', ')||x.table).filter(Boolean);
   if(reads.length)c.append(h('div','file','reads '+reads.join(', ')));
@@ -1468,7 +1475,7 @@ function cronWords(c){const [mi,hr,dm,mo,dw]=String(c||'').split(' ');if(!/^\d+$
 function trigWords(t){const m=t.measure&&(D.measures.find(x=>x.id===t.measure)?.name||t.measure);
  return t.type==='schedule'?cronWords(t.cron)+(t.timezone?` (${t.timezone})`:''):t.type==='data_condition'?`When ${m} ${t.op} ${t.value}`:t.type==='after_refresh'?`After ${t.table||'a table'} refreshes`:
   t.type==='data_quality'?'When data quality finds a problem':t.type?t.type.replace(/_/g,' '):'Run by hand'}
-function flows(box){newBtn(box,'flow');const g=h('div','cards');box.append(g);if(!D.flows.length)box.append(h('p','empty',MODE==='viewer'?'No automations here: the project\'s builders set them up.':'No flows yet: New flow, or ask the agent.'));
+function flows(box){newBtn(box,'flow');const g=h('div','cards');box.append(g);if(!D.flows.length)box.append(h('p','empty',MODE==='viewer'?vEmpty('No automations here: the project\'s builders set them up.'):'No flows yet: New flow, or ask the agent.'));
  D.flows.forEach(f=>{const t=f.trigger||{},c=card(f.name||f.id);{const b=h('span','state'+(f.enabled?' on':''),f.enabled?'On':'Off');c.querySelector('h3').append(b)}
   {const w=h('div','when');w.append(ic(t.type==='schedule'?'history':'monitor'),h('span','',trigWords(t)));w.title=`flows/${f.id}.json`+(t.cron?` · ${t.cron}`:'');c.append(w)}
   const st=h('div','stepchips');(f.steps||[]).forEach((s,i)=>{if(i)st.append(h('span','arr','→'));st.append(h('span','chip',(s.action||s.type||s.id).replace(/_/g,' ')))});const tr=h('ol','trace');c.append(st,tr);
@@ -1486,13 +1493,13 @@ function ml(box){newBtn(box,'ml');const g=h('div','cards');box.append(g);if(!D.m
    for(let i=0;i<60;i++){await wait(3000);const x=(await api('ml_models',{})).models.find(y=>y.id===m.id);if(x){Object.assign(m,x);lr()}
     if(['ok','failed'].includes(m.latest_run?.status)&&m.latest_run?.finished)return `${m.latest_run.kind}: ${m.latest_run.status}`}return 'still running'};
   act(c,'Train',m2=>follow('train_model',m2),1);act(c,'Score',m2=>follow('score_model',m2));editBtns(c,'ml',m);g.append(c)})}
-function tools(box){newBtn(box,'tool');const g=h('div','cards');box.append(g);if(!D.tools.length)box.append(h('p','empty',MODE==='viewer'?'No tools here: a tool is a calculation the agents can call, set up by the project\'s builders.':'No tools yet. A tool is a calculation your agents can call, such as a margin or a forecast check: press New tool, or ask the agent to write one.'));
+function tools(box){newBtn(box,'tool');const g=h('div','cards');box.append(g);if(!D.tools.length)box.append(h('p','empty',MODE==='viewer'?vEmpty('No tools here: a tool is a calculation the agents can call, set up by the project\'s builders.'):'No tools yet. A tool is a calculation your agents can call, such as a margin or a forecast check: press New tool, or ask the agent to write one.'));
  D.tools.forEach(t=>{const c=card(t.name||t.id,`tools/${t.id}.json · ${t.status||''}`);c.append(h('div','',t.description||''));const ins={};
   Object.entries(t.inputs?.properties||{}).forEach(([k,s])=>{const i=h('input','f');i.placeholder=s.description||'';ins[k]=i;c.append(h('label','l',k),i)});
   const out=h('div');
   act(c,'Run',async()=>{rows(out,await api('run_tool',{tool:t.id,inputs:Object.fromEntries(Object.entries(ins).filter(([,i])=>i.value).map(([k,i])=>[k,i.value]))}))},1);
   act(c,'Run its tests',async()=>{rows(out,await api('test_tool',{tool:t.id}))});editBtns(c,'tool',t);c.append(out);g.append(c)})}
-function agents(box){newBtn(box,'agent');const g=h('div','cards');box.append(g);if(!D.agents.length)box.append(h('p','empty',MODE==='viewer'?'No custom agents here yet: ask the main agent your question (Ask the agent).':'No custom agents yet. An agent answers one kind of question with your measures and tools, for example a store manager assistant: press New agent, or ask the agent to set one up.'));
+function agents(box){newBtn(box,'agent');const g=h('div','cards');box.append(g);if(!D.agents.length)box.append(h('p','empty',MODE==='viewer'?vEmpty('No custom agents here yet: ask the main agent your question (Ask the agent).'):'No custom agents yet. An agent answers one kind of question with your measures and tools, for example a store manager assistant: press New agent, or ask the agent to set one up.'));
  D.agents.forEach(a=>{const c=card(a.name||a.id,`agents/${a.id}.json · ${a.status||''}`);c.append(h('div','file',(a.purpose||a.instructions||'').slice(0,240)));
   const q=h('input','f');q.placeholder='e.g. revenue in North?';const out=h('div','msg');c.append(h('label','l','Question'),q);
   act(c,'Ask',async()=>{const r=await api('run_agent',{agent:a.id,question:q.value});out.textContent=r.answer||JSON.stringify(r,null,1)},1);
