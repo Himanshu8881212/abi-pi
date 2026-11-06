@@ -900,7 +900,10 @@ with sync_playwright() as p:
     pg.on("pageerror", lambda e: out["errors"].append(str(e)[:200]))
     pg.goto(url); pg.wait_for_selector("aside button.it")
     for k in pg.eval_on_selector_all("aside button.it", "bs => bs.map(b => b.dataset.k)"):
-        pg.click(f"aside button.it[data-k='{k}']"); pg.wait_for_timeout(300); out["pages"] += 1
+        sel = f"aside button.it[data-k='{k}']"
+        if not pg.is_visible(sel):  # 1.2.5: a group the sidebar folded to fit opens from its own heading, as a person does
+            pg.locator(sel).locator("xpath=ancestor::div[contains(@class,'sec')][1]/button[contains(@class,'grp')]").click()
+        pg.click(sel); pg.wait_for_timeout(300); out["pages"] += 1
         if len(pg.inner_text("main").strip()) < 10: out["blank"].append(k)
     for want in ("viewer", "developer"):  # the switch's own buttons (a stray comment once swallowed their wiring)
         pg.click("#m-view" if want == "viewer" else "#m-dev"); pg.wait_for_timeout(800)
