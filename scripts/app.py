@@ -264,7 +264,7 @@ select.f{max-width:100%;min-width:0}.card h3{flex-wrap:wrap}.file,.kv span{overf
    screen tall, a long page went on below it on paper) */
 aside{border-right:0;grid-column:1;grid-row:2;z-index:2}main{grid-column:2;grid-row:2}
 @media (min-width:821px){html:not(.mobile) body:not(.side-off)::after{content:"";grid-column:1;grid-row:2;background:var(--sheet);border-right:1px solid var(--line);z-index:1;pointer-events:none}}
-body.side-off main,.mobile main{grid-column:1}@media (max-width:820px){aside,main{grid-column:auto;grid-row:auto}}
+body.side-off main,.mobile main{grid-column:1}@media (min-width:821px){html:not(.mobile) body:not(.side-off) aside{background:transparent}}@media (max-width:820px){aside,main{grid-column:auto;grid-row:auto}}
 .ic{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
 /* header */
 header{gap:12px;padding-block:10px;box-shadow:0 1px 0 var(--line);border-bottom:0}
@@ -448,7 +448,7 @@ aside button.goto:hover{border-color:var(--line-strong);color:var(--ink)}aside b
 dialog .card>h4+.srow{border-top:0;padding-top:6px}dialog .card>h4+label.l{margin-top:12px!important}.mobile aside kbd{display:none}
 dialog .two .f{margin-top:6px}dialog .two label.l{margin:0}
 .node span{font:12px var(--text)}.node{border-radius:8px;box-shadow:var(--shadow)}.node b{font-size:13.5px}
-.rowcard textarea.desc{max-height:80px;overflow:hidden;font:13.5px/1.5 var(--text)}.rowcard textarea.desc:focus{max-height:220px;overflow:auto}.rowcard{align-items:start}
+.rowcard textarea.desc{max-height:calc(3lh + 16px);overflow:hidden;font:13.5px/1.5 var(--text)}.rowcard textarea.desc:focus{max-height:220px;overflow:auto}.rowcard{align-items:start}
 body[data-mode=viewer] .tcard label.l:has(input[type=checkbox]:not(:checked)){display:none}body[data-mode=viewer] .tcard label.l input[type=checkbox]{pointer-events:none}
 .mobile dialog{padding:22px 20px;border-radius:16px}.mobile dialog .srow .btn{flex:none}
 /* a field the action needs, an undo in a toast, a destructive confirmation */
@@ -525,8 +525,8 @@ dialog.done{width:min(480px,calc(100vw - 32px))}.done .dhead{display:flex;align-
 .pg .grid[data-page]{grid-auto-rows:54px}.grid>.rtext{margin:0;color:var(--mute);font-size:14px;line-height:1.55;align-self:center;max-width:90ch;white-space:pre-wrap}
 .grid>.card.kcard{padding:16px 20px}.grid>.card.kcard>h3{margin-bottom:6px}.grid>.card.sized.kcard:has(.kpi)>.body{padding-bottom:0}
 .grid>.card.kcard .kpi .v{font-size:clamp(24px,13cqi,40px)!important;margin:0}
-.mobile .pg .grid[data-page]{grid-auto-rows:auto}.mobile .grid>.card{grid-row:auto!important}.mobile .grid>.card:not(.kcard){grid-column:1/-1!important}.mobile .grid>.card.pair{grid-column:1/-1!important}
-.mobile .grid>.card.kcard>h3>span:first-child{white-space:normal;overflow:visible;line-height:1.3}.mobile .grid>.card>h3 button.pin{width:32px;padding:0;justify-content:center;font-size:0;gap:0}.mobile .grid>.card>h3 button.pin .ic{width:14px;height:14px}
+.mobile .pg .grid[data-page]{grid-auto-rows:auto}.mobile .grid>.card{grid-row:auto!important}.mobile .grid>.card:not(.kcard){grid-column:1/-1!important}.mobile .grid>.card.pair{grid-column:1/-1!important}.mobile .grid>.rtext{grid-column:1/-1!important}
+.mobile .grid>.card.kcard>h3>span:first-child{white-space:normal;overflow:visible;line-height:1.3}.mobile .cards.pins:not(.lay)>.card:not(.wide){flex-basis:140px}.mobile .card h3 button.pin,.mobile .grid>.card>h3 button.pin{width:32px;padding:0;justify-content:center;font-size:0;gap:0}.mobile .card h3 button.pin .ic{width:14px;height:14px}
 .mobile .grid>.card.kcard{padding:14px 16px}.mobile .grid .kcard .kpi .v{font-size:clamp(20px,12cqi,28px)!important}
 /* Home: the pins share a row (a drawer opening keeps the KPIs side by side) */
 .cards.pins:not(.lay){display:flex;flex-wrap:wrap;gap:16px}.cards.pins:not(.lay)>.card{flex:1 1 240px;min-width:0;max-width:none}.cards.pins:not(.lay)>.card.wide{flex-basis:100%}
@@ -535,13 +535,13 @@ dialog.done{width:min(480px,calc(100vw - 32px))}.done .dhead{display:flex;align-
 .skel .sk{height:14px;border-radius:6px;background:linear-gradient(100deg,var(--hover) 30%,color-mix(in srgb,var(--hover) 35%,var(--sheet)) 50%,var(--hover) 70%) 0 0/300% 100%;animation:shim 1.4s ease-in-out infinite}.skel .w40{width:40%;height:18px}.skel .w70{width:70%}
 /* Docs: a contents line, sections that fold */
 nav.toc{display:flex;flex-wrap:wrap;gap:6px;align-items:center}nav.toc .chip{cursor:pointer;margin:0;padding:4px 11px;font-size:12.5px;background:var(--sheet)}nav.toc .chip:hover{border-color:var(--ink)}nav.toc .flink{margin-left:6px}
-details.dsec{padding:0}details.dsec>summary{display:flex;align-items:center;gap:12px;padding:16px 22px;cursor:pointer;list-style:none;font:600 14.5px var(--display)}details.dsec>summary::-webkit-details-marker{display:none}
+details.dsec,.pg details.dsec.card{padding:0!important}.mobile nav.toc .chip{display:none}details.dsec>summary{display:flex;align-items:center;gap:12px;padding:16px 22px;cursor:pointer;list-style:none;font:600 14.5px var(--display)}details.dsec>summary::-webkit-details-marker{display:none}
 details.dsec>summary::after{content:"";width:7px;height:7px;border-right:1.5px solid var(--mute);border-bottom:1.5px solid var(--mute);transform:rotate(45deg);margin-left:8px;transition:transform .15s}details.dsec[open]>summary::after{transform:rotate(225deg)}
 details.dsec>summary .dn{display:inline-grid;place-items:center;min-width:24px;height:24px;border-radius:6px;background:var(--hover);font:600 12px var(--text);color:var(--mute)}details.dsec>summary .dt{flex:1}details.dsec>summary .file{margin:0}
 details.dsec[open]>summary{border-bottom:1px solid var(--line)}details.dsec>:not(summary){margin:0 22px}details.dsec>h4{margin-top:18px!important}details.dsec>table:last-child{margin-bottom:18px}
 details.dsec{scroll-margin-top:72px}table.facts td:first-child{width:32%;color:var(--mute)}table.facts td{overflow-wrap:anywhere}.mobile details.dsec>summary{padding:14px 16px;min-height:52px}.mobile details.dsec>:not(summary){margin:0 16px}
 /* History: what, where, who, when */
-table.hist td.code{font:12px var(--mono);color:var(--mute)}table.hist td:nth-child(2){color:var(--mute)}table.hist td:first-child{font-weight:500}
+table.hist .cnt:not(:empty){margin-left:8px;padding:1px 8px;border-radius:999px;background:var(--hover);color:var(--mute);font:500 11.5px var(--text)}table.hist td.code{font:12px var(--mono);color:var(--mute)}table.hist td:nth-child(2){color:var(--mute)}table.hist td:first-child{font-weight:500}
 /* Changes: a file in words, its diff one click away */
 #commit .files details.chg>summary{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r);font-weight:500;list-style:none}#commit details.chg>summary::-webkit-details-marker{display:none}
 #commit details.chg>summary .what{flex:1}#commit details.chg[open]>summary{border-radius:var(--r) var(--r) 0 0}#commit details.chg>pre{margin:0;border-top:0;border-radius:0 0 var(--r) var(--r)}
@@ -550,7 +550,9 @@ dialog .row.foot{justify-content:flex-end;gap:8px}dialog .row.foot .sp{flex:1}
 p.note.warn{display:flex;gap:8px;align-items:flex-start;background:color-mix(in srgb,var(--signal) 8%,var(--sheet))}p.note.warn .ic{color:var(--signal-ink);margin-top:1px}
 /* configuration notes are notes, not errors: neutral, with an info line */
 p.note,.card .note{background:var(--paper);border-color:var(--line)}
-.card .scroll.all{max-height:none}
+.card .scroll.all{max-height:none}.rowcard .vtog{display:block;margin:6px 0 0 12px;font-size:12.5px}.cards>.card>.acts{margin-top:auto}
+body[data-mode=viewer] .rowcard .f{min-height:0;padding:2px 0;border-color:transparent!important;background:none!important}body[data-mode=viewer] .mobile .rows>.rowcard,.mobile body[data-mode=viewer] .rows>.rowcard{gap:6px;padding:14px 16px}
+.mobile body[data-mode=viewer] .rowcard .fld>label.l{margin:6px 0 0;font-size:12px}.mobile body[data-mode=viewer] .rowcard .f{font-size:15px}
 .mpick{mask-image:linear-gradient(to bottom,#000 calc(100% - 14px),transparent);padding-bottom:10px}
 """
 
@@ -648,7 +650,7 @@ function act(c,label,fn,pri){const m=c.querySelector(':scope>.msg')||c.appendChi
  if(!c.dataset.clr){c.dataset.clr=1;c.addEventListener('input',()=>{if(m.classList.contains('bad'))m.textContent=''})}  /* an error goes once the person fixes the field */
  let r=c.querySelector(':scope>.acts');if(!r){r=h('div','row acts');c.insertBefore(r,m)}
  const b0=btn(label,async()=>{c.querySelectorAll('.invalid').forEach(x=>x.classList.remove('invalid'));ASK_WHAT=/^Delete/.test(label)?ttl(c):'';try{const t=await fn(m);if(label==='Delete'){undoToast(ttl(c)||'It');return}if(t)c.isConnected?say(m,t):toast(t)}catch(e){c.isConnected?say(m,e.message,1):toast(e.message,1)}},pri);
- if(/^(Delete|Remove)\b/.test(label)){b0.classList.add('mi');b0.setAttribute('role','menuitem');more(r).append(b0)}else{const mm=r.querySelector(':scope>.more');mm?r.insertBefore(b0,mm):r.append(b0)}return m}
+ if(/^(Delete|Remove|Edit as JSON)\b/.test(label)){b0.classList.add('mi');b0.setAttribute('role','menuitem');more(r).append(b0)}else{const mm=r.querySelector(':scope>.more');mm?r.insertBefore(b0,mm):r.append(b0)}return m}
 // a field the action needs: marked and focused, and the action stops with what to do
 // a builder on a phone reads the published project: say where the building happens
 function vEmpty(t){return MOBILE&&['editor','owner'].includes(window.ME?.role)?'This is built on a computer, in Developer: a phone shows the published project.':t}
@@ -810,7 +812,7 @@ function multi(opts,sel){const m=h('select','f ed');m.multiple=true;m.size=Math.
 const ALLCOLS=()=>Object.entries(D.columns||{}).flatMap(([t,cols])=>Object.keys(cols).map(c=>`${t}.${c}`)).sort();
 function dsForm(d,isNew){const c=card(isNew?'New query':(d.name||d.id),isNew?'':`model/datasets.json · ${d.id}`),id=h('input','f ed'),nm=h('input','f ed'),de=h('input','f ed');
  id.value=d.id||'';id.readOnly=!isNew;nm.value=d.name||'';de.value=d.description||'';const q=d.query||{};
- const ms=multi(D.measures.map(m=>m.id),q.measures),dm=multi(ALLCOLS(),q.dimensions),lim=h('input','f ed');lim.type='number';lim.value=q.limit||'';lim.placeholder='no limit';
+ const ms=multi(D.measures.map(m=>m.id),q.measures),dm=multi([...new Set([...(q.dimensions||[]),...(D.dims||ALLCOLS())])],q.dimensions),lim=h('input','f ed');lim.type='number';lim.value=q.limit||'';lim.placeholder='no limit';
  c.append(h('label','l','ID'),id,h('label','l','Name'),nm,h('label','l','Description'),de,h('label','l','Measures'),ms,h('label','l','Grain (dimensions)'),dm,h('label','l','Row limit'),lim);
  const out=h('div');const query=()=>({...q,measures:[...ms.selectedOptions].map(o=>o.value),dimensions:[...dm.selectedOptions].map(o=>o.value),...(lim.value?{limit:+lim.value}:{})});
  act(c,isNew?'Create':'Save',async()=>{await KIND.dataset.save({id:id.value,name:nm.value,description:de.value,query:query()});return 'Saved through ABI.'},1);
@@ -1060,7 +1062,7 @@ function monCond(c){if(c.kind!=='measure'||!c.measure)return null;const ag=c.aga
   ...(other?{other}:{}),...(ag==='prev'?{change:true}:{}),...(c.period?{period:c.period,skip_latest:!!c.skip_latest}:{})}}
 async function monEval(c){if(c.kind==='measure'){const k=c.condition;if(!k)return {ok:false,text:`${c.name}: this check is incomplete; edit it`};
   const r=await api('check_condition',k),rs=r.rows||[],ix=x=>r.columns.indexOf(x),nk=k.period?ix(k.period)+1:0,per=(k.period||'').split('.').pop();
-  const lbl=v=>v.length>1?`${per} ${v[1]} of ${v[0]}`:cell(v[0]),f=c.filters||[],where=f.length?` (${f.map(x=>`${x.column} = ${x.value}`).join(', ')})`:'',i=ix(c.measure);
+  const lbl=v=>v.length>1?(per==='month'?`${MON[v[1]-1]||v[1]} ${v[0]}`:per==='quarter'?`Q${v[1]} ${v[0]}`:`${per} ${v[1]} of ${v[0]}`):cell(v[0]),f=c.filters||[],where=f.length?` (${f.map(x=>`${x.column} = ${x.value}`).join(', ')})`:'',i=ix(c.measure);
   if(k.change){const x=rs[0];if(!x)return {ok:true,text:`${mname(c.measure)}: not enough ${per}s to compare yet${where}`};const p=x[ix('change_pct')];  // the latest (completed) period and the one before
    return {ok:!r.holds,text:`${mname(c.measure)}: ${fmt(x[i])} in ${lbl(x.slice(0,nk))}, ${p>=0?'+':''}${fmt(p)}% on ${lbl(x.slice(i+1,i+1+nk))} (${fmt(x[ix('previous_'+c.measure)])})${where} · alerts when the change ${opw(c.op)} ${fmt(k.value)}%`}}
   const j=k.other?ix(k.other):-1,what=k.other?mname(k.other):fmt(k.value),at=nk&&rs[0]?` in ${lbl(rs[0].slice(0,nk))}`:'';
@@ -1109,7 +1111,7 @@ function monitorPage(box){const bar=h('div','row bar top');bar.append(btn('New m
  const g=h('div','cards');box.append(g);const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),rs=q.rows||[],when=t=>t?when2(t):'—';
  const M=D.app?.monitor||{watch:[],fresh_within_hours:36},watch=t=>M.watch?.length?M.watch.includes(t):/stream/.test(t),old=r=>watch(r[0])&&(!r[ix('last_load')]||Date.now()-Date.parse(r[ix('last_load')])>M.fresh_within_hours*3600e3);
  const fr=card('Data freshness',`ABI data quality; watched tables must load within ${M.fresh_within_hours} h (monitor.json)`),bad=rs.filter(r=>(r[ix('problems')]||[]).length||r[ix('missing_periods')]||old(r));
- fr.append(h('p',bad.length?'bad':'ok',bad.length?`${bad.length} of ${rs.length} tables have problems`:`All ${rs.length} tables without problems`));
+ fr.append(h('p',bad.length?'bad':q.masked?'':'ok',bad.length?`${bad.length} of ${rs.length} tables have problems`:q.masked?`${rs.length} tables loaded`:`All ${rs.length} tables without problems`));
  const t=h('table'),shown=[...bad,...rs.filter(r=>watch(r[0])&&!bad.includes(r))],probs=r=>[...(r[ix('problems')]||[]).map(p=>typeof p==='string'?p:p.message||p.kind||JSON.stringify(p)),...(old(r)?[`no load for over ${M.fresh_within_hours} h`]:[])].join('; ');
  t.insertRow().append(...['Table','Last load','Rows','Missing periods','Problems'].map(x=>h('th','',x)));
  shown.forEach(r=>{const tr=t.insertRow();[r[0],when(r[ix('last_load')]),r[ix('rows')]==null?'not shown':fmt(r[ix('rows')]),r[ix('missing_periods')]??(q.masked?'not shown':0),probs(r)||'—'].forEach((v,i)=>{const td=tr.insertCell();td.textContent=v;if(i===2||i===3)td.className='n'})});
@@ -1152,7 +1154,7 @@ let MINE=D.app?.analyses||[];if(!MINE.length)try{MINE=JSON.parse(localStorage.ge
 function saveMine(){MINE=MINE.slice(0,100);fetch('/analyses',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({analyses:MINE})}).catch(()=>{})}
 var EXQ=null;  // the analysis on screen: a redraw (ABI's data event) shows it again
 function explore(box){const q0=PENDING.explore||EXQ||{};PENDING.explore=null;
- const c=card('New analysis','measures by a dimension, from the model'),ms=multi(D.measures.map(m=>m.id),q0.measures),dm=h('select','f'),ty=h('select','f'),
+ const c=card('New analysis','measures by a dimension, from the model'),ms=multi(D.measures.filter(m=>!/_(prev|change|change_pct)$/.test(m.id)||(q0.measures||[]).includes(m.id)).map(m=>m.id),q0.measures),dm=h('select','f'),ty=h('select','f'),
   fc=h('select','f'),fv=h('select','f'),out=h('div','body'),msg=h('div','msg');ms.classList.remove('ed');fv.multiple=true;fv.hidden=true;
  ms.querySelectorAll('option').forEach(o=>o.text=D.measures.find(m=>m.id===o.value)?.name||o.value);
  dm.append(new Option('Total only',''));fc.append(new Option('No filter',''));D.dims.forEach(d=>{const l=`${colName(d)} · ${d.split('.')[0]}`;dm.append(new Option(l,d));fc.append(new Option(l,d))});dm.value=(q0.dimensions||[])[0]||'';
@@ -1176,8 +1178,9 @@ function explore(box){const q0=PENDING.explore||EXQ||{};PENDING.explore=null;
   await KIND.dataset.save({id,name:id,description:'Saved from Explore',query:q});return `Saved as query ${id} through ABI.`});
  c.append(msg,out);if(!out.children.length)out.append(h('p','empty pad hint','Pick one or more measures, and a dimension to split them by, then Run: the chart shows here.'));const g=h('div','cards'),my=card('Saved analyses','kept with the project for everyone; numbers rerun from the model when opened'),list=h('div');my.append(list);c.style.gridColumn=my.style.gridColumn='1/-1';ms.style.width='100%';g.append(c,my);box.append(g);
  function mine(){list.innerHTML='';if(!MINE.length){list.append(h('p','empty','Nothing kept yet. Run an analysis and press Keep; charts the agent shows you land here too.'));return}
-  MINE.forEach((a,i)=>{const r=h('div','row');const o=h('button','btn',a.name);o.onclick=()=>{[...ms.options].forEach(x=>x.selected=a.q.measures.includes(x.value));mp.sync();dm.value=a.q.dimensions[0]||'';ty.value=a.type;flt=a.q.filters||[];fc.value='';fv.hidden=true;run(a.q,a.type)};
-   const x=ib('trash','Forget this analysis');x.onclick=()=>{MINE.splice(i,1);saveMine();mine()};r.append(o,h('span','file',a.at||''),pinBtn({kind:'analysis',ref:{q:a.q,type:a.type},title:a.name}),x);list.append(r)})}
+  MINE.forEach((a,i)=>{const r=h('div','srow saved');const o=h('button','flink nm',a.name);o.onclick=()=>{[...ms.options].forEach(x=>x.selected=a.q.measures.includes(x.value));mp.sync();dm.value=a.q.dimensions[0]||'';ty.value=a.type;flt=a.q.filters||[];fc.value='';fv.hidden=true;run(a.q,a.type)};
+   const n=h('div','sname');n.append(o,h('div','file',[a.by==='agent'?'Shown by the agent':'',a.at?when2(a.at.replace(' ','T')):''].filter(Boolean).join(' · ')));const ac=h('div','row acts');ac.append(pinBtn({kind:'analysis',ref:{q:a.q,type:a.type},title:a.name}));
+   const fg=h('button','btn mi danger','Forget it');fg.prepend(ic('trash'));fg.onclick=()=>{MINE.splice(i,1);saveMine();mine();toast(`Forgot “${a.name}”.`)};more(ac).append(fg);r.append(n,ac);list.append(r)})}
  mine();if(q0.measures)run(query(),ty.value)}
 function measures(box){modelBar(box);const top=h('div','row bar top'),q=h('input','f');q.placeholder='Search measures';const list=h('div','cards rows');box.append(top,list);
  const edit=(m,isNew)=>{const c=card(isNew?'New measure':(m.name||m.id),isNew?'':m.id),name=h('input','f'),id=h('input','f'),ex=h('textarea','f'),de=h('textarea','f desc');de.rows=1;
@@ -1199,7 +1202,13 @@ function measures(box){modelBar(box);const top=h('div','row bar top'),q=h('input
   act(c,'Test',async msg=>{say(msg,'Testing…');const t0=Date.now(),r=await api('semantic_query',{measures:[id.value]}),v=r.rows?.[0]?.[0];
    return `${r.measures?.[id.value]||id.value} = ${fmt(v,r.format?.[id.value])} · total over all data, ${((Date.now()-t0)/1000).toFixed(1)} s`+(c.classList.contains('dirty')?' · this is the saved version: Save to test your change':'')});
   if(!isNew)act(c,'Delete',async()=>{await api('delete_measure',{id:id.value});D.measures=D.measures.filter(x=>x!==m);show('measures')});return c};
- const fill=()=>{list.innerHTML='';list.append(rowhead('Measure','Formula (MEL)','Description',''));D.measures.filter(nmMeasure).filter(m=>!q.value||JSON.stringify(m).toLowerCase().includes(q.value.toLowerCase())).forEach(m=>list.append(edit(m)))};
+ // a starter measure's period variants (…_prev, …_change, …_change_pct) fold under it; a search shows them all
+ const VAR=/_(prev|change|change_pct)$/,base=id=>id.replace(VAR,'');
+ const fill=()=>{list.innerHTML='';list.append(rowhead('Measure','Formula (MEL)','Description',''));const all=D.measures.filter(nmMeasure),t=q.value.toLowerCase(),hit=m=>!t||JSON.stringify(m).toLowerCase().includes(t);
+  const ids=new Set(all.map(m=>m.id)),kids=m=>all.filter(x=>VAR.test(x.id)&&base(x.id)===m.id);
+  all.filter(m=>!VAR.test(m.id)||!ids.has(base(m.id))).forEach(m=>{const ks=kids(m),shown=ks.filter(hit);if(!hit(m)&&!shown.length)return;const c=edit(m);list.append(c);
+   if(!ks.length)return;const rows=ks.map(x=>{const r=edit(x);r.hidden=!t;list.append(r);return r}),tg=h('button','flink vtog',t?`${ks.length} period variants`:`+ ${ks.length} period variants`);tg.type='button';tg.setAttribute('aria-expanded',String(!!t));
+   tg.onclick=()=>{const o=rows[0].hidden;rows.forEach(r=>r.hidden=!o);tg.textContent=(o?'− ':'+ ')+`${ks.length} period variants`;tg.setAttribute('aria-expanded',String(o))};c.querySelector('.fld')?.append(tg)})};
  top.append(q,btn('New measure',()=>list.firstChild.after(edit({},true)),1));q.oninput=fill;fill()}
 function glossary(box){const list=h('div','cards rows');box.append(list);
  const edit=(t,isNew)=>{const c=card(isNew?'New term':(t.term||t.id)),term=h('input','f'),def=h('textarea','f'),ms=h('input','f');[term,def,ms].forEach(e=>e.classList.add('ed'));term.value=t.term||'';def.value=t.definition||'';ms.value=(t.measures||[]).join(', ');
@@ -1272,7 +1281,7 @@ function sources(box){const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),qr=
  D.sources.forEach(id=>{const sp=D.source_specs?.[id]||{},r=qr[id],c=card(id),k=h('div','kv'),p=r?(r[ix('problems')]||[]):[];
   const hid=q.masked&&!p.length&&r;c.querySelector('h3').title=`sources/${id}.json`;c.querySelector('h3').append(h('span','state'+(p.length?' bad':hid?'':r?' on':''),p.length?'Needs a look':hid?'Loaded':r?'Loaded':'Not loaded'));
   const loc=String(sp.location||'—'),up=/^uploads\/[0-9a-f]{16,}\//.test(loc),rf={on_change:'when the file changes',daily:'daily',hourly:'hourly',manual:'by hand'},rv=sp.refresh||(r?r[ix('refresh')]:'');
-  [['source',up?'Uploaded file · '+loc.split('/').pop():loc],['format',sp.format||'from the file'],['refresh',rf[rv]||rv||'—'],['rows',r&&r[ix('rows')]!==null?fmt(r[ix('rows')]):r?'not shown with your access':'—'],['last load',r?cell(r[ix('last_load')]):'—'],...(hid?[['health','not shown with your access']]:[])]
+  [['source',up?'Uploaded file · '+loc.split('/').pop():loc],['format',sp.format||'from the file'],['refresh',rf[rv]||rv||'—'],...(hid&&r[ix('rows')]===null?[]:[['rows',r&&r[ix('rows')]!==null?fmt(r[ix('rows')]):r?'not shown with your access':'—']]),['last load',r?cell(r[ix('last_load')]):'—'],...(hid?[[r[ix('rows')]===null?'rows, health':'health','not shown with your access']]:[])]
    .forEach(([a,b])=>{const v=h('span','',String(b));if(a==='source')v.title=loc;k.append(h('b','',a),v)});c.append(k);
   if(p.length)c.append(h('div','bad',p.map(x=>typeof x==='string'?x:x.message||JSON.stringify(x)).join('; ')));
   act(c,'Reload',async m=>loaded(await api('refresh',{table:id}),m,'Reloaded: a new snapshot.'));act(c,'Delete',async()=>{await api('delete_source',{source:id});return 'Deleted.'});g.append(c)})}
@@ -1447,7 +1456,7 @@ function editor(kind,obj,isNew){const K=KIND[kind],c=card(isNew?`New ${K.label}`
   c.insertBefore(h('label','l','What should it show?'),ta);c.insertBefore(say0,ta);c.insertBefore(row,ta);det.append(h('summary','','Or write the report as JSON'));c.insertBefore(det,ta);det.append(ta)}
  return c}
 function editBtns(c,kind,obj){const K=KIND[kind];let ed=null;c.querySelector('h3')?.append(pinBtn({kind,ref:obj.id,title:obj.name||obj.id}));
- act(c,'Edit',()=>{if(ed){ed.remove();ed=null;return}ed=editor(kind,obj,false);c.after(ed);ed.scrollIntoView({behavior:'smooth',block:'nearest'})});
+ act(c,'Edit as JSON',()=>{if(ed){ed.remove();ed=null;return}ed=editor(kind,obj,false);c.after(ed);ed.scrollIntoView({behavior:'smooth',block:'nearest'})});
  (K.extra||[]).forEach(([l,f])=>act(c,l,async()=>{await f(obj);return `${l}ed.`}));
  act(c,'Delete',async()=>{await K.del(obj);return 'Deleted.'})}
 // ---------- New flow / ML model / tool / agent as a form: pick what you want, it saves through ABI (checked like an import) ----------
@@ -1664,7 +1673,9 @@ function commits(box){const c=card('Commits','every change is a commit in ABI\'s
  const fill=()=>{t.innerHTML='';if(!(D.history||[]).length){t.append(h('p','empty','No commits yet.'));return}
   if(MOBILE){(D.history||[]).forEach(x=>{const [w,f]=plainCommit(x.message),r=h('div','srow'),n=h('div','sname');n.append(h('b','',w),h('div','file',[f,who(x),when(x)].filter(Boolean).join(' · ')));r.append(n);r.title=x.message;t.append(r)});return}
   const hd=t.createTHead().insertRow();['What','Where','Who','When','Version'].forEach(x=>hd.append(h('th','',x)));const tb=t.createTBody();
-  (D.history||[]).forEach(x=>{const r=tb.insertRow(),[w,f]=plainCommit(x.message);[w,f,who(x),when(x),x.id.slice(0,7)].forEach((v,i)=>{const td=r.insertCell();td.textContent=v;if(i===4)td.className='code'});r.title=x.message})};fill();
+  // a run of the same change (17 measures saved by the seed) is one row with its count
+  let last=null;(D.history||[]).forEach(x=>{const [w,f]=plainCommit(x.message),k=[w,f,who(x)].join('|');if(last&&last.k===k&&Math.abs(last.t-x.time)<900){last.n++;last.c.textContent=`${last.n} times`;last.v.textContent=`${last.id}…${x.id.slice(0,7)}`;return}
+   const r=tb.insertRow();[w,f,who(x),when(x),x.id.slice(0,7)].forEach((v,i)=>{const td=r.insertCell();td.textContent=v;if(i===4)td.className='code'});r.title=x.message;const c=h('span','cnt');r.cells[0].append(c);last={k,t:x.time,n:1,c,v:r.cells[4],id:x.id.slice(0,7)}})};fill();
  act(c,'Reload',async()=>{D.history=(await api('history',{})).commits;fill()})}
 
 function security(box){const g=h('div','cards');box.append(g);const r=D.rls||{},who=Object.fromEntries((r.accounts||[]).map(a=>[a.id,a.name]));
@@ -1821,7 +1832,8 @@ function plainFile(st,p){const m=/^([^/]+)\/(.+?)(\.json|\.md|\.ya?ml)?$/.exec(p
   K={sources:'Source',tables:'Table',reports:'Report',flows:'Flow',ml:'ML model',tools:'Tool',agents:'Agent',docs:'Docs',security:'Security',environments:'Environment',app:'App setting',evals:'Evaluation set'},
   M={measures:'Measures',glossary:'Glossary',datasets:'Queries',models:'Data models',model:'Model',relationships:'Joins',calendar:'Calendar'},
   v={M:'changed',A:'added',D:'deleted',R:'renamed','??':'added'}[String(st||'').trim()]||'changed';
- return dir==='model'?[M[name]||'Model',M[name]?'':name,v]:[K[dir]||'File',K[dir]?name:p,v]}
+ const T={rls:'Row rules',roles:'Roles',project:'Project settings',descriptions:'Descriptions',security:'Security',environments:'Environments'};
+ return !dir?[T[name.replace(/\.json$/,'')]||'File',T[name.replace(/\.json$/,'')]?'':p,v]:dir==='model'?[M[name]||'Model',M[name]?'':name,v]:dir==='docs'&&T[name]?[T[name],'',v]:[K[dir]||'File',K[dir]?name:p,v]}
 function commitMsg(fl){const g={};fl.forEach(x=>{const [k,n,v]=plainFile(x.status,x.path),key=k+'|'+v;(g[key]||=[]).push(n)});
  return Object.entries(g).map(([key,ns])=>{const [k,v]=key.split('|'),xs=ns.filter(Boolean),pl=xs.length>1?(k.endsWith('s')?k:k+'s'):k;
   return `${pl}${xs.length?' '+(xs.length>2?xs.slice(0,-1).join(', ')+' and '+xs.at(-1):xs.join(' and ')):''} ${v}`}).join('; ').replace(/^./,c=>c.toUpperCase())}
@@ -1963,7 +1975,7 @@ $('#chat .stop').onclick=()=>fetch('/chat/stop',{method:'POST',headers:{'X-Abi-A
 {const es=new EventSource('/events?k='+encodeURIComponent(KEY)+'&c='+CID+'&m='+(MOBILE?1:0)+'&p='+encodeURIComponent(D.project));
  es.onerror=()=>{if(es.readyState===2)stale()};  // the stream was refused: a restart or an ended session
  es.onmessage=async ev=>{const e=JSON.parse(ev.data);
-  if(e.type==='show'){if(TURN)TURN.shown=true;PENDING.filters=e.filters||null;if(e.page==='explore'&&e.query){const q={measures:e.query.measures||[],dimensions:(e.query.dimensions||[]).slice(0,1),filters:e.query.filters||[]};PENDING.explore={...q,chart:e.chart};MINE.unshift({name:'Agent: '+q.measures.join(', ')+(q.dimensions[0]?' by '+q.dimensions[0]:''),q,type:e.chart||'bar',at:new Date().toISOString().slice(0,16).replace('T',' ')});saveMine();sidebar()}const nv=h('div','m nav','→ '+(e.page==='report'?'report '+e.report:e.page)+(e.note?' · '+e.note:''));nv.onclick=()=>show(e.page==='report'?'rep:'+e.report:e.page);log.append(nv);log.scrollTop=log.scrollHeight;const wasFull=chatBox.classList.contains('full');const k=e.page==='report'?'rep:'+e.report:e.page;show(k);if(wasFull)openChat(true);setTimeout(()=>highlight(e.item),400);if(e.note)toast('Agent: '+e.note)}
+  if(e.type==='show'){if(TURN)TURN.shown=true;PENDING.filters=e.filters||null;if(e.page==='explore'&&e.query){const q={measures:e.query.measures||[],dimensions:(e.query.dimensions||[]).slice(0,1),filters:e.query.filters||[]};PENDING.explore={...q,chart:e.chart};MINE.unshift({name:q.measures.map(m=>D.measures.find(x=>x.id===m)?.name||m).join(' and ')+(q.dimensions[0]?' by '+colName(q.dimensions[0]).toLowerCase():''),by:'agent',q,type:e.chart||'bar',at:new Date().toISOString().slice(0,16).replace('T',' ')});saveMine();sidebar()}const nv=h('div','m nav','→ '+(e.page==='report'?'report '+e.report:e.page)+(e.note?' · '+e.note:''));nv.onclick=()=>show(e.page==='report'?'rep:'+e.report:e.page);log.append(nv);log.scrollTop=log.scrollHeight;const wasFull=chatBox.classList.contains('full');const k=e.page==='report'?'rep:'+e.report:e.page;show(k);if(wasFull)openChat(true);setTimeout(()=>highlight(e.item),400);if(e.note)toast('Agent: '+e.note)}
   else if(e.type==='data'){Object.assign(D,e.data);normQ(D.quality);const keep=[...document.querySelectorAll('main .card.editor')];sidebar();let k=CUR;if(PENDING.open&&PAGES['rep:'+PENDING.open]){k='rep:'+PENDING.open;PENDING.open=null;keep.length=0}show(k);{const hd=$('main .pghead');if(hd)keep.reverse().forEach(c=>hd.after(c))}vc()}  // a form being filled in survives the redraw
   else if(e.type==='busy'){busy.hidden=!e.on;$('#chat .stop').hidden=!e.on;if(!e.on&&TURN){const t=TURN;TURN=null;setTimeout(()=>{if(!t.shown&&(t.ai||log.querySelector('.m.ai:last-of-type')))followUps()},400)}}
   else if(e.type==='step'){if(!steps){steps=h('div','m steps');log.append(steps)}const last=[...steps.children].reverse().find(x=>x.dataset.t===e.tool&&x.dataset.s==='run');

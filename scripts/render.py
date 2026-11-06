@@ -119,7 +119,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
  // ranked bars across (a map's members, or bars whose names don't fit under them): every name, its value at the end
  const hb=(rs,m,note)=>{const n=rs.length;if(!n)return;const top=note?18:4,rh=Math.max(14,Math.min(30,(H-top-4)/n)),bh=Math.max(8,rh*.62),lw=Math.min(W*.34,Math.max(...rs.map(i=>String(d.rows[i][0]??'—').length))*6.6+10),x0=lw+10,x1=W-64,mx=Math.max(1e-9,...rs.map(i=>Math.abs(val(i,m))));
   if(note)el('text',{x:0,y:11},svg).textContent=note;svg.setAttribute('viewBox',`0 0 ${W} ${Math.max(H,top+n*rh+4)}`);
-  rs.forEach((i,k)=>{const y=top+k*rh,v=val(i,m),w=Math.max(1,(x1-x0)*Math.abs(v)/(mx||1));fit(el('text',{x:lw,y:y+rh/2+4,'text-anchor':'end'},svg),String(d.rows[i][0]??'—'),lw-4);
+  rs.forEach((i,k)=>{const y=top+k*rh,v=val(i,m),w=Math.max(1,(x1-x0)*Math.abs(v)/(mx||1));fit(el('text',{x:lw,y:y+rh/2+4,'text-anchor':'end'},svg),String(d.rows[i][0]??'Not given'),lw-4);
    mk(el('rect',{x:x0,y:y+(rh-bh)/2,width:w,height:bh,rx:Math.min(3,bh/4),fill:k?'var(--ink)':'var(--signal)'},svg),i,[m]);el('text',{x:x0+w+6,y:y+rh/2+4,class:'val'},svg).textContent=tick(v,m)})};
  if(type==='map'){const m=ms[0];hb(idx.filter(i=>num(i,m)).sort((i,j)=>val(j,m)-val(i,m)),m,`${dimLabel(c[0])}, ranked by ${N(m)} (the PDF draws the map)`);return}
  // a heatmap: one dimension down, one across, the measure as the cell's shade of the signal colour
@@ -147,7 +147,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
   if(r>26){el('text',{x:cx,y:cy+2,'text-anchor':'middle',class:'tot'},svg).textContent=tick(tot,m);el('text',{x:cx,y:cy+18,'text-anchor':'middle'},svg).textContent='Total'}return}
  if(type==='funnel'){const m=ms[0],rs=idx.filter(i=>val(i,m)>0).sort((i,j)=>val(j,m)-val(i,m)),h=(H-8)/Math.max(rs.length,1),w=i=>(W-16)*val(i,m)/val(rs[0],m),x=W/2;
   rs.forEach((i,k)=>{const y=4+h*k,a=w(i)/2,b=w(rs[k+1]??i)/2;mk(el('path',{d:`M${x-a},${y}L${x+a},${y}L${x+b},${y+h-2}L${x-b},${y+h-2}Z`,fill:COL[k%6]},svg),i,[m]);
-   if(h>=14){const t=el('text',{x,y:y+h/2+4,'text-anchor':'middle',class:'on'},svg);fit(t,`${d.rows[i][0]??'—'} · ${tick(val(i,m),m)}${k?' · '+Math.round(val(i,m)/val(rs[0],m)*100)+'%':''}`,Math.max(w(i),w(rs[k+1]??i))-8)}});return}
+   if(h>=14){const t=el('text',{x,y:y+h/2+4,'text-anchor':'middle',class:'tl'},svg);if(dark(k))t.style.fill='var(--sheet)';fit(t,`${d.rows[i][0]??'—'} · ${tick(val(i,m),m)}${k?' · '+Math.round(val(i,m)/val(rs[0],m)*100)+'%':''}`,Math.max(w(i),w(rs[k+1]??i))-8)}});return}
  if(type==='treemap'){const m=ms[0],rs=idx.filter(i=>val(i,m)>0).sort((i,j)=>val(j,m)-val(i,m)),sum=g=>g.reduce((s,i)=>s+val(i,m),0),
    gs=two?[...new Set(rs.map(i=>d.rows[i][0]))].map(g=>rs.filter(i=>d.rows[i][0]===g)).sort((a,b)=>sum(b)-sum(a)):rs.map(i=>[i]),T=two?legend(svg,W,gs.map(g=>d.rows[g[0]][0])):0;
   sq(gs.map(sum),0,T,W,H-T).forEach(([x,y,w,h],k)=>sq(gs[k].map(i=>val(i,m)),x+1,y+1,Math.max(w-2,0),Math.max(h-2,0)).forEach(([x,y,w,h],j)=>{const i=gs[k][j];if(w<3||h<3)return;  // too small to draw: in the rows
@@ -195,7 +195,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
   pts.forEach((p,k)=>p&&mk(el('circle',{cx:p[0],cy:p[1],r:dot?4:Math.max(2,Math.min(4,step/3)),fill:COL[j%6],opacity:dot?1:.01},svg),s.r[k],[s.m],dot?.7:1));
   // a line ends on its latest value, marked and labelled
   if(!dot&&type==='line'&&S.length<=2&&run.length){const kk=s.v.map((v,k)=>v==null?-1:k).filter(k=>k>=0).at(-1),[lx,ly]=pts[kk];el('circle',{cx:lx,cy:ly,r:3.5,fill:COL[j%6],stroke:'var(--card)','stroke-width':1.5},svg);
-   const t=el('text',{x:lx-6,y:ly-9,'text-anchor':'end',class:'val'},svg);t.textContent=tick(s.v[kk],s.m)}});
+   const t=el('text',{x:lx-6,y:ly-10,'text-anchor':'end',class:'val on'},svg);t.textContent=tick(s.v[kk],s.m)}});
  // a line over time: a guide follows the pointer to the nearest period and the tooltip has every series there
  if(type==='line'&&(!two||per)){const g=el('line',{y1:T,y2:H-B,stroke:'var(--mute)','stroke-dasharray':'3 3',opacity:0,'pointer-events':'none'},svg);
   svg.addEventListener('mousemove',e=>{const r=svg.getBoundingClientRect();if(!r.width)return;const k=Math.round(((e.clientX-r.left)*W/r.width-L-step/2)/step);if(k<0||k>=n){g.setAttribute('opacity',0);return}

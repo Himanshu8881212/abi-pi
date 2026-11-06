@@ -15,6 +15,11 @@ ABI_UX_ACCOUNTS holds bench/ux_seed.py's output ({role: {name, password}}), neve
     {"wait": 800} | {"wait": "selector"} milliseconds, or until the selector shows
     {"shot": "name"}                     <width>-<role>-<name>.png (full page; "viewport": true for the screen only)
     {"close": true}                      close any open dialog
+    {"totp": "selector", "into": "selector"}   the 6-digit code of the base32 key shown in one input, typed into another
+    {"hide": "selector"}                 blur secrets (a two-step key, recovery codes) before a shot
+    {"dark": true}                       the system's dark colour scheme (false: light)
+    {"password": "selector"}             type the signed-in role's own password (from ABI_UX_ACCOUNTS, never a steps file)
+A "type" value's {t} becomes a number that differs per run (a new person's name on a rerun).
 steps.jsonl: one line per step with ok or the error, and the console and page errors it caused.
 --tour: every page of the sidebar plus the reports, the main dialogs, as owner and viewer at 1440 and 390 px
 (--role or --width narrows it).
@@ -67,6 +72,7 @@ class Shot:
         self.pg.on("pageerror", lambda e: self.errs.append(f"page: {str(e)[:300]}"))
         self.log = (out / "steps.jsonl").open("a")
         a = acc[role]
+        self.pw, self.key = a["password"], ""
         self.pg.goto(URL + "/")  # signed out, the page is the sign-in form (it posts to /signin)
         self.pg.fill("#n", a["name"])
         self.pg.fill("#p", a["password"])
@@ -109,7 +115,9 @@ class Shot:
                     pg.select_option(s["select"], label=s["value"])
                 pg.wait_for_timeout(s.get("settle", SETTLE))
             elif "type" in s:
-                pg.fill(s["type"], s.get("value", ""))
+                pg.fill(s["type"], s.get("value", "").replace("{t}", str(int(time.time()) % 100000)))
+            elif "password" in s:
+                pg.fill(s["password"], self.pw)
             elif "upload" in s:  # a file on the container, e.g. bench/brewline.py OUT --csv's brewline.csv
                 pg.set_input_files(s["upload"], s["file"])
                 pg.wait_for_timeout(s.get("settle", SETTLE))
@@ -118,6 +126,17 @@ class Shot:
                 pg.wait_for_timeout(300)
             elif "wait" in s:
                 pg.wait_for_timeout(s["wait"]) if isinstance(s["wait"], (int, float)) else pg.wait_for_selector(s["wait"])
+            elif "totp" in s:  # two-step sign-in: the code an authenticator app shows for the key on the page (RFC 6238)
+                import base64, hashlib, hmac, struct  # noqa: E401, PLC0415
+                k = self.key = pg.input_value(s["totp"]).replace(" ", "").upper() if s["totp"] else self.key  # "": the key read last
+                h = hmac.new(base64.b32decode(k + "=" * (-len(k) % 8)), struct.pack(">Q", int(time.time()) // 30), hashlib.sha1).digest()
+                o = h[-1] & 15
+                pg.fill(s["into"], f"{(struct.unpack('>I', h[o:o + 4])[0] & 0x7fffffff) % 1000000:06d}")
+            elif "dark" in s:  # the system's colour scheme (the app follows it until a theme is picked)
+                pg.emulate_media(color_scheme="dark" if s["dark"] else "light")
+                pg.wait_for_timeout(400)
+            elif "hide" in s:  # blur what is secret (a two-step key, recovery codes) before a shot
+                pg.eval_on_selector_all(s["hide"], "es => es.forEach(e => e.style.filter = 'blur(6px)')")
             elif "close" in s:
                 pg.evaluate("document.querySelectorAll('dialog[open]').forEach(d => d.close())")
                 pg.evaluate("document.body.classList.remove('menu-open'); document.querySelector('#chat.open .x')?.click()")
