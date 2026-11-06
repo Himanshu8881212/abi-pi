@@ -145,5 +145,37 @@
    "tests/test_brewline.py::test_ontology_journey"
   ],
   "also": "RLS perf p95 <= 1.2x 1.2.5; AI bench: why >= 18/20, report 5/5, 0 masked or wrong numbers; 1.2.5 -> 1.2.6 upgrade keeps every project; owner OK to tag"
+ },
+ "M11": {
+  "items": [
+   35,
+   36,
+   37,
+   38
+  ],
+  "tests": [
+   "tests/test_entity_resolution.py::test_er_exact_key_merges",
+   "tests/test_entity_resolution.py::test_er_fuzzy_needs_approval",
+   "tests/test_entity_resolution.py::test_er_counts_once",
+   "tests/test_entity_resolution.py::test_er_reject_and_undo",
+   "tests/test_entity_resolution.py::test_er_rls_hides_source_rows",
+   "tests/test_entity_resolution.py::test_er_blocking_scales"
+  ]
+ },
+ "M12": {
+  "items": [
+   39,
+   40,
+   41,
+   42
+  ],
+  "tests": [
+   "tests/test_optimizers.py::test_opt_allocation_optimal",
+   "tests/test_optimizers.py::test_opt_infeasible_explained",
+   "tests/test_optimizers.py::test_opt_result_is_proposal",
+   "tests/test_optimizers.py::test_opt_time_limit",
+   "tests/test_optimizers.py::test_opt_rls_scope",
+   "tests/test_optimizers.py::test_opt_schema_and_bundle"
+  ]
  }
 }
