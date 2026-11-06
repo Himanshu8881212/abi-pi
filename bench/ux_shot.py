@@ -16,6 +16,7 @@ ABI_UX_ACCOUNTS holds bench/ux_seed.py's output ({role: {name, password}}), neve
     {"shot": "name"}                     <width>-<role>-<name>.png (full page; "viewport": true for the screen only)
     {"close": true}                      close any open dialog
     {"totp": "selector", "into": "selector"}   the 6-digit code of the base32 key shown in one input, typed into another
+    {"eval": "js expression"}            its value, in steps.jsonl
     {"hide": "selector"}                 blur secrets (a two-step key, recovery codes) before a shot
     {"dark": true}                       the system's dark colour scheme (false: light)
     {"password": "selector"}             type the signed-in role's own password (from ABI_UX_ACCOUNTS, never a steps file)
@@ -86,7 +87,7 @@ class Shot:
 
     def step(self, s: dict) -> bool:
         self.errs.clear()
-        t, pg, err = time.time(), self.pg, None
+        t, pg, err, val = time.time(), self.pg, None, None
         try:
             if "goto" in s:
                 g = s["goto"]
@@ -125,7 +126,7 @@ class Shot:
                 pg.keyboard.press(s["key"])
                 pg.wait_for_timeout(300)
             elif "wait" in s:
-                pg.wait_for_timeout(s["wait"]) if isinstance(s["wait"], (int, float)) else pg.wait_for_selector(s["wait"])
+                pg.wait_for_timeout(s["wait"]) if isinstance(s["wait"], (int, float)) else pg.wait_for_selector(s["wait"], timeout=s.get("timeout", 10_000))
             elif "totp" in s:  # two-step sign-in: the code an authenticator app shows for the key on the page (RFC 6238)
                 import base64, hashlib, hmac, struct  # noqa: E401, PLC0415
                 k = self.key = pg.input_value(s["totp"]).replace(" ", "").upper() if s["totp"] else self.key  # "": the key read last
@@ -135,6 +136,8 @@ class Shot:
             elif "dark" in s:  # the system's colour scheme (the app follows it until a theme is picked)
                 pg.emulate_media(color_scheme="dark" if s["dark"] else "light")
                 pg.wait_for_timeout(400)
+            elif "eval" in s:  # a JavaScript expression's value, kept in steps.jsonl (to look into a layout)
+                val = pg.evaluate(s["eval"])
             elif "hide" in s:  # blur what is secret (a two-step key, recovery codes) before a shot
                 pg.eval_on_selector_all(s["hide"], "es => es.forEach(e => e.style.filter = 'blur(6px)')")
             elif "close" in s:
@@ -149,6 +152,8 @@ class Shot:
         rec = {"role": self.role, "width": self.width, "step": s, "ok": err is None, "ms": round((time.time() - t) * 1000)}
         if err:
             rec["error"] = err
+        if val is not None:
+            rec["value"] = val
         if self.errs:
             rec["errors"] = list(self.errs)
         self.log.write(json.dumps(rec) + "\n")

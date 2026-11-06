@@ -359,7 +359,7 @@ nav.tabs{gap:2px}nav.tabs button{padding:9px 12px;font-size:13px}
 .mobile #chat-toggle{padding:0 14px}
 .mobile body.menu-open::after{content:"";position:fixed;inset:0;background:rgb(11 11 11/.38);z-index:7;animation:fade .2s}
 @keyframes fade{from{opacity:0}}
-.mobile aside{box-shadow:12px 0 32px -16px rgb(11 11 11/.3);top:0;padding-top:max(16px,env(safe-area-inset-top,0px));z-index:12}
+.mobile body.menu-open aside{box-shadow:12px 0 32px -16px rgb(11 11 11/.3)}.mobile aside{box-shadow:none;top:0;padding-top:max(16px,env(safe-area-inset-top,0px));z-index:12}
 .mobile aside button.it{min-height:44px;font-size:15px}.mobile aside button.grp{min-height:36px}
 .mobile .pghead{align-items:stretch}.mobile .pghead>.bar{justify-content:flex-start}.mobile .pghead h1{font-size:23px}.mobile .pghead .ttl p{font-size:13.5px}
 .mobile .card h3 .tools .btn.icon{width:36px;height:36px}.mobile button.pin{height:32px;padding:0 12px}
@@ -550,7 +550,8 @@ dialog .row.foot{justify-content:flex-end;gap:8px}dialog .row.foot .sp{flex:1}
 p.note.warn{display:flex;gap:8px;align-items:flex-start;background:color-mix(in srgb,var(--signal) 8%,var(--sheet))}p.note.warn .ic{color:var(--signal-ink);margin-top:1px}
 /* configuration notes are notes, not errors: neutral, with an info line */
 p.note,.card .note{background:var(--paper);border-color:var(--line)}
-.card .scroll.all{max-height:none}.rowcard .vtog{display:block;margin:6px 0 0 12px;font-size:12.5px}.cards>.card>.acts{margin-top:auto}
+.card .scroll.all{max-height:none}#confirm pre.plain{font:14px/1.6 var(--text);background:var(--paper);white-space:pre-wrap}.fbar .fexp{margin-left:auto}.msg.ok::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor;margin:0 8px 1px 0}.srow.saved{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid var(--line)}.srow.saved:first-child{border-top:0;padding-top:0}.srow.saved .acts{flex-wrap:nowrap;gap:6px}.srow.saved .flink.nm{font-size:14px;color:var(--ink);text-decoration:none;font-weight:500}.srow.saved .flink.nm:hover{text-decoration:underline}.figs{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}.fig{display:inline-flex;align-items:baseline;gap:8px;padding:6px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper)}.fig b{font-weight:500;font-size:12px;color:var(--mute)}.fig span{font:600 15px var(--display);font-variant-numeric:tabular-nums}.item .mdata{max-width:720px}.msg.prog::before{content:"";display:block;height:3px;border-radius:2px;margin:2px 0 10px;max-width:320px;background:linear-gradient(90deg,transparent 0,var(--signal) 40%,transparent 80%) 0 0/50% 100% no-repeat,var(--hover);animation:prog 1.3s ease-in-out infinite}
+@keyframes prog{from{background-position:-60% 0,0 0}to{background-position:160% 0,0 0}}.cards:has(>.card.editor){align-items:start}.card>.grp+label.l,.card>.grp+.row+label.l{margin-top:18px!important}.newkind>.two{max-width:none;grid-template-columns:minmax(0,1fr) minmax(0,1.6fr)}.newkind>.two+label.l,.newkind>.formrow{margin-top:18px!important}.newkind>.formrow+label.chk{margin-top:16px}.card .scroll table input.f{width:100%;min-width:72px;min-height:32px;padding:5px 8px;font-size:13px}.card .scroll td .btn{height:32px}.stepchips .chip i,.tcard .chip i{font:normal 10.5px var(--mono);color:var(--mute)}.tcard label.l:has(input[type=checkbox]){margin-top:12px!important}.tcard .cols{margin-top:16px}.rowcard .vtog{display:block;margin:6px 0 0 12px;font-size:12.5px}.cards>.card>.acts{margin-top:auto}
 body[data-mode=viewer] .rowcard .f{min-height:0;padding:2px 0;border-color:transparent!important;background:none!important}body[data-mode=viewer] .mobile .rows>.rowcard,.mobile body[data-mode=viewer] .rows>.rowcard{gap:6px;padding:14px 16px}
 .mobile body[data-mode=viewer] .rowcard .fld>label.l{margin:6px 0 0;font-size:12px}.mobile body[data-mode=viewer] .rowcard .f{font-size:15px}
 .mpick{mask-image:linear-gradient(to bottom,#000 calc(100% - 14px),transparent);padding-bottom:10px}
@@ -628,10 +629,14 @@ async function api(action,args){
  if(r.error)throw new Error(r.error);return r.result}
 let ASK_WHAT='';  // what the person is deleting, for ABI's confirmation
 function ask(c){return new Promise(res=>{const d=$('#confirm'),bad=/\b(delet|remov|drop|revok|stop|disabl|overwrit)/i.test((c.title||'')+' '+(c.message||''));$('#c-yes').classList.toggle('danger-solid',bad);$('#c-yes').textContent=c.yes||(bad?(ASK_WHAT?'Delete':'Yes, go ahead'):'Confirm');$('#confirm h3').textContent=bad&&ASK_WHAT?`Delete “${ASK_WHAT}”?`:c.title||(c.id?'Confirm this change':'Confirm');
- $('#c-msg').textContent=bad&&ASK_WHAT?`“${ASK_WHAT}” leaves the project. It stays an uncommitted change, so Undo in the toast or under Changes takes it back.`:c.lead||c.message;$('#c-abi').textContent=bad&&ASK_WHAT||c.lead?c.message||'':'';$('#c-abi').hidden=!$('#c-abi').textContent;ASK_WHAT='';$('#c-prev').textContent=c.preview||'';$('#c-prev').hidden=!c.preview;
+ $('#c-msg').textContent=bad&&ASK_WHAT?`“${ASK_WHAT}” leaves the project. It stays an uncommitted change, so Undo in the toast or under Changes takes it back.`:c.lead||c.message;$('#c-abi').textContent=bad&&ASK_WHAT||c.lead?c.message||'':'';$('#c-abi').hidden=!$('#c-abi').textContent;ASK_WHAT='';const pv=plainPreview(c.preview||'');$('#c-prev').textContent=pv;$('#c-prev').hidden=!pv;$('#c-prev').classList.toggle('plain',pv!==(c.preview||''));
  d.showModal();$('#c-yes').onclick=()=>{d.close();res(true)};$('#c-no').onclick=()=>{d.close();res(false)}})}
+// ABI's preview of what it will do, in words where it is a known shape (a role change: "editor1: Viewer → Editor")
+function plainPreview(t){let j;try{j=JSON.parse(t)}catch(e){return t}const who=Object.fromEntries((D.rls?.accounts||[]).map(a=>[String(a.id),a.name])),R=x=>x?x[0].toUpperCase()+x.slice(1):'No access';
+ if(j&&Array.isArray(j.roles))return j.roles.map(r=>`${who[String(r.user)]||'Person '+r.user}: ${R(r.old)} → ${R(r.new)}`).join('\n');
+ if(j&&typeof j==='object'&&!Array.isArray(j)&&Object.values(j).every(v=>v===null||typeof v!=='object'))return Object.entries(j).map(([k,v])=>`${colName(k)}: ${v??'—'}`).join('\n');return t}
 function say(box,text,bad){box.textContent=text;box.className='msg '+(bad?'bad':'ok')}
-function card(title,sub){const c=h('div','card'),t=h('h3');t.append(h('span','',title));if(sub&&/\s/.test(sub))t.title=sub;else if(sub)t.append(h('span','file',sub));c.append(t);return c}
+function card(title,sub){const c=h('div','card'),t=h('h3');t.append(h('span','',title));if(sub&&(/\s/.test(sub)||/\.json$/.test(sub)))t.title=sub;else if(sub)t.append(h('span','file',sub));c.append(t);return c}
 // a list of editable items as aligned rows under one header (rows mode); a field is its label (shown on phones) and input
 function fld(label,el,note){const d=h('div','fld');d.append(h('label','l',label),el);if(note)d.append(h('div','file',note));return d}
 function rowcard(c,...fields){c.classList.add('rowcard');c.append(...fields);c.oninput=()=>c.classList.add('dirty');return c}
@@ -649,12 +654,15 @@ async function confirmed(x){if(x.confirm){if(!await ask(x.confirm))return null;x
 function act(c,label,fn,pri){const m=c.querySelector(':scope>.msg')||c.appendChild(h('div','msg'));
  if(!c.dataset.clr){c.dataset.clr=1;c.addEventListener('input',()=>{if(m.classList.contains('bad'))m.textContent=''})}  /* an error goes once the person fixes the field */
  let r=c.querySelector(':scope>.acts');if(!r){r=h('div','row acts');c.insertBefore(r,m)}
- const b0=btn(label,async()=>{c.querySelectorAll('.invalid').forEach(x=>x.classList.remove('invalid'));ASK_WHAT=/^Delete/.test(label)?ttl(c):'';try{const t=await fn(m);if(label==='Delete'){undoToast(ttl(c)||'It');return}if(t)c.isConnected?say(m,t):toast(t)}catch(e){c.isConnected?say(m,e.message,1):toast(e.message,1)}},pri);
+ const b0=btn(label,async()=>{c.querySelectorAll('.invalid').forEach(x=>x.classList.remove('invalid'));ASK_WHAT=/^Delete/.test(label)?ttl(c):'';try{const t=await fn(m);c.querySelectorAll('[data-u]').forEach(x=>delete x.dataset.u);if(label==='Delete'){undoToast(ttl(c)||'It');return}if(t)c.isConnected?say(m,t):toast(t)}catch(e){c.isConnected?say(m,e.message,1):toast(e.message,1)}},pri);
  if(/^(Delete|Remove|Edit as JSON)\b/.test(label)){b0.classList.add('mi');b0.setAttribute('role','menuitem');more(r).append(b0)}else{const mm=r.querySelector(':scope>.more');mm?r.insertBefore(b0,mm):r.append(b0)}return m}
 // a field the action needs: marked and focused, and the action stops with what to do
 // a builder on a phone reads the published project: say where the building happens
 function vEmpty(t){return MOBILE&&['editor','owner'].includes(window.ME?.role)?'This is built on a computer, in Developer: a phone shows the published project.':t}
 function emptyBox(icon,title,text,action){const d=h('div','emptyx'),i=h('span','ei');i.append(ic(icon));d.append(i,h('h3','',title),h('p','',text));if(action)d.append(btn(action[0],action[1],1));return d}
+// what the person typed, by where it sits (its card's title and its place in the card): ABI's redraw puts it back
+document.addEventListener('input',e=>{if(e.target.closest?.('main'))e.target.dataset.u=1},true);
+function fkey(x){const c=x.closest('.person,.card')||$('main'),t=(c.querySelector('h3,.pwho b')?.textContent||'').trim();return CUR+'|'+t+'|'+[...c.querySelectorAll('input,textarea,select')].indexOf(x)}
 function need(el,ok,msg){if(ok)return;el.classList.add('invalid');el.setAttribute('aria-invalid','true');const off=()=>{el.classList.remove('invalid');el.removeAttribute('aria-invalid')};el.addEventListener('input',off,{once:true});el.addEventListener('change',off,{once:true});el.focus();throw new Error(msg)}
 
 // ---------- Overview ----------
@@ -738,11 +746,11 @@ nav().filter(([gname])=>gname!=='Start'&&line[gname]).forEach(([gname,items])=>{
 var RFLT={},v0odd=null;  // each report's filters, kept across ABI's redraws
 function report(box,rep){let flt=PENDING.filters||RFLT[rep.id]||[];PENDING.filters=null;
  {const tb=h('div','row bar top');let ed=null;tb.append(btn('Edit report',()=>{if(ed){ed.remove();ed=null;return}ed=editor('report',rep.spec||{id:rep.id,name:rep.name},false);box.querySelector('.pghead').after(ed)}));box.append(tb)}
- {const tb=box.querySelector(':scope>.bar.top');let ex=null;const eb=h('button','btn pri','Export');eb.onclick=()=>{if(ex){ex.remove();ex=null;return}ex=exportCard(rep,()=>flt,()=>cur);box.querySelector('.pghead').after(ex)};tb.prepend(eb)
+ {const tb=box.querySelector(':scope>.bar.top');let ex=null;const eb=h('button','btn pri','Export');eb.onclick=()=>{if(ex){ex.remove();ex=null;return}ex=exportCard(rep,()=>flt,()=>cur);box.querySelector('.pghead').after(ex)};if(MOBILE){eb.classList.remove('pri');eb.prepend(ic('dataexport'));eb.classList.add('fexp');tb.append(eb)}else tb.prepend(eb)
   let mc=null;tb.append(btn('Email this report',()=>{if(mc){mc.remove();mc=null;return}mc=mailCard(rep);box.querySelector('.pghead').after(mc)}));
   if((window.ME||{admin:true}).admin&&!MOBILE){const sh=btn('Share',()=>{PENDING.share=rep.id;show('people');toast(`${rep.name||rep.id} is marked under each person: tick it for whoever should see it and Save. Viewers see the published copy.`)});sh.classList.add('w');sh.prepend(ic('people'));tb.append(sh)}
   const dr=btn('Delete report',async()=>{ASK_WHAT=rep.name||rep.id;try{await KIND.report.del({id:rep.id});undoToast(rep.name||rep.id);show('reports')}catch(e){if(!/declined/.test(e.message))toast(e.message,1)}});dr.classList.add('mi');dr.setAttribute('role','menuitem');more(tb).append(dr)}const top=h('div','fbar'),chips=h('span','fchips'),addb=h('button','btn fadd','+ Filter'),clr=h('button','flink','Clear all');clr.hidden=!flt.length;
- top.append(chips,addb,clr);const tabs=h('nav','tabs'),grid=h('div','grid'),msg=h('div','msg');box.append(top,msg,tabs,grid);
+ top.append(chips,addb,clr);if(MOBILE)top.append(box.querySelector(':scope>.bar.top .fexp')||h('span'));const tabs=h('nav','tabs'),grid=h('div','grid'),msg=h('div','msg');box.append(top,msg,tabs,grid);
  // filters: one per column, a list of members ("in"); a chart click or a slicer sets it, the bar shows and edits it
  const vals=c=>{const f=flt.find(f=>f.column===c);return f?[].concat(f.value):[]};
  const setVals=(c,vs)=>{flt=flt.filter(f=>f.column!==c);if(vs.length)flt.push({column:c,op:'in',value:vs});draw()};
@@ -779,9 +787,11 @@ function report(box,rep){let flt=PENDING.filters||RFLT[rep.id]||[];PENDING.filte
   grid.classList.remove('busy');page(cur)}
  function page(p){cur=p;grid.dataset.page=p.id;[...tabs.children].forEach(b=>b.classList.toggle('on',b.dataset.id===p.id));grid.innerHTML='';
   const vs=p.visuals.slice().sort((a,b)=>(a.layout.y-b.layout.y)||(a.layout.x-b.layout.x)),kp=v=>(v.data?.type||v.type)==='kpi';
-  if(MOBILE){let n=0;for(const v of vs.filter(v=>v.text===undefined)){if(!kp(v))break;n++}v0odd=n%2?vs.filter(v=>v.text===undefined)[n-1]?.id:null}
+  // a row of headline numbers that leaves columns empty shares the row out; a KPI is two rows tall at most
+  const span={},rowsY={};vs.filter(v=>v.text===undefined).forEach(v=>(rowsY[v.layout.y]??=[]).push(v));Object.values(rowsY).forEach(r=>{const w=r.reduce((a,v)=>a+(v.layout.w||6),0);if(r.every(kp)&&w<12){let left=12;r.forEach((v,i)=>{const x=i===r.length-1?left:Math.round((v.layout.w||6)*12/w);span[v.id]=x;left-=x})}});
+    if(MOBILE){let n=0;for(const v of vs.filter(v=>v.text===undefined)){if(!kp(v))break;n++}v0odd=n%2?vs.filter(v=>v.text===undefined)[n-1]?.id:null}
   vs.forEach(v=>{if(v.text!==undefined){const t=h('p','rtext',v.text);t.dataset.lk=v.id;t.dataset.w=12;t.style.gridColumn='span 12';grid.append(t);return}
-   const c=h('div','card');c.style.gridColumn=`span ${Math.min(12,v.layout.w||6)}`;c.dataset.lk=v.id;c.dataset.w=Math.min(12,v.layout.w||6);if(v.layout.h){c.dataset.h=v.layout.h*70-16;c.style.gridRow=`span ${v.layout.h}`}if(MOBILE&&v.id===v0odd)c.classList.add('pair');if(kp(v))c.classList.add('kcard');
+   const c=h('div','card'),cw=span[v.id]||Math.min(12,v.layout.w||6),ch=kp(v)?Math.min(2,v.layout.h||2):v.layout.h;c.style.gridColumn=`span ${cw}`;c.dataset.lk=v.id;c.dataset.w=cw;if(ch){c.dataset.h=ch*70-16;c.style.gridRow=`span ${ch}`}if(MOBILE&&v.id===v0odd)c.classList.add('pair');if(kp(v))c.classList.add('kcard');
    c.innerHTML=`<h3><span></span><span class="tools"><button data-a="t">Table</button><button data-a="c">CSV</button><button data-a="h">How</button></span></h3><div class="body"></div><pre class="how" hidden></pre>`;
    $('h3 span',c).textContent=v.title||v.id;if(v.text===undefined)$('h3',c).append(pinBtn({kind:'visual',ref:{report:rep.id,page:p.id,visual:v.id},title:v.title||v.id}));grid.append(c);const body=$('.body',c),d=v.live||v.data;
    if(!d||d.error||v.error){body.append(h('div','bad',d?.error||v.error||'no data'));return}
@@ -827,7 +837,7 @@ function datasets(box){const g=h('div','cards');const bar=h('div','row bar top')
 function editsPage(box){const T=D.model?.tables||{},keyed=Object.keys(T).filter(t=>(T[t].key||[]).length&&!t.startsWith('ml_')&&t!==(D.model?.date_table?.table||'calendar')).sort();  // ABI makes the date table: nothing to edit
  const top=h('div','row'),sel=h('select','f');keyed.forEach(t=>sel.append(new Option(`${t} (${T[t].kind||''})`,t)));top.append(h('label','l','Table'),sel);box.append(top);
  const grid=card('Rows','the edited table, as every query sees it'),hist=card('Edit history','who changed what; undo a batch'),prop=card('Waiting for approval','edits the agent proposed'),g=h('div','cards');
- grid.style.gridColumn=hist.style.gridColumn='1/-1';g.append(grid,prop,hist);box.append(g);let off=0,staged=[];
+ grid.style.gridColumn=hist.style.gridColumn=prop.style.gridColumn='1/-1';g.append(grid,prop,hist);box.append(g);let off=0,staged=[];
  const msg=h('div','msg'),body=h('div','body'),pager=h('div','row'),save=h('div','row');grid.append(pager,body,save,msg);
  async function rowsPage(){body.innerHTML='';pager.innerHTML='';save.innerHTML='';staged=[];const t=sel.value,key=T[t]?.key||[];
   const r=await fetch('/edits/rows',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({table:t,offset:off,limit:25})}).then(x=>x.json());
@@ -853,7 +863,7 @@ function editsPage(box){const T=D.model?.tables||{},keyed=Object.keys(T).filter(
   list.forEach(p=>{const c=h('div','hit');c.append(h('div','',`${p.table} · ${p.changes?.length||p.rows?.length||''} change(s) · ${p.user||''} · ${p.comment||''}`));
    if(MODE==='developer')c.append(btn('Approve',async()=>{try{await api('approve_edit',{table:p.table,batch:p.batch});await proposals();await rowsPage()}catch(e){toast(e.message)}},1),btn('Reject',async()=>{try{await api('reject_edit',{table:p.table,batch:p.batch});await proposals()}catch(e){toast(e.message)}}));prop.append(c)})}
  if(MODE==='developer'){const it=card('New input table','rows entered by people only, e.g. targets or a budget'),nm=h('input','f ed'),cs=h('input','f ed'),ky=h('input','f ed');
-  nm.placeholder='targets_2026';cs.placeholder='region:VARCHAR, month:DATE, target_revenue:DOUBLE';ky.placeholder='region, month';it.append(h('label','l','Name'),nm,h('label','l','Columns (name:TYPE, …)'),cs,h('label','l','Key'),ky);
+  nm.placeholder='targets_2026';cs.placeholder='region:VARCHAR, month:DATE, target_revenue:DOUBLE';ky.placeholder='region, month';it.append(h('label','l','Name'),nm,h('label','l','Columns (name:TYPE, …)'),cs,h('label','l','Key'),ky);it.style.gridColumn='1/-1';
   act(it,'Create',async()=>{const columns=cs.value.split(',').map(x=>x.trim()).filter(Boolean).map(x=>{const[n,t]=x.split(':').map(y=>y.trim());return{name:n,type:t||'VARCHAR'}});
    await api('create_input_table',{table:nm.value.trim(),columns,key:ky.value.split(',').map(x=>x.trim()).filter(Boolean)});return 'Created through ABI. Pick it above and add its rows.'});g.append(it)}
  sel.onchange=()=>{off=0;rowsPage();history()};if(keyed.length){rowsPage();history();proposals()}else box.append(h('p','empty','No keyed tables: a table needs a key to be edited.'))}
@@ -1137,8 +1147,9 @@ async function inboxPage(box){const r=await ipost();if(r.error){box.append(h('p'
  const mc=card('Messages','posted by flows and Monitor, your subscriptions and your test runs');mc.classList.add('wide');
  if(!M.length)mc.append(h('p','empty','No messages yet. A Monitor check posts here when it starts to hold; flows can post here too.'));
  M.forEach(m=>{const d=h('div','item'+(m.id>s?' new':''));d.append(h('div','file',`${cell(m.at)} · ${m.sender}`),txt(m.text));
-  if(m.data?.columns){const t=h('div'),y=m.data.columns.filter(c=>/(^|[._])year$/.test(c));  // a year reads 2026, not 2,026
-   rows(t,{...m.data,rows:m.data.rows.map(r=>({...r,...Object.fromEntries(y.map(c=>[c,r[c]==null?r[c]:String(r[c])]))}))});d.append(t)}if(m.snapshot){const a=h('a','',`Open the ${m.snapshot.split('.').pop().toUpperCase()}`);a.href=m.snapshot;a.target='_blank';d.append(a)}mc.append(d)});
+  if(m.data?.columns){const t=h('div','mdata'),y=m.data.columns.filter(c=>/(^|[._])year$/.test(c));  // a year reads 2026, not 2,026
+   if((m.data.rows||[]).length===1&&m.data.columns.length<=4){const r=m.data.rows[0],f=h('div','figs');m.data.columns.forEach(c=>{const v=Array.isArray(r)?r[m.data.columns.indexOf(c)]:r[c],x=h('span','fig');x.append(h('b','',m.data.measures?.[c]||colName(c)),h('span','',typeof v==='number'&&!y.includes(c)?fmt(v,m.data.format?.[c]):String(v??'—')));f.append(x)});d.append(f)}
+   else{rows(t,{...m.data,rows:m.data.rows.map(r=>({...r,...Object.fromEntries(y.map(c=>[c,r[c]==null?r[c]:String(r[c])]))}))});d.append(t)}}if(m.snapshot){const a=h('a','',`Open the ${m.snapshot.split('.').pop().toUpperCase()}`);a.href=m.snapshot;a.target='_blank';d.append(a)}mc.append(d)});
  const ac=card('Alerts','failed flows and data problems, as ABI reported them'),un=A.filter(a=>!a.read);if(!A.length)ac.append(h('p','empty','No alerts. ABI posts here when the model or the data needs a look.'));
  ac.classList.add('wide');
  // alerts that say the same thing (same opening, e.g. 'Semantic model is not Ready') fold under the newest one
@@ -1165,8 +1176,14 @@ function explore(box){const q0=PENDING.explore||EXQ||{};PENDING.explore=null;
  const query=()=>{const f=fc.value&&fv.selectedOptions.length?[{column:fc.value,op:'in',value:[...fv.selectedOptions].map(o=>JSON.parse(o.value))}]:flt;
   return {measures:[...ms.selectedOptions].map(o=>o.value),dimensions:dm.value?[dm.value]:[],filters:f}};
  async function run(q,type){out.innerHTML='';msg.textContent='';EXQ={...q,chart:type};if(!q.measures.length){say(msg,'Pick at least one measure.',1);return}
-  try{const d=await api('semantic_query',{...q,...(q.dimensions.length?{order_by:[{field:q.dimensions[0]}]}:{}),limit:500});d.format=d.format||{};d.type=type;d.id='analysis';
-   out.append(h('p','file',(q.filters||[]).map(f=>`${colName(f.column)} ${f.op==='in'?'is':f.op} ${[].concat(f.value).join(', ')}`).join(' · ')||'All rows, no filter'));
+  // a period variant (revenue_prev) needs the calendar in the query: ask by month, then keep the latest month's rows,
+  // so each member's two periods stand side by side (every figure is still ABI's row)
+  const pv=q.measures.some(m=>/_(prev|change|change_pct)$/.test(m)),cal=q.dimensions.some(x=>x.startsWith('calendar.'));let per='';
+  try{let d;if(pv&&!cal&&D.dims.includes('calendar.year')&&D.dims.includes('calendar.month')){const x=await api('semantic_query',{...q,dimensions:[...q.dimensions,'calendar.year','calendar.month'],limit:5000}),
+     iy=x.columns.indexOf('calendar.year'),im=x.columns.indexOf('calendar.month'),k=r=>r[iy]*100+r[im],top=Math.max(...x.rows.map(k));
+     d={...x,columns:x.columns.filter((_,i)=>i!==iy&&i!==im),rows:x.rows.filter(r=>k(r)===top).map(r=>r.filter((_,i)=>i!==iy&&i!==im))};const y=Math.floor(top/100),mo=top%100;per=`${MON[mo-1]} ${y} against ${MON[(mo+10)%12]} ${mo===1?y-1:y}`}
+   else d=await api('semantic_query',{...q,...(q.dimensions.length?{order_by:[{field:q.dimensions[0]}]}:{}),limit:500});d.format=d.format||{};d.type=type;d.id='analysis';
+   out.append(h('p','file',[per,...(q.filters||[]).map(f=>`${colName(f.column)} ${f.op==='in'?'is':f.op} ${[].concat(f.value).join(', ')}`)].filter(Boolean).join(' · ')||'All rows, no filter'));
    const b=h('div');out.append(b);requestAnimationFrame(()=>type==='table'?table(b,d):chart(b,d));return d}catch(e){say(msg,e.message,1)}}
  const fr=h('div','formrow'),ff=fld('Filter',fc);ff.append(fv);const mp=pickList(ms);fr.append(fld('Measures',mp),fld('By',dm),ff,fld('Chart',ty));c.append(fr);
  act(c,'Run',async()=>{await run(query(),ty.value)},1);
@@ -1230,7 +1247,7 @@ async function upload(table,file,sheet){const id=[...crypto.getRandomValues(new 
 // 1.2 M3.2: a big load answers at once with its run (status queued) and loads on the server: queued, then rows so far,
 // then done or failed with ABI's error, in the card's message (each check is a short call; the page follows when it is in)
 async function loaded(r,m,text){if(!r||r.status!=='queued')return text;
- for(let x=r;;){say(m,x.status==='queued'?`${x.table}: queued, it starts when the loads ahead of it are done…`:`${x.table}: loading, about ${fmt(x.rows||0)} rows so far…`);
+ for(let x=r;;){say(m,x.status==='queued'?`${x.table}: queued, it starts when the loads ahead of it are done…`:`${x.table}: loading, about ${fmt(x.rows||0)} rows so far…`);m.className='msg prog';
   await wait(2000);x=(await api('load_runs',{run:r.run})).runs[0];if(x.status==='done')return `${text} ${fmt(x.rows)} rows.`;if(x.status==='failed')throw new Error(x.error)}}
 function sources(box){const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),qr=Object.fromEntries((q.rows||[]).map(r=>[r[ix('table')],r]));
  const g=h('div','cards'),bar=h('div','row bar top');box.append(bar,g);
@@ -1245,18 +1262,18 @@ function sources(box){const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),qr=
   // two ways in, one shown at a time: a file from this computer, or a location (S3 or https)
   const fg=h('div','grp'),lg=h('div','grp'),tabs=h('div','row seg'),tb=(l,on)=>{const b=h('button','chip'+(on?' on':''),l);b.type='button';return b},t1=tb('Upload a file',1),t2=tb('S3 or a URL');
   const pick=up=>{fg.hidden=!up;lg.hidden=up;t1.classList.toggle('on',up);t2.classList.toggle('on',!up);if(up)loc.value=''};t1.onclick=()=>pick(true);t2.onclick=()=>pick(false);tabs.append(t1,t2);
-  fg.append(h('label','l','File (CSV, TSV, Excel, JSON, Parquet, Avro)'),file,h('label','l','Excel sheet (optional)'),sh);
+  const shl=h('label','l','Excel sheet (optional)');fg.append(h('label','l','File (CSV, TSV, Excel, JSON, Parquet, Avro)'),file,shl,sh);shl.hidden=sh.hidden=true;
   lg.append(h('label','l','Location: an S3 file or folder (a glob, or a Delta or Iceberg table), or an https:// file'),loc,
    h('label','l','Format'),fm,h('label','l','Region'),rg,h('label','l','S3 endpoint'),ep,tl,
    h('label','l','Keys (workspace owners; stored encrypted for this bucket only, never shown again)'),ki,ks);lg.hidden=true;
   const warn=h('p','note warn');warn.hidden=true;const chk=()=>{const x=t.value.trim();warn.hidden=!D.sources.includes(x);warn.replaceChildren(ic('alert'),h('span','',`${x} already exists: adding this replaces its data with the new file's rows.`))};
   let auto=true;t.addEventListener('input',()=>{auto=false;chk()});
-  file.onchange=()=>{if((auto||!t.value)&&file.files[0]){t.value='bronze_'+file.files[0].name.replace(/\.[^.]+$/,'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');chk()}};
+  file.onchange=()=>{shl.hidden=sh.hidden=!/\.xlsx$/i.test(file.files[0]?.name||'');if((auto||!t.value)&&file.files[0]){t.value='bronze_'+file.files[0].name.replace(/\.[^.]+$/,'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');chk()}};
   c.append(tabs,fg,lg,h('label','l','Table name'),t,h('div','file','made from the file name; lowercase letters, digits and _'),warn);
   act(c,'Add source',async m=>{need(t,t.value.trim(),'Name the table first, e.g. bronze_orders.');need(t,/^[a-z][a-z0-9_]*$/.test(t.value),'A table name is lowercase letters, digits and _ and starts with a letter.');const sheet=sh.value.trim();
    if(file.files[0])need(file,/\.(csv|tsv|xlsx|json|jsonl|ndjson|parquet|avro)$/i.test(file.files[0].name),`${file.files[0].name} is not a file ABI reads: choose a CSV, TSV, Excel, JSON, Parquet or Avro file.`);
    if(D.sources.includes(t.value.trim())&&!await ask({title:`Replace ${t.value.trim()}?`,message:`${t.value.trim()} already exists. Adding this source overwrites its data: every table, measure and report built on it then reads the new rows.`,yes:'Replace it'}))return 'Not added: nothing changed.';
-   if(file.files[0]){const fl=file.files[0];m.className='msg';m.textContent=(`Uploading ${fl.name} (${fl.size>1e6?(fl.size/1e6).toFixed(1)+' MB':Math.max(1,Math.round(fl.size/1e3))+' KB'}), then ABI loads it…`);const x=await loaded(await upload(t.value,fl,sheet),m,`Uploaded and loaded into ${t.value}.`);return x+' Next: stage or model it under Tables, or ask the agent to build a report from it.'}
+   if(file.files[0]){const fl=file.files[0];m.className='msg prog';m.textContent=(`Uploading ${fl.name} (${fl.size>1e6?(fl.size/1e6).toFixed(1)+' MB':Math.max(1,Math.round(fl.size/1e3))+' KB'}), then ABI loads it…`);const x=await loaded(await upload(t.value,fl,sheet),m,`Uploaded and loaded into ${t.value}.`);return x+' Next: stage or model it under Tables, or ask the agent to build a report from it.'}
    if(!loc.value)throw new Error('Choose a file, or give a location like s3://bucket/folder/*.csv.');
    const s3=loc.value.startsWith('s3://')?{region:rg.value.trim()||'us-east-1',...(ep.value?{endpoint:ep.value.trim(),url_style:'path'}:{}),...(tls.checked?{}:{use_ssl:false})}:null;
    if(s3&&(ki.value||ks.value)){const r=await fetch('/s3key',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({table:t.value,location:loc.value,...s3,key_id:ki.value,secret:ks.value})}).then(x=>x.json());
@@ -1625,7 +1642,8 @@ function flows(box){newBtn(box,'flow');const g=h('div','cards');box.append(g);if
   act(c,'Open canvas',async()=>{show('flw:'+f.id)});
   act(c,f.enabled?'Disable':'Enable',async()=>{await api('enable_flow',{flow:f.id,enabled:!f.enabled});f.enabled=!f.enabled;show('flows')});editBtns(c,'flow',f);g.append(c)})}
 function ml(box){newBtn(box,'ml');const g=h('div','cards');box.append(g);if(!D.ml.length)box.append(emptyBox('ml','No ML models yet',MODE==='viewer'?vEmpty('Forecasts, segments and anomaly models are set up by the project\'s builders.'):'Forecast a measure, group similar rows or find unusual days. A model learns from a query of your measures.',MODE==='developer'?['New ML model',()=>$('main .bar.top .btn.pri')?.click()]:null));
- D.ml.forEach(m=>{const c=card(m.name||m.id,`ml/${m.id}.json`);c.append(h('div','file',`${m.task}${m.target?' of '+m.target:''} on query ${m.dataset}${m.horizon?`, ${m.horizon} ahead`:''}`));
+ D.ml.forEach(m=>{const c=card(m.name||m.id,`ml/${m.id}.json`);{const T={forecast:'Forecasts',regression:'Predicts',classification:'Predicts',clustering:'Groups similar rows',anomaly:'Finds unusual periods'}[m.task]||m.task,dn=(D.datasets||[]).find(x=>x.id===m.dataset)?.name||m.dataset;
+  c.append(h('p','mtext',`${T}${m.target?' '+mname(m.target):''}${m.horizon?`, ${m.horizon} periods ahead`:''}, learning from the query ${dn}.`))}
   const st=h('div','kv');st.style.marginTop='12px';const lr=()=>{const r=m.latest_run||{};st.innerHTML='';
    if(!r.kind){st.append(h('b','','Latest run'),h('span','',MODE==='viewer'?'None in the published copy yet':'Not trained yet: press Train'));return}
    [['Latest run',{train:'Training',score:'Scoring'}[r.kind]||r.kind],['Status',r.status||'—'],['Finished',cell(r.finished)||'—'],...Object.entries(r.metrics||{}).map(([a,b])=>{const M={mae:['MAE (mean absolute error)'],wape:['WAPE (weighted % error)',{style:'percent',decimals:1}],mape:['MAPE (mean % error)',{style:'percent',decimals:1}],rmse:['RMSE (root mean squared error)'],r2:['R² (fit)'],accuracy:['Accuracy',{style:'percent',decimals:1}],auc:['AUC'],windows:['Backtest windows']}[a]||[a.replace(/_/g,' ')];return [M[0],typeof b==='number'?fmt(b,M[1]):cell(b)]})].forEach(([a,b])=>st.append(h('b','',a),h('span',a==='Status'?(b==='ok'?'ok':b==='failed'?'bad':''):'',a==='Status'&&b==='ok'?'OK':String(b))))};lr();c.append(st);
@@ -1680,12 +1698,12 @@ function commits(box){const c=card('Commits','every change is a commit in ABI\'s
 
 function security(box){const g=h('div','cards');box.append(g);const r=D.rls||{},who=Object.fromEntries((r.accounts||[]).map(a=>[a.id,a.name]));
  const c=card('Row-level rules','Viewers see only their rows');if(!(r.rules||[]).length)c.append(h('p','empty','None yet: ask the agent, e.g. "user X sees only region North".'));
- (r.rules||[]).forEach(x=>{const k=h('div','kv');k.style.marginBottom='12px';k.append(h('b','','rule'),h('span','',x.id||x.name||'(unnamed)'),h('b','','rows of'),h('span','',`${x.table}.${x.column}`));
+ (r.rules||[]).forEach(x=>{const k=h('div','kv');k.style.marginBottom='12px';k.append(h('b','','Rule'),h('span','',x.id||x.name||'(unnamed)'),h('b','','Rows of'),h('span','',`${x.table}.${x.column}`));
   (Array.isArray(x.users)?x.users.map(u=>[u.name||who[u.id]||u.id,u.values]):Object.entries(x.users||{}).map(([u,v])=>[who[u]||u,v])).forEach(([u,v])=>k.append(h('b','',u),h('span','',(v||[]).join(', ')||'no rows')));c.append(k)});g.append(c);
  // a new rule is a model change the agent makes in ABI (AGENTS.md rule 4): say who sees which rows
  if(MODE==='developer'){const rr=card('Restrict rows for a person','the agent writes the row rule in ABI, and ABI asks you to confirm it');rr.classList.add('wide');
   const pw=h('select','f'),col=h('select','f'),vals=h('input','f'),R0=/region|country|segment|categor|city|state|team/;(r.accounts||[]).filter(a=>a.role!=='owner').forEach(a=>pw.append(new Option(a.name,a.name)));
-  D.dims.filter(d=>!d.startsWith('calendar.')).sort((a,b)=>(R0.test(b)-R0.test(a))||a.localeCompare(b)).forEach(d=>col.append(new Option(`${colName(d)} · ${d.split('.')[0]}`,d)));vals.placeholder='e.g. South, West';
+  D.dims.filter(d=>!d.startsWith('calendar.')).sort((a,b)=>{const r=x=>{const i=['region','country','segment','categor','team','state','city'].findIndex(w=>x.includes(w));return i<0?99:i};return r(a)-r(b)||a.localeCompare(b)}).forEach(d=>col.append(new Option(`${colName(d)} · ${d.split('.')[0]}`,d)));vals.placeholder='e.g. South, West';
   const fr=h('div','formrow');fr.append(fld('Person',pw),fld('Only the rows where',col),fld('is one of',vals));rr.append(fr);
   act(rr,'Ask the agent to set it',async()=>{need(vals,vals.value.trim(),'Name the values they may see, e.g. South.');openChat(true);inp.value=`Restrict ${pw.value} to the rows where ${col.value} is one of: ${vals.value.trim()}. Set the row-level rule in ABI.`;sendChat();return 'Asked: follow it in the chat; ABI asks you to confirm, then the rule shows above.'},1);g.after(rr)}
  const cr=card('Hidden columns','hidden from Viewers');const cols=r.columns||[];if(!cols.length)cr.append(h('p','empty','None.'));cols.forEach(x=>cr.append(h('span','chip',typeof x==='string'?x:`${x.table}: ${(x.columns||[]).join(', ')}`)));g.append(cr);
@@ -1753,7 +1771,7 @@ function sidebar(){side.innerHTML='';PAGES={};side.setAttribute('aria-label','Pa
  if(window.ME?.source){const a=h('a','src',`ABI-PI ${ME.version} · source code (AGPL-3.0)`);a.href=ME.source;a.target='_blank';a.rel='noopener';side.append(a)}}
 let PREV='home';
 function show(k){if(!PAGES[k]){if(MOBILE&&k&&k!=='home'&&/^(people|settings|flw:|staged|tools|agents)/.test(k))toast('That page opens on a computer, in Developer: a phone shows the published project.');k='home'}if(k!=='chat'&&CUR!=='chat')PREV=k;else if(k==='chat'&&CUR!=='chat')PREV=CUR;{const cb=$('#chat');if(cb.classList.contains('full')){cb.classList.remove('full');wideT(0);document.body.append(cb);cb.classList.remove('open');document.body.classList.remove('chat-open')}}CUR=k;setTimeout(ctx);const sk=k.startsWith('rep:')?'reports':k.startsWith('mdl:')?'model':k.startsWith('flw:')?'flows':k;side.querySelectorAll('button.it').forEach(b=>{b.classList.toggle('on',b.dataset.k===sk);b.toggleAttribute('aria-current',b.dataset.k===sk)});
- const act=side.querySelector('button.it.on');if(act){act.closest('.sec').classList.remove('folded');requestAnimationFrame(()=>act.scrollIntoView({block:'nearest'}))}
+ const act=side.querySelector('button.it.on');if(act){act.closest('.sec').classList.remove('folded');requestAnimationFrame(()=>{const y=act.offsetTop;side.scrollTop=y<side.clientHeight-72?0:Math.max(0,y-side.clientHeight/2)})}
  const box=$('main');box.innerHTML='';const pg=h('div','pg'),head=h('div','pghead'),pn=$('#pgname');pn.textContent=PAGES[k][0];document.title=PAGES[k][0]+' · '+D.project;
  pn.title=(k.startsWith('rep:')?'Filter the report or click a bar to filter by it. Every number comes from ABI.':LEDE[k])||'';
  // the page says what it is and what it is for, above its actions (the header's crumb says where it sits)
@@ -1916,7 +1934,7 @@ async function switcher(){let d=$('#switcher');if(d){d.remove();return}
 function toast(t,bad,action){const x=h('div','toast'+(bad?' bad':''),t);x.setAttribute('role',bad?'alert':'status');
  if(action){const b=h('button','tact',action[0]);b.onclick=async()=>{x.remove();await action[1]()};x.append(b)}document.body.append(x);setTimeout(()=>x.remove(),action?12000:bad?9000:6000)}
 // a delete is one uncommitted change in ABI: the toast after it offers to take it back (the Changes dialog's Undo)
-function undoToast(what){toast(`${what} deleted.`,0,['Undo',async()=>{try{const r=await api('undo',{});toast(`${what} is back.`)}catch(e){toast(e.message,1)}}])}
+function undoToast(what){toast(`${what} deleted.`,0,['Undo',async()=>{try{const r=await api('undo',{});toast(`${what} is back.`);setTimeout(()=>highlight(what),1500)}catch(e){toast(e.message,1)}}])}
 function highlight(item){if(!item)return;const want=String(item).toLowerCase();
  const c=[...document.querySelectorAll('main .card')].find(c=>c.textContent.toLowerCase().includes(want));if(c){c.classList.add('hl');c.scrollIntoView({behavior:'smooth',block:'center'});setTimeout(()=>c.classList.remove('hl'),4000)}}
 const chatBox=$('#chat'),log=$('#chat .log'),inp=$('#chat textarea'),busy=$('#chat .busy');
@@ -1976,7 +1994,8 @@ $('#chat .stop').onclick=()=>fetch('/chat/stop',{method:'POST',headers:{'X-Abi-A
  es.onerror=()=>{if(es.readyState===2)stale()};  // the stream was refused: a restart or an ended session
  es.onmessage=async ev=>{const e=JSON.parse(ev.data);
   if(e.type==='show'){if(TURN)TURN.shown=true;PENDING.filters=e.filters||null;if(e.page==='explore'&&e.query){const q={measures:e.query.measures||[],dimensions:(e.query.dimensions||[]).slice(0,1),filters:e.query.filters||[]};PENDING.explore={...q,chart:e.chart};MINE.unshift({name:q.measures.map(m=>D.measures.find(x=>x.id===m)?.name||m).join(' and ')+(q.dimensions[0]?' by '+colName(q.dimensions[0]).toLowerCase():''),by:'agent',q,type:e.chart||'bar',at:new Date().toISOString().slice(0,16).replace('T',' ')});saveMine();sidebar()}const nv=h('div','m nav','→ '+(e.page==='report'?'report '+e.report:e.page)+(e.note?' · '+e.note:''));nv.onclick=()=>show(e.page==='report'?'rep:'+e.report:e.page);log.append(nv);log.scrollTop=log.scrollHeight;const wasFull=chatBox.classList.contains('full');const k=e.page==='report'?'rep:'+e.report:e.page;show(k);if(wasFull)openChat(true);setTimeout(()=>highlight(e.item),400);if(e.note)toast('Agent: '+e.note)}
-  else if(e.type==='data'){Object.assign(D,e.data);normQ(D.quality);const keep=[...document.querySelectorAll('main .card.editor')];sidebar();let k=CUR;if(PENDING.open&&PAGES['rep:'+PENDING.open]){k='rep:'+PENDING.open;PENDING.open=null;keep.length=0}show(k);{const hd=$('main .pghead');if(hd)keep.reverse().forEach(c=>hd.after(c))}vc()}  // a form being filled in survives the redraw
+  else if(e.type==='data'){Object.assign(D,e.data);normQ(D.quality);const keep=[...document.querySelectorAll('main .card.editor')],typed=[...document.querySelectorAll('main [data-u]')].filter(x=>!x.closest('.card.editor')&&x.type!=='file').map(x=>[fkey(x),x.type==='checkbox'?x.checked:x.value]);sidebar();let k=CUR;if(PENDING.open&&PAGES['rep:'+PENDING.open]){k='rep:'+PENDING.open;PENDING.open=null;keep.length=0}show(k);{const hd=$('main .pghead');if(hd)keep.reverse().forEach(c=>hd.after(c))}
+   if(typed.length){const at=Object.fromEntries([...document.querySelectorAll('main input,main textarea,main select')].map(x=>[fkey(x),x]));typed.forEach(([k,v])=>{const x=at[k];if(!x)return;if(x.type==='checkbox')x.checked=v;else x.value=v;x.dataset.u=1})}vc()}  // a form being filled in survives the redraw, also outside an editor card
   else if(e.type==='busy'){busy.hidden=!e.on;$('#chat .stop').hidden=!e.on;if(!e.on&&TURN){const t=TURN;TURN=null;setTimeout(()=>{if(!t.shown&&(t.ai||log.querySelector('.m.ai:last-of-type')))followUps()},400)}}
   else if(e.type==='step'){if(!steps){steps=h('div','m steps');log.append(steps)}const last=[...steps.children].reverse().find(x=>x.dataset.t===e.tool&&x.dataset.s==='run');
    if(e.state==='run'||!last){const l=h('div','',`${e.state==='run'?'…':e.state==='ok'?'✓':'✗'} ${stepName(e.tool)}`);l.dataset.t=e.tool;l.dataset.s=e.state;steps.append(l)}
