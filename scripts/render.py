@@ -84,8 +84,8 @@ function mark(e,r,t,o=.7){const was=e.getAttribute('opacity')||1;if(r!=null)e.da
  e.onmousemove=v=>{e.setAttribute('opacity',o);showTip(v,t)};e.onmouseleave=()=>{e.setAttribute('opacity',was);hideTip()};return e}
 // the series' names over the plot in their colours, wrapped as measured; three lines at most (two on a short chart),
 // then how many more. Returns the plot's top
-function legend(svg,W,names){let x=8,y=14,i=0;const k=Math.max(4,Math.min(18,Math.floor((W-38)/7))),last=svg.viewBox.baseVal.height<200?30:46;
- for(;i<names.length;i++){const t=cut(names[i],k),e=el('text',{x,y},svg);el('tspan',{fill:COL[i%6]},e).textContent='■ ';e.append(t);
+function legend(svg,W,names,cols){let x=8,y=14,i=0;const k=Math.max(4,Math.min(28,Math.floor((W-38)/7))),last=svg.viewBox.baseVal.height<200?30:46;
+ for(;i<names.length;i++){const t=cut(names[i],k),e=el('text',{x,y},svg);el('tspan',{fill:(cols||COL)[i%6]},e).textContent='■ ';e.append(t);
   const w=(e.getComputedTextLength()||t.length*6.5+12)+10;if(x>8&&x+w>W-(y>=last?36:8)){if(y>=last){e.remove();break}x=8;y+=16;e.setAttribute('x',x);e.setAttribute('y',y)}x+=w}
  if(i<names.length)el('text',{x:W-8,y,'text-anchor':'end'},svg).textContent='+'+(names.length-i);return y+12}
 // squarified treemap: [x,y,w,h] for each value (largest first) filling the box
@@ -147,7 +147,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
   if(r>26){el('text',{x:cx,y:cy+2,'text-anchor':'middle',class:'tot'},svg).textContent=tick(tot,m);el('text',{x:cx,y:cy+18,'text-anchor':'middle'},svg).textContent='Total'}return}
  if(type==='funnel'){const m=ms[0],rs=idx.filter(i=>val(i,m)>0).sort((i,j)=>val(j,m)-val(i,m)),h=(H-8)/Math.max(rs.length,1),w=i=>(W-16)*val(i,m)/val(rs[0],m),x=W/2;
   rs.forEach((i,k)=>{const y=4+h*k,a=w(i)/2,b=w(rs[k+1]??i)/2;mk(el('path',{d:`M${x-a},${y}L${x+a},${y}L${x+b},${y+h-2}L${x-b},${y+h-2}Z`,fill:COL[k%6]},svg),i,[m]);
-   if(h>=14){const t=el('text',{x,y:y+h/2+4,'text-anchor':'middle',class:'tl'},svg);if(dark(k))t.style.fill='var(--sheet)';fit(t,`${d.rows[i][0]??'—'} · ${tick(val(i,m),m)}${k?' · '+Math.round(val(i,m)/val(rs[0],m)*100)+'%':''}`,Math.max(w(i),w(rs[k+1]??i))-8)}});return}
+   if(h>=14){const t=el('text',{x,y:y+h/2+4,'text-anchor':'middle',class:'tl'},svg);if(dark(k))t.style.fill='var(--sheet)';const fw=Math.max(w(i),w(rs[k+1]??i))-8,full=`${d.rows[i][0]??'—'} · ${tick(val(i,m),m)}${k?' · '+Math.round(val(i,m)/val(rs[0],m)*100)+'%':''}`;t.textContent=full;if(t.getComputedTextLength()>fw)fit(t,`${d.rows[i][0]??'—'} · ${tick(val(i,m),m)}`,fw)}});return}
  if(type==='treemap'){const m=ms[0],rs=idx.filter(i=>val(i,m)>0).sort((i,j)=>val(j,m)-val(i,m)),sum=g=>g.reduce((s,i)=>s+val(i,m),0),
    gs=two?[...new Set(rs.map(i=>d.rows[i][0]))].map(g=>rs.filter(i=>d.rows[i][0]===g)).sort((a,b)=>sum(b)-sum(a)):rs.map(i=>[i]),T=two?legend(svg,W,gs.map(g=>d.rows[g[0]][0])):0;
   sq(gs.map(sum),0,T,W,H-T).forEach(([x,y,w,h],k)=>sq(gs[k].map(i=>val(i,m)),x+1,y+1,Math.max(w-2,0),Math.max(h-2,0)).forEach(([x,y,w,h],j)=>{const i=gs[k][j];if(w<3||h<3)return;  // too small to draw: in the rows
@@ -167,7 +167,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
  ord.forEach(i=>(two&&!per?[[d.rows[i][1],ms[0]]]:ms.map(m=>[m,m])).forEach(([n,m])=>{let s=S.find(s=>s.n===n);if(!s)S.push(s={n,m,v:cats.map(()=>null),r:cats.map(()=>null)});const k=ix.get(key(d.rows[i]));s.v[k]=val(i,m);s.r[k]=i}));
  if(!S.length)return;
  {const lw=Math.max(...cats.map(v=>Math.min(11,String(v??'—').length)))*6.2+8;if(type==='bar'&&!two&&!per&&S.length===1&&cats.length<=24&&cats.length*lw>W-68){hb(ord,S[0].m);return}}
- const stack=type==='bar'&&two&&!per,combo=type==='combo'&&S.length>1,R=combo?60:8,T=S.length>1&&type!=='waterfall'?legend(svg,W,S.map(s=>two&&!per?s.n:N(s.m))):10,cum=[];
+ const stack=type==='bar'&&two&&!per,combo=type==='combo'&&S.length>1,R=combo?60:8,PC=S.length===2&&/_prev$/.test(S[1].m)&&S[1].m.startsWith(S[0].m.replace(/_prev$/,''))?['var(--ink)','var(--c3)']:COL,T=S.length>1&&type!=='waterfall'?legend(svg,W,S.map(s=>two&&!per?s.n:N(s.m)),PC):10,cum=[];  // a measure against its previous period: now in ink, before in grey
  let run=0;if(type==='waterfall')S[0].v.forEach(v=>cum.push([run,run+=v||0]));
  const ax=(vs,m,x,an)=>{const {lo,hi,t}=nice(Math.min(0,...vs),Math.max(0,...vs),Math.max(2,Math.floor((H-B-T)/28))),y=v=>H-B-(v-lo)/(hi-lo)*(H-B-T);
   t.forEach(v=>{an==='end'&&el('line',{x1:L,x2:W-R,y1:y(v),y2:y(v),stroke:'var(--line)'},svg);el('text',{x,y:y(v)+4,'text-anchor':an},svg).textContent=tick(v,m)});return y};
@@ -184,7 +184,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
  const SW=Math.min(step*.8,120);if(stack)cats.forEach((_,k)=>{let p=0,q=0;S.forEach((s,j)=>{const v=s.v[k];if(v==null)return;const a=v<0?q:p,b=a+v;v<0?q=b:p=b;
   mk(el('rect',{x:L+step*k+(step-SW)/2,y:Math.min(y(a),y(b)),width:Math.max(SW,1),height:Math.abs(y(a)-y(b)),fill:COL[j%6]},svg),s.r[k],[s.m])})});
  else{const bs=type==='bar'?S:type==='combo'?S.slice(0,1):[],gw=Math.min(step*.8,72*Math.max(bs.length,1)),bw=gw/Math.max(bs.length,1);  // a few wide categories: bars keep a bar's width
-  cats.forEach((_,k)=>bs.forEach((s,j)=>{const v=s.v[k];if(v!=null)mk(el('rect',{x:L+step*k+(step-gw)/2+bw*j,y:Math.min(y(v),y(0)),width:Math.max(bw,1),height:Math.abs(y(v)-y(0)),fill:COL[j%6],rx:Math.min(2,bw/6)},svg),s.r[k],[s.m])}));
+  cats.forEach((_,k)=>bs.forEach((s,j)=>{const v=s.v[k];if(v!=null)mk(el('rect',{x:L+step*k+(step-gw)/2+bw*j,y:Math.min(y(v),y(0)),width:Math.max(bw,1),height:Math.abs(y(v)-y(0)),fill:PC[j%6],rx:Math.min(2,bw/6)},svg),s.r[k],[s.m])}));
   // one series of a few bars: each bar's value over it, compact (the tooltip has it in full)
   if(type==='bar'&&bs.length===1&&n<=16&&step>=34)bs[0].v.forEach((v,k)=>{if(v==null)return;const t=el('text',{x:X(k),y:Math.min(y(v),y(0))-5,'text-anchor':'middle',class:'val'},svg);t.textContent=tick(v,bs[0].m);if(+t.getAttribute('y')<10)t.remove()})}
  (type==='combo'?S.slice(1):type==='line'||type==='scatter'?S:[]).forEach(s=>{const j=S.indexOf(s),yy=combo?y2:y,dot=type==='scatter',pts=s.v.map((v,k)=>v==null?null:[X(k),yy(v)]);
