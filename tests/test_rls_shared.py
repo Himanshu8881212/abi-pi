@@ -43,6 +43,11 @@ QUERIES = [  # beside every visual of the report: totals, filters, time, AVG, MI
     {"measures": ["median_revenue"], "dimensions": ["products.category"]},
 ]
 
+# The visuals the starter report had until 1.2.5, which dropped summed prices and discounts from its KPIs and draws
+# months instead of days: kept here as queries, so the checks still cover a read of the discount column (refused under
+# a column rule) and a daily partial, whatever the starter report holds.
+WAS = [{"measures": ["unit_price"]}, {"measures": ["discount"]}, {"measures": ["quantity"], "dimensions": ["calendar.day"]}]
+
 # The engine's own code in a process of its own, driven one JSON line at a time: each person's every visual and query
 # with shared partials (ABI_RLS_SHARED_ROWS) and without (0: each person's own read), compared value for value and type
 # for type (a DOUBLE within 1e-9: DuckDB's own parallel sums vary as much).
@@ -278,7 +283,7 @@ def test_every_visual_and_query_is_each_persons_own_after_new_data(brew):
     """The critical one: four restricted Viewers at once, each visual of the report and each query, with shared
     partials and without, equal to the cent; again after new data (a new snapshot: new tables, the old ones gone)."""
     drv = brew["drv"]
-    r = drv("check", queries=QUERIES)
+    r = drv("check", queries=QUERIES + WAS)
     exact(r)
     share = r["rows"]["several q:5"][1]  # the IGNORE expression: shares of the person's own total, never past their rule
     assert 1 <= len(share) <= 3 and abs(sum(float(x[2]) for x in share) - 1) < 1e-9, share
@@ -288,7 +293,7 @@ def test_every_visual_and_query_is_each_persons_own_after_new_data(brew):
     d = brew["dir"]
     duckdb.sql(f"COPY (SELECT * FROM '{d}/orders.parquet' WHERE order_date < DATE '2025-07-01') TO '{d}/orders2.parquet' (FORMAT parquet)")
     abi.upload(P, "orders", d / "orders2.parquet")
-    r = drv("check", queries=QUERIES)
+    r = drv("check", queries=QUERIES + WAS)
     exact(r)
     assert not first & set(r["names"]) and not first & set(r["have"]), "the old snapshot's tables are gone"
 
@@ -299,12 +304,12 @@ def test_what_doesnt_decompose_and_a_hidden_column_take_the_persons_own_read(bre
     assert drv("plan", who="one", q={"measures": ["revenue"], "dimensions": ["cafes.city"], "expressions": [SHARE]})["facts"] == ["orders", "orders"]
     for m in ("customers", "median_revenue", "avg_revenue"):  # DISTINCT_COUNT, MEDIAN; AVG isn't SUM/COUNT to the bit
         assert drv("plan", who="one", q={"measures": [m, "revenue"], "dimensions": ["cafes.city"]})["facts"] == [], m
-    r = drv("check", queries=QUERIES, rows=10)  # partials of more than 10 rows: each person's own read
+    r = drv("check", queries=QUERIES + WAS, rows=10)  # partials of more than 10 rows: each person's own read
     assert r["n"] > 50 and not r["diff"] and r["sliced"] == 0, (r["diff"][:3], r["sliced"])
     sure("set_column_rule", project=P, id="nodiscount", table="orders", columns=["discount"])
     try:
         assert drv("plan", who="one", q={"measures": ["revenue"], "dimensions": ["cafes.city"]})["facts"] == []
-        r = drv("check", queries=QUERIES)
+        r = drv("check", queries=QUERIES + WAS)
         assert r["n"] > 50 and not r["diff"], r["diff"][:3]
         assert any(isinstance(v, str) and v.startswith("403") for v in r["rows"].values()), "the discount visual is refused"
     finally:
@@ -487,7 +492,7 @@ def test_the_published_copy_is_sliced_the_same(brew):
             time.sleep(2)
         else:
             pytest.fail("the published copy's tables didn't load")
-        r = brew["drv"]("check", project=pub, queries=QUERIES[:3])
+        r = brew["drv"]("check", project=pub, queries=QUERIES[:3] + WAS)
         exact(r)
     finally:
         s.shutdown()
