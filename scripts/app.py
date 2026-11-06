@@ -550,7 +550,7 @@ dialog .row.foot{justify-content:flex-end;gap:8px}dialog .row.foot .sp{flex:1}
 p.note.warn{display:flex;gap:8px;align-items:flex-start;background:color-mix(in srgb,var(--signal) 8%,var(--sheet))}p.note.warn .ic{color:var(--signal-ink);margin-top:1px}
 /* configuration notes are notes, not errors: neutral, with an info line */
 p.note,.card .note{background:var(--paper);border-color:var(--line)}
-.card .scroll.all{max-height:none}.cards.vault>.card{max-width:none!important}.card label.l+.checks{margin-top:8px}.card label.l+.checks+label.l{margin-top:18px}
+.card .scroll.all{max-height:none}dialog .srow{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 0}dialog .srow .pwho{flex:1;min-width:0}.cards.vault>.card{max-width:none!important}.card label.l+.checks{margin-top:8px}.card label.l+.checks+label.l{margin-top:18px}
 body:not(.mobile) .pg:has(>.cards.pins) .pghead{flex-wrap:nowrap}
 .slicer.list{height:100%}.slicer.list .opts{flex:1;justify-content:flex-start;gap:6px}.slicer.list .sl{min-height:42px;align-items:center}.more>.btn.mbtn{color:color-mix(in srgb,var(--ink) 80%,var(--mute))}.acts button.pin,.srow .acts button.pin{height:34px;padding:0 12px;opacity:1!important;color:var(--ink)}
 .mobile .card h3 button.pin,.mobile .grid>.card>h3 button.pin{width:auto!important;padding:0 10px!important;font-size:12px!important;gap:4px!important;min-height:32px}
@@ -2780,7 +2780,7 @@ LOOPBACK = re.compile(r"^(localhost|127\.\d+\.\d+\.\d+|\[?::1\]?|0\.0\.0\.0)(:\d
 def public_base(public: str, host: str, proto: str = "") -> str:
     """The address other people open this app at, for a link to share: ABI_PUBLIC_URL when set, else the request's own
     Host; never a loopback address (nobody else can open it): then "" and the page says to set ABI_PUBLIC_URL."""
-    if public:
+    if public and not LOOPBACK.match(urllib.parse.urlsplit(public).netloc):
         return public.rstrip("/")
     host = host.strip()
     if not host or LOOPBACK.match(host):

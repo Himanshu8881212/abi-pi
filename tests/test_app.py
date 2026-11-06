@@ -1241,4 +1241,5 @@ def test_a_share_link_never_points_at_a_loopback_address():
     assert app.public_base("https://abi.example.com/", "127.0.0.1:8790") == "https://abi.example.com"
     assert app.public_base("", "abi.lan:8790") == "http://abi.lan:8790"
     assert app.public_base("", "abi.example.com", "https") == "https://abi.example.com"
+    assert app.public_base("http://127.0.0.1:8780", "abi.lan") == "http://abi.lan", "a loopback ABI_PUBLIC_URL is no address to share"
     assert all(app.public_base("", h) == "" for h in ("127.0.0.1:8790", "localhost:8790", "[::1]:8790", "0.0.0.0", ""))

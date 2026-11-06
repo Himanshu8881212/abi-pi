@@ -164,7 +164,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
  if(!S.length)return;
  {const lw=Math.max(...cats.map(v=>Math.min(11,String(v??'—').length)))*6.2+8;if(type==='bar'&&!two&&!per&&S.length===1&&cats.length<=24&&cats.length*lw>W-68){hb(ord,S[0].m);return}}
  const rot=!per&&cats.length>3&&cats.length<=24&&cats.length*(Math.max(...cats.map(v=>Math.min(11,String(v??'—').length)))*6.2+8)>W-L-(type==='combo'?60:8);if(rot)B=Math.min(80,24+Math.max(...cats.map(v=>Math.min(16,String(v??'—').length)))*4.6);
- const stack=type==='bar'&&two&&!per,combo=type==='combo'&&S.length>1,R=combo?60:type==='line'&&S.length<=2&&!two?58:8,PC=S.length===2&&/_prev$/.test(S[1].m)&&S[1].m.startsWith(S[0].m.replace(/_prev$/,''))?['var(--c1)','var(--c3)']:COL,T=S.length>1&&type!=='waterfall'?legend(svg,W,S.map(s=>two&&!per?s.n:N(s.m)),PC):10,cum=[];  // a measure against its previous period: now in ink, before in grey
+ const stack=type==='bar'&&two&&!per,combo=type==='combo'&&S.length>1,R=combo?60:type==='line'&&S.length<=2&&!(two&&!per)?58:8,PC=S.length===2&&/_prev$/.test(S[1].m)&&S[1].m.startsWith(S[0].m.replace(/_prev$/,''))?['var(--c1)','var(--c3)']:COL,T=S.length>1&&type!=='waterfall'?legend(svg,W,S.map(s=>two&&!per?s.n:N(s.m)),PC):10,cum=[];  // a measure against its previous period: now in ink, before in grey
  let run=0;if(type==='waterfall')S[0].v.forEach(v=>cum.push([run,run+=v||0]));
  const ax=(vs,m,x,an)=>{const {lo,hi,t}=nice(Math.min(0,...vs),Math.max(0,...vs),Math.max(2,Math.floor((H-B-T)/28))),y=v=>H-B-(v-lo)/(hi-lo)*(H-B-T);
   t.forEach(v=>{an==='end'&&el('line',{x1:L,x2:W-R,y1:y(v),y2:y(v),stroke:'var(--line)'},svg);el('text',{x,y:y(v)+4,'text-anchor':an},svg).textContent=tick(v,m)});return y};
