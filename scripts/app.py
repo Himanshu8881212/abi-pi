@@ -464,6 +464,11 @@ body[data-mode=viewer] .tcard label.l:has(input[type=checkbox]:not(:checked)){di
 .flowsteps>.row>b{font-weight:500;font-size:13.5px}
 .card p.hint{margin:16px 0 0;padding:28px 16px;text-align:center;border:1px dashed var(--line-strong);border-radius:var(--r);font-size:13.5px}
 label.chk.hl{background:color-mix(in srgb,var(--signal) 12%,var(--sheet));box-shadow:0 0 0 1px color-mix(in srgb,var(--signal) 45%,transparent);border-radius:6px;padding:2px 8px}
+.fopt small{margin-left:auto;color:var(--mute);font-size:11.5px;font-variant-numeric:tabular-nums}.colpick{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.colpick .chip{cursor:pointer;font:12px var(--mono);margin:0}.colpick .chip:hover{border-color:var(--ink)}
+.card>div.file+.colpick{margin-top:6px}
+.card .row>input[type=time]{max-width:150px;flex:none}.card .row>input[type=number]{max-width:120px}.card .row>.l{margin:0}
+#chat .m.nav{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:5px 12px;text-decoration:none;color:var(--ink);background:var(--sheet);font-size:12.5px}
+#chat .m.nav:hover{border-color:var(--ink)}#chat .steps{border-left-width:2px;border-radius:0 6px 6px 0;background:var(--paper);padding:6px 12px}
 """
 
 JS = r"""
@@ -535,10 +540,11 @@ function rows(box,d){box.innerHTML='';box.classList.add('out');if(!(d&&d.columns
  const rs=d.rows.map(r=>(Array.isArray(r)?r:d.columns.map(c=>r[c])).map(cell));table(box,{measures:d.measures||{},format:d.format||{},columns:d.columns,rows:rs})}
 // an admin action ABI wants confirmed: the person's own click in ABI's dialog, then the server runs it (null: they said no)
 async function confirmed(x){if(x.confirm){if(!await ask(x.confirm))return null;x=await fetch('/confirm/'+x.confirm.id,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(y=>y.json())}if(x.error)throw new Error(x.error);return x}
-function act(c,label,fn,pri){const m=c.querySelector(':scope>.msg')||c.appendChild(h('div','msg'));let r=c.querySelector(':scope>.acts');if(!r){r=h('div','row acts');c.insertBefore(r,m)}
+function act(c,label,fn,pri){const m=c.querySelector(':scope>.msg')||c.appendChild(h('div','msg'));
+ if(!c.dataset.clr){c.dataset.clr=1;c.addEventListener('input',()=>{if(m.classList.contains('bad'))m.textContent=''})}  // an error goes once the person fixes the fieldlet r=c.querySelector(':scope>.acts');if(!r){r=h('div','row acts');c.insertBefore(r,m)}
  r.append(btn(label,async()=>{c.querySelectorAll('.invalid').forEach(x=>x.classList.remove('invalid'));ASK_WHAT=/^Delete/.test(label)?ttl(c):'';try{const t=await fn(m);if(label==='Delete'){undoToast(ttl(c)||'It');return}if(t)c.isConnected?say(m,t):toast(t)}catch(e){c.isConnected?say(m,e.message,1):toast(e.message,1)}},pri));return m}
 // a field the action needs: marked and focused, and the action stops with what to do
-function need(el,ok,msg){if(ok)return;el.classList.add('invalid');el.focus();throw new Error(msg)}
+function need(el,ok,msg){if(ok)return;el.classList.add('invalid');el.addEventListener('input',()=>el.classList.remove('invalid'),{once:true});el.focus();throw new Error(msg)}
 
 // ---------- Overview ----------
 // the agent team on Home: one progress line while a plan is open, and each step a specialist left for the person's yes
@@ -646,7 +652,7 @@ function report(box,rep){let flt=PENDING.filters||[];PENDING.filters=null;
   q.oninput=()=>{const t=q.value.toLowerCase();list.querySelectorAll('label').forEach(l=>l.hidden=!l.textContent.toLowerCase().includes(t))};
   col.onchange=async()=>{list.textContent='';q.hidden=true;if(!col.value)return;list.append(h('p','msg','Loading…'));
    try{const r=await api('semantic_query',{measures:[measFor(col.value)],dimensions:[col.value],order_by:[{field:col.value}],limit:500}),on=vals(col.value);list.textContent='';
-    r.rows.forEach(x=>{const l=h('label','fopt'),i=h('input');i.type='checkbox';i.value=JSON.stringify(x[0]);i.checked=on.includes(x[0]);l.append(i,h('span','',x[0]===null?'(blank)':String(x[0])));list.append(l)});
+    r.rows.forEach(x=>{const l=h('label','fopt'),i=h('input');i.type='checkbox';i.value=JSON.stringify(x[0]);i.checked=on.includes(x[0]);l.append(i,h('span','',x[0]===null?'(blank)':String(x[0])));if(typeof x[1]==='number')l.append(h('small','',fmt(x[1],{compact:true,decimals:1})));list.append(l)});
     q.hidden=r.rows.length<8;if(!q.hidden)q.focus()}catch(e){list.textContent='';list.append(h('p','msg',e.message))}};
   if(c0)col.onchange();else col.focus()}
  addb.onclick=()=>pop?close():open();
@@ -784,7 +790,7 @@ async function usersPage(box){
  act(inv,'Invite',async()=>{let x=await post('invite',{email:em.value});if(x.confirm){if(!await ask(x.confirm))return 'Not invited.';x=await fetch('/confirm/'+x.confirm.id,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(y=>y.json())}
   if(x.error)throw new Error(x.error);return 'Invited through ABI. Give them a role below.'},1);g.append(inv);
  const t=card(`People in ${U.project}`,'role: Viewer reads the published copy; Editor and Owner build (Developer)');t.style.gridColumn='1/-1';g.append(t);
- U.users.forEach(u=>{const row=h('div','hit'),role=(u.roles||{})[U.project]||'none',sel=h('select','f');['none','viewer','editor','owner'].forEach(x=>sel.append(new Option(x==='none'?(u.workspace_owner?'No project role (owns the workspace)':'No access'):x[0].toUpperCase()+x.slice(1),x)));sel.value=role;
+ U.users.forEach(u=>{const row=h('div','hit'),role=(u.roles||{})[U.project]||'none',sel=h('select','f');['none','viewer','editor','owner'].forEach(x=>sel.append(new Option(x==='none'?(u.workspace_owner?'Workspace owner':'No access'):x[0].toUpperCase()+x.slice(1),x)));sel.value=role;
   const a=U.access[u.name]||{},sx=h('div','checks'),rx=h('div','checks'),m=h('div','msg');
   U.sections.forEach(x=>{const l=h('label','chk'),c=h('input');c.type='checkbox';c.value=x;c.checked=!a.sections||a.sections.includes(x);l.append(c,h('span','',x));sx.append(l)});
   U.reports.forEach(x=>{const l=h('label','chk'),c=h('input');c.type='checkbox';c.value=x.id;c.checked=!a.reports||a.reports.includes(x.id);l.append(c,h('span','',x.name));rx.append(l)});
@@ -802,7 +808,7 @@ async function usersPage(box){
   det.append(h('summary','',`What ${u.name} sees, password and two-step`),h('label','l','Sections'),sx,h('label','l','Reports'),rx,h('label','l','Forgot their password?'),pw,h('label','l','Lost their authenticator app and recovery codes?'),rmf);
   row.append(top,det,m);t.append(row);
   // from a report's Share: each person's reports open, that report marked
-  if(PENDING.share){const l=[...rx.querySelectorAll('label')].find(x=>x.querySelector('input').value===PENDING.share);if(l){det.open=true;l.classList.add('hl')}}});PENDING.share=null;
+  if(PENDING.share){const l=[...rx.querySelectorAll('label')].find(x=>x.querySelector('input').value===PENDING.share);if(l){det.open=true;l.classList.add('hl')}}});if(PENDING.share)setTimeout(()=>box.querySelector('label.chk.hl')?.scrollIntoView({block:'center',behavior:'smooth'}),300);PENDING.share=null;
  const mf=card('Two-step sign-in','a code from an authenticator app after the password; each person turns it on by clicking their name');g.append(mf);
  mf.append(h('p','',U.tenants.length?'Require it for everyone in a tenant: the password sessions and personal tokens of its people without it end at once, and at their next sign-in they add the key to an authenticator app before they get in. Single sign-on is not affected.'
   :'ABI requires it per tenant and this workspace has no tenants: each person can still turn it on for themselves.'));
@@ -893,7 +899,7 @@ function exportCard(rep,filters,curPage){const c=card('Export',`rendered by ABI 
   const one=pages.length===1,body={report:rep.id,format:fm.value,filters:ap.checked?filters():[],...(one?{page:pages[0],visual:vs.value||null}:{pages})};
   const get=async b=>{const r=await fetch('/report/export',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b)});if(!r.ok)throw new Error((await r.json()).error);return r.blob()};
   const save=(blob,name)=>{const a=h('a');a.href=URL.createObjectURL(blob);a.download=name;a.click()};
-  try{save(await get(body),`${rep.id}${one?'-'+pages[0]:''}.${fm.value}`);return 'Downloaded.'}
+  try{const fn=`${rep.id}${one?'-'+pages[0]:''}.${fm.value}`;save(await get(body),fn);return `Downloaded ${fn}: it is in your downloads.`}
   catch(e){if(one||fm.value==='pptx')throw e;for(const p of pages)save(await get({...body,pages:undefined,page:p}),`${rep.id}-${p}.${fm.value}`);
    return `This ABI makes one file per page: downloaded ${pages.length}.`}},1);
  c.classList.add('editor');return c}
@@ -965,7 +971,7 @@ function newMonitor(box,ck){box.querySelector('.monform')?.remove();ck=ck||{};co
  const sum=h('p','sum'),upd=()=>{try{const g=f.get(),nmOf=id=>D.measures.find(x=>x.id===id)?.name||id;
    sum.textContent=kind.value==='measure'?`Alerts when ${nmOf(g.measure)} ${(OPS.find(o=>o[0]===g.op)||[0,g.op])[1]} ${g.against==='measure'?nmOf(g.other):g.against==='prev'?`${g.value}% against its previous period`:fmt(g.value)}${g.by?`, for any ${colName(g.by).toLowerCase()}`:''}. It posts to the Inbox${em.value.trim()?' and emails '+em.value.trim():''}.`
     :kind.value==='fresh'?`Alerts when ${g.table} has gone ${g.hours} hours without a load.`:'Alerts when the flow\'s last run failed.'}catch(e){sum.textContent='Fill in the value to see what it alerts on.'}};
- c.insertBefore(sum,c.querySelector(':scope>p.file'));c.addEventListener('input',upd);c.addEventListener('change',upd);upd();
+ c.insertBefore(sum,f);c.addEventListener('input',upd);c.addEventListener('change',upd);upd();
  act(c,ck.id?'Save':'Create',async()=>{need(nm,nm.value.trim(),'Give it a name, e.g. Revenue below target.');const nc={id:ck.id||nm.value.trim().toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')||'check',name:nm.value.trim(),kind:kind.value,...f.get()};
   if(await monPost({action:'save',check:nc,email:em.value.trim()}))show('monitor')},1);act(c,'Cancel',()=>c.remove());(box.querySelector('.pghead')||box).after(c)}
 // a check and its flow in ABI (/monitor asks ABI's confirmation for the flow, then keeps the check); null: they said no
@@ -1046,7 +1052,11 @@ function measures(box){modelBar(box);const top=h('div','row bar top'),q=h('input
  const edit=(m,isNew)=>{const c=card(isNew?'New measure':(m.name||m.id),isNew?'':m.id),name=h('input','f'),id=h('input','f'),ex=h('textarea','f'),de=h('textarea','f desc');de.rows=1;
   [name,id,ex,de].forEach(e=>e.classList.add('ed'));name.value=m.name||'';id.value=m.id||'';ex.value=m.expression||'';de.value=m.description||'';
   id.placeholder='a-z, 0-9, _';name.placeholder='display name';ex.placeholder='e.g. SUM(sales.revenue)';de.placeholder='what it means';
-  if(isNew)c.append(h('label','l','ID'),id,h('label','l','Name'),name,h('label','l','MEL'),ex,h('label','l','Description'),de);
+  if(isNew){// the name first, its ID made from it; the formula with the model's numeric columns one click away
+   name.placeholder='e.g. Net revenue';let auto=true;name.oninput=()=>{if(auto)id.value=slug(name.value,'m')};id.oninput=()=>auto=false;
+   const cols=h('div','colpick');Object.entries(D.columns||{}).forEach(([t,cs])=>Object.entries(cs).forEach(([k,ty])=>{if(!/INT|DECIMAL|DOUBLE|FLOAT|NUMERIC|REAL/i.test(String(ty))||/(^|_)(id|key|year|month|day|week|quarter)$/.test(k))return;
+    const b=h('button','chip',`${t}.${k}`);b.type='button';b.title='Put it in the formula';b.onclick=()=>{const a=ex.selectionStart??ex.value.length,v=ex.value.trim()?`${t}.${k}`:`SUM(${t}.${k})`;ex.value=ex.value.slice(0,a)+v+ex.value.slice(ex.selectionEnd??a);ex.focus();ex.dispatchEvent(new Event('input'))};cols.append(b)}));
+   c.append(h('label','l','Name'),name,h('label','l','ID (made from the name)'),id,h('label','l','Formula (MEL)'),ex,...(cols.children.length?[h('div','file','Numeric columns: click one to use it'),cols]:[]),h('label','l','Description'),de)}
   ex.classList.add('code');if(!isNew){ex.rows=1;rowcard(c,fld('Name',name,m.id),fld('MEL',ex),fld('Description',de))}
   act(c,isNew?'Create':'Save',async()=>{await api('set_measure',{id:id.value,name:name.value,expression:ex.value,description:de.value||null}).catch(e=>{ex.classList.add('invalid');ex.focus();throw e});
    Object.assign(m,{id:id.value,name:name.value,expression:ex.value,description:de.value});if(isNew){D.measures.push(m);show('measures')}return 'Saved through ABI (checked like an import).'},1);
@@ -1098,7 +1108,7 @@ function sources(box){const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),qr=
   c.append(h('label','l','Table'),t,tabs,fg,lg);
   act(c,'Add source',async m=>{need(t,t.value.trim(),'Name the table first, e.g. bronze_orders.');need(t,/^[a-z][a-z0-9_]*$/.test(t.value),'A table name is lowercase letters, digits and _ and starts with a letter.');const sheet=sh.value.trim();
    if(file.files[0])need(file,/\.(csv|tsv|xlsx|json|jsonl|ndjson|parquet|avro)$/i.test(file.files[0].name),`${file.files[0].name} is not a file ABI reads: choose a CSV, TSV, Excel, JSON, Parquet or Avro file.`);
-   if(file.files[0]){const x=await loaded(await upload(t.value,file.files[0],sheet),m,`Uploaded and loaded into ${t.value}.`);return x+' Next: stage or model it under Tables, or ask the agent to build a report from it.'}
+   if(file.files[0]){const fl=file.files[0];m.className='msg';m.textContent=(`Uploading ${fl.name} (${fl.size>1e6?(fl.size/1e6).toFixed(1)+' MB':Math.max(1,Math.round(fl.size/1e3))+' KB'}), then ABI loads it…`);const x=await loaded(await upload(t.value,fl,sheet),m,`Uploaded and loaded into ${t.value}.`);return x+' Next: stage or model it under Tables, or ask the agent to build a report from it.'}
    if(!loc.value)throw new Error('Choose a file, or give a location like s3://bucket/folder/*.csv.');
    const s3=loc.value.startsWith('s3://')?{region:rg.value.trim()||'us-east-1',...(ep.value?{endpoint:ep.value.trim(),url_style:'path'}:{}),...(tls.checked?{}:{use_ssl:false})}:null;
    if(s3&&(ki.value||ks.value)){const r=await fetch('/s3key',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({table:t.value,location:loc.value,...s3,key_id:ki.value,secret:ks.value})}).then(x=>x.json());
@@ -1697,7 +1707,7 @@ async function switcher(){let d=$('#switcher');if(d){d.remove();return}
 function toast(t,bad,action){const x=h('div','toast'+(bad?' bad':''),t);x.setAttribute('role',bad?'alert':'status');
  if(action){const b=h('button','tact',action[0]);b.onclick=async()=>{x.remove();await action[1]()};x.append(b)}document.body.append(x);setTimeout(()=>x.remove(),action?12000:bad?9000:6000)}
 // a delete is one uncommitted change in ABI: the toast after it offers to take it back (the Changes dialog's Undo)
-function undoToast(what){toast(`${what} deleted.`,0,['Undo',async()=>{try{const r=await api('undo',{});toast(`Back: ${r.undone||what}.`)}catch(e){toast(e.message,1)}}])}
+function undoToast(what){toast(`${what} deleted.`,0,['Undo',async()=>{try{const r=await api('undo',{});toast(`${what} is back.`)}catch(e){toast(e.message,1)}}])}
 function highlight(item){if(!item)return;const want=String(item).toLowerCase();
  const c=[...document.querySelectorAll('main .card')].find(c=>c.textContent.toLowerCase().includes(want));if(c){c.classList.add('hl');c.scrollIntoView({behavior:'smooth',block:'center'});setTimeout(()=>c.classList.remove('hl'),4000)}}
 const chatBox=$('#chat'),log=$('#chat .log'),inp=$('#chat textarea'),busy=$('#chat .busy');
