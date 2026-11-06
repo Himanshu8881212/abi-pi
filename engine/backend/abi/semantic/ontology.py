@@ -18,7 +18,7 @@ import duckdb
 from pydantic import BaseModel, Field
 
 from abi import semantic, storage
-from abi.actions import ActionFailed, action, require_confirmation
+from abi.actions import ActionFailed, action
 from abi.project import SCHEMA, bundle, git
 from abi.security import Role, User
 from abi.semantic import lineage, live, model, rls
@@ -433,8 +433,9 @@ def _change(conn, user: User, project: str, new: dict | None) -> dict:
     ga, gb = lineage.graph(files), lineage.graph(after)
     reads = {n: lineage.reach(gb if n in b else ga, {n}, "downstream") for n in sorted(hit)}
     preview = {"changes": changes, "reads": {n: r for n, r in reads.items() if r}}
-    require_confirmation(f"This changes the ontology of project '{project}': {' '.join(changes)}", preview)
-    return imports.apply(conn, user, project, after) | {"ontology": preview}
+    # one confirmation with the import gate's (a follow link: the Owner, and who sees fewer rows), after its checks
+    return imports.apply(conn, user, project, after, ask=(f"This changes the ontology of project '{project}': {' '.join(changes)}", preview)) | {
+        "ontology": preview}
 
 
 class Save(storage.ProjectRef):

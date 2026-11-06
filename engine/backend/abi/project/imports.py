@@ -538,6 +538,27 @@ def _rules(files: dict) -> list:
     return f.get("rules", []) + f.get("columns", [])
 
 
+def follow_links(files: dict) -> dict:
+    """1.2.6 M3: {link ID: [from, to, via]} of the ontology's `rls: follow` links: each changes who sees which rows."""
+    return {ln["id"]: [ln["from"], ln["to"], ln["via"]] for ln in (files.get(ontology.FILE) or {}).get("links", [])
+            if ln.get("rls") == "follow"}
+
+
+def fewer(conn, project: str, old: dict, files: dict) -> str:
+    """Owner answer 1 (6 Nov 2026): the confirmation of a follow link change says who will see fewer rows, and of what."""
+    was, now = follow_links(old), follow_links(files)
+    names = {x["id"]: x["plural"] for f in (old, files) for x in (f.get(ontology.FILE) or {}).get("objects", [])}
+    viewers = [r["name"] for r in conn.execute("SELECT u.name FROM project_roles r JOIN users u ON u.id = r.user_id WHERE r.project = %s"
+                                               " AND r.role = 'viewer' AND NOT u.workspace_owner ORDER BY u.name", [project])]
+    ruled = viewers if (files.get(RLS) or {}).get("rules") else []  # D-42: Viewers are restricted once a row rule exists
+    who = f"Viewers under row-level security rules ({', '.join(ruled) or 'none now'})"
+    say = lambda i, ln: f"{names.get(ln[0], ln[0])} only when linked by '{i}' to {names.get(ln[1], ln[1])} they may see"  # noqa: E731
+    out = [f"{who} will see fewer rows: {say(i, ln)}, and only the rows of tables pointing at those."
+           for i, ln in now.items() if was.get(i) != ln]
+    out += [f"{who} will see more rows: not {say(i, ln)}." for i, ln in was.items() if i not in now]
+    return f"This changes which rows row-level security shows through links in project '{project}'. " + " ".join(out)
+
+
 def sends(conn, project: str, old: dict, files: dict) -> list[str]:
     """FL-6 targets (as `builtin._first_send` keys them) that the flows this change adds or edits name literally and the
     project hasn't confirmed: a flow run can't confirm, and in production nobody may send by hand (D-56), so a promoted
@@ -599,6 +620,9 @@ def gate(conn, project: str, old: dict, files: dict, asking: bool = False) -> tu
         if not rules and (links := rls.share_links(conn, project)):  # D-82: the first rule revokes them (rls.first_rule)
             why.append(rls.revoking(len(links)))
             preview["revoke_share_links"] = links
+    if (was := follow_links(old)) != (now := follow_links(files)):  # 1.2.6 M3: as a rule change, Owner plus confirmation
+        why.append(fewer(conn, project, old, files))
+        preview["follow"] = {"old": was, "new": now}
     if wide := shared_wider(old, files):  # SH-1: a file widens sharing only past the Owner's eye, as set_sharing does
         why.append(f"This shares {', '.join(sorted(wide))} view-only with accounts that have no role in project '{project}'.")
         preview["sharing"] = wide
@@ -621,9 +645,10 @@ def gate(conn, project: str, old: dict, files: dict, asking: bool = False) -> tu
     return why, preview or None
 
 
-def apply(conn, user: User, project: str, files: dict, dry_run: bool = False) -> dict:
+def apply(conn, user: User, project: str, files: dict, dry_run: bool = False, ask: tuple[str, dict] | None = None) -> dict:
     """PC-3 end to end. Call inside a definition=True action: git.change makes it one undoable change and
-    restores the old files if anything fails."""
+    restores the old files if anything fails. `ask`: (why, preview) the caller confirms anyway, asked with the gate's
+    reasons in one confirmation (a token is per call), after every check here."""
     folder = git.path(project)
     old = bundle.bundle(folder)
     if ROLES not in files and ROLES in old:  # D-11: no roles.json leaves roles as they are; clearing needs an explicit empty file
@@ -639,6 +664,11 @@ def apply(conn, user: User, project: str, files: dict, dry_run: bool = False) ->
         raise ActionFailed(403, "Only a project Owner may change security/rls.json; nothing changed.", errors=[_err(
             RLS, "$.rules", "This change edits the row-level security rules.",
             "Ask a project Owner to make it, or keep security/rls.json as it is.")])
+    if follow_links(old) != follow_links(files) and (role_in(conn, user, project) or 0) < Role.owner:  # 1.2.6 M3, owner answer 1
+        raise ActionFailed(403, "Only a project Owner may add, change or remove a link that row-level security follows"
+                                " (rls: follow); nothing changed.", errors=[_err(
+            ontology.FILE, "$.links", "This change makes Viewers see fewer or more rows through a link.",
+            "Ask a project Owner to make it, or keep the links' rls as they are.")])
     if (wide := shared_wider(old, files)) and (role_in(conn, user, project) or 0) < Role.owner:
         raise ActionFailed(403, "Only a project Owner may widen who a report, dataset or agent is shared with; nothing changed.", errors=[
             _err(k.split("#")[0], "$.sharing" if "#" not in k else f"$.datasets[id={k.split('#')[1]}].sharing",
@@ -661,8 +691,10 @@ def apply(conn, user: User, project: str, files: dict, dry_run: bool = False) ->
     from abi import flows  # not at top: flows imports this module
 
     on, publishing = _publishing(project, old, files)
-    why, preview = gate(conn, project, old, files, bool(publishing))
+    why, preview = gate(conn, project, old, files, bool(publishing or ask))
     why += publishing
+    if ask:
+        why, preview = [ask[0], *why], ask[1] | (preview or {})
     if why:  # one confirmation for every reason (a token is per call)
         require_confirmation(" ".join(why), preview)  # the token confirms this role diff and these API tools only
     for t in (preview or {}).get("send_targets", []) + (preview or {}).get("source_hosts", []):

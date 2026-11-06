@@ -394,10 +394,11 @@ def undo(conn, user: User, args: ProjectRef) -> dict:
         try:
             if imports.ROLES in was and (imports.ROLES not in now or was[imports.ROLES].id != now[imports.ROLES].id) \
                     or imports.api_published(old, files) or imports._rules(old) != imports._rules(files) \
+                    or imports.follow_links(old) != imports.follow_links(files) \
                     or imports.shared_wider(old, files) or imports.sends(conn, args.project, old, files) \
                     or imports.source_hosts(conn, args.project, old, files):
                 # D-1/M-12: Postgres follows roles.json, so the files go back through the import (Owner + confirmation);
-                # D-35: so does re-publishing an API tool, D-42: so does a row-level security change, SH-1: widened sharing,
+                # D-35: so does re-publishing an API tool, D-42: so does a row-level security change (1.2.6: a follow link), SH-1: widened sharing,
                 # FL-6: a flow's first send (apply stores the confirmed targets), H-01.5-fix-8: a new source host
                 imports.apply(conn, user, args.project, files)
             else:  # no roles.json before: D-11 leaves roles as they are, so the files alone go back
