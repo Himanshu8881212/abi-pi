@@ -552,7 +552,7 @@ p.note.warn{display:flex;gap:8px;align-items:flex-start;background:color-mix(in 
 p.note,.card .note{background:var(--paper);border-color:var(--line)}
 .card .scroll.all{max-height:none}dialog .srow{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 0}dialog .srow .pwho{flex:1;min-width:0}.cards.vault>.card{max-width:none!important}.card label.l+.checks{margin-top:8px}.card label.l+.checks+label.l{margin-top:18px}
 body:not(.mobile) .pg:has(>.cards.pins) .pghead{flex-wrap:nowrap}
-.slicer.list{height:100%}.slicer.list .opts{flex:1;justify-content:flex-start;gap:6px}.slicer.list .sl{min-height:42px;align-items:center}.more>.btn.mbtn{color:color-mix(in srgb,var(--ink) 80%,var(--mute))}.acts button.pin,.srow .acts button.pin{height:34px;padding:0 12px;opacity:1!important;color:var(--ink)}
+.slicer.list{height:100%}.slicer.list .opts{flex:1;justify-content:flex-start;gap:6px}.slicer.list .sl{min-height:42px;flex:1 1 0;max-height:76px;align-items:center;font-size:14.5px}.slicer.list .sl small{font-size:13px;font-weight:500;color:var(--ink)}.grid>.card.sized:has(.slicer.list)>.body{display:flex;flex-direction:column}.more>.btn.mbtn{color:color-mix(in srgb,var(--ink) 80%,var(--mute))}.acts button.pin,.srow .acts button.pin{height:34px;padding:0 12px;opacity:1!important;color:var(--ink)}
 .mobile .card h3 button.pin,.mobile .grid>.card>h3 button.pin{width:auto!important;padding:0 10px!important;font-size:12px!important;gap:4px!important;min-height:32px}
 .mobile .pinned .kpi .v,.mobile .cards.pins .kpi .v{font-size:clamp(22px,8.5vw,30px);letter-spacing:-.03em}
 .hist .srow{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid var(--line)}.hist .srow:first-child{border-top:0}.hist .cnt:not(:empty){padding:1px 8px;border-radius:999px;background:var(--hover);color:var(--mute);font-size:11.5px;align-self:center}
@@ -1064,7 +1064,7 @@ async function settingsPage(box){
   act(so,'Add',async()=>{const x=await confirmed(await post('sso/save',{id:pid.value.trim(),name:pn.value.trim(),issuer:iss.value.trim(),client_id:cl.value.trim(),secret:cs.value}));cs.value='';if(!x)return 'Not added.';draw();return 'Added.'},1);g.append(so)};
  draw()}
 function transferPage(box){if(MODE==='viewer'){box.append(h('p','empty','Export and import work in Developer mode with the live app.'));return}
- const ex=card('Export','the whole project as one zip'),im=card('Import','replace this project with a zip; ABI checks it first'),g=h('div','cards');
+ const ex=card('Export','the whole project as one zip'),im=card('Import','replace this project with a zip; ABI checks it first'),g=h('div','cards top');
  ex.append(h('p','','ABI\'s committed files (sources, tables, model, measures, glossary, queries, reports, flows, ML, tools, agents, security, environments, docs), the app\'s JSON (Monitor settings, saved analyses), the vault\'s documents and the team\'s plan. Not inside: the data (refresh the sources after an import), secret values, people\'s roles, chats, uncommitted changes.'));
  act(ex,'Download zip',async()=>{const r=await fetch('/transfer/export',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'});if(!r.ok)throw new Error((await r.json()).error);
   const a=h('a');a.href=URL.createObjectURL(await r.blob());a.download=`${D.project}.abi.zip`;a.click();return 'Downloaded.'},1);
