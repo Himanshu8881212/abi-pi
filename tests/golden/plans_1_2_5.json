@@ -1,0 +1,313 @@
+{
+ "plans": {
+  "north q0": "WITH s0 AS (SELECT SUM(\"orders\".\"revenue\") AS \"a0\", COUNT(\"orders\".\"order_id\") AS \"a1\", AVG(\"orders\".\"revenue\") AS \"a2\", MAX(\"orders\".\"quantity\") AS \"a3\", SUM(\"orders\".\"revenue\") FILTER(WHERE (\"orders\".\"quantity\" > 1)) AS \"a4\" FROM \"orders\") SELECT \"s0\".\"a0\" AS \"revenue\", \"s0\".\"a1\" AS \"orders_rows\", \"s0\".\"a2\" AS \"avg_revenue\", \"s0\".\"a3\" AS \"max_quantity\", \"s0\".\"a4\" AS \"big_revenue\" FROM \"s0\"",
+  "north q1": "SELECT * FROM (WITH s0 AS (SELECT \"cafes\".\"city\" AS \"k0\", SUM(\"orders\".\"__a0\") AS \"a0\" FROM (SELECT \"orders\".\"cafe_id\", SUM(\"orders\".\"revenue\") AS \"__a0\" FROM \"orders\" GROUP BY \"orders\".\"cafe_id\") AS \"orders\" LEFT JOIN \"cafes\" ON \"cafes\".\"cafe_id\" = \"orders\".\"cafe_id\" GROUP BY \"cafes\".\"city\") SELECT \"s0\".\"k0\" AS \"cafes.city\", \"s0\".\"a0\" AS \"revenue\" FROM \"s0\") ORDER BY \"revenue\" DESC NULLS LAST, \"cafes.city\" ASC NULLS LAST LIMIT 3",
+  "north q10": "SELECT * FROM (WITH s0 AS (SELECT \"calendar\".\"week_year\" AS \"k0\", \"calendar\".\"week\" AS \"k1\", SUM(\"orders\".\"__a0\") AS \"a0\" FROM (SELECT \"orders\".\"order_date\", SUM(\"orders\".\"revenue\") AS \"__a0\" FROM \"orders\" GROUP BY \"orders\".\"order_date\") AS \"orders\" LEFT JOIN \"calendar\" ON \"calendar\".\"day\" = \"orders\".\"order_date\" GROUP BY \"calendar\".\"week_year\", \"calendar\".\"week\") SELECT \"s0\".\"k0\" AS \"calendar.week_year\", \"s0\".\"k1\" AS \"calendar.week\", \"s0\".\"a0\" AS \"revenue\" FROM \"s0\") ORDER BY \"calendar.week_year\" ASC NULLS LAST, \"calendar.week\" ASC NULLS LAST LIMIT 5",
+  "north q11": "SELECT * FROM (WITH s0 AS (SELECT \"cafes\".\"region\" AS \"k0\", COUNT(\"cafes\".\"cafe_id\") AS \"a0\" FROM \"cafes\" GROUP BY \"cafes\".\"region\") SELECT \"s0\".\"k0\" AS \"cafes.region\", \"s0\".\"a0\" AS \"cafes_count\" FROM \"s0\") ORDER BY \"cafes.region\" ASC NULLS LAST",
+  "north q12": "refused: Measure 'cafes_count' can't be filtered or grouped by products.category: its fact table 'cafes' has no relationship to 'products'. Remove products.category from the query or add a relationship.",
+  "north q13": "SELECT * FROM (WITH s0 AS (SELECT \"cafes\".\"city\" AS \"k0\", SUM(\"orders\".\"__a0\") AS \"a0\" FROM (SELECT \"orders\".\"cafe_id\", SUM(\"orders\".\"revenue\") AS \"__a0\" FROM \"orders\" GROUP BY \"orders\".\"cafe_id\") AS \"orders\" LEFT JOIN \"cafes\" ON \"cafes\".\"cafe_id\" = \"orders\".\"cafe_id\" GROUP BY \"cafes\".\"city\"), s1 AS (SELECT \"cafes\".\"city\" AS \"k0\", COUNT(\"cafes\".\"cafe_id\") AS \"a0\" FROM \"cafes\" GROUP BY \"cafes\".\"city\") SELECT COALESCE(\"s0\".\"k0\", \"s1\".\"k0\") AS \"cafes.city\", \"s0\".\"a0\" AS \"revenue\", \"s1\".\"a0\" AS \"cafes_count\" FROM \"s0\" FULL JOIN \"s1\" ON \"s0\".\"k0\" IS NOT DISTINCT FROM \"s1\".\"k0\") ORDER BY \"cafes.city\" ASC NULLS LAST",
+  "north q14": "refused: Unknown table in dimension nope.x; use a model table: cafes, calendar, customers, orders, products.",
+  "north q2": "SELECT * FROM (WITH s0 AS (SELECT \"calendar\".\"year\" AS \"k0\", \"calendar\".\"month\" AS \"k1\", SUM(\"orders\".\"__a0\") AS \"a0\" FROM (SELECT \"orders\".\"order_date\", SUM(\"orders\".\"quantity\") AS \"__a0\" FROM \"orders\" GROUP BY \"orders\".\"order_date\") AS \"orders\" LEFT JOIN \"calendar\" ON \"calendar\".\"day\" = \"orders\".\"order_date\" GROUP BY \"calendar\".\"year\", \"calendar\".\"month\"), s1 AS (SELECT \"__m\".\"year\" AS \"k0\", \"__m\".\"month\" AS \"k1\", SUM(\"__f\".\"__a0\") AS \"a0\" FROM (SELECT \"month\", \"year\", MIN(\"day\") AS lo, MAX(\"day\") + INTERVAL '1' DAY AS hi FROM \"calendar\" WHERE TRUE GROUP BY \"month\", \"year\") AS \"__m\" JOIN (SELECT \"orders\".\"order_date\" AS \"__d\", SUM(\"orders\".\"quantity\") AS \"__a0\" FROM \"orders\" WHERE \"orders\".\"order_date\" >= (SELECT MIN((__m.lo) - INTERVAL '1' MONTH) FROM (SELECT \"month\", \"year\", MIN(\"day\") AS lo, MAX(\"day\") + INTERVAL '1' DAY AS hi FROM \"calendar\" WHERE TRUE GROUP BY \"month\", \"year\") AS \"__m\") AND \"orders\".\"order_date\" < (SELECT MAX(__m.lo) FROM (SELECT \"month\", \"year\", MIN(\"day\") AS lo, MAX(\"day\") + INTERVAL '1' DAY AS hi FROM \"calendar\" WHERE TRUE GROUP BY \"month\", \"year\") AS \"__m\") GROUP BY \"orders\".\"order_date\") AS \"__f\" ON \"__f\".\"__d\" >= (__m.lo) - INTERVAL '1' MONTH AND \"__f\".\"__d\" < __m.lo GROUP BY \"__m\".\"year\", \"__m\".\"month\") SELECT COALESCE(\"s0\".\"k0\", \"s1\".\"k0\") AS \"calendar.year\", COALESCE(\"s0\".\"k1\", \"s1\".\"k1\") AS \"calendar.month\", \"s0\".\"a0\" AS \"quantity\", \"s1\".\"a0\" AS \"quantity_prev\", (\"s0\".\"a0\" - \"s1\".\"a0\") / NULLIF(ABS(\"s1\".\"a0\"), 0) AS \"quantity_change_pct\" FROM \"s0\" FULL JOIN \"s1\" ON \"s0\".\"k0\" IS NOT DISTINCT FROM \"s1\".\"k0\" AND \"s0\".\"k1\" IS NOT DISTINCT FROM \"s1\".\"k1\") ORDER BY \"calendar.year\" ASC NULLS LAST, \"calendar.month\" ASC NULLS LAST",
+  "north q3": "SELECT * FROM (WITH s0 AS (SELECT \"products\".\"category\" AS \"k0\", GROUPING_ID(\"products\".\"category\") AS \"g\", SUM(\"orders\".\"__a0\") AS \"a0\", SUM(\"orders\".\"__a1s\") / SUM(\"orders\".\"__a1c\") AS \"a1\" FROM (SELECT \"orders\".\"product_id\", SUM(\"orders\".\"revenue\") AS \"__a0\", SUM(\"orders\".\"revenue\") AS \"__a1s\", COUNT(\"orders\".\"revenue\") AS \"__a1c\" FROM \"orders\" GROUP BY \"orders\".\"product_id\") AS \"orders\" LEFT JOIN \"products\" ON \"products\".\"product_id\" = \"orders\".\"product_id\" GROUP BY GROUPING SETS ((\"products\".\"category\"), ())) SELECT \"s0\".\"k0\" AS \"products.category\", \"s0\".\"g\" AS \"grouping_id\", \"s0\".\"a0\" AS \"revenue\", \"s0\".\"a1\" AS \"avg_revenue\" FROM \"s0\") ORDER BY \"grouping_id\" ASC NULLS LAST, \"products.category\" ASC NULLS LAST",
+  "north q4": "SELECT * FROM (WITH s0 AS (SELECT \"cafes\".\"region\" AS \"k0\", SUM(\"orders\".\"revenue\") AS \"a0\" FROM \"orders\" LEFT JOIN \"cafes\" ON \"cafes\".\"cafe_id\" = \"orders\".\"cafe_id\" LEFT JOIN \"products\" ON \"products\".\"product_id\" = \"orders\".\"product_id\" WHERE (\"products\".\"category\" <> 'Tea') GROUP BY \"cafes\".\"region\") SELECT \"s0\".\"k0\" AS \"cafes.region\", \"s0\".\"a0\" AS \"revenue\" FROM \"s0\") ORDER BY \"cafes.region\" ASC NULLS LAST",
+  "north q5": "SELECT * FROM (WITH s0 AS (SELECT \"cafes\".\"city\" AS \"k0\", SUM(\"orders\".\"__a0\") AS \"a0\" FROM (SELECT \"orders\".\"cafe_id\", SUM(\"orders\".\"revenue\") AS \"__a0\" FROM \"orders\" GROUP BY \"orders\".\"cafe_id\") AS \"orders\" LEFT JOIN \"cafes\" ON \"cafes\".\"cafe_id\" = \"orders\".\"cafe_id\" GROUP BY \"cafes\".\"city\"), s1 AS (SELECT SUM(\"orders\".\"revenue\") AS \"a0\" FROM \"orders\") SELECT \"s0\".\"k0\" AS \"cafes.city\", \"s0\".\"a0\" AS \"revenue\", \"s0\".\"a0\" / NULLIF(\"s1\".\"a0\", 0) AS \"share\" FROM \"s0\" LEFT JOIN \"s1\" ON TRUE) ORDER BY \"cafes.city\" ASC NULLS LAST",
+  "north q6": "SELECT * FROM (WITH s0 AS (SELECT \"cafes\".\"city\" AS \"k0\", COUNT(DISTINCT \"orders\".\"customer_id\") AS \"a0\", SUM(\"orders\".\"revenue\") AS \"a1\" FROM \"orders\" LEFT JOIN \"cafes\" ON \"cafes\".\"cafe_id\" = \"orders\".\"cafe_id\" GROUP BY \"cafes\".\"city\") SELECT \"s0\".\"k0\" AS \"cafes.city\", \"s0\".\"a0\" AS \"customers\", \"s0\".\"a1\" AS \"revenue\" FROM \"s0\") ORDER BY \"cafes.city\" ASC NULLS LAST",
+  "north q7": "SELECT * FROM (WITH s0 AS (WITH __r AS NOT MATERIALIZED (SELECT \"products\".\"category\" AS \"k0\", \"orders\".\"revenue\" AS \"__v\" FROM \"orders\" LEFT JOIN \"products\" ON \"products\".\"product_id\" = \"orders\".\"product_id\"), __s AS MATERIALIZED (SELECT lo, CASE WHEN num AND hi > lo THEN 1024 / (hi - lo) END AS sc FROM (SELECT TRY_CAST(MIN(__v) AS DOUBLE) AS lo, TRY_CAST(MAX(__v) AS DOUBLE) AS hi, REGEXP_FULL_MATCH(TYPEOF(MIN(__v)), 'U?(TINYINT|SMALLINT|INTEGER|BIGINT|HUGEINT)|FLOAT|DOUBLE|DECIMAL\\(.*') AS num FROM __r)), __b AS NOT MATERIALIZED (SELECT __r.*, CASE WHEN __v IS NULL THEN NULL WHEN NOT sc IS NULL THEN CAST(LEAST(FLOOR((TRY_CAST(__v AS DOUBLE) - lo) * sc), 1023) AS INT) ELSE 0 END AS __bk FROM __r, __s), __t AS MATERIALIZED (SELECT * FROM (SELECT *, SUM(__c) OVER (PARTITION BY __h.\"k0\", __h.g ORDER BY __bk) - __c AS __pre, SUM(__c) OVER (PARTITION BY __h.\"k0\", __h.g) AS __n FROM (SELECT \"k0\", 0 AS g, __bk, COUNT(__v) AS __c, MIN(__v) AS __lo, MAX(__v) AS __hi FROM __b GROUP BY \"k0\", __bk) AS __h) WHERE __pre < (__n + 2) // 2 AND __pre + __c >= (__n + 1) // 2) SELECT \"k0\", g, MEDIAN(__v) FILTER(WHERE __rk IN ((__n + 1) // 2, (__n + 2) // 2)) AS \"a0\" FROM (SELECT __t.\"k0\", __t.g, __t.__n, __b.__v, __t.__pre + ROW_NUMBER() OVER (PARTITION BY __t.\"k0\", __t.g, __t.__bk ORDER BY __b.__v) AS __rk FROM __t LEFT JOIN (SELECT * FROM __b WHERE __v BETWEEN (SELECT MIN(__lo) FROM __t) AND (SELECT MAX(__hi) FROM __t)) AS __b ON __b.__bk = __t.__bk AND (__t.\"k0\" IS NOT DISTINCT FROM __b.\"k0\")) GROUP BY \"k0\", g) SELECT \"s0\".\"k0\" AS \"products.category\", \"s0\".\"a0\" AS \"median_revenue\" FROM \"s0\") ORDER BY \"products.category\" ASC NULLS LAST",
+  "north q8": "SELECT * FROM (WITH s0 AS (SELECT \"cafes\".\"region\" AS \"k0\", \"calendar\".\"year\" AS \"k1\", GROUPING_ID(\"cafes\".\"region\", \"calendar\".\"year\") AS \"g\", SUM(\"orders\".\"revenue\") AS \"a0\" FROM \"orders\" LEFT JOIN \"cafes\" ON \"cafes\".\"cafe_id\" = \"orders\".\"cafe_id\" LEFT JOIN \"calendar\" ON \"calendar\".\"day\" = \"orders\".\"order_date\" GROUP BY GROUPING SETS ((\"cafes\".\"region\", \"calendar\".\"year\"), (\"cafes\".\"region\"), ())) SELECT \"s0\".\"k0\" AS \"cafes.region\", \"s0\".\"k1\" AS \"calendar.year\", \"s0\".\"g\" AS \"grouping_id\", \"s0\".\"a0\" AS \"revenue\" FROM \"s0\") ORDER BY \"grouping_id\" ASC NULLS LAST, \"cafes.region\" ASC NULLS LAST, \"calendar.year\" ASC NULLS LAST",
+  "north q9": "SELECT * FROM (WITH s0 AS (SELECT \"customers\".\"segment\" AS \"k0\", COUNT(\"orders\".\"order_id\") AS \"a0\" FROM \"orders\" LEFT JOIN \"customers\" ON \"customers\".\"customer_id\" = \"orders\".\"customer_id\" LEFT JOIN \"cafes\" ON \"cafes\".\"cafe_id\" = \"orders\".\"cafe_id\" WHERE \"cafes\".\"region\" IN ('North', 'South') GROUP BY \"customers\".\"segment\") SELECT \"s0\".\"k0\" AS \"customers.segment\", \"s0\".\"a0\" AS \"orders_rows\" FROM \"s0\") ORDER BY \"customers.segment\" ASC NULLS LAST",
+  "north v:overview/by-dim": "SELECT * FROM (WITH s0 AS (SELECT \"cafes\".\"city\" AS \"k0\", SUM(\"orders\".\"__a0\") AS \"a0\" FROM (SELECT \"orders\".\"cafe_id\", SUM(\"orders\".\"quantity\") AS \"__a0\" FROM \"orders\" GROUP BY \"orders\".\"cafe_id\") AS \"orders\" LEFT JOIN \"cafes\" ON \"cafes\".\"cafe_id\" = \"orders\".\"cafe_id\" GROUP BY \"cafes\".\"city\") SELECT \"s0\".\"k0\" AS \"cafes.city\", \"s0\".\"a0\" AS \"quantity\" FROM \"s0\") ORDER BY \"quantity\" DESC NULLS LAST, \"cafes.city\" ASC NULLS LAST LIMIT 20",
+  "north v:overview/by-month": "SELECT * FROM (WITH s0 AS (SELECT \"calendar\".\"year\" AS \"k0\", \"calendar\".\"month\" AS \"k1\", SUM(\"orders\".\"__a0\") AS \"a0\" FROM (SELECT \"orders\".\"order_date\", SUM(\"orders\".\"quantity\") AS \"__a0\" FROM \"orders\" GROUP BY \"orders\".\"order_date\") AS \"orders\" LEFT JOIN \"calendar\" ON \"calendar\".\"day\" = \"orders\".\"order_date\" GROUP BY \"calendar\".\"year\", \"calendar\".\"month\") SELECT \"s0\".\"k0\" AS \"calendar.year\", \"s0\".\"k1\" AS \"calendar.month\", \"s0\".\"a0\" AS \"quantity\" FROM \"s0\") ORDER BY \"calendar.year\" ASC NULLS LAST, \"calendar.month\" ASC NULLS LAST",
+  "north v:overview/kpi-orders_rows": "WITH s0 AS (SELECT COUNT(\"orders\".\"order_id\") AS \"a0\" FROM \"orders\") SELECT \"s0\".\"a0\" AS \"orders_rows\" FROM \"s0\"",
+  "north v:overview/kpi-quantity": "WITH s0 AS (SELECT SUM(\"orders\".\"quantity\") AS \"a0\" FROM \"orders\") SELECT \"s0\".\"a0\" AS \"quantity\" FROM \"s0\"",
+  "north v:overview/kpi-revenue": "WITH s0 AS (SELECT SUM(\"orders\".\"revenue\") AS \"a0\" FROM \"orders\") SELECT \"s0\".\"a0\" AS \"revenue\" FROM \"s0\"",
+  "one q0": "WITH s0 AS (SELECT SUM(\"orders\".\"revenue\") AS \"a0\", COUNT(\"orders\".\"order_id\") AS \"a1\", AVG(\"orders\".\"revenue\") AS \"a2\", MAX(\"orders\".\"quantity\") AS \"a3\", SUM(\"orders\".\"revenue\") FILTER(WHERE (\"orders\".\"quantity\" > 1)) AS \"a4\" FROM \"orders\") SELECT \"s0\".\"a0\" AS \"revenue\", \"s0\".\"a1\" AS \"orders_rows\", \"s0\".\"a2\" AS \"avg_revenue\", \"s0\".\"a3\" AS \"max_quantity\", \"s0\".\"a4\" AS \"big_revenue\" FROM \"s0\"",
+  "one q1": "SELECT * FROM (WITH s0 AS (SELECT \"cafes\".\"city\" AS \"k0\", SUM(\"orders\".\"__a0\") AS \"a0\" FROM (SELECT \"orders\".\"cafe_id\", SUM(\"orders\".\"revenue\") AS \"__a0\" FROM \"orders\" GROUP BY \"orders\".\"cafe_id\") AS \"orders\" LEFT JOIN \"cafes\" ON \"cafes\".\"cafe_id\" = \"orders\".\"cafe_id\" GROUP BY \"cafes\".\"city\") SELECT \"s0\".\"k0\" AS \"cafes.city\", \"s0\".\"a0\" AS \"revenue\" FROM \"s0\") ORDER BY \"revenue\" DESC NULLS LAST, \"cafes.city\" ASC NULLS LAST LIMIT 3",
+  "one q10": "SELECT * FROM (WITH s0 AS (SELECT \"calendar\".\"week_year\" AS \"k0\", \"calendar\".\"week\" AS \"k1\", SUM(\"orders\".\"__a0\") AS \"a0\" FROM (SELECT \"orders\".\"order_date\", SUM(\"orders\".\"revenue\") AS \"__a0\" FROM \"orders\" GROUP BY \"orders\".\"order_date\") AS \"orders\" LEFT JOIN \"calendar\" ON \"calendar\".\"day\" = \"orders\".\"order_date\" GROUP BY \"calendar\".\"week_year\", \"calendar\".\"week\") SELECT \"s0\".\"k0\" AS \"calendar.week_year\", \"s0\".\"k1\" AS \"calendar.week\", \"s0\".\"a0\" AS \"revenue\" FROM \"s0\") ORDER BY \"calendar.week_year\" ASC NULLS LAST, \"calendar.week\" ASC NULLS LAST LIMIT 5",
+  "one q11": "SELECT * FROM (WITH s0 AS (SELECT \"cafes\".\"region\" AS \"k0\", COUNT(\"cafes\".\"cafe_id\") AS \"a0\" FROM \"cafes\" GROUP BY \"cafes\".\"region\") SELECT \"s0\".\"k0\" AS \"cafes.region\", \"s0\".\"a0\" AS \"cafes_count\" FROM \"s0\") ORDER BY \"cafes.region\" ASC NULLS LAST",
+  "one q12": "refused: Measure 'cafes_count' can't be filtered or grouped by products.category: its fact table 'cafes' has no relationship to 'products'. Remove products.category from the query or add a relationship.",
+  "one q13": "SELECT * FROM (WITH s0 AS (SELECT \"cafes\".\"city\" AS \"k0\", SUM(\"orders\".\"__a0\") AS \"a0\" FROM (SELECT \"orders\".\"cafe_id\", SUM(\"orders\".\"revenue\") AS \"__a0\" FROM \"orders\" GROUP BY \"orders\".\"cafe_id\") AS \"orders\" LEFT JOIN \"cafes\" ON \"cafes\".\"cafe_id\" = \"orders\".\"cafe_id\" GROUP BY \"cafes\".\"city\"), s1 AS (SELECT \"cafes\".\"city\" AS \"k0\", COUNT(\"cafes\".\"cafe_id\") AS \"a0\" FROM \"cafes\" GROUP BY \"cafes\".\"city\") SELECT COALESCE(\"s0\".\"k0\", \"s1\".\"k0\") AS \"cafes.city\", \"s0\".\"a0\" AS \"revenue\", \"s1\".\"a0\" AS \"cafes_count\" FROM \"s0\" FULL JOIN \"s1\" ON \"s0\".\"k0\" IS NOT DISTINCT FROM \"s1\".\"k0\") ORDER BY \"cafes.city\" ASC NULLS LAST",
+  "one q14": "refused: Unknown table in dimension nope.x; use a model table: cafes, calendar, customers, orders, products.",
+  "one q2": "SELECT * FROM (WITH s0 AS (SELECT \"calendar\".\"year\" AS \"k0\", \"calendar\".\"month\" AS \"k1\", SUM(\"orders\".\"__a0\") AS \"a0\" FROM (SELECT \"orders\".\"order_date\", SUM(\"orders\".\"quantity\") AS \"__a0\" FROM \"orders\" GROUP BY \"orders\".\"order_date\") AS \"orders\" LEFT JOIN \"calendar\" ON \"calendar\".\"day\" = \"orders\".\"order_date\" GROUP BY \"calendar\".\"year\", \"calendar\".\"month\"), s1 AS (SELECT \"__m\".\"year\" AS \"k0\", \"__m\".\"month\" AS \"k1\", SUM(\"__f\".\"__a0\") AS \"a0\" FROM (SELECT \"month\", \"year\", MIN(\"day\") AS lo, MAX(\"day\") + INTERVAL '1' DAY AS hi FROM \"calendar\" WHERE TRUE GROUP BY \"month\", \"year\") AS \"__m\" JOIN (SELECT \"orders\".\"order_date\" AS \"__d\", SUM(\"orders\".\"quantity\") AS \"__a0\" FROM \"orders\" WHERE \"orders\".\"order_date\" >= (SELECT MIN((__m.lo) - INTERVAL '1' MONTH) FROM (SELECT \"month\", \"year\", MIN(\"day\") AS lo, MAX(\"day\") + INTERVAL '1' DAY AS hi FROM \"calendar\" WHERE TRUE GROUP BY \"month\", \"year\") AS \"__m\") AND \"orders\".\"order_date\" < (SELECT MAX(__m.lo) FROM (SELECT \"month\", \"year\", MIN(\"day\") AS lo, MAX(\"day\") + INTERVAL '1' DAY AS hi FROM \"calendar\" WHERE TRUE GROUP BY \"month\", \"year\") AS \"__m\") GROUP BY \"orders\".\"order_date\") AS \"__f\" ON \"__f\".\"__d\" >= (__m.lo) - INTERVAL '1' MONTH AND \"__f\".\"__d\" < __m.lo GROUP BY \"__m\".\"year\", \"__m\".\"month\") SELECT COALESCE(\"s0\".\"k0\", \"s1\".\"k0\") AS \"calendar.year\", COALESCE(\"s0\".\"k1\", \"s1\".\"k1\") AS \"calendar.month\", \"s0\".\"a0\" AS \"quantity\", \"s1\".\"a0\" AS \"quantity_prev\", (\"s0\".\"a0\" - \"s1\".\"a0\") / NULLIF(ABS(\"s1\".\"a0\"), 0) AS \"quantity_change_pct\" FROM \"s0\" FULL JOIN \"s1\" ON \"s0\".\"k0\" IS NOT DISTINCT FROM \"s1\".\"k0\" AND \"s0\".\"k1\" IS NOT DISTINCT FROM \"s1\".\"k1\") ORDER BY \"calendar.year\" ASC NULLS LAST, \"calendar.month\" ASC NULLS LAST",
+  "one q3": "SELECT * FROM (WITH s0 AS (SELECT \"products\".\"category\" AS \"k0\", GROUPING_ID(\"products\".\"category\") AS \"g\", SUM(\"orders\".\"__a0\") AS \"a0\", SUM(\"orders\".\"__a1s\") / SUM(\"orders\".\"__a1c\") AS \"a1\" FROM (SELECT \"orders\".\"product_id\", SUM(\"orders\".\"revenue\") AS \"__a0\", SUM(\"orders\".\"revenue\") AS \"__a1s\", COUNT(\"orders\".\"revenue\") AS \"__a1c\" FROM \"orders\" GROUP BY \"orders\".\"product_id\") AS \"orders\" LEFT JOIN \"products\" ON \"products\".\"product_id\" = \"orders\".\"product_id\" GROUP BY GROUPING SETS ((\"products\".\"category\"), ())) SELECT \"s0\".\"k0\" AS \"products.category\", \"s0\".\"g\" AS \"grouping_id\", \"s0\".\"a0\" AS \"revenue\", \"s0\".\"a1\" AS \"avg_revenue\" FROM \"s0\") ORDER BY \"grouping_id\" ASC NULLS LAST, \"products.category\" ASC NULLS LAST",
+  "one q4": "SELECT * FROM (WITH s0 AS (SELECT \"cafes\".\"region\" AS \"k0\", SUM(\"orders\".\"revenue\") AS \"a0\" FROM \"orders\" LEFT JOIN \"cafes\" ON \"cafes\".\"cafe_id\" = \"orders\".\"cafe_id\" LEFT JOIN \"products\" ON \"products\".\"product_id\" = \"orders\".\"product_id\" WHERE (\"products\".\"category\" <> 'Tea') GROUP BY \"cafes\".\"region\") SELECT \"s0\".\"k0\" AS \"cafes.region\", \"s0\".\"a0\" AS \"revenue\" FROM \"s0\") ORDER BY \"cafes.region\" ASC NULLS LAST",
+  "one q5": "SELECT * FROM (WITH s0 AS (SELECT \"cafes\".\"city\" AS \"k0\", SUM(\"orders\".\"__a0\") AS \"a0\" FROM (SELECT \"orders\".\"cafe_id\", SUM(\"orders\".\"revenue\") AS \"__a0\" FROM \"orders\" GROUP BY \"orders\".\"cafe_id\") AS \"orders\" LEFT JOIN \"cafes\" ON \"cafes\".\"cafe_id\" = \"orders\".\"cafe_id\" GROUP BY \"cafes\".\"city\"), s1 AS (SELECT SUM(\"orders\".\"revenue\") AS \"a0\" FROM \"orders\") SELECT \"s0\".\"k0\" AS \"cafes.city\", \"s0\".\"a0\" AS \"revenue\", \"s0\".\"a0\" / NULLIF(\"s1\".\"a0\", 0) AS \"share\" FROM \"s0\" LEFT JOIN \"s1\" ON TRUE) ORDER BY \"cafes.city\" ASC NULLS LAST",
+  "one q6": "SELECT * FROM (WITH s0 AS (SELECT \"cafes\".\"city\" AS \"k0\", COUNT(DISTINCT \"orders\".\"customer_id\") AS \"a0\", SUM(\"orders\".\"revenue\") AS \"a1\" FROM \"orders\" LEFT JOIN \"cafes\" ON \"cafes\".\"cafe_id\" = \"orders\".\"cafe_id\" GROUP BY \"cafes\".\"city\") SELECT \"s0\".\"k0\" AS \"cafes.city\", \"s0\".\"a0\" AS \"customers\", \"s0\".\"a1\" AS \"revenue\" FROM \"s0\") ORDER BY \"cafes.city\" ASC NULLS LAST",
+  "one q7": "SELECT * FROM (WITH s0 AS (WITH __r AS NOT MATERIALIZED (SELECT \"products\".\"category\" AS \"k0\", \"orders\".\"revenue\" AS \"__v\" FROM \"orders\" LEFT JOIN \"products\" ON \"products\".\"product_id\" = \"orders\".\"product_id\"), __s AS MATERIALIZED (SELECT lo, CASE WHEN num AND hi > lo THEN 1024 / (hi - lo) END AS sc FROM (SELECT TRY_CAST(MIN(__v) AS DOUBLE) AS lo, TRY_CAST(MAX(__v) AS DOUBLE) AS hi, REGEXP_FULL_MATCH(TYPEOF(MIN(__v)), 'U?(TINYINT|SMALLINT|INTEGER|BIGINT|HUGEINT)|FLOAT|DOUBLE|DECIMAL\\(.*') AS num FROM __r)), __b AS NOT MATERIALIZED (SELECT __r.*, CASE WHEN __v IS NULL THEN NULL WHEN NOT sc IS NULL THEN CAST(LEAST(FLOOR((TRY_CAST(__v AS DOUBLE) - lo) * sc), 1023) AS INT) ELSE 0 END AS __bk FROM __r, __s), __t AS MATERIALIZED (SELECT * FROM (SELECT *, SUM(__c) OVER (PARTITION BY __h.\"k0\", __h.g ORDER BY __bk) - __c AS __pre, SUM(__c) OVER (PARTITION BY __h.\"k0\", __h.g) AS __n FROM (SELECT \"k0\", 0 AS g, __bk, COUNT(__v) AS __c, MIN(__v) AS __lo, MAX(__v) AS __hi FROM __b GROUP BY \"k0\", __bk) AS __h) WHERE __pre < (__n + 2) // 2 AND __pre + __c >= (__n + 1) // 2) SELECT \"k0\", g, MEDIAN(__v) FILTER(WHERE __rk IN ((__n + 1) // 2, (__n + 2) // 2)) AS \"a0\" FROM (SELECT __t.\"k0\", __t.g, __t.__n, __b.__v, __t.__pre + ROW_NUMBER() OVER (PARTITION BY __t.\"k0\", __t.g, __t.__bk ORDER BY __b.__v) AS __rk FROM __t LEFT JOIN (SELECT * FROM __b WHERE __v BETWEEN (SELECT MIN(__lo) FROM __t) AND (SELECT MAX(__hi) FROM __t)) AS __b ON __b.__bk = __t.__bk AND (__t.\"k0\" IS NOT DISTINCT FROM __b.\"k0\")) GROUP BY \"k0\", g) SELECT \"s0\".\"k0\" AS \"products.category\", \"s0\".\"a0\" AS \"median_revenue\" FROM \"s0\") ORDER BY \"products.category\" ASC NULLS LAST",
+  "one q8": "SELECT * FROM (WITH s0 AS (SELECT \"cafes\".\"region\" AS \"k0\", \"calendar\".\"year\" AS \"k1\", GROUPING_ID(\"cafes\".\"region\", \"calendar\".\"year\") AS \"g\", SUM(\"orders\".\"revenue\") AS \"a0\" FROM \"orders\" LEFT JOIN \"cafes\" ON \"cafes\".\"cafe_id\" = \"orders\".\"cafe_id\" LEFT JOIN \"calendar\" ON \"calendar\".\"day\" = \"orders\".\"order_date\" GROUP BY GROUPING SETS ((\"cafes\".\"region\", \"calendar\".\"year\"), (\"cafes\".\"region\"), ())) SELECT \"s0\".\"k0\" AS \"cafes.region\", \"s0\".\"k1\" AS \"calendar.year\", \"s0\".\"g\" AS \"grouping_id\", \"s0\".\"a0\" AS \"revenue\" FROM \"s0\") ORDER BY \"grouping_id\" ASC NULLS LAST, \"cafes.region\" ASC NULLS LAST, \"calendar.year\" ASC NULLS LAST",
+  "one q9": "SELECT * FROM (WITH s0 AS (SELECT \"customers\".\"segment\" AS \"k0\", COUNT(\"orders\".\"order_id\") AS \"a0\" FROM \"orders\" LEFT JOIN \"customers\" ON \"customers\".\"customer_id\" = \"orders\".\"customer_id\" LEFT JOIN \"cafes\" ON \"cafes\".\"cafe_id\" = \"orders\".\"cafe_id\" WHERE \"cafes\".\"region\" IN ('North', 'South') GROUP BY \"customers\".\"segment\") SELECT \"s0\".\"k0\" AS \"customers.segment\", \"s0\".\"a0\" AS \"orders_rows\" FROM \"s0\") ORDER BY \"customers.segment\" ASC NULLS LAST",
+  "one v:overview/by-dim": "SELECT * FROM (WITH s0 AS (SELECT \"cafes\".\"city\" AS \"k0\", SUM(\"orders\".\"__a0\") AS \"a0\" FROM (SELECT \"orders\".\"cafe_id\", SUM(\"orders\".\"quantity\") AS \"__a0\" FROM \"orders\" GROUP BY \"orders\".\"cafe_id\") AS \"orders\" LEFT JOIN \"cafes\" ON \"cafes\".\"cafe_id\" = \"orders\".\"cafe_id\" GROUP BY \"cafes\".\"city\") SELECT \"s0\".\"k0\" AS \"cafes.city\", \"s0\".\"a0\" AS \"quantity\" FROM \"s0\") ORDER BY \"quantity\" DESC NULLS LAST, \"cafes.city\" ASC NULLS LAST LIMIT 20",
+  "one v:overview/by-month": "SELECT * FROM (WITH s0 AS (SELECT \"calendar\".\"year\" AS \"k0\", \"calendar\".\"month\" AS \"k1\", SUM(\"orders\".\"__a0\") AS \"a0\" FROM (SELECT \"orders\".\"order_date\", SUM(\"orders\".\"quantity\") AS \"__a0\" FROM \"orders\" GROUP BY \"orders\".\"order_date\") AS \"orders\" LEFT JOIN \"calendar\" ON \"calendar\".\"day\" = \"orders\".\"order_date\" GROUP BY \"calendar\".\"year\", \"calendar\".\"month\") SELECT \"s0\".\"k0\" AS \"calendar.year\", \"s0\".\"k1\" AS \"calendar.month\", \"s0\".\"a0\" AS \"quantity\" FROM \"s0\") ORDER BY \"calendar.year\" ASC NULLS LAST, \"calendar.month\" ASC NULLS LAST",
+  "one v:overview/kpi-orders_rows": "WITH s0 AS (SELECT COUNT(\"orders\".\"order_id\") AS \"a0\" FROM \"orders\") SELECT \"s0\".\"a0\" AS \"orders_rows\" FROM \"s0\"",
+  "one v:overview/kpi-quantity": "WITH s0 AS (SELECT SUM(\"orders\".\"quantity\") AS \"a0\" FROM \"orders\") SELECT \"s0\".\"a0\" AS \"quantity\" FROM \"s0\"",
+  "one v:overview/kpi-revenue": "WITH s0 AS (SELECT SUM(\"orders\".\"revenue\") AS \"a0\" FROM \"orders\") SELECT \"s0\".\"a0\" AS \"revenue\" FROM \"s0\"",
+  "owner q0": "WITH s0 AS (SELECT SUM(\"orders\".\"revenue\") AS \"a0\", COUNT(\"orders\".\"order_id\") AS \"a1\", AVG(\"orders\".\"revenue\") AS \"a2\", MAX(\"orders\".\"quantity\") AS \"a3\", SUM(\"orders\".\"revenue\") FILTER(WHERE (\"orders\".\"quantity\" > 1)) AS \"a4\" FROM \"lake\".\"query\".\"orders__<stamp>\" AS \"orders\") SELECT \"s0\".\"a0\" AS \"revenue\", \"s0\".\"a1\" AS \"orders_rows\", \"s0\".\"a2\" AS \"avg_revenue\", \"s0\".\"a3\" AS \"max_quantity\", \"s0\".\"a4\" AS \"big_revenue\" FROM \"s0\"",
+  "owner q1": "SELECT * FROM (WITH s0 AS (SELECT \"orders\".\"cafes.city\" AS \"k0\", SUM(\"orders\".\"revenue\") AS \"a0\" FROM \"lake\".\"query\".\"orders__<stamp>\" AS \"orders\" GROUP BY \"orders\".\"cafes.city\") SELECT \"s0\".\"k0\" AS \"cafes.city\", \"s0\".\"a0\" AS \"revenue\" FROM \"s0\") ORDER BY \"revenue\" DESC NULLS LAST, \"cafes.city\" ASC NULLS LAST LIMIT 3",
+  "owner q10": "SELECT * FROM (WITH s0 AS (SELECT \"orders\".\"calendar.week_year\" AS \"k0\", \"orders\".\"calendar.week\" AS \"k1\", SUM(\"orders\".\"revenue\") AS \"a0\" FROM \"lake\".\"query\".\"orders__<stamp>\" AS \"orders\" GROUP BY \"orders\".\"calendar.week_year\", \"orders\".\"calendar.week\") SELECT \"s0\".\"k0\" AS \"calendar.week_year\", \"s0\".\"k1\" AS \"calendar.week\", \"s0\".\"a0\" AS \"revenue\" FROM \"s0\") ORDER BY \"calendar.week_year\" ASC NULLS LAST, \"calendar.week\" ASC NULLS LAST LIMIT 5",
+  "owner q11": "SELECT * FROM (WITH s0 AS (SELECT \"cafes\".\"region\" AS \"k0\", COUNT(\"cafes\".\"cafe_id\") AS \"a0\" FROM \"cafes\" GROUP BY \"cafes\".\"region\") SELECT \"s0\".\"k0\" AS \"cafes.region\", \"s0\".\"a0\" AS \"cafes_count\" FROM \"s0\") ORDER BY \"cafes.region\" ASC NULLS LAST",
+  "owner q12": "refused: Measure 'cafes_count' can't be filtered or grouped by products.category: its fact table 'cafes' has no relationship to 'products'. Remove products.category from the query or add a relationship.",
+  "owner q13": "SELECT * FROM (WITH s0 AS (SELECT \"orders\".\"cafes.city\" AS \"k0\", SUM(\"orders\".\"revenue\") AS \"a0\" FROM \"lake\".\"query\".\"orders__<stamp>\" AS \"orders\" GROUP BY \"orders\".\"cafes.city\"), s1 AS (SELECT \"cafes\".\"city\" AS \"k0\", COUNT(\"cafes\".\"cafe_id\") AS \"a0\" FROM \"cafes\" GROUP BY \"cafes\".\"city\") SELECT COALESCE(\"s0\".\"k0\", \"s1\".\"k0\") AS \"cafes.city\", \"s0\".\"a0\" AS \"revenue\", \"s1\".\"a0\" AS \"cafes_count\" FROM \"s0\" FULL JOIN \"s1\" ON \"s0\".\"k0\" IS NOT DISTINCT FROM \"s1\".\"k0\") ORDER BY \"cafes.city\" ASC NULLS LAST",
+  "owner q14": "refused: Unknown table in dimension nope.x; use a model table: cafes, calendar, customers, orders, products.",
+  "owner q2": "SELECT * FROM (WITH s0 AS (SELECT \"orders\".\"calendar.year\" AS \"k0\", \"orders\".\"calendar.month\" AS \"k1\", SUM(\"orders\".\"quantity\") AS \"a0\" FROM \"lake\".\"query\".\"orders__<stamp>\" AS \"orders\" GROUP BY \"orders\".\"calendar.year\", \"orders\".\"calendar.month\"), s1 AS (SELECT \"__m\".\"year\" AS \"k0\", \"__m\".\"month\" AS \"k1\", SUM(\"__f\".\"__a0\") AS \"a0\" FROM (SELECT \"month\", \"year\", MIN(\"day\") AS lo, MAX(\"day\") + INTERVAL '1' DAY AS hi FROM \"calendar\" WHERE TRUE GROUP BY \"month\", \"year\") AS \"__m\" JOIN (SELECT \"orders\".\"order_date\" AS \"__d\", SUM(\"orders\".\"quantity\") AS \"__a0\" FROM \"lake\".\"query\".\"orders__<stamp>\" AS \"orders\" WHERE \"orders\".\"order_date\" >= (SELECT MIN((__m.lo) - INTERVAL '1' MONTH) FROM (SELECT \"month\", \"year\", MIN(\"day\") AS lo, MAX(\"day\") + INTERVAL '1' DAY AS hi FROM \"calendar\" WHERE TRUE GROUP BY \"month\", \"year\") AS \"__m\") AND \"orders\".\"order_date\" < (SELECT MAX(__m.lo) FROM (SELECT \"month\", \"year\", MIN(\"day\") AS lo, MAX(\"day\") + INTERVAL '1' DAY AS hi FROM \"calendar\" WHERE TRUE GROUP BY \"month\", \"year\") AS \"__m\") GROUP BY \"orders\".\"order_date\") AS \"__f\" ON \"__f\".\"__d\" >= (__m.lo) - INTERVAL '1' MONTH AND \"__f\".\"__d\" < __m.lo GROUP BY \"__m\".\"year\", \"__m\".\"month\") SELECT COALESCE(\"s0\".\"k0\", \"s1\".\"k0\") AS \"calendar.year\", COALESCE(\"s0\".\"k1\", \"s1\".\"k1\") AS \"calendar.month\", \"s0\".\"a0\" AS \"quantity\", \"s1\".\"a0\" AS \"quantity_prev\", (\"s0\".\"a0\" - \"s1\".\"a0\") / NULLIF(ABS(\"s1\".\"a0\"), 0) AS \"quantity_change_pct\" FROM \"s0\" FULL JOIN \"s1\" ON \"s0\".\"k0\" IS NOT DISTINCT FROM \"s1\".\"k0\" AND \"s0\".\"k1\" IS NOT DISTINCT FROM \"s1\".\"k1\") ORDER BY \"calendar.year\" ASC NULLS LAST, \"calendar.month\" ASC NULLS LAST",
+  "owner q3": "SELECT * FROM (WITH s0 AS (SELECT \"orders\".\"products.category\" AS \"k0\", GROUPING_ID(\"orders\".\"products.category\") AS \"g\", SUM(\"orders\".\"revenue\") AS \"a0\", AVG(\"orders\".\"revenue\") AS \"a1\" FROM \"lake\".\"query\".\"orders__<stamp>\" AS \"orders\" GROUP BY GROUPING SETS ((\"orders\".\"products.category\"), ())) SELECT \"s0\".\"k0\" AS \"products.category\", \"s0\".\"g\" AS \"grouping_id\", \"s0\".\"a0\" AS \"revenue\", \"s0\".\"a1\" AS \"avg_revenue\" FROM \"s0\") ORDER BY \"grouping_id\" ASC NULLS LAST, \"products.category\" ASC NULLS LAST",
+  "owner q4": "SELECT * FROM (WITH s0 AS (SELECT \"orders\".\"cafes.region\" AS \"k0\", SUM(\"orders\".\"revenue\") AS \"a0\" FROM \"lake\".\"query\".\"orders__<stamp>\" AS \"orders\" WHERE (\"orders\".\"products.category\" <> 'Tea') GROUP BY \"orders\".\"cafes.region\") SELECT \"s0\".\"k0\" AS \"cafes.region\", \"s0\".\"a0\" AS \"revenue\" FROM \"s0\") ORDER BY \"cafes.region\" ASC NULLS LAST",
+  "owner q5": "SELECT * FROM (WITH s0 AS (SELECT \"orders\".\"cafes.city\" AS \"k0\", SUM(\"orders\".\"revenue\") AS \"a0\" FROM \"lake\".\"query\".\"orders__<stamp>\" AS \"orders\" GROUP BY \"orders\".\"cafes.city\"), s1 AS (SELECT SUM(\"orders\".\"revenue\") AS \"a0\" FROM \"lake\".\"query\".\"orders__<stamp>\" AS \"orders\") SELECT \"s0\".\"k0\" AS \"cafes.city\", \"s0\".\"a0\" AS \"revenue\", \"s0\".\"a0\" / NULLIF(\"s1\".\"a0\", 0) AS \"share\" FROM \"s0\" LEFT JOIN \"s1\" ON TRUE) ORDER BY \"cafes.city\" ASC NULLS LAST",
+  "owner q6": "SELECT * FROM (WITH s0 AS (SELECT \"orders\".\"cafes.city\" AS \"k0\", COUNT(DISTINCT \"orders\".\"customer_id\") AS \"a0\", SUM(\"orders\".\"revenue\") AS \"a1\" FROM \"lake\".\"query\".\"orders__<stamp>\" AS \"orders\" GROUP BY \"orders\".\"cafes.city\") SELECT \"s0\".\"k0\" AS \"cafes.city\", \"s0\".\"a0\" AS \"customers\", \"s0\".\"a1\" AS \"revenue\" FROM \"s0\") ORDER BY \"cafes.city\" ASC NULLS LAST",
+  "owner q7": "SELECT * FROM (WITH s0 AS (WITH __r AS NOT MATERIALIZED (SELECT \"orders\".\"products.category\" AS \"k0\", \"orders\".\"revenue\" AS \"__v\" FROM \"lake\".\"query\".\"orders__<stamp>\" AS \"orders\"), __s AS MATERIALIZED (SELECT lo, CASE WHEN num AND hi > lo THEN 1024 / (hi - lo) END AS sc FROM (SELECT TRY_CAST(MIN(__v) AS DOUBLE) AS lo, TRY_CAST(MAX(__v) AS DOUBLE) AS hi, REGEXP_FULL_MATCH(TYPEOF(MIN(__v)), 'U?(TINYINT|SMALLINT|INTEGER|BIGINT|HUGEINT)|FLOAT|DOUBLE|DECIMAL\\(.*') AS num FROM __r)), __b AS NOT MATERIALIZED (SELECT __r.*, CASE WHEN __v IS NULL THEN NULL WHEN NOT sc IS NULL THEN CAST(LEAST(FLOOR((TRY_CAST(__v AS DOUBLE) - lo) * sc), 1023) AS INT) ELSE 0 END AS __bk FROM __r, __s), __t AS MATERIALIZED (SELECT * FROM (SELECT *, SUM(__c) OVER (PARTITION BY __h.\"k0\", __h.g ORDER BY __bk) - __c AS __pre, SUM(__c) OVER (PARTITION BY __h.\"k0\", __h.g) AS __n FROM (SELECT \"k0\", 0 AS g, __bk, COUNT(__v) AS __c, MIN(__v) AS __lo, MAX(__v) AS __hi FROM __b GROUP BY \"k0\", __bk) AS __h) WHERE __pre < (__n + 2) // 2 AND __pre + __c >= (__n + 1) // 2) SELECT \"k0\", g, MEDIAN(__v) FILTER(WHERE __rk IN ((__n + 1) // 2, (__n + 2) // 2)) AS \"a0\" FROM (SELECT __t.\"k0\", __t.g, __t.__n, __b.__v, __t.__pre + ROW_NUMBER() OVER (PARTITION BY __t.\"k0\", __t.g, __t.__bk ORDER BY __b.__v) AS __rk FROM __t LEFT JOIN (SELECT * FROM __b WHERE __v BETWEEN (SELECT MIN(__lo) FROM __t) AND (SELECT MAX(__hi) FROM __t)) AS __b ON __b.__bk = __t.__bk AND (__t.\"k0\" IS NOT DISTINCT FROM __b.\"k0\")) GROUP BY \"k0\", g) SELECT \"s0\".\"k0\" AS \"products.category\", \"s0\".\"a0\" AS \"median_revenue\" FROM \"s0\") ORDER BY \"products.category\" ASC NULLS LAST",
+  "owner q8": "SELECT * FROM (WITH s0 AS (SELECT \"orders\".\"cafes.region\" AS \"k0\", \"orders\".\"calendar.year\" AS \"k1\", GROUPING_ID(\"orders\".\"cafes.region\", \"orders\".\"calendar.year\") AS \"g\", SUM(\"orders\".\"revenue\") AS \"a0\" FROM \"lake\".\"query\".\"orders__<stamp>\" AS \"orders\" GROUP BY GROUPING SETS ((\"orders\".\"cafes.region\", \"orders\".\"calendar.year\"), (\"orders\".\"cafes.region\"), ())) SELECT \"s0\".\"k0\" AS \"cafes.region\", \"s0\".\"k1\" AS \"calendar.year\", \"s0\".\"g\" AS \"grouping_id\", \"s0\".\"a0\" AS \"revenue\" FROM \"s0\") ORDER BY \"grouping_id\" ASC NULLS LAST, \"cafes.region\" ASC NULLS LAST, \"calendar.year\" ASC NULLS LAST",
+  "owner q9": "SELECT * FROM (WITH s0 AS (SELECT \"orders\".\"customers.segment\" AS \"k0\", COUNT(\"orders\".\"order_id\") AS \"a0\" FROM \"lake\".\"query\".\"orders__<stamp>\" AS \"orders\" WHERE \"orders\".\"cafes.region\" IN ('North', 'South') GROUP BY \"orders\".\"customers.segment\") SELECT \"s0\".\"k0\" AS \"customers.segment\", \"s0\".\"a0\" AS \"orders_rows\" FROM \"s0\") ORDER BY \"customers.segment\" ASC NULLS LAST",
+  "owner v:overview/by-dim": "SELECT * FROM (WITH s0 AS (SELECT \"orders\".\"cafes.city\" AS \"k0\", SUM(\"orders\".\"quantity\") AS \"a0\" FROM \"lake\".\"query\".\"orders__<stamp>\" AS \"orders\" GROUP BY \"orders\".\"cafes.city\") SELECT \"s0\".\"k0\" AS \"cafes.city\", \"s0\".\"a0\" AS \"quantity\" FROM \"s0\") ORDER BY \"quantity\" DESC NULLS LAST, \"cafes.city\" ASC NULLS LAST LIMIT 20",
+  "owner v:overview/by-month": "SELECT * FROM (WITH s0 AS (SELECT \"orders\".\"calendar.year\" AS \"k0\", \"orders\".\"calendar.month\" AS \"k1\", SUM(\"orders\".\"quantity\") AS \"a0\" FROM \"lake\".\"query\".\"orders__<stamp>\" AS \"orders\" GROUP BY \"orders\".\"calendar.year\", \"orders\".\"calendar.month\") SELECT \"s0\".\"k0\" AS \"calendar.year\", \"s0\".\"k1\" AS \"calendar.month\", \"s0\".\"a0\" AS \"quantity\" FROM \"s0\") ORDER BY \"calendar.year\" ASC NULLS LAST, \"calendar.month\" ASC NULLS LAST",
+  "owner v:overview/kpi-orders_rows": "WITH s0 AS (SELECT COUNT(\"orders\".\"order_id\") AS \"a0\" FROM \"lake\".\"query\".\"orders__<stamp>\" AS \"orders\") SELECT \"s0\".\"a0\" AS \"orders_rows\" FROM \"s0\"",
+  "owner v:overview/kpi-quantity": "WITH s0 AS (SELECT SUM(\"orders\".\"quantity\") AS \"a0\" FROM \"lake\".\"query\".\"orders__<stamp>\" AS \"orders\") SELECT \"s0\".\"a0\" AS \"quantity\" FROM \"s0\"",
+  "owner v:overview/kpi-revenue": "WITH s0 AS (SELECT SUM(\"orders\".\"revenue\") AS \"a0\" FROM \"lake\".\"query\".\"orders__<stamp>\" AS \"orders\") SELECT \"s0\".\"a0\" AS \"revenue\" FROM \"s0\""
+ },
+ "queries": [
+  {
+   "measures": [
+    "revenue",
+    "orders_rows",
+    "avg_revenue",
+    "max_quantity",
+    "big_revenue"
+   ]
+  },
+  {
+   "dimensions": [
+    "cafes.city"
+   ],
+   "limit": 3,
+   "measures": [
+    "revenue"
+   ],
+   "order_by": [
+    {
+     "desc": true,
+     "field": "revenue"
+    }
+   ]
+  },
+  {
+   "dimensions": [
+    "calendar.year",
+    "calendar.month"
+   ],
+   "measures": [
+    "quantity",
+    "quantity_prev",
+    "quantity_change_pct"
+   ]
+  },
+  {
+   "dimensions": [
+    "products.category"
+   ],
+   "measures": [
+    "revenue",
+    "avg_revenue"
+   ],
+   "totals": [
+    []
+   ]
+  },
+  {
+   "dimensions": [
+    "cafes.region"
+   ],
+   "filters": [
+    {
+     "column": "products.category",
+     "op": "<>",
+     "value": "Tea"
+    }
+   ],
+   "measures": [
+    "revenue"
+   ]
+  },
+  {
+   "dimensions": [
+    "cafes.city"
+   ],
+   "expressions": [
+    {
+     "expr": "DIVIDE([revenue], IGNORE([revenue], cafes.city))",
+     "name": "share"
+    }
+   ],
+   "measures": [
+    "revenue"
+   ]
+  },
+  {
+   "dimensions": [
+    "cafes.city"
+   ],
+   "measures": [
+    "customers",
+    "revenue"
+   ]
+  },
+  {
+   "dimensions": [
+    "products.category"
+   ],
+   "measures": [
+    "median_revenue"
+   ]
+  },
+  {
+   "dimensions": [
+    "cafes.region",
+    "calendar.year"
+   ],
+   "measures": [
+    "revenue"
+   ],
+   "totals": [
+    [
+     "cafes.region"
+    ],
+    []
+   ]
+  },
+  {
+   "dimensions": [
+    "customers.segment"
+   ],
+   "filters": [
+    {
+     "column": "cafes.region",
+     "op": "in",
+     "value": [
+      "North",
+      "South"
+     ]
+    }
+   ],
+   "measures": [
+    "orders_rows"
+   ]
+  },
+  {
+   "dimensions": [
+    "calendar.week_year",
+    "calendar.week"
+   ],
+   "limit": 5,
+   "measures": [
+    "revenue"
+   ]
+  },
+  {
+   "dimensions": [
+    "cafes.region"
+   ],
+   "measures": [
+    "cafes_count"
+   ]
+  },
+  {
+   "dimensions": [
+    "products.category"
+   ],
+   "measures": [
+    "cafes_count"
+   ]
+  },
+  {
+   "dimensions": [
+    "cafes.city"
+   ],
+   "measures": [
+    "revenue",
+    "cafes_count"
+   ]
+  },
+  {
+   "dimensions": [
+    "nope.x"
+   ],
+   "measures": [
+    "revenue"
+   ]
+  },
+  {
+   "dimensions": [],
+   "filters": [],
+   "measures": [
+    "orders_rows"
+   ]
+  },
+  {
+   "dimensions": [],
+   "filters": [],
+   "measures": [
+    "quantity"
+   ]
+  },
+  {
+   "dimensions": [],
+   "filters": [],
+   "measures": [
+    "revenue"
+   ]
+  },
+  {
+   "dimensions": [
+    "cafes.city"
+   ],
+   "filters": [],
+   "limit": 20,
+   "measures": [
+    "quantity"
+   ],
+   "order_by": [
+    {
+     "desc": true,
+     "field": "quantity"
+    }
+   ]
+  },
+  {
+   "dimensions": [
+    "calendar.year",
+    "calendar.month"
+   ],
+   "filters": [],
+   "measures": [
+    "quantity"
+   ]
+  }
+ ],
+ "rls": {
+  "all": {
+   "filtered": [
+    "cafes",
+    "orders"
+   ],
+   "keys": {
+    "cafes": [
+     "region",
+     "cafe_id"
+    ],
+    "orders": [
+     "cafe_id"
+    ]
+   }
+  },
+  "north": {
+   "conditions": {
+    "cafes": "list_contains([CAST('North' AS VARCHAR)], \"region\") AND list_contains([CAST('CF001' AS VARCHAR), CAST('CF002' AS VARCHAR), CAST('CF003' AS VARCHAR), CAST('CF004' AS VARCHAR), CAST('CF005' AS VARCHAR), CAST('CF006' AS VARCHAR), CAST('CF007' AS VARCHAR), CAST('CF008' AS VARCHAR), CAST('CF009' AS VARCHAR), CAST('CF010' AS VARCHAR), CAST('CF011' AS VARCHAR), CAST('CF012' AS VARCHAR), CAST('CF013' AS VARCHAR), CAST('CF014' AS VARCHAR), CAST('CF015' AS VARCHAR), CAST('CF016' AS VARCHAR), CAST('CF017' AS VARCHAR), CAST('CF018' AS VARCHAR), CAST('CF019' AS VARCHAR), CAST('CF020' AS VARCHAR), CAST('CF021' AS VARCHAR), CAST('CF022' AS VARCHAR), CAST('CF023' AS VARCHAR), CAST('CF024' AS VARCHAR), CAST('CF025' AS VARCHAR), CAST('CF026' AS VARCHAR), CAST('CF027' AS VARCHAR), CAST('CF028' AS VARCHAR), CAST('CF029' AS VARCHAR), CAST('CF030' AS VARCHAR), CAST('CF031' AS VARCHAR), CAST('CF032' AS VARCHAR), CAST('CF033' AS VARCHAR), CAST('CF034' AS VARCHAR), CAST('CF035' AS VARCHAR), CAST('CF036' AS VARCHAR), CAST('CF037' AS VARCHAR), CAST('CF038' AS VARCHAR), CAST('CF039' AS VARCHAR), CAST('CF040' AS VARCHAR), CAST('CF041' AS VARCHAR), CAST('CF042' AS VARCHAR), CAST('CF043' AS VARCHAR), CAST('CF044' AS VARCHAR), CAST('CF045' AS VARCHAR), CAST('CF046' AS VARCHAR), CAST('CF047' AS VARCHAR), CAST('CF048' AS VARCHAR), CAST('CF049' AS VARCHAR), CAST('CF050' AS VARCHAR), CAST('CF051' AS VARCHAR), CAST('CF052' AS VARCHAR), CAST('CF053' AS VARCHAR), CAST('CF054' AS VARCHAR), CAST('CF055' AS VARCHAR), CAST('CF056' AS VARCHAR), CAST('CF057' AS VARCHAR), CAST('CF058' AS VARCHAR), CAST('CF059' AS VARCHAR), CAST('CF060' AS VARCHAR), CAST('CF061' AS VARCHAR), CAST('CF062' AS VARCHAR), CAST('CF063' AS VARCHAR), CAST('CF064' AS VARCHAR), CAST('CF065' AS VARCHAR), CAST('CF066' AS VARCHAR), CAST('CF067' AS VARCHAR), CAST('CF068' AS VARCHAR), CAST('CF069' AS VARCHAR), CAST('CF070' AS VARCHAR), CAST('CF071' AS VARCHAR), CAST('CF072' AS VARCHAR), CAST('CF073' AS VARCHAR), CAST('CF074' AS VARCHAR), CAST('CF075' AS VARCHAR), CAST('CF076' AS VARCHAR), CAST('CF077' AS VARCHAR), CAST('CF078' AS VARCHAR), CAST('CF079' AS VARCHAR), CAST('CF080' AS VARCHAR), CAST('CF081' AS VARCHAR), CAST('CF082' AS VARCHAR), CAST('CF083' AS VARCHAR), CAST('CF084' AS VARCHAR), CAST('CF085' AS VARCHAR), CAST('CF086' AS VARCHAR), CAST('CF087' AS VARCHAR), CAST('CF088' AS VARCHAR), CAST('CF089' AS VARCHAR), CAST('CF090' AS VARCHAR), CAST('CF091' AS VARCHAR), CAST('CF092' AS VARCHAR), CAST('CF093' AS VARCHAR), CAST('CF094' AS VARCHAR), CAST('CF095' AS VARCHAR), CAST('CF096' AS VARCHAR), CAST('CF097' AS VARCHAR), CAST('CF098' AS VARCHAR), CAST('CF099' AS VARCHAR), CAST('CF100' AS VARCHAR), CAST('CF101' AS VARCHAR), CAST('CF102' AS VARCHAR), CAST('CF103' AS VARCHAR), CAST('CF104' AS VARCHAR), CAST('CF105' AS VARCHAR), CAST('CF106' AS VARCHAR), CAST('CF107' AS VARCHAR), CAST('CF108' AS VARCHAR), CAST('CF109' AS VARCHAR), CAST('CF110' AS VARCHAR), CAST('CF111' AS VARCHAR), CAST('CF112' AS VARCHAR), CAST('CF113' AS VARCHAR), CAST('CF114' AS VARCHAR), CAST('CF115' AS VARCHAR), CAST('CF116' AS VARCHAR), CAST('CF117' AS VARCHAR), CAST('CF118' AS VARCHAR), CAST('CF119' AS VARCHAR), CAST('CF120' AS VARCHAR)], \"cafe_id\")",
+    "orders": "list_contains([CAST('CF002' AS VARCHAR), CAST('CF009' AS VARCHAR), CAST('CF012' AS VARCHAR), CAST('CF014' AS VARCHAR), CAST('CF021' AS VARCHAR), CAST('CF024' AS VARCHAR), CAST('CF026' AS VARCHAR), CAST('CF033' AS VARCHAR), CAST('CF036' AS VARCHAR), CAST('CF038' AS VARCHAR), CAST('CF045' AS VARCHAR), CAST('CF048' AS VARCHAR), CAST('CF050' AS VARCHAR), CAST('CF057' AS VARCHAR), CAST('CF060' AS VARCHAR), CAST('CF062' AS VARCHAR), CAST('CF069' AS VARCHAR), CAST('CF072' AS VARCHAR), CAST('CF074' AS VARCHAR), CAST('CF081' AS VARCHAR), CAST('CF084' AS VARCHAR), CAST('CF086' AS VARCHAR), CAST('CF093' AS VARCHAR), CAST('CF096' AS VARCHAR), CAST('CF098' AS VARCHAR), CAST('CF105' AS VARCHAR), CAST('CF108' AS VARCHAR), CAST('CF110' AS VARCHAR), CAST('CF117' AS VARCHAR), CAST('CF120' AS VARCHAR)], \"cafe_id\")"
+   },
+   "explain": "-- Row-level security (SE-6): every table below is read through these filters\n-- cafes: \"region\" IN ('North')\n-- cafes: \"cafe_id\" IN ('CF001', 'CF002', 'CF003', 'CF004', 'CF005', 'CF006', 'CF007', 'CF008', 'CF009', 'CF010', 'CF011', 'CF012', 'CF013', 'CF014', 'CF015', 'CF016', 'CF017', 'CF018', 'CF019', 'CF020', 'CF021', 'CF022', 'CF023', 'CF024', 'CF025', 'CF026', 'CF027', 'CF028', 'CF029', 'CF030', 'CF031', 'CF032', 'CF033', 'CF034', 'CF035', 'CF036', 'CF037', 'CF038', 'CF039', 'CF040', 'CF041', 'CF042', 'CF043', 'CF044', 'CF045', 'CF046', 'CF047', 'CF048', 'CF049', 'CF050', 'CF051', 'CF052', 'CF053', 'CF054', 'CF055', 'CF056', 'CF057', 'CF058', 'CF059', 'CF060', 'CF061', 'CF062', 'CF063', 'CF064', 'CF065', 'CF066', 'CF067', 'CF068', 'CF069', 'CF070', 'CF071', 'CF072', 'CF073', 'CF074', 'CF075', 'CF076', 'CF077', 'CF078', 'CF079', 'CF080', 'CF081', 'CF082', 'CF083', 'CF084', 'CF085', 'CF086', 'CF087', 'CF088', 'CF089', 'CF090', 'CF091', 'CF092', 'CF093', 'CF094', 'CF095', 'CF096', 'CF097', 'CF098', 'CF099', 'CF100', 'CF101', 'CF102', 'CF103', 'CF104', 'CF105', 'CF106', 'CF107', 'CF108', 'CF109', 'CF110', 'CF111', 'CF112', 'CF113', 'CF114', 'CF115', 'CF116', 'CF117', 'CF118', 'CF119', 'CF120')\n-- orders: only rows whose cafe_id is a row of cafes you may see\n"
+  },
+  "one": {
+   "conditions": {
+    "cafes": "list_contains([CAST('East' AS VARCHAR), CAST('North' AS VARCHAR), CAST('South' AS VARCHAR), CAST('West' AS VARCHAR)], \"region\") AND list_contains([CAST('CF002' AS VARCHAR)], \"cafe_id\")",
+    "orders": "list_contains([CAST('CF002' AS VARCHAR)], \"cafe_id\")"
+   },
+   "explain": "-- Row-level security (SE-6): every table below is read through these filters\n-- cafes: \"region\" IN ('East', 'North', 'South', 'West')\n-- cafes: \"cafe_id\" IN ('CF002')\n-- orders: only rows whose cafe_id is a row of cafes you may see\n"
+  }
+ }
+}
