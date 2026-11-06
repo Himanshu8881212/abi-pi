@@ -7,7 +7,7 @@ ABI container as its owner (ABI_USER, ABI_PASSWORD from the container's environm
 Makes project brewline (bench/brewline.py at scale 0.01, loaded with abi.load as bench/perf.py's `project`: tables,
 model, starter measures, Overview), a `showcase` report with a visual of every type, a dataset, an ML forecast
 (trained), a flow on a schedule (saved switched off), a Monitor check (its alert flow on, so the Inbox fills), a vault
-document, glossary terms, a saved Explore analysis, the accounts editor1 (Editor) and viewer1 (Viewer, a row-level rule:
+document, glossary terms, a saved Explore analysis, the accounts editor1 (Editor), owner2 (a project Owner no rule lists) and viewer1 (Viewer, a row-level rule:
 the South region only), one commit, a published copy (Publish) and Home widgets for the owner and viewer1.
 
 Idempotent: what exists is kept (accounts, the trained model, the loaded data); the rest is saved again as it was.
@@ -161,7 +161,9 @@ def train() -> None:
 def people(o: perf.App, old: dict) -> dict:
     have = {u["name"] for u in abi.call("list_users")["users"]}
     out = {"owner": {"name": os.environ.get("ABI_USER") or "admin", "password": os.environ["ABI_PASSWORD"]}}
-    for role, name in (("editor", "editor1"), ("viewer", "viewer1")):
+    # owner2: an Owner of the project (not of the workspace) whom no row rule lists: Viewer mode and the phone must not
+    # leave them with empty reports (1.2.5: the published copy gave everyone Viewer, and its rules then hid every row)
+    for role, name in (("editor", "editor1"), ("viewer", "viewer1"), ("owner2", "owner2")):
         pw = (old.get(role) or {}).get("password")
         if name not in have:
             pw = secrets.token_urlsafe(16)
@@ -169,11 +171,11 @@ def people(o: perf.App, old: dict) -> dict:
         elif not pw:  # an account from before whose password is lost: a new one
             pw = secrets.token_urlsafe(16)
             ask(o, "/admin/setpass", {"user": name, "password": pw})
-        ask(o, "/admin/role", {"user": name, "role": role})
+        ask(o, "/admin/role", {"user": name, "role": role.rstrip("2")})
         out[role] = {"name": name, "password": pw}
     ids = {u["name"]: u["id"] for u in abi.call("rls_rules", project=P)["accounts"]}
     perf.sure("set_rls_rule", project=P, id="viewer_region", table="cafes", column="region", users={str(ids["viewer1"]): ["South"]})
-    log("editor1 (Editor) and viewer1 (Viewer, South only)")
+    log("editor1 (Editor), viewer1 (Viewer, South only) and owner2 (Owner, in no rule)")
     return out
 
 

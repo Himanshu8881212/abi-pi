@@ -3,7 +3,7 @@
 # then its PNGs and steps.jsonl copied back into OUTDIR (bench/UX.md).
 #
 #   bench/ux_shots.sh NAME OUTDIR --tour [--role owner|viewer] [--width 1440|390]
-#   bench/ux_shots.sh NAME OUTDIR steps.json [--role owner|editor|viewer] [--width 1440|390]
+#   bench/ux_shots.sh NAME OUTDIR steps.json [--role owner|owner2|editor|viewer] [--width 1440|390]
 #
 # The accounts come from the root-only /root/abi-ux-NAME-accounts on the LXC, passed in the container's environment
 # (ABI_UX_ACCOUNTS), never on a command line.
@@ -12,7 +12,7 @@ set -eu
 NAME=$1 OUT=$2 WHAT=$3
 shift 3
 case $NAME in ''|*[!a-z0-9-]*) echo "NAME: lowercase letters, digits and -" >&2; exit 2 ;; esac
-for x in "$@"; do case $x in --role|--width|owner|editor|viewer|1440|390) ;; *) echo "Unknown option $x" >&2; exit 2 ;; esac; done
+for x in "$@"; do case $x in --role|--width|owner|owner2|editor|viewer|1440|390) ;; *) echo "Unknown option $x" >&2; exit 2 ;; esac; done
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 C=abi-ux-$NAME
 O=/opt/abi-ux-$NAME

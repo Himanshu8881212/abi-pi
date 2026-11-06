@@ -22,7 +22,8 @@ ABI_UX_ACCOUNTS holds bench/ux_seed.py's output ({role: {name, password}}), neve
     {"password": "selector"}             type the signed-in role's own password (from ABI_UX_ACCOUNTS, never a steps file)
 A "type" value's {t} becomes a number that differs per run (a new person's name on a rerun).
 steps.jsonl: one line per step with ok or the error, and the console and page errors it caused.
---tour: every page of the sidebar plus the reports, the main dialogs, as owner and viewer at 1440 and 390 px
+--tour: every page of the sidebar plus the reports, the main dialogs, as owner and viewer at 1440 and 390 px, then the
+Overview on a phone as owner2 (a project Owner in no row rule: its numbers must show)
 (--role or --width narrows it).
 """
 import argparse
@@ -169,6 +170,12 @@ class Shot:
         self.ctx.close()
 
 
+# the phone always shows Viewer mode; for an Owner that is a read-only face, never their row rules as a Viewer (1.2.5)
+OWNER_PHONE = [{"goto": "rep:overview"}, {"wait": 2500}, {"eval": "(()=>{const v=[...document.querySelectorAll('.kpi .v')]"
+               ".map(e=>e.textContent.trim());if(!v.length||v.some(x=>x==='—'||!x))throw new Error('empty numbers for a "
+               "project owner on the phone: '+JSON.stringify(v));return v})()"}, {"shot": "owner-phone-report", "viewport": True}]
+
+
 def tour(sh: Shot) -> None:
     pg = sh.pg
     pages = pg.eval_on_selector_all("aside button.it", "bs => bs.map(b => b.dataset.k)")
@@ -188,7 +195,7 @@ def tour(sh: Shot) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("steps", nargs="?", help="a JSON file with a list of steps")
-    ap.add_argument("--role", choices=["owner", "editor", "viewer"])
+    ap.add_argument("--role", choices=["owner", "owner2", "editor", "viewer"])
     ap.add_argument("--width", type=int, choices=[1440, 390])
     ap.add_argument("--out", required=True)
     ap.add_argument("--tour", action="store_true", help="every page and the main dialogs")
@@ -210,6 +217,12 @@ def main() -> None:
                     tour(sh) if a.tour else sh.run(steps)
                 finally:
                     sh.close()
+        if a.tour and not a.role and "owner2" in acc:  # a project Owner no row rule lists, on a phone: the numbers, not "—"
+            sh = Shot(b, "owner2", 390, out, acc)
+            try:
+                sh.run(OWNER_PHONE)
+            finally:
+                sh.close()
         b.close()
     rows = [json.loads(x) for x in (out / "steps.jsonl").read_text().splitlines()]
     print(json.dumps({"shots": len(list(out.glob("*.png"))), "steps": len(rows), "failed": sum(not r["ok"] for r in rows),

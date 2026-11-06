@@ -860,6 +860,8 @@ function report(box,rep){let flt=PENDING.filters||RFLT[rep.id]||[];PENDING.filte
    $('h3 span',c).textContent=v.title||v.id;if(v.text===undefined)$('h3',c).append(pinBtn({kind:'visual',ref:{report:rep.id,page:p.id,visual:v.id},title:v.title||v.id}));grid.append(c);const body=$('.body',c),d=v.live||v.data;
    if(!d||d.error||v.error){body.append(h('div','bad',d?.error||v.error||'no data'));return}
    if(flt.length&&(!d.rows.length||d.rows.every(r=>r.every(x=>x===null||typeof x!=='number')))){body.append(h('p','empty','No rows for these filters: they fall outside what this visual covers (the report\'s period or population). Remove a filter to see it again.'));return}
+   // no filter and no rows: a row rule leaves this person nothing here; say so, never a bare —
+   if(!flt.length&&(window.ME||{}).role==='viewer'&&d.type!=='slicer'&&(!d.rows.length||d.rows.every(r=>r.every(x=>x===null)))){body.append(emptyBox('lock','Your access shows no rows here','A row rule doesn\'t list you for this data. A project owner can add you to it in Security.'));return}
    if(d.type==='slicer'&&v.dim){$('[data-a=t]',c).remove();slicer(body,d,vals(v.dim),vs=>setVals(v.dim,vs));$('[data-a=c]',c).onclick=()=>csv(d);
     $('[data-a=h]',c).onclick=()=>{const x=$('.how',c);x.hidden=!x.hidden;x.textContent=v.how};return}
    let asTable=false;const dr=()=>{body.innerHTML='';asTable?table(body,d):chart(body,d)};
@@ -2149,6 +2151,9 @@ def read(action: str, project: str, **kw):
         return None
 
 
+ROLES_SYNCED: set[str] = set()  # projects whose published copy's roles this process has matched to the project's
+
+
 def pub_id(project: str) -> str:
     """The published copy Viewer reads: a sibling ABI project that changes only by Publish."""
     return f"{project}_pub"[:63]
@@ -2327,17 +2332,20 @@ def publish_layouts(project: str, by: str = "") -> None:
 
 
 def publish_roles(project: str, pub: str) -> None:
-    """Everyone with a role on the project reads its published copy: Viewer there. A role given before the first Publish,
-    or in ABI's own app, left that person an empty Viewer (release run 31 Oct). Removing a role stays with Users & access
-    (it is destructive and asks first)."""
+    """Everyone with a role on the project reads its published copy with that same role. A role given before the first
+    Publish, or in ABI's own app, left that person an empty Viewer (release run 31 Oct); and Viewer on the copy for
+    everyone made ABI's row rules ("a Viewer not listed sees no rows") hide every row from an owner or editor reading the
+    copy in Viewer mode or on a phone (1.2.5). Viewer mode is the app's read-only face, never less access. Removing a role
+    stays with Users & access (it is destructive and asks first)."""
     try:
         users = abi.call("list_users").get("users") or []
     except abi.ActionError:
         return  # not an owner: the owner's Publish does it
     for u in users:
-        if (u.get("roles") or {}).get(project) and not (u.get("roles") or {}).get(pub) and not u.get("workspace_owner"):
+        role = (u.get("roles") or {}).get(project)
+        if role and role != "none" and (u.get("roles") or {}).get(pub) != role and not u.get("workspace_owner"):
             try:
-                abi.call("set_role", project=pub, user=u["name"], role="viewer")
+                abi.call("set_role", project=pub, user=u["name"], role=role)
             except abi.ActionError as e:
                 print(f"abi-pi: viewer role on {pub} for {u['name']} not set: {e.body.get('message')}", file=sys.stderr)
 
@@ -3340,6 +3348,9 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
             if not p:
                 return self.reply(200, NO_PROJECT.replace("%NAME%", html.escape(self.sess["name"])).encode(), "text/html; charset=utf-8")
             opening(p)
+            if role_of(self.sess, p) == "owner" and p not in ROLES_SYNCED and abi.folder(pub_id(p)):  # an older install's copy: Viewer for all
+                ROLES_SYNCED.add(p)
+                publish_roles(p, pub_id(p))
             me = {"name": self.sess["name"] if self.sess else None, "admin": bool(not self.sess or self.sess["admin"]), "signin": signin,
                   "role": role_of(self.sess, p), **access(self.sess, p), "source": source_url(), "version": VERSION,
                   "novideo": video.missing(), "base": public_base(os.environ.get("ABI_PUBLIC_URL", ""), self.headers.get("Host", ""),
@@ -3819,7 +3830,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                         if role == "none":
                             abi.call("remove_role", project=pub, user=who)
                         else:
-                            abi.call("set_role", project=pub, user=who, role="viewer")
+                            abi.call("set_role", project=pub, user=who, role=role)  # the same role: rules follow it
                     except abi.ActionError:
                         return "Saved; set the published copy's role in ABI too."
                 return "Saved through ABI."

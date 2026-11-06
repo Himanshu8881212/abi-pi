@@ -7,7 +7,7 @@
 #   bench/ux_install.sh --redeploy BRANCH_OR_TAG NAME [PORT]   rebuild on another ref, restart, keep the volume
 #
 # Root-only files on the LXC: /root/abi-ux-NAME.env (the owner's random password) and /root/abi-ux-NAME-accounts
-# (bench/ux_seed.py's output: owner, editor1, viewer1). No password or key is printed or written anywhere else.
+# (bench/ux_seed.py's output: owner, editor1, viewer1, owner2). No password or key is printed or written anywhere else.
 # The harness (bench/ux_seed.py, ux_shot.py and the brewline.py and perf.py they use) is this checkout's, copied into
 # the container (the image leaves bench/ out), so a ref from before them (v1.2.0) works too. Touches only abi-ux-* containers, volumes, images and /opt/abi-ux-*.
 set -eu

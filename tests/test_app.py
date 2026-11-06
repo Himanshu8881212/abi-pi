@@ -1236,6 +1236,20 @@ def test_s3_keys_become_secrets_bound_to_the_bucket_host_and_never_come_back(srv
                     abi.call("delete_secret", confirm=e.body["confirm_token"], name=n)
 
 
+def test_the_published_copy_gives_each_person_their_own_role(monkeypatch):
+    """1.2.5: Publish gave everyone Viewer on the published copy, so ABI's row rules ("a Viewer not listed sees no rows")
+    left an owner or editor in no rule with empty reports in Viewer mode and on every phone. The copy now mirrors each
+    person's project role; workspace owners need none, and a role already right is left alone."""
+    calls = []
+    users = [{"name": "himanshu", "roles": {"b": "owner", "b_pub": "viewer"}}, {"name": "ed", "roles": {"b": "editor"}},
+             {"name": "v", "roles": {"b": "viewer", "b_pub": "viewer"}}, {"name": "admin", "workspace_owner": True, "roles": {}},
+             {"name": "gone", "roles": {"b": "none"}}]
+    monkeypatch.setattr(app.abi, "call", lambda action, **kw: {"users": users} if action == "list_users" else calls.append((action, kw)))
+    app.publish_roles("b", "b_pub")
+    assert calls == [("set_role", {"project": "b_pub", "user": "himanshu", "role": "owner"}),
+                     ("set_role", {"project": "b_pub", "user": "ed", "role": "editor"})]
+
+
 def test_a_share_link_never_points_at_a_loopback_address():
     """1.2.5: Share copied http://127.0.0.1:8790/... (the container's own address): nobody else can open it."""
     assert app.public_base("https://abi.example.com/", "127.0.0.1:8790") == "https://abi.example.com"
