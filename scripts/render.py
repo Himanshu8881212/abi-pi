@@ -160,7 +160,12 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
   // one series: a faint area under it; a dense one (a point every few pixels, e.g. per day) a thinner line
   if(!dot&&S.length===1&&type==='line'&&run.length>1&&pts.every(Boolean))el('path',{d:`${ln}L${run.at(-1)[0]},${H-B}L${run[0][0]},${H-B}Z`,fill:COL[j%6],opacity:.05},svg);
   dot||el('path',{d:ln,fill:'none',stroke:COL[j%6],'stroke-width':step<4?1.25:2,'stroke-linejoin':'round','stroke-linecap':'round',...(step<2?{opacity:.6}:{})},svg);
-  pts.forEach((p,k)=>p&&mk(el('circle',{cx:p[0],cy:p[1],r:dot?4:Math.max(2,Math.min(4,step/3)),fill:COL[j%6],opacity:dot?1:.01},svg),s.r[k],[s.m],dot?.7:1))})}
+  pts.forEach((p,k)=>p&&mk(el('circle',{cx:p[0],cy:p[1],r:dot?4:Math.max(2,Math.min(4,step/3)),fill:COL[j%6],opacity:dot?1:.01},svg),s.r[k],[s.m],dot?.7:1))});
+ // a line over time: a guide follows the pointer to the nearest period and the tooltip has every series there
+ if(type==='line'&&(!two||per)){const g=el('line',{y1:T,y2:H-B,stroke:'var(--mute)','stroke-dasharray':'3 3',opacity:0,'pointer-events':'none'},svg);
+  svg.addEventListener('mousemove',e=>{const r=svg.getBoundingClientRect();if(!r.width)return;const k=Math.round(((e.clientX-r.left)*W/r.width-L-step/2)/step);if(k<0||k>=n){g.setAttribute('opacity',0);return}
+   g.setAttribute('x1',X(k));g.setAttribute('x2',X(k));g.setAttribute('opacity',.7);showTip(e,[cats[k],...S.map(s=>`${N(s.m)}: ${fmt(s.v[k],{...d.format[s.m],compact:false})}`)].join(' · '))});
+  svg.addEventListener('mouseleave',()=>{g.setAttribute('opacity',0);hideTip()})}}
 function csv(d){const q=v=>v===null?'':/[",\n]/.test(String(v))?'"'+String(v).replace(/"/g,'""')+'"':String(v);
  const blob=new Blob([[d.columns.join(','),...d.rows.map(r=>r.map(q).join(','))].join('\n')],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=d.id+'.csv';a.click()}
 """

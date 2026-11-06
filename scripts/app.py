@@ -462,6 +462,8 @@ body[data-mode=viewer] .tcard label.l:has(input[type=checkbox]:not(:checked)){di
 .flowsteps{counter-reset:st;gap:6px!important}.flowsteps>.row{counter-increment:st;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r);background:var(--sheet)}
 .flowsteps>.row::before{content:counter(st);display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--hover);font:600 11px var(--text);color:var(--mute)}
 .flowsteps>.row>b{font-weight:500;font-size:13.5px}
+.card p.hint{margin:16px 0 0;padding:28px 16px;text-align:center;border:1px dashed var(--line-strong);border-radius:var(--r);font-size:13.5px}
+label.chk.hl{background:color-mix(in srgb,var(--signal) 12%,var(--sheet));box-shadow:0 0 0 1px color-mix(in srgb,var(--signal) 45%,transparent);border-radius:6px;padding:2px 8px}
 """
 
 JS = r"""
@@ -517,7 +519,8 @@ async function api(action,args){
  let r=await post('/api/'+action,{project:D.project,...args});
  if(r.confirm){if(!await ask(r.confirm))throw new Error('You declined. Nothing changed.');r=await post('/confirm/'+r.confirm.id)}
  if(r.error)throw new Error(r.error);return r.result}
-function ask(c){return new Promise(res=>{const d=$('#confirm'),bad=/\b(delet|remov|drop|revok|stop|disabl|overwrit)/i.test((c.title||'')+' '+(c.message||''));$('#c-yes').classList.toggle('danger-solid',bad);$('#c-yes').textContent=bad?'Yes, go ahead':'Confirm';$('#confirm h3').textContent=c.title||(c.id?'ABI asks for your confirmation':'Confirm');$('#c-msg').textContent=c.message;$('#c-prev').textContent=c.preview||'';$('#c-prev').hidden=!c.preview;
+let ASK_WHAT='';  // what the person is deleting, for ABI's confirmation
+function ask(c){return new Promise(res=>{const d=$('#confirm'),bad=/\b(delet|remov|drop|revok|stop|disabl|overwrit)/i.test((c.title||'')+' '+(c.message||''));$('#c-yes').classList.toggle('danger-solid',bad);$('#c-yes').textContent=bad?(ASK_WHAT?'Delete':'Yes, go ahead'):'Confirm';$('#confirm h3').textContent=bad&&ASK_WHAT?`Delete “${ASK_WHAT}”?`:c.title||(c.id?'ABI asks for your confirmation':'Confirm');ASK_WHAT='';$('#c-msg').textContent=c.message;$('#c-prev').textContent=c.preview||'';$('#c-prev').hidden=!c.preview;
  d.showModal();$('#c-yes').onclick=()=>{d.close();res(true)};$('#c-no').onclick=()=>{d.close();res(false)}})}
 function say(box,text,bad){box.textContent=text;box.className='msg '+(bad?'bad':'ok')}
 function card(title,sub){const c=h('div','card'),t=h('h3');t.append(h('span','',title));if(sub&&/\s/.test(sub))t.title=sub;else if(sub)t.append(h('span','file',sub));c.append(t);return c}
@@ -533,7 +536,7 @@ function rows(box,d){box.innerHTML='';box.classList.add('out');if(!(d&&d.columns
 // an admin action ABI wants confirmed: the person's own click in ABI's dialog, then the server runs it (null: they said no)
 async function confirmed(x){if(x.confirm){if(!await ask(x.confirm))return null;x=await fetch('/confirm/'+x.confirm.id,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(y=>y.json())}if(x.error)throw new Error(x.error);return x}
 function act(c,label,fn,pri){const m=c.querySelector(':scope>.msg')||c.appendChild(h('div','msg'));let r=c.querySelector(':scope>.acts');if(!r){r=h('div','row acts');c.insertBefore(r,m)}
- r.append(btn(label,async()=>{c.querySelectorAll('.invalid').forEach(x=>x.classList.remove('invalid'));try{const t=await fn(m);if(label==='Delete'&&t){undoToast(ttl(c)||'It');return}if(t)c.isConnected?say(m,t):toast(t)}catch(e){c.isConnected?say(m,e.message,1):toast(e.message,1)}},pri));return m}
+ r.append(btn(label,async()=>{c.querySelectorAll('.invalid').forEach(x=>x.classList.remove('invalid'));ASK_WHAT=/^Delete/.test(label)?ttl(c):'';try{const t=await fn(m);if(label==='Delete'){undoToast(ttl(c)||'It');return}if(t)c.isConnected?say(m,t):toast(t)}catch(e){c.isConnected?say(m,e.message,1):toast(e.message,1)}},pri));return m}
 // a field the action needs: marked and focused, and the action stops with what to do
 function need(el,ok,msg){if(ok)return;el.classList.add('invalid');el.focus();throw new Error(msg)}
 
@@ -620,7 +623,7 @@ function report(box,rep){let flt=PENDING.filters||[];PENDING.filters=null;
   btn('Delete report',async()=>{try{await KIND.report.del({id:rep.id});toast('Deleted.')}catch(e){toast(e.message)}}));box.append(tb)}
  {const tb=box.querySelector(':scope>.bar.top');let ex=null;const eb=h('button','btn pri','Export');eb.onclick=()=>{if(ex){ex.remove();ex=null;return}ex=exportCard(rep,()=>flt,()=>cur);box.querySelector('.pghead').after(ex)};tb.prepend(eb)
   let mc=null;tb.append(btn('Email this report',()=>{if(mc){mc.remove();mc=null;return}mc=mailCard(rep);box.querySelector('.pghead').after(mc)}));
-  if((window.ME||{admin:true}).admin&&!MOBILE){const sh=btn('Share',()=>{show('people');toast(`Tick ${rep.name||rep.id} under a person's "What they see" and Save; Viewers see the published copy.`)});sh.classList.add('w');sh.prepend(ic('people'));tb.append(sh)}}const top=h('div','fbar'),chips=h('span','fchips'),addb=h('button','btn fadd','+ Filter'),clr=h('button','flink','Clear all');clr.hidden=!flt.length;
+  if((window.ME||{admin:true}).admin&&!MOBILE){const sh=btn('Share',()=>{PENDING.share=rep.id;show('people');toast(`${rep.name||rep.id} is marked under each person: tick it for whoever should see it and Save. Viewers see the published copy.`)});sh.classList.add('w');sh.prepend(ic('people'));tb.append(sh)}}const top=h('div','fbar'),chips=h('span','fchips'),addb=h('button','btn fadd','+ Filter'),clr=h('button','flink','Clear all');clr.hidden=!flt.length;
  top.append(chips,addb,clr);const tabs=h('nav','tabs'),grid=h('div','grid'),msg=h('div','msg');box.append(top,msg,tabs,grid);
  // filters: one per column, a list of members ("in"); a chart click or a slicer sets it, the bar shows and edits it
  const vals=c=>{const f=flt.find(f=>f.column===c);return f?[].concat(f.value):[]};
@@ -781,7 +784,7 @@ async function usersPage(box){
  act(inv,'Invite',async()=>{let x=await post('invite',{email:em.value});if(x.confirm){if(!await ask(x.confirm))return 'Not invited.';x=await fetch('/confirm/'+x.confirm.id,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(y=>y.json())}
   if(x.error)throw new Error(x.error);return 'Invited through ABI. Give them a role below.'},1);g.append(inv);
  const t=card(`People in ${U.project}`,'role: Viewer reads the published copy; Editor and Owner build (Developer)');t.style.gridColumn='1/-1';g.append(t);
- U.users.forEach(u=>{const row=h('div','hit'),role=(u.roles||{})[U.project]||'none',sel=h('select','f');['none','viewer','editor','owner'].forEach(x=>sel.append(new Option(x==='none'?'no access':x,x)));sel.value=role;
+ U.users.forEach(u=>{const row=h('div','hit'),role=(u.roles||{})[U.project]||'none',sel=h('select','f');['none','viewer','editor','owner'].forEach(x=>sel.append(new Option(x==='none'?(u.workspace_owner?'No project role (owns the workspace)':'No access'):x[0].toUpperCase()+x.slice(1),x)));sel.value=role;
   const a=U.access[u.name]||{},sx=h('div','checks'),rx=h('div','checks'),m=h('div','msg');
   U.sections.forEach(x=>{const l=h('label','chk'),c=h('input');c.type='checkbox';c.value=x;c.checked=!a.sections||a.sections.includes(x);l.append(c,h('span','',x));sx.append(l)});
   U.reports.forEach(x=>{const l=h('label','chk'),c=h('input');c.type='checkbox';c.value=x.id;c.checked=!a.reports||a.reports.includes(x.id);l.append(c,h('span','',x.name));rx.append(l)});
@@ -797,7 +800,9 @@ async function usersPage(box){
   who.append(h('span','av',u.name.slice(0,1).toUpperCase()),h('b','',u.name));if(u.workspace_owner)who.append(h('span','state on','Workspace owner · sees everything'));if(u.tenant)who.append(h('span','state','Tenant '+u.tenant));
   sel.setAttribute('aria-label','Role of '+u.name+' in this project');top.append(who,sel,save);pw.append(np,setp);
   det.append(h('summary','',`What ${u.name} sees, password and two-step`),h('label','l','Sections'),sx,h('label','l','Reports'),rx,h('label','l','Forgot their password?'),pw,h('label','l','Lost their authenticator app and recovery codes?'),rmf);
-  row.append(top,det,m);t.append(row)});
+  row.append(top,det,m);t.append(row);
+  // from a report's Share: each person's reports open, that report marked
+  if(PENDING.share){const l=[...rx.querySelectorAll('label')].find(x=>x.querySelector('input').value===PENDING.share);if(l){det.open=true;l.classList.add('hl')}}});PENDING.share=null;
  const mf=card('Two-step sign-in','a code from an authenticator app after the password; each person turns it on by clicking their name');g.append(mf);
  mf.append(h('p','',U.tenants.length?'Require it for everyone in a tenant: the password sessions and personal tokens of its people without it end at once, and at their next sign-in they add the key to an authenticator app before they get in. Single sign-on is not affected.'
   :'ABI requires it per tenant and this workspace has no tenants: each person can still turn it on for themselves.'));
@@ -944,8 +949,8 @@ function newMonitor(box,ck){box.querySelector('.monform')?.remove();ck=ck||{};co
  const s=(x,v)=>{const e=h('select','f');x.forEach(([v,l])=>e.append(new Option(l,v)));if(v!==undefined)e.value=v;return e},L=t=>h('label','l',t);
  const draw=()=>{f.innerHTML='';
   if(kind.value==='measure'){const ms=D.measures.map(x=>[x.id,x.name||x.id]),m=s(ms,ck.measure),vs=s([['value','a value'],['measure','another measure (e.g. a target)'],['prev','its previous period (% change)']],ck.against||'value'),
-    op=s(OPS,ck.op),v=h('input','f'),other=s(ms,ck.other),per=s(D.dims.filter(d=>d.startsWith('calendar.')).map(d=>[d,d]),ck.period),by=s([['','the total'],...D.dims.map(d=>[d,'each '+d])],ck.by||''),
-    fc=s([['','no filter'],...D.dims.map(d=>[d,d])],ck.filters?.[0]?.column||''),fv=h('input','f');v.type='number';v.placeholder='value';v.value=ck.value??'';fv.placeholder='equals…';fv.value=ck.filters?.[0]?.value??'';
+    op=s(OPS,ck.op),v=h('input','f'),other=s(ms,ck.other),per=s(D.dims.filter(d=>d.startsWith('calendar.')).map(d=>[d,d]),ck.period),by=s([['','the total'],...D.dims.map(d=>[d,'each '+colName(d).toLowerCase()+' ('+d.split('.')[0]+')'])],ck.by||''),
+    fc=s([['','no filter'],...D.dims.map(d=>[d,`${colName(d)} · ${d.split('.')[0]}`])],ck.filters?.[0]?.column||''),fv=h('input','f');v.type='number';v.placeholder='value';v.value=ck.value??'';fv.placeholder='equals…';fv.value=ck.filters?.[0]?.value??'';
    // completed periods only, unless they untick it: with daily loads the latest period is still filling, so its change on a whole period would alert at every period's start
    const dn=h('label','chk'),dc=h('input');dc.type='checkbox';dc.checked=ck.id?!!ck.skip_latest:true;dn.append(dc,h('span','','Completed periods only (the latest may still be filling)'));
    const lv=L('Value'),lo=L('Other measure'),lp=L('Period'),lb=L('Check');const vis=()=>{const a=vs.value;lv.hidden=v.hidden=a==='measure';lv.textContent=a==='prev'?'Change in %':'Value';lo.hidden=other.hidden=a!=='measure';lp.hidden=per.hidden=dn.hidden=a!=='prev';lb.hidden=by.hidden=a==='prev'};vs.onchange=vis;
@@ -956,7 +961,12 @@ function newMonitor(box,ck){box.querySelector('.monform')?.remove();ck=ck||{};co
   else{const fl=s((D.flows||[]).map(x=>[x.id,x.name||x.id]),ck.flow);f.append(L('Flow'),fl);f.get=()=>({flow:fl.value})}};kind.onchange=draw;draw();
  const em=h('input','f');em.type='email';em.placeholder='name@company.com (optional)';em.value=ck.id?monMail(ck)||'':/@/.test(window.ME?.name||'')?ME.name:'';
  c.append(L('Name'),nm,L('Watch'),kind,f,L('Also email the alert to'),em,h('p','file','A measure check becomes a flow in ABI: it checks it every minute, also with this page closed, and posts to the Inbox when it starts to hold.'));
- act(c,ck.id?'Save':'Create',async()=>{if(!nm.value.trim())throw new Error('Give it a name.');const nc={id:ck.id||nm.value.trim().toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')||'check',name:nm.value.trim(),kind:kind.value,...f.get()};
+ // the check said back in one sentence as it is filled in
+ const sum=h('p','sum'),upd=()=>{try{const g=f.get(),nmOf=id=>D.measures.find(x=>x.id===id)?.name||id;
+   sum.textContent=kind.value==='measure'?`Alerts when ${nmOf(g.measure)} ${(OPS.find(o=>o[0]===g.op)||[0,g.op])[1]} ${g.against==='measure'?nmOf(g.other):g.against==='prev'?`${g.value}% against its previous period`:fmt(g.value)}${g.by?`, for any ${colName(g.by).toLowerCase()}`:''}. It posts to the Inbox${em.value.trim()?' and emails '+em.value.trim():''}.`
+    :kind.value==='fresh'?`Alerts when ${g.table} has gone ${g.hours} hours without a load.`:'Alerts when the flow\'s last run failed.'}catch(e){sum.textContent='Fill in the value to see what it alerts on.'}};
+ c.insertBefore(sum,c.querySelector(':scope>p.file'));c.addEventListener('input',upd);c.addEventListener('change',upd);upd();
+ act(c,ck.id?'Save':'Create',async()=>{need(nm,nm.value.trim(),'Give it a name, e.g. Revenue below target.');const nc={id:ck.id||nm.value.trim().toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')||'check',name:nm.value.trim(),kind:kind.value,...f.get()};
   if(await monPost({action:'save',check:nc,email:em.value.trim()}))show('monitor')},1);act(c,'Cancel',()=>c.remove());(box.querySelector('.pghead')||box).after(c)}
 // a check and its flow in ABI (/monitor asks ABI's confirmation for the flow, then keeps the check); null: they said no
 const monFlow=ck=>(D.flows||[]).find(x=>x.id===('monitor_'+ck.id).slice(0,63)),monMail=ck=>monFlow(ck||{})?.steps?.find(s=>s.action==='send_email')?.input?.to?.[0];
@@ -1027,7 +1037,7 @@ function explore(box){const q0=PENDING.explore||{};PENDING.explore=null;
  act(c,'Save as query',async()=>{const q=query();if(!q.measures.length)return 'Pick at least one measure.';
   const id=('q_'+q.measures.join('_')+(q.dimensions[0]?'_by_'+q.dimensions[0].split('.').pop():'')).toLowerCase().replace(/[^a-z0-9_]/g,'_').slice(0,60);
   await KIND.dataset.save({id,name:id,description:'Saved from Explore',query:q});return `Saved as query ${id} through ABI.`});
- c.append(msg,out);const g=h('div','cards'),my=card('Saved analyses','kept with the project for everyone; numbers rerun from the model when opened'),list=h('div');my.append(list);c.style.gridColumn=my.style.gridColumn='1/-1';ms.style.width='100%';g.append(c,my);box.append(g);
+ c.append(msg,out);if(!out.children.length)out.append(h('p','empty pad hint','Pick one or more measures, and a dimension to split them by, then Run: the chart shows here.'));const g=h('div','cards'),my=card('Saved analyses','kept with the project for everyone; numbers rerun from the model when opened'),list=h('div');my.append(list);c.style.gridColumn=my.style.gridColumn='1/-1';ms.style.width='100%';g.append(c,my);box.append(g);
  function mine(){list.innerHTML='';if(!MINE.length){list.append(h('p','empty','Nothing kept yet. Run an analysis and press Keep; charts the agent shows you land here too.'));return}
   MINE.forEach((a,i)=>{const r=h('div','row');const o=h('button','btn',a.name);o.onclick=()=>{[...ms.options].forEach(x=>x.selected=a.q.measures.includes(x.value));mp.sync();dm.value=a.q.dimensions[0]||'';ty.value=a.type;flt=a.q.filters||[];fc.value='';fv.hidden=true;run(a.q,a.type)};
    const x=ib('trash','Forget this analysis');x.onclick=()=>{MINE.splice(i,1);saveMine();mine()};r.append(o,h('span','file',a.at||''),pinBtn({kind:'analysis',ref:{q:a.q,type:a.type},title:a.name}),x);list.append(r)})}
@@ -1038,7 +1048,7 @@ function measures(box){modelBar(box);const top=h('div','row bar top'),q=h('input
   id.placeholder='a-z, 0-9, _';name.placeholder='display name';ex.placeholder='e.g. SUM(sales.revenue)';de.placeholder='what it means';
   if(isNew)c.append(h('label','l','ID'),id,h('label','l','Name'),name,h('label','l','MEL'),ex,h('label','l','Description'),de);
   ex.classList.add('code');if(!isNew){ex.rows=1;rowcard(c,fld('Name',name,m.id),fld('MEL',ex),fld('Description',de))}
-  act(c,isNew?'Create':'Save',async()=>{await api('set_measure',{id:id.value,name:name.value,expression:ex.value,description:de.value||null});
+  act(c,isNew?'Create':'Save',async()=>{await api('set_measure',{id:id.value,name:name.value,expression:ex.value,description:de.value||null}).catch(e=>{ex.classList.add('invalid');ex.focus();throw e});
    Object.assign(m,{id:id.value,name:name.value,expression:ex.value,description:de.value});if(isNew){D.measures.push(m);show('measures')}return 'Saved through ABI (checked like an import).'},1);
   // Test: the measure's total through ABI. ABI runs saved measures only, so an edit not yet saved is not what it tests
   act(c,'Test',async msg=>{say(msg,'Testing…');const t0=Date.now(),r=await api('semantic_query',{measures:[id.value]}),v=r.rows?.[0]?.[0];
@@ -1087,7 +1097,7 @@ function sources(box){const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),qr=
   file.onchange=()=>{if(!t.value&&file.files[0])t.value='bronze_'+file.files[0].name.replace(/\.[^.]+$/,'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')};
   c.append(h('label','l','Table'),t,tabs,fg,lg);
   act(c,'Add source',async m=>{need(t,t.value.trim(),'Name the table first, e.g. bronze_orders.');need(t,/^[a-z][a-z0-9_]*$/.test(t.value),'A table name is lowercase letters, digits and _ and starts with a letter.');const sheet=sh.value.trim();
-   if(file.files[0]&&!/\.(csv|tsv|xlsx|json|jsonl|ndjson|parquet|avro)$/i.test(file.files[0].name))throw new Error(`${file.files[0].name} is not a file ABI reads: choose a CSV, TSV, Excel, JSON, Parquet or Avro file.`);
+   if(file.files[0])need(file,/\.(csv|tsv|xlsx|json|jsonl|ndjson|parquet|avro)$/i.test(file.files[0].name),`${file.files[0].name} is not a file ABI reads: choose a CSV, TSV, Excel, JSON, Parquet or Avro file.`);
    if(file.files[0]){const x=await loaded(await upload(t.value,file.files[0],sheet),m,`Uploaded and loaded into ${t.value}.`);return x+' Next: stage or model it under Tables, or ask the agent to build a report from it.'}
    if(!loc.value)throw new Error('Choose a file, or give a location like s3://bucket/folder/*.csv.');
    const s3=loc.value.startsWith('s3://')?{region:rg.value.trim()||'us-east-1',...(ep.value?{endpoint:ep.value.trim(),url_style:'path'}:{}),...(tls.checked?{}:{use_ssl:false})}:null;
@@ -1378,7 +1388,7 @@ function agentForm(c){const nm=inpt('e.g. Store manager assistant'),pu=inpt('who
    ...(ask.selectedOptions.length?{agents:[...ask.selectedOptions].map(o=>o.value)}:{}),cases:[...cs.children].map(r=>r.get()).filter(Boolean)}}}
 const FORMS={flow:[flowForm,'flows'],ml:[mlForm,'ml'],tool:[toolForm,'tools'],agent:[agentForm,'agents']};
 function newBtn(box,kind){const bar=box.querySelector(':scope>.bar.top')||h('div','row bar top'),L=KIND[kind].label;
- bar.append(btn(`New ${L}`,()=>{if(box.querySelector('.newkind'))return;const c=card(`New ${L}`,'fill it in and create it; it is checked by ABI like everything else');c.classList.add('newkind','wide');
+ bar.append(btn(`New ${L}`,()=>{if(box.querySelector('.newkind'))return;const c=card(`New ${L}`,'fill it in and create it; it is checked by ABI like everything else');c.classList.add('newkind','wide','editor');
   const get=FORMS[kind][0](c);
   act(c,`Create ${L}`,async()=>{const o=await get();await KIND[kind].save(o);toast(`Created ${o.name}. `+(kind==='flow'?'It is off until you switch it on.':kind==='ml'?'Train it on its card.':kind==='tool'?'Test it, then publish it.':'Run its evaluation set on its card.'));show(FORMS[kind][1])},1);
   act(c,'Describe it to the agent instead',()=>{openChat(true);inp.value=`Create a ${L} in this project: `;inp.focus()});
@@ -1418,7 +1428,7 @@ function flowPage(box,f){const bar=h('div','row bar lead');bar.append(btn('← F
 // a flow's trigger in words: "Mondays at 07:00", "when Revenue < -20", not cron and action names
 const DOW=['Sundays','Mondays','Tuesdays','Wednesdays','Thursdays','Fridays','Saturdays'];
 function cronWords(c){const [mi,hr,dm,mo,dw]=String(c||'').split(' ');if(!/^\d+$/.test(mi||'')||!/^\d+$/.test(hr||''))return c;const at=`${hr.padStart(2,'0')}:${mi.padStart(2,'0')}`;
- if(dm==='*'&&mo==='*'&&dw==='*')return `Every day at ${at}`;if(dm==='*'&&mo==='*'&&/^[0-6](,[0-6])*$/.test(dw))return `${dw.split(',').map(d=>DOW[+d]).join(', ')} at ${at}`;
+ if(dm==='*'&&mo==='*'&&(dw==='*'||dw==='0,1,2,3,4,5,6'||dw==='0-6'))return `Every day at ${at}`;if(dm==='*'&&mo==='*'&&(dw==='1,2,3,4,5'||dw==='1-5'))return `Weekdays at ${at}`;if(dm==='*'&&mo==='*'&&/^[0-6](,[0-6])*$/.test(dw))return `${dw.split(',').map(d=>DOW[+d]).join(', ')} at ${at}`;
  if(dm==='*'&&mo==='*'&&dw==='1-5')return `Weekdays at ${at}`;if(/^\d+$/.test(dm)&&mo==='*'&&dw==='*')return `Day ${dm} of each month at ${at}`;return c}
 function trigWords(t){const m=t.measure&&(D.measures.find(x=>x.id===t.measure)?.name||t.measure);
  return t.type==='schedule'?cronWords(t.cron)+(t.timezone?` (${t.timezone})`:''):t.type==='data_condition'?`When ${m} ${t.op} ${t.value}`:t.type==='after_refresh'?`After ${t.table||'a table'} refreshes`:
@@ -1430,7 +1440,7 @@ function flows(box){newBtn(box,'flow');const g=h('div','cards');box.append(g);if
   act(c,'Run now',async m=>{tr.innerHTML='';const r=await api('run_flow',{flow:f.id});say(m,`run started: ${r.run}`);
    for(let i=0;i<150;i++){await wait(2000);const x=await api('flow_runs',{flow:f.id,run:r.run}),one=x.runs?.[0]||x;tr.innerHTML='';
     (one.steps||[]).forEach(s=>tr.append(h('li',s.status==='ok'?'ok':s.status==='failed'?'bad':'',`${s.step||s.id}: ${s.status}${s.error?' · '+s.error:''}`)));
-    if(['ok','failed','stopped','rejected','waiting'].includes(one.status))return `run ${one.status}`}return 'still running; see ABI\'s flow runs'},1);
+    if(['ok','failed','stopped','rejected','waiting'].includes(one.status))return `Run ${one.status==='ok'?'finished':one.status}.`}return 'Still running: see the flow\'s runs on its canvas.'});
   act(c,'Open canvas',async()=>{show('flw:'+f.id)});
   act(c,f.enabled?'Disable':'Enable',async()=>{await api('enable_flow',{flow:f.id,enabled:!f.enabled});f.enabled=!f.enabled;show('flows')});editBtns(c,'flow',f);g.append(c)})}
 function ml(box){newBtn(box,'ml');const g=h('div','cards');box.append(g);if(!D.ml.length)box.append(h('p','empty','No ML models yet: New ML model needs a query.'));
@@ -1500,7 +1510,7 @@ function vaultPage(box){
 
 // ---------- Knowledge: the agent team ----------
 // ---------- sidebar ----------
-const PENDING={filters:null,explore:null};
+const PENDING={filters:null,explore:null,share:null};
 const LEDE={vault:'Your business documents: definitions, finance rules, KPI specs. The agents search them before they define or check a measure.',home:'Start here: ask anything, see what needs attention, and every part of the project at a glance.',datasets:'Saved questions to the model (measures by dimensions, with filters). Each run returns a fresh table; nothing is stored. Reports, flows and ML reuse them. Preview their rows.',
  measures:'The business numbers. Edit a formula and ABI checks it before it saves; Test shows the total.',model:'Your data models: the whole model and each named model. Open one to see its tables and how they join.',
  chat:'Talk to the agent: ask a question, ask where something is, or ask for a change. When it shows you a page, the chat moves to the side and goes on.',boardpack:'Board packs: the documents, data and explainer video a review needs, made from ABI by the board-pack agent and checked before they leave. Nothing is sent from here.',documents:'A report, some of its pages or one view, as ABI renders it: PDF, PNG or PowerPoint.',onepager:'One page for the board: a report page with the headline numbers, two charts and the caveats. The agent builds it in ABI; export it here.',dataexport:'The rows behind any view, as CSV or Excel, or a query\'s rows as CSV.',video:'A silent explainer of report views: the numbers from ABI, animated, with a caption per slide, in the app\'s theme.',settings:'The agent\'s model and how hard it thinks, and the providers it may use. API keys are stored encrypted and never shown again.',people:'Who may sign in to this project, as what (Viewer, Editor, Owner), and which sections and reports each person sees.',transfer:'The whole project as one zip, so it can be kept, reviewed, moved or rebuilt. Import goes through ABI, which checks it and makes it one undoable commit.',edits:'Write-back: people correct or add rows of the gold tables. Edits apply on top of the table by row key (the loaded data is never changed), survive refreshes, can be undone, and every query sees the edited table.',reports:'The saved reports of this project. Open one to filter it and click through.',monitor:'Is anything wrong right now: data freshness, model readiness, ML runs and flows. Reports show the business; this shows the system.',inbox:'What reached you here: Monitor alerts and flows\' posts with their figures, your subscriptions and test runs, and the project\'s alerts (a failed flow, a data problem).',explore:'Your own analysis: pick measures, a dimension and a filter; the numbers come from the model, so they match the reports. Keep the ones you want: they are saved with the app, the project itself doesn\'t change.',glossary:'What the business words mean and which measures implement them.',sources:'Bronze: the data as it landed, one source per file or bucket folder. Reload, add or delete a source.',
