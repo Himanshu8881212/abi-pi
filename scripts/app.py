@@ -440,6 +440,12 @@ aside button.goto:hover{border-color:var(--line-strong);color:var(--ink)}aside b
 .golist{max-height:min(420px,60vh);overflow:auto;padding:6px}.goit{display:flex;align-items:center;gap:12px;width:100%;padding:10px 12px;border:0;border-radius:var(--r);background:none;color:var(--ink);font:14px var(--text);cursor:pointer;text-align:left}
 .goit .ic{color:var(--mute)}.goit .lb{flex:1}.goit .file{margin:0}.goit.on,.goit:hover{background:var(--hover)}.goit.on .ic{color:var(--signal)}
 @media (hover:none){.btn:hover{background:var(--sheet);border-color:var(--line)}.btn.pri:hover{background:var(--ink);border-color:var(--ink)}.btn:active:not(:disabled){background:var(--hover)}.btn.pri:active:not(:disabled){background:color-mix(in srgb,var(--ink) 84%,var(--sheet))}}
+.fpop>.file{margin:0;font-size:11.5px;text-transform:uppercase;letter-spacing:.06em}.fpop>.seg{gap:6px}.fpop>.seg .chip{cursor:pointer;padding:4px 10px;font-size:12.5px;margin:0}.fpop>.seg .chip.on{background:var(--ink);color:var(--sheet);border-color:var(--ink)}
+.pghead .bar .btn.quiet{width:34px;padding:0;font-size:0;gap:0}.pghead .bar .btn.quiet .ic{margin:0}.mobile .pghead .bar .btn.quiet{width:44px}
+dialog .card>h4+.srow{border-top:0;padding-top:6px}dialog .card>h4+label.l{margin-top:12px}.mobile aside kbd{display:none}
+dialog .two .f{margin-top:6px}dialog .two label.l{margin:0}
+.node span{font:12px var(--text)}.node{border-radius:8px;box-shadow:var(--shadow)}.node b{font-size:13.5px}
+.rowcard textarea.desc{max-height:62px;overflow:hidden;font:13.5px/1.5 var(--text)}.rowcard textarea.desc:focus{max-height:220px;overflow:auto}.rowcard{align-items:start}
 """
 
 JS = r"""
@@ -504,7 +510,7 @@ function fld(label,el,note){const d=h('div','fld');d.append(h('label','l',label)
 function rowcard(c,...fields){c.classList.add('rowcard');c.append(...fields);c.oninput=()=>c.classList.add('dirty');return c}
 function rowhead(...cols){const r=h('div','rowhead');cols.forEach(t=>r.append(h('span','',t)));return r}
 const W=/^(Save|Create|Delete|Edit report|New report|Reload |Run now|Enable|Disable|Train|Score|New |Ask$|Add |Remove|Edit|Publish|Save steps|Upload|Email this|Alert with)/;
-function btn(label,fn,pri){const b=h('button','btn'+(pri?' pri':'')+(W.test(label)?' w':'')+(/^(Delete|Remove|Revoke)/.test(label)?' danger':''),label);if(/^(Delete|Remove|Revoke|Edit)$/.test(label)){b.title=label;b.classList.add('quiet')}{const m=BIC.find(([r])=>r.test(label));if(m)b.prepend(ic(m[1]));if(label.startsWith('+ '))b.lastChild.textContent=label.slice(2)}b.onclick=async()=>{b.disabled=true;const t=setTimeout(()=>b.classList.add('busy'),150);try{await fn()}finally{clearTimeout(t);b.disabled=false;b.classList.remove('busy')}};return b}
+function btn(label,fn,pri){const b=h('button','btn'+(pri?' pri':'')+(W.test(label)?' w':'')+(/^(Delete|Remove|Revoke)/.test(label)?' danger':''),label);if(/^(Delete|Remove|Revoke|Edit|Delete report)$/.test(label)){b.title=label;b.classList.add('quiet')}{const m=BIC.find(([r])=>r.test(label));if(m)b.prepend(ic(m[1]));if(label.startsWith('+ '))b.lastChild.textContent=label.slice(2)}b.onclick=async()=>{b.disabled=true;const t=setTimeout(()=>b.classList.add('busy'),150);try{await fn()}finally{clearTimeout(t);b.disabled=false;b.classList.remove('busy')}};return b}
 const cell=v=>v!==null&&typeof v==='object'?JSON.stringify(v):typeof v==='string'&&/^\d{4}-\d\d-\d\dT\d\d:\d\d/.test(v)?new Date(v).toLocaleString():v;
 function rows(box,d){box.innerHTML='';box.classList.add('out');if(!(d&&d.columns&&Array.isArray(d.rows))){box.append(h('pre','',JSON.stringify(d,null,1)));return}
  const rs=d.rows.map(r=>(Array.isArray(r)?r:d.columns.map(c=>r[c])).map(cell));table(box,{measures:d.measures||{},format:d.format||{},columns:d.columns,rows:rs})}
@@ -584,7 +590,7 @@ function home(box){pinsHome(box);const rd=D.readiness||{},q=D.quality||{},ix=c=>
  const mlok=D.ml.filter(m=>m.latest_score?.status==='ok').length,on=D.flows.filter(f=>f.enabled).length,lastC=(D.history||[])[0];
  const pl=(n,w)=>`${n} ${w}${n===1?'':'s'}`;const line={Data:problems.length?pl(problems.length,'data problem'):`fresh · last load ${last?cell(last):'never'}`,'Data Model':rd.ready?'Ready':'Not ready',
   Visualizations:`${pl(D.reports.length,'report')} · ${pl(MINE.length,'saved analysis').replace('analysiss','analyses')}`,Automate:`${mlok} of ${D.ml.length} ML models scored · ${on} of ${D.flows.length} flows on`,
-  Knowledge:pl((VAULT||[]).length,'vault document'),Govern:`${D.pending?.files?.length?pl(D.pending.files.length,'uncommitted change'):'All committed'} · ${D.published?.at?'published '+cell(D.published.at):'not published yet'}`};
+  Knowledge:pl((VAULT||[]).length,'vault document'),Govern:MODE==='viewer'?(D.published?.at?'Published '+cell(D.published.at):'Not published yet'):`${D.pending?.files?.length?pl(D.pending.files.length,'uncommitted change'):'All committed'} · ${D.published?.at?'published '+cell(D.published.at):'not published yet'}`};
  const map=card('Where things stand','one line per area; open it to go there'),tb=h('div','areas');
  line['Data Model']=(rd.ready?'Ready':'Not ready')+` · ${D.measures.length} measures`;
 nav().filter(([gname])=>gname!=='Start'&&line[gname]).forEach(([gname,items])=>{const b=h('button','lk'),t=h('b');t.append(ic({Data:'sources','Data Model':'model',Visualizations:'reports',Automate:'flows',Knowledge:'vault',Govern:'security'}[gname]||'home'),gname);b.append(t,h('span','',line[gname]||''));b.onclick=()=>show(items[0][0]);tb.append(b)});
@@ -593,10 +599,10 @@ nav().filter(([gname])=>gname!=='Start'&&line[gname]).forEach(([gname,items])=>{
 // ---------- Analyze: one report per entry; filters and cross-filter ----------
 function report(box,rep){let flt=PENDING.filters||[];PENDING.filters=null;
  {const tb=h('div','row bar top');let ed=null;tb.append(btn('Edit report',()=>{if(ed){ed.remove();ed=null;return}ed=editor('report',rep.spec||{id:rep.id,name:rep.name},false);box.querySelector('.pghead').after(ed)}),
-  btn('New report',()=>{const c=editor('report',KIND.report.tpl,true);box.querySelector('.pghead').after(c)}),
   btn('Delete report',async()=>{try{await KIND.report.del({id:rep.id});toast('Deleted.')}catch(e){toast(e.message)}}));box.append(tb)}
  {const tb=box.querySelector(':scope>.bar.top');let ex=null;const eb=h('button','btn pri','Export');eb.onclick=()=>{if(ex){ex.remove();ex=null;return}ex=exportCard(rep,()=>flt,()=>cur);box.querySelector('.pghead').after(ex)};tb.prepend(eb)
-  let mc=null;tb.append(btn('Email this report',()=>{if(mc){mc.remove();mc=null;return}mc=mailCard(rep);box.querySelector('.pghead').after(mc)}))}const top=h('div','fbar'),chips=h('span','fchips'),addb=h('button','btn fadd','+ Filter'),clr=h('button','flink','Clear all');clr.hidden=!flt.length;
+  let mc=null;tb.append(btn('Email this report',()=>{if(mc){mc.remove();mc=null;return}mc=mailCard(rep);box.querySelector('.pghead').after(mc)}));
+  if((window.ME||{admin:true}).admin&&!MOBILE){const sh=btn('Share',()=>{show('people');toast(`Tick ${rep.name||rep.id} under a person's "What they see" and Save; Viewers see the published copy.`)});sh.classList.add('w');sh.prepend(ic('people'));tb.append(sh)}}const top=h('div','fbar'),chips=h('span','fchips'),addb=h('button','btn fadd','+ Filter'),clr=h('button','flink','Clear all');clr.hidden=!flt.length;
  top.append(chips,addb,clr);const tabs=h('nav','tabs'),grid=h('div','grid'),msg=h('div','msg');box.append(top,msg,tabs,grid);
  // filters: one per column, a list of members ("in"); a chart click or a slicer sets it, the bar shows and edits it
  const vals=c=>{const f=flt.find(f=>f.column===c);return f?[].concat(f.value):[]};
@@ -611,7 +617,10 @@ function report(box,rep){let flt=PENDING.filters||[];PENDING.filters=null;
  const measFor=c=>(qs.find(q=>(q.dimensions||[]).includes(c))||qs[0])?.measures[0]||D.measures[0]?.id;
  function open(c0){close();pop=h('div','fpop');const col=h('select','f'),q=h('input','f'),list=h('div','list'),ft=h('div','row'),ok=h('button','btn pri','Apply'),no=h('button','btn','Cancel');
   col.append(new Option('Choose a column…',''));D.dims.forEach(c=>col.append(new Option(`${colName(c)} · ${c.split('.')[0]}`,c)));col.value=c0||'';q.placeholder='Search';q.hidden=true;
-  ft.append(ok,no);ft.style.justifyContent='flex-end';pop.append(col,q,list,ft);top.append(pop);no.onclick=close;
+  // the columns this report already slices by, one click each; every column in the list under them
+  const used=[...new Set((rep.spec?.pages||[]).flatMap(p=>p.visuals||[]).flatMap(v=>v.query?.dimensions||[]).filter(c=>D.dims.includes(c)&&!c.startsWith('calendar.')))].slice(0,6),quick=h('div','row seg');
+  used.forEach(c=>{const b=h('button','chip',colName(c));b.type='button';b.onclick=()=>{col.value=c;quick.querySelectorAll('.chip').forEach(x=>x.classList.toggle('on',x===b));col.onchange()};quick.append(b)});
+  ft.append(ok,no);ft.style.justifyContent='flex-end';pop.append(...(used.length?[h('div','file','Filter by'),quick]:[]),col,q,list,ft);top.append(pop);no.onclick=close;
   ok.onclick=()=>{if(col.value)setVals(col.value,[...list.querySelectorAll('input:checked')].map(i=>JSON.parse(i.value)));close()};
   q.oninput=()=>{const t=q.value.toLowerCase();list.querySelectorAll('label').forEach(l=>l.hidden=!l.textContent.toLowerCase().includes(t))};
   col.onchange=async()=>{list.textContent='';q.hidden=true;if(!col.value)return;list.append(h('p','msg','Loading…'));
@@ -715,7 +724,7 @@ function repPicker(box,onPick,filter){const sel=h('select','f'),list=D.reports.f
  if(!list.length)box.append(h('p','empty','No reports here yet.'))}
 function documentsPage(box){const g=h('div','cards'),c=card('Document','rendered by ABI, as you');repPicker(c,(slot,r)=>slot.append(exportCard(r,()=>[],()=>r.pages[0])));g.append(c);box.append(g)}
 function onePagerPage(box){const g=h('div','cards'),c=card('Make a one-pager','the board-pack agent builds it as an ABI report');g.append(c);box.append(g);
- if(MODE==='developer'){const ta=h('textarea','f ed');ta.rows=3;ta.value='A one-pager for the board: partner revenue, views, RPM and net subscribers for the last complete months, the trend by month, the top channels, and the caveats.';
+ if(MODE==='developer'){const ta=h('textarea','f ed');ta.rows=3;ta.value='A one-pager for the board: the headline numbers for the last complete months, the trend by month, the biggest movers, and the caveats.';
   c.append(ta);act(c,'Ask the agent',async()=>{openChat(true);inp.value='Use the board-pack specialist to build a one-pager report in ABI: '+ta.value;sendChat();return 'Asked: follow it in the chat.'},1)}
  else c.append(h('p','empty','Switch to Developer to have one made.'));
  const ex=card('Export a one-pager','reports with a single page');repPicker(ex,(slot,r)=>slot.append(exportCard(r,()=>[],()=>r.pages[0])),r=>r.pages.length===1);g.append(ex)}
@@ -737,7 +746,7 @@ function videoPage(box){const c=card('Explainer video','silent, one slide per vi
    dl(await fileOf('/video/export',{report:r.id,pages,theme:th.value,size:sz.value,seconds:+sec.value}),`${r.id}.mp4`);return 'Downloaded.'},1)});box.append(c)}
 function boardPage(box){const g=h('div','cards');box.append(g);const P=D.app?.packs||[];
  if(MODE==='developer'){const c=card('Prepare a board pack','the board-pack agent picks, checks, writes and renders; you send'),ta=h('textarea','f ed');ta.rows=4;
-  ta.value='For the board review: the executive overview and monetization for the last complete months, a one-pager, the channel table as Excel, and a short explainer video. Commentary on what moved and what is open.';
+  ta.value='For the board review: the overview for the last complete months, a one-pager, the main table as Excel, and a short explainer video. Commentary on what moved and what is open.';
   c.append(ta);act(c,'Ask the agent',async()=>{openChat(true);inp.value='Use the board-pack specialist to prepare a board pack: '+ta.value;sendChat();return 'Asked: follow it in the chat; the pack appears here.'},1);g.append(c)}
  if(!P.length)g.append(h('p','empty','No board packs yet. Describe the review and press Ask the agent: the board-pack agent prepares the documents, data and video, and they show here.'));
  P.slice().reverse().forEach(m=>{const c=card(m.title||m.id,`${m.status} · made ${cell(m.made)}${m.audience?' · for '+m.audience:''}`);
@@ -823,11 +832,11 @@ async function settingsPage(box){
   const warn=r.reachable?null:h('p','note','Set ABI_PUBLIC_URL (the address people open, e.g. https://abi.example.com) in .env and restart: emailed links and SSO go there.');
   const em=card('Email','invites, "forgot your password" links, and every email of a project without its own mail server (reports, Monitor alerts, flows, the agent; a new domain asks once per project); without it you set passwords in Users & access'),host=f('smtp.example.com',M.host),port=f('587',M.port),from=f('abi@example.com',M.from),sec=h('select','f'),us=f('user name (optional)',M.username),pw=f(M.username?'password (stored in ABI; empty keeps it)':'password','','password');
   ['starttls','tls','none'].forEach(x=>sec.append(new Option({starttls:'STARTTLS (port 587)',tls:'TLS (port 465)',none:'none (a local relay)'}[x],x)));sec.value=M.security||'starttls';
-  em.append(...(warn?[warn.cloneNode(true)]:[]),h('p','',M.host?`On: ${M.host}:${M.port} from ${M.from}`:'Off.'),h('label','l','Server'),host,h('label','l','Port'),port,h('label','l','Connection'),sec,h('label','l','From'),from,h('label','l','Sign-in'),us,pw);
+  em.append(...(warn?[warn.cloneNode(true)]:[]),h('p','state'+(M.host?' on':''),M.host?`On: ${M.host}:${M.port} from ${M.from}`:'Not set up yet'),h('label','l','Server'),host,h('label','l','Port'),port,h('label','l','Connection'),sec,h('label','l','From'),from,h('label','l','Sign-in'),us,pw);
   act(em,'Save',async()=>{const x=await confirmed(await post('mail',{host:host.value,port:Number(port.value),security:sec.value,from:from.value,username:us.value,password:pw.value}));pw.value='';if(!x)return 'Not changed.';draw();return 'Saved.'},1);
   if(M.host)act(em,'Turn off',async()=>{const x=await confirmed(await post('mail',{off:true}));if(x)draw();return x?'Off.':'Not changed.'});g.append(em);
   const so=card('Single sign-on','people sign in with your company account (OpenID Connect: Google, Microsoft Entra, Okta, Keycloak, …)'),pid=f('id, e.g. google'),pn=f('button name, e.g. Google'),iss=f('issuer, e.g. https://accounts.google.com'),cl=f('client ID'),cs=f('client secret (stored in ABI)','','password');
-  so.append(...(warn?[warn]:[]),h('p','file','Redirect URI at your provider: '+r.callback.replace('<id>','{id}')),...r.providers.map(x=>{const row=h('div','row');row.append(h('span','',x.name+' · '+x.id),btn('Remove',async()=>{const y=await confirmed(await post('sso/remove',{id:x.id}));if(y)draw()}));return row}),
+  so.append(...(warn?[h('p','note','Needs ABI_PUBLIC_URL too (see Email).')]:[]),h('p','file','Redirect URI at your provider: '+r.callback.replace('<id>','{id}')),...r.providers.map(x=>{const row=h('div','row');row.append(h('span','',x.name+' · '+x.id),btn('Remove',async()=>{const y=await confirmed(await post('sso/remove',{id:x.id}));if(y)draw()}));return row}),
    h('label','l','Add a provider'),pid,pn,iss,cl,cs,h('p','','Each person links it once: they sign in with their password, click their name and Link.'));
   act(so,'Add',async()=>{const x=await confirmed(await post('sso/save',{id:pid.value.trim(),name:pn.value.trim(),issuer:iss.value.trim(),client_id:cl.value.trim(),secret:cs.value}));cs.value='';if(!x)return 'Not added.';draw();return 'Added.'},1);g.append(so)};
  draw()}
@@ -995,7 +1004,7 @@ function explore(box){const q0=PENDING.explore||{};PENDING.explore=null;
    const x=ib('trash','Forget this analysis');x.onclick=()=>{MINE.splice(i,1);saveMine();mine()};r.append(o,h('span','file',a.at||''),pinBtn({kind:'analysis',ref:{q:a.q,type:a.type},title:a.name}),x);list.append(r)})}
  mine();if(q0.measures)run(query(),ty.value)}
 function measures(box){modelBar(box);const top=h('div','row bar top'),q=h('input','f');q.placeholder='Search measures';const list=h('div','cards rows');box.append(top,list);
- const edit=(m,isNew)=>{const c=card(isNew?'New measure':(m.name||m.id),isNew?'':m.id),name=h('input','f'),id=h('input','f'),ex=h('textarea','f'),de=h('input','f');
+ const edit=(m,isNew)=>{const c=card(isNew?'New measure':(m.name||m.id),isNew?'':m.id),name=h('input','f'),id=h('input','f'),ex=h('textarea','f'),de=h('textarea','f desc');de.rows=1;
   [name,id,ex,de].forEach(e=>e.classList.add('ed'));name.value=m.name||'';id.value=m.id||'';ex.value=m.expression||'';de.value=m.description||'';
   id.placeholder='a-z, 0-9, _';name.placeholder='display name';ex.placeholder='e.g. SUM(sales.revenue)';de.placeholder='what it means';
   if(isNew)c.append(h('label','l','ID'),id,h('label','l','Name'),name,h('label','l','MEL'),ex,h('label','l','Description'),de);
@@ -1049,6 +1058,7 @@ function sources(box){const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),qr=
   file.onchange=()=>{if(!t.value&&file.files[0])t.value='bronze_'+file.files[0].name.replace(/\.[^.]+$/,'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')};
   c.append(h('label','l','Table'),t,tabs,fg,lg);
   act(c,'Add source',async m=>{if(!t.value)throw new Error('Name the table first.');const sheet=sh.value.trim();
+   if(file.files[0]&&!/\.(csv|tsv|xlsx|json|jsonl|ndjson|parquet|avro)$/i.test(file.files[0].name))throw new Error(`${file.files[0].name} is not a file ABI reads: choose a CSV, TSV, Excel, JSON, Parquet or Avro file.`);
    if(file.files[0]){const x=await loaded(await upload(t.value,file.files[0],sheet),m,`Uploaded and loaded into ${t.value}.`);return x+' Next: stage or model it under Tables, or ask the agent to build a report from it.'}
    if(!loc.value)throw new Error('Choose a file, or give a location like s3://bucket/folder/*.csv.');
    const s3=loc.value.startsWith('s3://')?{region:rg.value.trim()||'us-east-1',...(ep.value?{endpoint:ep.value.trim(),url_style:'path'}:{}),...(tls.checked?{}:{use_ssl:false})}:null;
@@ -1351,7 +1361,7 @@ function flowPage(box,f){const bar=h('div','row bar lead');bar.append(btn('← F
  const deps={};steps.forEach((x,i)=>deps[x.id]=x.after===undefined?[i?steps[i-1].id:T0]:(x.after.length?x.after:[T0]));
  const depth={[T0]:0};steps.forEach(x=>depth[x.id]=1+Math.max(...deps[x.id].map(d=>depth[d]??0)));
  const what=x=>x.table||x.tool||x.agent||x.action||x.model||x.report||(x.measure?`${x.measure} ${x.op} ${x.value}`:'')||(x.changed?'data changed':'')||(x.message||'').slice(0,40);
- const nodes=[{id:T0,title:'Trigger',sub:t.type+(t.cron?` · ${t.cron}${t.timezone?' '+t.timezone:''}`:'')+(t.tables?' · '+t.tables.join(', '):'')+(t.measure?` · ${t.measure} ${t.op} ${t.value}`:'')},
+ const nodes=[{id:T0,title:'Trigger',sub:trigWords(t)+(t.tables?' · '+t.tables.join(', '):'')},
   ...steps.map(x=>({id:x.id,title:x.id,sub:`${x.type}${what(x)?' · '+what(x):''}`,when:x.when}))];
  const H=x=>x.when?96:72,key='abi-flow2-'+D.project+'-'+f.id;let pos={};try{pos=JSON.parse(localStorage.getItem(key)||'{}')}catch(e){}
  const save=()=>{try{localStorage.setItem(key,JSON.stringify(pos))}catch(e){}};
@@ -1463,6 +1473,12 @@ const LEDE={vault:'Your business documents: definitions, finance rules, KPI spec
  ml:'Forecasts, segments and anomaly models. Train, score and read the latest run.',tools:'Calculations your agents can call. Run one with inputs or run its tests.',
  agents:'Custom agents for this project. Ask one a question or run its evaluation set.',docs:'The project documentation ABI writes from its definitions.',
  security:'Who sees which rows. Roles are set in ABI itself.',environments:'Where each environment reads its data from.',history:'Every change is a commit in ABI. Newest first.'};let PAGES={},CUR='home';const side=$('aside');
+// what a page is for, said to a Viewer (who reads, and does not build)
+const VLEDE={sources:'Bronze: the data as it landed, one source per file or bucket folder, and when each last loaded.',staged:'Silver: the cleaned and combined tables between the sources and the final tables.',
+ tables:'Gold: the final business tables the model and measures are built on.',measures:'The business numbers and how each one is calculated.',flows:'Automations and their last runs.',
+ ml:'Forecasts, segments and anomaly models, with their latest runs.',tools:'Calculations your agents can call.',agents:'Custom agents for this project: ask one a question.',
+ edits:'Corrections to the gold tables, applied on top of the loaded data; every query sees them.',glossary:'What the business words mean and which measures implement them.',
+ datasets:'Saved questions to the model (measures by dimensions, with filters): each run returns a fresh table.',model:'The data models: open one to see its tables and how they join.'};
 function nav(){const all=navAll(),me=window.ME||{admin:true};return all.filter(([g])=>g==='Start'||!me.sections||me.sections.includes(g))}
 function navAll(){return [['Start',[['home','Home',home],['chat','Chat',chatPage]]],
  ['Data',[['sources','Sources',sources,D.sources.length],['staged','Staged',stagedPage,(D.layers||[]).filter(t=>t.layer==='silver').length],['tables','Tables',tablesPage,(D.model?Object.keys(D.model.tables||{}).length:D.tables.length)],['edits','Edits',editsPage]]],
@@ -1493,7 +1509,7 @@ function show(k){if(!PAGES[k])k='home';if(k!=='chat'&&CUR!=='chat')PREV=k;else i
  pn.title=(k.startsWith('rep:')?'Filter the report or click a bar to filter by it. Every number comes from ABI.':LEDE[k])||'';
  // the page says what it is and what it is for, above its actions (the header's crumb says where it sits)
  {const tt=h('div','ttl'),rp=k.startsWith('rep:')&&D.reports.find(r=>'rep:'+r.id===k),sec=nav().find(([,its])=>its.some(([x])=>x===(k.startsWith('rep:')?'reports':k.startsWith('mdl:')?'model':k.startsWith('flw:')?'flows':k)))?.[0];
-  if(sec&&sec!=='Start')tt.append(h('div','eyebrow',sec));tt.append(h('h1','',PAGES[k][0]));const ld=rp?(rp.spec?.description||rp.description||'Filter it, or click a bar or a slice to filter by that member. Every number comes from ABI.'):LEDE[k];
+  if(sec&&sec!=='Start')tt.append(h('div','eyebrow',sec));tt.append(h('h1','',PAGES[k][0]));const ld=rp?(rp.spec?.description||rp.description||'Filter it, or click a bar or a slice to filter by that member. Every number comes from ABI.'):(MODE==='viewer'&&VLEDE[k])||LEDE[k];
   if(ld)tt.append(h('p','',ld));head.append(tt)}
  pg.append(head);box.append(pg);PAGES[k][1](pg);lay(pg,k);new MutationObserver(()=>lay(pg,k)).observe(pg,{childList:true,subtree:true});
  const top=pg.querySelector(':scope>.bar.top'),lead=pg.querySelector(':scope>.bar.lead');if(lead)lead.classList.contains('seg')?head.append(lead):head.querySelector('.ttl').prepend(lead);if(top)head.append(top);if(MODE==='viewer')pg.querySelectorAll('.ed').forEach(e=>e.readOnly=true);
@@ -1598,8 +1614,8 @@ function tokDialog(){const d=h('dialog'),c=h('div','card'),list=h('div'),nm=h('i
  const make=btn('Make a token',async()=>{const r=await post({op:'mint',name:nm.value.trim(),days:+dy.value||90});if(r.error){say(m,r.error,1);return}
   const out=h('input','f');out.readOnly=true;out.value=r.result.token;c.insertBefore(out,m);out.select();nm.value='';
   say(m,'Copy it now: it is shown only this once. It signs in as you, only to read: the SQL endpoint\'s password and an MCP client\'s bearer token.');fill()});
- const row=h('div','row acts');row.append(nm,dy,make,btn('Close',()=>{d.close();d.remove()}));
- c.append(h('h3','','Personal tokens'),h('p','','Read-only sign-in as you for SQL clients (psql, DBeaver, BI tools) and MCP clients: only your rows, nothing changes. Never share one.'),list,row,m);
+ const row=h('div','row acts'),two=h('div','two');row.append(make,btn('Close',()=>{d.close();d.remove()}));two.append(fld('What it is for',nm),fld('Expires after (days)',dy));
+ c.append(h('h3','','Personal tokens'),h('p','file','Read-only sign-in as you for SQL clients (psql, DBeaver, BI tools) and MCP clients: only your rows, nothing changes. Never share one.'),list,h('h4','','Make a token'),two,row,m);
  d.append(c);document.body.append(d);d.showModal();fill()}
 // two-step sign-in (ABI's start/confirm/disable_mfa as you): the key and the recovery codes live in this dialog only
 function mfaDialog(){const d=h('dialog'),c=h('div','card'),b=h('div'),m=h('div','msg'),close=()=>{d.close();d.remove()};
