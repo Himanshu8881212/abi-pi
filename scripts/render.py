@@ -15,13 +15,9 @@ CSS = """
  --display:"Inter Tight","Inter",system-ui,-apple-system,"Segoe UI",sans-serif;--text:var(--display);
  --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;--r:6px;--r-lg:10px;--line-strong:#d2d2cd;
  --shadow:0 1px 2px rgb(11 11 11/.04),0 1px 3px rgb(11 11 11/.03);--shadow-pop:0 16px 40px -12px rgb(11 11 11/.22),0 4px 12px rgb(11 11 11/.06);
- --bg:var(--paper);--card:var(--sheet);--acc:var(--ink);--acc2:var(--c2);--bad:var(--red);color-scheme:light}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--paper:#0c0c0b;--sheet:#161614;--ink:#f2f2ef;--mute:#9b9b96;
- --faint:#2b2b28;--line:#2b2b28;--hover:#1f1f1c;--signal:#ff6a3d;--signal-ink:#ff8a63;--red:#ff6b55;--ok:#4cc27f;--c2:#ff6a3d;--c3:#8f8f8a;--c4:#4d4d4a;--c5:#9a4a30;color-scheme:dark;
- --line-strong:#3b3b38;--shadow:0 1px 2px rgb(0 0 0/.4);--shadow-pop:0 16px 40px -12px rgb(0 0 0/.7),0 0 0 1px #2a2a28}}
-:root[data-theme="dark"]{--paper:#0c0c0b;--sheet:#161614;--ink:#f2f2ef;--mute:#9b9b96;--faint:#2b2b28;--line:#2b2b28;--hover:#1f1f1c;
- --line-strong:#3b3b38;--shadow:0 1px 2px rgb(0 0 0/.4);--shadow-pop:0 16px 40px -12px rgb(0 0 0/.7),0 0 0 1px #2a2a28;
- --signal:#ff6a3d;--signal-ink:#ff8a63;--red:#ff6b55;--ok:#4cc27f;--c2:#ff6a3d;--c3:#8f8f8a;--c4:#4d4d4a;--c5:#9a4a30;color-scheme:dark}
+ --focus:color-mix(in srgb,var(--ink) 62%,transparent);--c1:var(--ink);--bg:var(--paper);--card:var(--sheet);--acc:var(--ink);--acc2:var(--c2);--bad:var(--red);color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--paper:#13110f;--sheet:#1d1a17;--ink:#f1ece4;--mute:#a7a097;--faint:#302c27;--line:#302c27;--hover:#26221e;--line-strong:#433d36;--c1:#d9d2c6;--signal:#ff6a3d;--signal-ink:#ff9068;--red:#ff6b55;--ok:#5cc58a;--c2:#ff6a3d;--c3:#8e877d;--c4:#544d45;--c5:#a1532f;--shadow:0 1px 0 rgb(255 245 230/.03),0 1px 3px rgb(0 0 0/.45);--shadow-pop:0 16px 40px -12px rgb(0 0 0/.75),0 0 0 1px #302c27;color-scheme:dark}}
+:root[data-theme="dark"]{--paper:#13110f;--sheet:#1d1a17;--ink:#f1ece4;--mute:#a7a097;--faint:#302c27;--line:#302c27;--hover:#26221e;--line-strong:#433d36;--c1:#d9d2c6;--signal:#ff6a3d;--signal-ink:#ff9068;--red:#ff6b55;--ok:#5cc58a;--c2:#ff6a3d;--c3:#8e877d;--c4:#544d45;--c5:#a1532f;--shadow:0 1px 0 rgb(255 245 230/.03),0 1px 3px rgb(0 0 0/.45);--shadow-pop:0 16px 40px -12px rgb(0 0 0/.75),0 0 0 1px #302c27;color-scheme:dark}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}[hidden]{display:none!important}
 body{margin:0;font:14px/1.5 var(--text);background:var(--paper);color:var(--ink);-webkit-font-smoothing:antialiased;font-feature-settings:"ss01","cv11"}
 header{display:flex;gap:16px;align-items:center;flex-wrap:wrap;padding-block:12px;padding-left:max(24px,env(safe-area-inset-left,0px));
@@ -45,7 +41,7 @@ td.n{text-align:right;font:13px var(--text);font-variant-numeric:tabular-nums;le
 .scroll th{position:sticky;top:0;z-index:1}
 .scroll{max-height:400px;overflow:auto}svg text{fill:var(--mute);font:11px var(--text);font-variant-numeric:tabular-nums}
 svg text.val{fill:var(--ink);font-weight:500;font-size:11px}svg text.tot{fill:var(--ink);font:600 16px var(--display);letter-spacing:-.01em}
-svg text.tl{fill:var(--ink);font-weight:500;font-size:11.5px;pointer-events:none}svg text.tv{fill:var(--ink);opacity:.78;font-size:11px;pointer-events:none}svg text.on{fill:var(--ink);stroke:var(--card);stroke-width:3px;paint-order:stroke;stroke-linejoin:round;pointer-events:none}
+svg text.endv{fill:var(--sheet);font-weight:600;font-size:11px}svg rect.endb{fill:var(--ink)}svg text.tl{fill:var(--ink);font-weight:500;font-size:11.5px;pointer-events:none}svg text.tv{fill:var(--ink);opacity:.78;font-size:11px;pointer-events:none}svg text.on{fill:var(--ink);stroke:var(--card);stroke-width:3px;paint-order:stroke;stroke-linejoin:round;pointer-events:none}
 .tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--sheet);padding:7px 10px;border-radius:var(--r);font-size:12px;line-height:1.4;display:none;z-index:40;box-shadow:var(--shadow-pop);font-variant-numeric:tabular-nums;max-width:320px}
 code,pre{font:12.5px/1.6 var(--mono)}pre{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);padding:12px 16px;overflow:auto;max-height:320px}
 .file{color:var(--mute);font:12px var(--mono);margin-top:8px}
@@ -53,7 +49,7 @@ code,pre{font:12.5px/1.6 var(--mono)}pre{background:var(--paper);border:1px soli
 section{margin-bottom:40px}section>h2{font:600 18px var(--display);margin:0 0 16px}
 input.search{padding:8px 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--sheet);color:var(--ink);font:inherit;width:280px;max-width:100%}
 a{color:var(--ink);text-underline-offset:3px;text-decoration-color:var(--signal)}.empty{color:var(--mute)}.steps li{margin:2px 0}.ok{color:var(--ok)}.bad{color:var(--red)}
-:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
 """
 
@@ -69,7 +65,7 @@ function fmt(v,f){if(v===null||v===undefined)return'—';if(typeof v!=='number')
  return new Intl.NumberFormat(undefined,o).format(v)}
 const NS='http://www.w3.org/2000/svg';function el(t,a,p){const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);p&&p.appendChild(e);return e}
 // neighbours always differ in tone: ink, signal, light grey, mid grey, signal tint, dark grey
-const COL=['var(--ink)','var(--c2)','var(--c4)','var(--c3)','var(--c5)','var(--mute)'];
+const COL=['var(--c1)','var(--c2)','var(--c4)','var(--c3)','var(--c5)','var(--mute)'];
 const dimLabel=c=>{const k=String(c).split('.').pop().replace(/_/g,' ');return k.charAt(0).toUpperCase()+k.slice(1)};  // products.product_name: Product name
 const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];  // a (year, month) axis reads Jan 2023
 const PLAIN=/(^|\.)(year|week_year|quarter|month|week|day_of_week)$/;  // calendar numbers: 2023, not 2,023
@@ -114,14 +110,14 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
   key=r=>!per?r[0]:c[1-yi].endsWith('.month')?`${MON[r[1-yi]-1]||r[1-yi]} ${r[yi]}`:`Q${r[1-yi]} ${r[yi]}`,tick=(v,m)=>fmt(v,{...d.format[m],compact:true,decimals:2}),
   mk=(e,i,ks,o)=>mark(e,per?null:i,[...(per?[key(d.rows[i])]:d.rows[i].slice(0,nd).map(x=>x??'—')),...ks.map(m=>`${N(m)}: ${fmt(val(i,m),{...d.format[m],compact:false})}`)].join(' · '),o),
   // a label that fits its width: shortened until it does, gone when not even a few letters do
-  fit=(t,s,w)=>{t.textContent=s;if(t.getComputedTextLength()<=w)return t;for(let n=s.length-1;n>2;n--){t.textContent=s.slice(0,n)+'…';if(t.getComputedTextLength()<=w)return t}t.remove();return null},
+  fit=(t,s,w,strict)=>{t.textContent=s;if(t.getComputedTextLength()<=w)return t;if(strict){t.remove();return null}for(let n=s.length-1;n>2;n--){t.textContent=s.slice(0,n)+'…';if(t.getComputedTextLength()<=w)return t}t.remove();return null},
   dark=k=>[0,5].includes(k%6);  // ink and mute tiles take light text, the rest ink
  // ranked bars across (a map's members, or bars whose names don't fit under them): every name, its value at the end
  const hb=(rs,m,note)=>{const n=rs.length;if(!n)return;const top=note?18:4,rh=Math.max(14,Math.min(30,(H-top-4)/n)),bh=Math.max(8,rh*.62),lw=Math.min(W*.34,Math.max(...rs.map(i=>String(d.rows[i][0]??'—').length))*6.6+10),x0=lw+10,x1=W-64,mx=Math.max(1e-9,...rs.map(i=>Math.abs(val(i,m))));
   if(note)el('text',{x:0,y:11},svg).textContent=note;svg.setAttribute('viewBox',`0 0 ${W} ${Math.max(H,top+n*rh+4)}`);
   rs.forEach((i,k)=>{const y=top+k*rh,v=val(i,m),w=Math.max(1,(x1-x0)*Math.abs(v)/(mx||1));fit(el('text',{x:lw,y:y+rh/2+4,'text-anchor':'end'},svg),String(d.rows[i][0]??'Not given'),lw-4);
-   mk(el('rect',{x:x0,y:y+(rh-bh)/2,width:w,height:bh,rx:Math.min(3,bh/4),fill:k?'var(--ink)':'var(--signal)'},svg),i,[m]);el('text',{x:x0+w+6,y:y+rh/2+4,class:'val'},svg).textContent=tick(v,m)})};
- if(type==='map'){const m=ms[0];hb(idx.filter(i=>num(i,m)).sort((i,j)=>val(j,m)-val(i,m)),m,`${dimLabel(c[0])}, ranked by ${N(m)} (the PDF draws the map)`);return}
+   mk(el('rect',{x:x0,y:y+(rh-bh)/2,width:w,height:bh,rx:Math.min(3,bh/4),fill:d.rows[i][0]==null?'var(--c4)':k?COL[0]:'var(--signal)'},svg),i,[m]);el('text',{x:x0+w+6,y:y+rh/2+4,class:'val'},svg).textContent=tick(v,m)})};
+ if(type==='map'){const m=ms[0];hb(idx.filter(i=>num(i,m)).sort((i,j)=>(d.rows[i][0]==null)-(d.rows[j][0]==null)||val(j,m)-val(i,m)),m,`${dimLabel(c[0])}, ranked by ${N(m)} (the PDF draws the map)`);return}
  // a heatmap: one dimension down, one across, the measure as the cell's shade of the signal colour
  if(type==='heatmap'){const m=ms[0],ys=[...new Set(d.rows.map(r=>r[0]))],xs=[...new Set(d.rows.map(r=>r[1]))],vs=idx.filter(i=>num(i,m)).map(i=>val(i,m)),lo=Math.min(...vs),hi=Math.max(...vs),
    lw=Math.min(W*.3,Math.max(...ys.map(v=>String(v??'—').length))*6.6+10),top=20,cw=(W-lw-4)/Math.max(xs.length,1),chh=Math.max(14,Math.min(44,(H-top-4)/Math.max(ys.length,1)));
@@ -147,13 +143,13 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
   if(r>26){el('text',{x:cx,y:cy+2,'text-anchor':'middle',class:'tot'},svg).textContent=tick(tot,m);el('text',{x:cx,y:cy+18,'text-anchor':'middle'},svg).textContent='Total'}return}
  if(type==='funnel'){const m=ms[0],rs=idx.filter(i=>val(i,m)>0).sort((i,j)=>val(j,m)-val(i,m)),h=(H-8)/Math.max(rs.length,1),w=i=>(W-16)*val(i,m)/val(rs[0],m),x=W/2;
   rs.forEach((i,k)=>{const y=4+h*k,a=w(i)/2,b=w(rs[k+1]??i)/2;mk(el('path',{d:`M${x-a},${y}L${x+a},${y}L${x+b},${y+h-2}L${x-b},${y+h-2}Z`,fill:COL[k%6]},svg),i,[m]);
-   if(h>=14){const t=el('text',{x,y:y+h/2+4,'text-anchor':'middle',class:'tl'},svg);if(dark(k))t.style.fill='var(--sheet)';const fw=Math.max(w(i),w(rs[k+1]??i))-8,full=`${d.rows[i][0]??'—'} · ${tick(val(i,m),m)}${k?' · '+Math.round(val(i,m)/val(rs[0],m)*100)+'%':''}`;t.textContent=full;if(t.getComputedTextLength()>fw)fit(t,`${d.rows[i][0]??'—'} · ${tick(val(i,m),m)}`,fw)}});return}
+   if(h>=14){const t=el('text',{x,y:y+h/2+4,'text-anchor':'middle',class:'tl'},svg);if(dark(k))t.style.fill='var(--sheet)';const fw=Math.max(w(i),w(rs[k+1]??i))-8,full=`${d.rows[i][0]??'—'} · ${tick(val(i,m),m)}${k?' · '+Math.round(val(i,m)/val(rs[0],m)*100)+'%':''}`;t.textContent=full;if(t.getComputedTextLength()>fw&&!fit(t,`${d.rows[i][0]??'—'} · ${tick(val(i,m),m)}`,fw,1)){const t2=el('text',{x,y:y+h/2+4,'text-anchor':'middle',class:'tl'},svg);if(dark(k))t2.style.fill='var(--sheet)';fit(t2,String(d.rows[i][0]??'—'),fw,1)}}});return}
  if(type==='treemap'){const m=ms[0],rs=idx.filter(i=>val(i,m)>0).sort((i,j)=>val(j,m)-val(i,m)),sum=g=>g.reduce((s,i)=>s+val(i,m),0),
    gs=two?[...new Set(rs.map(i=>d.rows[i][0]))].map(g=>rs.filter(i=>d.rows[i][0]===g)).sort((a,b)=>sum(b)-sum(a)):rs.map(i=>[i]),T=two?legend(svg,W,gs.map(g=>d.rows[g[0]][0])):0;
   sq(gs.map(sum),0,T,W,H-T).forEach(([x,y,w,h],k)=>sq(gs[k].map(i=>val(i,m)),x+1,y+1,Math.max(w-2,0),Math.max(h-2,0)).forEach(([x,y,w,h],j)=>{const i=gs[k][j];if(w<3||h<3)return;  // too small to draw: in the rows
    mk(el('rect',{x:x+1,y:y+1,width:Math.max(w-2,0),height:Math.max(h-2,0),fill:COL[k%6]},svg),i,[m]);
-   if(w>36&&h>18){const t=el('text',{x:x+7,y:y+16,class:'tl'},svg);if(dark(k))t.style.fill='var(--sheet)';if(fit(t,String(d.rows[i][nd-1]??'—'),w-12)&&h>36){const u=el('text',{x:x+7,y:y+31,class:'tv'},svg);if(dark(k))u.style.fill='var(--sheet)';fit(u,tick(val(i,m),m),w-12)}}}));return}
- const L=60,B=40;
+   if(w>36&&h>18){const t=el('text',{x:x+7,y:y+16,class:'tl'},svg);if(dark(k))t.style.fill='var(--sheet)';if(fit(t,String(d.rows[i][nd-1]??'—'),w-12,1)&&h>36){const u=el('text',{x:x+7,y:y+31,class:'tv'},svg);if(dark(k))u.style.fill='var(--sheet)';fit(u,tick(val(i,m),m),w-12,1)}}}));return}
+ const L=60;let B=40;
  if(type==='scatter'&&ms.length>1){const [mx,my]=ms,rs=idx.filter(i=>num(i,mx)&&num(i,my)),g=two?[...new Set(rs.map(i=>d.rows[i][1]))]:[],T=(two?legend(svg,W,g):8)+16,R=20;
   if(!rs.length)return;const sc=(m,a,b,n)=>{const vs=rs.map(i=>val(i,m)),k=nice(Math.min(...vs),Math.max(...vs),n);return [v=>a+(v-k.lo)/(k.hi-k.lo)*(b-a),k.t]},
    [X,xt]=sc(mx,L,W-R,Math.max(2,Math.floor((W-L-R)/60))),[Y,yt]=sc(my,H-B,T,Math.max(2,Math.floor((H-B-T)/28)));
@@ -167,7 +163,8 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
  ord.forEach(i=>(two&&!per?[[d.rows[i][1],ms[0]]]:ms.map(m=>[m,m])).forEach(([n,m])=>{let s=S.find(s=>s.n===n);if(!s)S.push(s={n,m,v:cats.map(()=>null),r:cats.map(()=>null)});const k=ix.get(key(d.rows[i]));s.v[k]=val(i,m);s.r[k]=i}));
  if(!S.length)return;
  {const lw=Math.max(...cats.map(v=>Math.min(11,String(v??'—').length)))*6.2+8;if(type==='bar'&&!two&&!per&&S.length===1&&cats.length<=24&&cats.length*lw>W-68){hb(ord,S[0].m);return}}
- const stack=type==='bar'&&two&&!per,combo=type==='combo'&&S.length>1,R=combo?60:8,PC=S.length===2&&/_prev$/.test(S[1].m)&&S[1].m.startsWith(S[0].m.replace(/_prev$/,''))?['var(--ink)','var(--c3)']:COL,T=S.length>1&&type!=='waterfall'?legend(svg,W,S.map(s=>two&&!per?s.n:N(s.m)),PC):10,cum=[];  // a measure against its previous period: now in ink, before in grey
+ const rot=!per&&cats.length>3&&cats.length<=24&&cats.length*(Math.max(...cats.map(v=>Math.min(11,String(v??'—').length)))*6.2+8)>W-L-(type==='combo'?60:8);if(rot)B=Math.min(80,24+Math.max(...cats.map(v=>Math.min(16,String(v??'—').length)))*4.6);
+ const stack=type==='bar'&&two&&!per,combo=type==='combo'&&S.length>1,R=combo?60:8,PC=S.length===2&&/_prev$/.test(S[1].m)&&S[1].m.startsWith(S[0].m.replace(/_prev$/,''))?['var(--c1)','var(--c3)']:COL,T=S.length>1&&type!=='waterfall'?legend(svg,W,S.map(s=>two&&!per?s.n:N(s.m)),PC):10,cum=[];  // a measure against its previous period: now in ink, before in grey
  let run=0;if(type==='waterfall')S[0].v.forEach(v=>cum.push([run,run+=v||0]));
  const ax=(vs,m,x,an)=>{const {lo,hi,t}=nice(Math.min(0,...vs),Math.max(0,...vs),Math.max(2,Math.floor((H-B-T)/28))),y=v=>H-B-(v-lo)/(hi-lo)*(H-B-T);
   t.forEach(v=>{an==='end'&&el('line',{x1:L,x2:W-R,y1:y(v),y2:y(v),stroke:'var(--line)'},svg);el('text',{x,y:y(v)+4,'text-anchor':an},svg).textContent=tick(v,m)});return y};
@@ -175,7 +172,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
   y2=combo?ax(S.slice(1).flatMap(s=>s.v.map(v=>v||0)),S[1].m,W-R+6,'start'):y;
  el('line',{x1:L,x2:W-R,y1:y(0),y2:y(0),stroke:'var(--line-strong)'},svg);  // the zero line, a shade stronger than the grid
  const n=cats.length,step=(W-L-R)/Math.max(n,1),lab=Math.ceil(n*(Math.min(11,Math.max(...cats.map(v=>String(v??'—').length)))*6.2+8)/(W-L-R)),X=k=>L+step*k+step/2;
- let edge=0;cats.forEach((v,k)=>{if(k%lab)return;const t=el('text',{x:X(k),y:H-B+14,'text-anchor':'middle'},svg);t.textContent=cut(v,11);  // inside the box, none over the last
+ let edge=0;if(rot)cats.forEach((v,k)=>{const t=el('text',{x:X(k),y:H-B+12,'text-anchor':'end',transform:`rotate(-38 ${X(k)} ${H-B+12})`},svg);t.textContent=cut(v,16)});else cats.forEach((v,k)=>{if(k%lab)return;const t=el('text',{x:X(k),y:H-B+14,'text-anchor':'middle'},svg);t.textContent=cut(v,11);  // inside the box, none over the last
   const w=t.getComputedTextLength()/2,x=Math.min(X(k),W-w-2);if(x-w<edge)return t.remove();t.setAttribute('x',x);edge=x+w+6});
  if(type==='waterfall'){S[0].v.forEach((v,k)=>{if(v==null)return;const [p,q]=cum[k];  // each step floats from the running total; the tooltip shows the row's own value
    mk(el('rect',{x:L+step*k+step*.15,y:Math.min(y(p),y(q)),width:Math.max(step*.7,1),height:Math.max(Math.abs(y(p)-y(q)),1),rx:2,fill:v<0?'var(--signal)':'var(--ink)'},svg),S[0].r[k],[S[0].m]);
@@ -195,7 +192,8 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
   pts.forEach((p,k)=>p&&mk(el('circle',{cx:p[0],cy:p[1],r:dot?4:Math.max(2,Math.min(4,step/3)),fill:COL[j%6],opacity:dot?1:.01},svg),s.r[k],[s.m],dot?.7:1));
   // a line ends on its latest value, marked and labelled
   if(!dot&&type==='line'&&S.length<=2&&run.length){const kk=s.v.map((v,k)=>v==null?-1:k).filter(k=>k>=0).at(-1),[lx,ly]=pts[kk];el('circle',{cx:lx,cy:ly,r:3.5,fill:COL[j%6],stroke:'var(--card)','stroke-width':1.5},svg);
-   const t=el('text',{x:lx-6,y:ly-10,'text-anchor':'end',class:'val on'},svg);t.textContent=tick(s.v[kk],s.m)}});
+   const up=ly-T>30,g=el('g',{},svg),t=el('text',{x:lx-8,y:up?ly-14:ly+22,'text-anchor':'end',class:'endv'},g);t.textContent=tick(s.v[kk],s.m);const tw=t.getComputedTextLength()||30;
+   el('rect',{x:lx-tw-14,y:(up?ly-14:ly+22)-12,width:tw+12,height:17,rx:4,class:'endb'},g).after(t);g.append(t)}});
  // a line over time: a guide follows the pointer to the nearest period and the tooltip has every series there
  if(type==='line'&&(!two||per)){const g=el('line',{y1:T,y2:H-B,stroke:'var(--mute)','stroke-dasharray':'3 3',opacity:0,'pointer-events':'none'},svg);
   svg.addEventListener('mousemove',e=>{const r=svg.getBoundingClientRect();if(!r.width)return;const k=Math.round(((e.clientX-r.left)*W/r.width-L-step/2)/step);if(k<0||k>=n){g.setAttribute('opacity',0);return}
