@@ -172,7 +172,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
   y2=combo?ax(S.slice(1).flatMap(s=>s.v.map(v=>v||0)),S[1].m,W-R+6,'start'):y;
  el('line',{x1:L,x2:W-R,y1:y(0),y2:y(0),stroke:'var(--line-strong)'},svg);  // the zero line, a shade stronger than the grid
  const n=cats.length,step=(W-L-R)/Math.max(n,1),lab=Math.ceil(n*(Math.min(11,Math.max(...cats.map(v=>String(v??'—').length)))*6.2+8)/(W-L-R)),X=k=>L+step*k+step/2;
- let edge=0;if(rot)cats.forEach((v,k)=>{if(step<26&&k%2)return;  // every other name when slanted names would touchconst t=el('text',{x:X(k)+3,y:H-B+12,'text-anchor':'end',transform:`rotate(-55 ${X(k)+3} ${H-B+12})`},svg);t.textContent=cut(v,13)});else cats.forEach((v,k)=>{if(k%lab)return;const t=el('text',{x:X(k),y:H-B+14,'text-anchor':'middle'},svg);t.textContent=cut(v,11);  // inside the box, none over the last
+ let edge=0;if(rot)cats.forEach((v,k)=>{if(step<26&&k%2)return;  /* every other name when slanted names would touch */const t=el('text',{x:X(k)+3,y:H-B+12,'text-anchor':'end',transform:`rotate(-55 ${X(k)+3} ${H-B+12})`},svg);t.textContent=cut(v,13)});else cats.forEach((v,k)=>{if(k%lab)return;const t=el('text',{x:X(k),y:H-B+14,'text-anchor':'middle'},svg);t.textContent=cut(v,11);  // inside the box, none over the last
   const w=t.getComputedTextLength()/2,x=Math.min(X(k),W-w-2);if(x-w<edge)return t.remove();t.setAttribute('x',x);edge=x+w+6});
  if(type==='waterfall'){S[0].v.forEach((v,k)=>{if(v==null)return;const [p,q]=cum[k];  // each step floats from the running total; the tooltip shows the row's own value
    mk(el('rect',{x:L+step*k+step*.15,y:Math.min(y(p),y(q)),width:Math.max(step*.7,1),height:Math.max(Math.abs(y(p)-y(q)),1),rx:2,fill:v<0?'var(--signal)':'var(--ink)'},svg),S[0].r[k],[S[0].m]);
@@ -192,7 +192,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
   pts.forEach((p,k)=>p&&mk(el('circle',{cx:p[0],cy:p[1],r:dot?4:Math.max(2,Math.min(4,step/3)),fill:COL[j%6],opacity:dot?1:.01},svg),s.r[k],[s.m],dot?.7:1));
   // a line ends on its latest value, marked and labelled
   if(!dot&&type==='line'&&S.length<=2&&run.length){const kk=s.v.map((v,k)=>v==null?-1:k).filter(k=>k>=0).at(-1),[lx,ly]=pts[kk];el('circle',{cx:lx,cy:ly,r:3.5,fill:COL[j%6],stroke:'var(--card)','stroke-width':1.5},svg);
-   let yy0=Math.max(T+9,Math.min(H-B-4,ly-13));  // off the last point, above itconst g=el('g',{},svg),t=el('text',{x:lx+16,y:0,class:'endv'},g);t.textContent=tick(s.v[kk],s.m);const tw=t.getComputedTextLength()||30;
+   let yy0=Math.max(T+9,Math.min(H-B-4,ly-13));  /* off the last point, above it */const g=el('g',{},svg),t=el('text',{x:lx+16,y:0,class:'endv'},g);t.textContent=tick(s.v[kk],s.m);const tw=t.getComputedTextLength()||30;
    for(const b of ENDS)if(lx+10<b.x+b.w&&lx+10+tw+12>b.x&&Math.abs(yy0-b.y)<20)yy0=b.y+(yy0>=b.y?20:-20);ENDS.push({x:lx+10,w:tw+12,y:yy0});t.setAttribute('y',yy0+4);
    el('rect',{x:lx+10,y:yy0-8.5,width:tw+12,height:17,rx:4,class:'endb'},g).after(t);g.append(t)}});
  // a line over time: a guide follows the pointer to the nearest period and the tooltip has every series there
