@@ -1236,6 +1236,23 @@ def test_s3_keys_become_secrets_bound_to_the_bucket_host_and_never_come_back(srv
                     abi.call("delete_secret", confirm=e.body["confirm_token"], name=n)
 
 
+def test_an_ml_prediction_table_stays_out_of_the_published_copy():
+    """R4: the copy got ml_revenue_forecast and "Revenue forecast": never loaded there and with no row rule, so a
+    restricted viewer saw an engine error, owner-only readiness gaps and a forecast chip. Publish leaves out the table,
+    its joins and the measures over it; the ML model's definition stays."""
+    b = {"ml/revenue_forecast.json": {"id": "revenue_forecast"},
+         "model/model.json": {"tables": [{"table": "orders"}, {"table": "ml_revenue_forecast"}],
+                              "relationships": [{"from": {"table": "ml_revenue_forecast"}, "to": {"table": "calendar"}},
+                                                {"from": {"table": "orders"}, "to": {"table": "cafes"}}]},
+         "model/measures.json": {"measures": [{"id": "revenue", "expression": "SUM(orders.revenue)"},
+                                              {"id": "revenue_forecast_prediction", "expression": 'SUM("ml_revenue_forecast".prediction)'}]},
+         "model/glossary.json": {"terms": [{"measures": ["revenue", "revenue_forecast_prediction"]}]}}
+    app.owner_only(b)
+    assert b["model/model.json"]["tables"] == [{"table": "orders"}] and len(b["model/model.json"]["relationships"]) == 1
+    assert [x["id"] for x in b["model/measures.json"]["measures"]] == ["revenue"]
+    assert b["model/glossary.json"]["terms"][0]["measures"] == ["revenue"] and "ml/revenue_forecast.json" in b
+
+
 def test_the_published_copy_gives_each_person_their_own_role(monkeypatch):
     """1.2.5: Publish gave everyone Viewer on the published copy, so ABI's row rules ("a Viewer not listed sees no rows")
     left an owner or editor in no rule with empty reports in Viewer mode and on every phone. The copy now mirrors each

@@ -148,7 +148,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
    gs=two?[...new Set(rs.map(i=>d.rows[i][0]))].map(g=>rs.filter(i=>d.rows[i][0]===g)).sort((a,b)=>sum(b)-sum(a)):rs.map(i=>[i]),T=two?legend(svg,W,gs.map(g=>d.rows[g[0]][0])):0;
   sq(gs.map(sum),0,T,W,H-T).forEach(([x,y,w,h],k)=>sq(gs[k].map(i=>val(i,m)),x+1,y+1,Math.max(w-2,0),Math.max(h-2,0)).forEach(([x,y,w,h],j)=>{const i=gs[k][j];if(w<3||h<3)return;  // too small to draw: in the rows
    mk(el('rect',{x:x+1,y:y+1,width:Math.max(w-2,0),height:Math.max(h-2,0),fill:COL[k%6]},svg),i,[m]);
-   if(w>36&&h>18){const t=el('text',{x:x+7,y:y+16,class:'tl'},svg);if(dark(k))t.style.fill='var(--sheet)';let ok=fit(t,String(d.rows[i][nd-1]??'—'),w-12,1),flat=!!ok;if(!ok&&w>30){const t3=el('text',{x:x+5,y:y+14,class:'tl'},svg);t3.style.fontSize='10px';if(dark(k))t3.style.fill='var(--sheet)';ok=flat=!!fit(t3,String(d.rows[i][nd-1]??'—'),w-8,1)}if(flat&&h>36){const u=el('text',{x:x+7,y:y+31,class:'tv'},svg);if(dark(k))u.style.fill='var(--sheet)';fit(u,tick(val(i,m),m),w-12,1)}}}));return}
+   if(w>36&&h>18){const t=el('text',{x:x+7,y:y+16,class:'tl'},svg);if(dark(k))t.style.fill='var(--sheet)';let ok=fit(t,String(d.rows[i][nd-1]??'—'),w-12,1),flat=!!ok;if(!ok&&w>30){const t3=el('text',{x:x+5,y:y+14,class:'tl'},svg);t3.style.fontSize='10px';if(dark(k))t3.style.fill='var(--sheet)';ok=flat=!!fit(t3,String(d.rows[i][nd-1]??'—'),w-8,w<40)}if(flat&&h>36){const u=el('text',{x:x+7,y:y+31,class:'tv'},svg);if(dark(k))u.style.fill='var(--sheet)';fit(u,tick(val(i,m),m),w-12,1)}}}));return}
  const L=60;let B=40;
  if(type==='scatter'&&ms.length>1){const [mx,my]=ms,rs=idx.filter(i=>num(i,mx)&&num(i,my)),g=two?[...new Set(rs.map(i=>d.rows[i][1]))]:[],T=(two?legend(svg,W,g):8)+16,R=20;
   if(!rs.length)return;const sc=(m,a,b,n)=>{const vs=rs.map(i=>val(i,m)),k=nice(Math.min(...vs),Math.max(...vs),n);return [v=>a+(v-k.lo)/(k.hi-k.lo)*(b-a),k.t]},
@@ -172,7 +172,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
   y2=combo?ax(S.slice(1).flatMap(s=>s.v.map(v=>v||0)),S[1].m,W-R+6,'start'):y;
  el('line',{x1:L,x2:W-R,y1:y(0),y2:y(0),stroke:'var(--line-strong)'},svg);  // the zero line, a shade stronger than the grid
  const n=cats.length,step=(W-L-R)/Math.max(n,1),lab=Math.ceil(n*(Math.min(11,Math.max(...cats.map(v=>String(v??'—').length)))*6.2+8)/(W-L-R)),X=k=>L+step*k+step/2;
- let edge=0;if(rot)cats.forEach((v,k)=>{if(step<14&&k%2)return;const t=el('text',{x:X(k)+3,y:H-B+12,'text-anchor':'end',transform:`rotate(-55 ${X(k)+3} ${H-B+12})`},svg);t.textContent=cut(v,13)});else cats.forEach((v,k)=>{if(k%lab)return;const t=el('text',{x:X(k),y:H-B+14,'text-anchor':'middle'},svg);t.textContent=cut(v,11);  // inside the box, none over the last
+ let edge=0;if(rot)cats.forEach((v,k)=>{if(step<26&&k%2)return;  // every other name when slanted names would touchconst t=el('text',{x:X(k)+3,y:H-B+12,'text-anchor':'end',transform:`rotate(-55 ${X(k)+3} ${H-B+12})`},svg);t.textContent=cut(v,13)});else cats.forEach((v,k)=>{if(k%lab)return;const t=el('text',{x:X(k),y:H-B+14,'text-anchor':'middle'},svg);t.textContent=cut(v,11);  // inside the box, none over the last
   const w=t.getComputedTextLength()/2,x=Math.min(X(k),W-w-2);if(x-w<edge)return t.remove();t.setAttribute('x',x);edge=x+w+6});
  if(type==='waterfall'){S[0].v.forEach((v,k)=>{if(v==null)return;const [p,q]=cum[k];  // each step floats from the running total; the tooltip shows the row's own value
    mk(el('rect',{x:L+step*k+step*.15,y:Math.min(y(p),y(q)),width:Math.max(step*.7,1),height:Math.max(Math.abs(y(p)-y(q)),1),rx:2,fill:v<0?'var(--signal)':'var(--ink)'},svg),S[0].r[k],[S[0].m]);
@@ -192,7 +192,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
   pts.forEach((p,k)=>p&&mk(el('circle',{cx:p[0],cy:p[1],r:dot?4:Math.max(2,Math.min(4,step/3)),fill:COL[j%6],opacity:dot?1:.01},svg),s.r[k],[s.m],dot?.7:1));
   // a line ends on its latest value, marked and labelled
   if(!dot&&type==='line'&&S.length<=2&&run.length){const kk=s.v.map((v,k)=>v==null?-1:k).filter(k=>k>=0).at(-1),[lx,ly]=pts[kk];el('circle',{cx:lx,cy:ly,r:3.5,fill:COL[j%6],stroke:'var(--card)','stroke-width':1.5},svg);
-   let yy0=Math.max(T+9,Math.min(H-B-4,ly));const g=el('g',{},svg),t=el('text',{x:lx+16,y:0,class:'endv'},g);t.textContent=tick(s.v[kk],s.m);const tw=t.getComputedTextLength()||30;
+   let yy0=Math.max(T+9,Math.min(H-B-4,ly-13));  // off the last point, above itconst g=el('g',{},svg),t=el('text',{x:lx+16,y:0,class:'endv'},g);t.textContent=tick(s.v[kk],s.m);const tw=t.getComputedTextLength()||30;
    for(const b of ENDS)if(lx+10<b.x+b.w&&lx+10+tw+12>b.x&&Math.abs(yy0-b.y)<20)yy0=b.y+(yy0>=b.y?20:-20);ENDS.push({x:lx+10,w:tw+12,y:yy0});t.setAttribute('y',yy0+4);
    el('rect',{x:lx+10,y:yy0-8.5,width:tw+12,height:17,rx:4,class:'endb'},g).after(t);g.append(t)}});
  // a line over time: a guide follows the pointer to the nearest period and the tooltip has every series there
