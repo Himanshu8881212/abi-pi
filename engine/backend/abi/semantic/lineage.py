@@ -206,7 +206,34 @@ def _ml(files: dict):
             yield f"table:ml_{mid}", f"ml:{mid}", "predictions"
 
 
-BUILDERS = [_tables, _model, _measures, _datasets, _glossary, _reports, _tools, _flows, _agents, _ml]
+def _ontology(files: dict):
+    """1.2.6 model/ontology.json: an object type reads its table, one-to-one property tables and measures; a link its
+    two types and the relationships it walks; an action type its object type, the table it writes and the flow it starts."""
+    o = files.get("model/ontology.json") or {}
+    for x in o.get("objects", []):
+        node = f"object:{x['id']}"
+        yield node, f"table:{x['table']}", "object"
+        for p in x.get("properties", []):
+            if "." in p["column"]:
+                yield node, "table:" + p["column"].split(".", 1)[0], p["column"]
+        for m in x.get("measures", []):
+            yield node, f"measure:{m}", "measure"
+    for ln in o.get("links", []):
+        node = f"link:{ln['id']}"
+        yield node, f"object:{ln['from']}", "from"
+        yield node, f"object:{ln['to']}", "to"
+        for r in ln["via"]:
+            yield node, f"relationship:{r}", "via"
+    for a in o.get("actions", []):
+        node = f"action:{a['id']}"
+        yield node, f"object:{a['object']}", "object"
+        if w := a.get("writes"):
+            yield node, f"table:{w['table']}", "writes"
+        if a.get("flow"):
+            yield node, f"flow:{a['flow']}", "starts"
+
+
+BUILDERS = [_tables, _model, _measures, _datasets, _glossary, _reports, _tools, _flows, _agents, _ml, _ontology]
 
 
 def graph(files: dict) -> dict[str, dict[str, set[str]]]:
@@ -241,7 +268,8 @@ def reach(g: dict, start: set[str], direction: Literal["downstream", "upstream"]
 class LineageInput(BaseModel):
     project: str = Field(pattern=git.ID)
     object: str = Field(description='"<kind>:<id>": kind is source, table, entity, relationship, measure, dataset, term,'
-                                    ' report, page ("<report>/<page>"), visual ("<report>/<page>/<visual>"), tool, flow, agent or ml,'
+                                    ' report, page ("<report>/<page>"), visual ("<report>/<page>/<visual>"), tool, flow, agent, ml,'
+                                    ' object (an ontology object type), link or action (an ontology action type),'
                                     ' e.g. "table:orders" or "measure:sales" (measure IDs from semantic_model)')
     direction: Literal["downstream", "upstream"] = Field(
         "downstream", description="downstream: what breaks if it changes; upstream: where it comes from")

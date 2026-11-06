@@ -60,9 +60,10 @@ def load(project: str) -> dict:
             "rates_table": f.get("rates_table"), "removed_relationships": f.get("removed_relationships", [])}
 
 
-def save(project: str, m: dict) -> None:
+def _file(m: dict) -> dict:
+    """`load`'s model as model.json holds it (without $schema)."""
     ts = m["tables"]
-    _write(project, "model.json", {
+    return {
         "tables": [{"table": t, "kind": i["kind"], **({"description": i["description"]} if i["description"] else {}),
                     **({"hidden": True} if i.get("hidden") else {})} for t, i in ts.items()],
         "entities": [{"id": slug(t), "table": t, "key": i["key"]} for t, i in ts.items() if i["key"]],
@@ -70,7 +71,11 @@ def save(project: str, m: dict) -> None:
         "date_table": m["date_table"],
         "rates_table": m.get("rates_table"),
         "removed_relationships": sorted(set(m.get("removed_relationships", []))) or None,
-    })
+    }
+
+
+def save(project: str, m: dict) -> None:
+    _write(project, "model.json", _file(m))
 
 
 def visible(m: dict) -> dict:
@@ -208,7 +213,13 @@ def set_table(conn, user: User, args: TableDef) -> dict:
         raise ActionFailed(400, f"Table '{args.table}' has no column {sorted(missing)}.")
     m = load(args.project)
     t = m["tables"].setdefault(args.table, {"kind": "fact", "key": None, "description": None})
+    from abi.semantic import ontology  # not at top: ontology imports this module
+
+    if args.key and t["key"] and args.key != t["key"] and (used := ontology.uses(args.project, f"table:{args.table}")):
+        raise ActionFailed(409, f"The key of '{args.table}' is the identity of {', '.join(used)} in the ontology; change or"
+                                " remove those first (save_ontology, delete_ontology_item).", uses=used)
     t.update(args.model_dump(include={"kind", "key", "description", "hidden"}, exclude_none=True))
+    ontology.guard(args.project, _file(m), f"Table '{args.table}'")  # 1.2.6: hidden or unkeyed while a type uses it
     save(args.project, m)
     if args.description:  # §8: marked agent-written when the Main Agent wrote it, else human-reviewed
         from abi import docs  # not at top: docs imports this module
@@ -252,6 +263,9 @@ def remove_relationship(conn, user: User, args: ObjectRef) -> dict:
         raise ActionFailed(400, f"No relationship '{args.id}'.")
     m["relationships"] = kept
     m["removed_relationships"].append(args.id)
+    from abi.semantic import ontology  # not at top: ontology imports this module
+
+    ontology.guard(args.project, _file(m), f"Relationship '{args.id}'")  # 1.2.6: refused while a link walks it
     save(args.project, m)
     return report(args.project)
 
@@ -371,6 +385,8 @@ def check(project: str) -> list[str]:
              " row-level security rules filter; restricted Viewers see none of its rows until a rule on it (or a"
              " relationship to each filtered table it is made from) filters it."
              for t in semantic.rls.unfiltered_outputs(project)]  # model tables or not: SQL and grids read them too
+    from abi.semantic import ontology  # not at top: ontology imports this module
+    gaps += ontology.gaps(project)  # 1.2.6: dangling references, only once an ontology exists
     from abi import ml  # not at top: ml imports this module
     gaps += [f"Table '{t}' was pre-filled from an ML forecast that row-level security rules now filter, and has no rule of"
              " its own, so every Viewer sees every pre-filled value; add a rule on it." for t in ml.prefill_gaps(project)]

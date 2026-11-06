@@ -21,7 +21,7 @@ from abi import actions, transform
 from abi.actions import ActionFailed, action, require_confirmation
 from abi.project import ID, SCHEMA, SCHEMAS, bundle, git
 from abi.security import ALLOWED, Role, User, role_in
-from abi.semantic import SemanticQuery, lineage, mel, model, planner, rls
+from abi.semantic import SemanticQuery, lineage, mel, model, ontology, planner, rls
 
 ROLES = "security/roles.json"
 RLS = git.RLS
@@ -29,6 +29,7 @@ MEASURES = "model/measures.json"
 LAYOUT = {  # §6.6 paths that have a published schema (M-04); other object types ship with their tasks
     r"project\.json": "project", r"sources/[^/]+\.json": "source", r"tables/[^/]+\.json": "table",
     r"model/model\.json": "model", r"model/glossary\.json": "glossary", r"model/measures\.json": "measures", r"model/datasets\.json": "datasets", r"model/models\.json": "models",
+    r"model/ontology\.json": "ontology",  # 1.2.6
     r"security/roles\.json": "roles", r"security/rls\.json": "rls", r"reports/[^/]+\.json": "report", r"tools/[^/]+\.json": "tool",
     r"docs/descriptions\.json": "descriptions", r"flows/[^/]+\.json": "flow",
     r"agents/[^/]+\.eval\.json": "eval", r"agents/[^/]+\.json": "agent",  # eval first: agents/x.eval.json matches both
@@ -186,7 +187,7 @@ def _schema(conn, project: str, files: dict) -> list[dict]:
         elif not rel.startswith("docs/"):
             errs.append(_err(rel, "$", "No object type is stored at this path.",
                              "Move it to a §6.6 layout path (project.json, sources/<id>.json, tables/<id>.json, model/model.json,"
-                             " model/glossary.json, model/measures.json, model/datasets.json, reports/<id>.json, tools/<id>.json, flows/<id>.json,"
+                             " model/glossary.json, model/measures.json, model/datasets.json, model/models.json, model/ontology.json, reports/<id>.json, tools/<id>.json, flows/<id>.json,"
                              " agents/<id>.json, agents/<id>.eval.json, ml/<id>.json, environments/<branch>.json,"
                              " security/roles.json, security/rls.json, docs/, .github/workflows/<name>.yml, .gitlab-ci.yml) or remove it."))
     return errs
@@ -299,7 +300,7 @@ def _references(conn, project: str, files: dict) -> list[dict]:
                 errs.append(_err(rel, f"$.sources['{sid}']", f"Merged over sources/{sid}.json, at {json_path(e, 'source')}: {msg}", fix))
     for uid in (files.get(ROLES) or {}).keys() - {"$schema"} - users.keys():
         errs.append(_err(ROLES, f"$['{uid}']", f"No user with ID {uid}.", "Use the ID of an existing account, or remove the entry."))
-    return errs
+    return errs + ontology.check(project, files)  # 1.2.6: none without model/ontology.json
 
 
 def _input_table(rel: str, c: dict) -> list[dict]:

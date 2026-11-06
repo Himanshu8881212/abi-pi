@@ -518,7 +518,7 @@ def validate_files(dest: Path) -> list[str]:
     import jsonschema  # noqa: PLC0415 (.venv only)
 
     kinds = {r"project\.json": "project", r"sources/[^/]+\.json": "source", r"tables/[^/]+\.json": "table",
-             r"model/(model|glossary|measures|datasets)\.json": None, r"security/(roles|rls)\.json": None,
+             r"model/(model|glossary|measures|datasets|ontology)\.json": None, r"security/(roles|rls)\.json": None,
              r"reports/[^/]+\.json": "report", r"tools/[^/]+\.json": "tool", r"docs/descriptions\.json": "descriptions",
              r"flows/[^/]+\.json": "flow", r"agents/[^/]+\.eval\.json": "eval", r"agents/[^/]+\.json": "agent",
              r"ml/[^/]+\.json": "ml", r"environments/[^/]+\.json": "environment"}
