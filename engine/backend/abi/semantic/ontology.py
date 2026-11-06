@@ -228,11 +228,16 @@ def uses(project: str, node: str) -> list[str]:
 
 # ---------- reading it: types, properties, links both ways, actions ----------
 
+def _seen(cols: dict, hid: dict, t: str) -> list[str]:
+    """The columns of table `t` the reader may read (D-110), in lake order."""
+    return [c for c in cols.get(t, {}) if c.lower() not in hid.get(t, ())]
+
+
 def _properties(m: dict, x: dict, cols: dict, hid: dict) -> list[dict]:
     """Every visible column of the type's table in lake order, then its listed one-to-one properties; the listed
     name, meaning and description over each, the lake type beside it. A column hidden from the reader is left out."""
     listed = {p["column"]: p for p in x.get("properties", [])}
-    own = [c for c in cols.get(x["table"], {}) if c.lower() not in hid.get(x["table"], ())]
+    own = _seen(cols, hid, x["table"])
     more = [c for c in listed if "." in c and c.split(".", 1)[1].lower() not in hid.get(c.split(".", 1)[0], ())]
     out = []
     for c in own + more:
@@ -544,17 +549,31 @@ def export_ontology(conn, user: User, args: Export) -> dict:
 LIMIT = 1000  # D-17
 
 
-def _obj(project: str, name: str) -> tuple[dict, dict, dict, dict]:
-    """(ontology, model.json, the object type, lake columns) for type `name`; 404 without it."""
+def _obj(project: str, name: str, user_id: int | None) -> tuple[dict, dict, dict, dict, dict]:
+    """(ontology, model.json, the object type, lake columns, columns hidden from the reader) for type `name`: 404
+    without it or before its table is loaded; refused when its key is hidden from the reader (objects have no identity
+    then; the column isn't named)."""
     o = read(project)
     x = next((x for x in o.get("objects", []) if x["id"] == name), None)
     if x is None:
         raise ActionFailed(404, f"No object type '{name}' in project '{project}': `ontology` lists them.")
-    return o, model._read(project, "model.json"), x, model.lake_columns(project)
+    cols, hid, m = model.lake_columns(project), rls.hidden(project, user_id), model._read(project, "model.json")
+    if x["table"] not in cols:
+        raise ActionFailed(404, f"The {x['plural']} of project '{project}' aren't loaded yet: table '{x['table']}' has no data.")
+    if not set(_keys(m)[x["table"]]) <= set(_seen(cols, hid, x["table"])):
+        raise ActionFailed(403, f"You can't read the {x['plural']} of project '{project}' one by one: what identifies them is hidden from you.")
+    return o, m, x, cols, hid
 
 
-def _cast(v, typ: str) -> str:
-    return f"CAST('{storage._lit(str(v))}' AS {typ})"  # as rls._in: the value is only ever a quoted literal
+def _col(cols: dict, hid: dict, t: str, c: str) -> str:
+    """Column `c` of table `t` if the reader may read it; a hidden column reads like a missing one (400)."""
+    if c not in _seen(cols, hid, t):
+        raise ActionFailed(400, f"Table '{t}' has no column '{c}' you can read. Use one of: {', '.join(_seen(cols, hid, t))}.")
+    return c
+
+
+def _hidden_join(cols: dict, hid: dict, r: dict) -> bool:
+    return not all(c in _seen(cols, hid, side["table"]) for side in (r["from"], r["to"]) for c in side["columns"])
 
 
 def _tuple(cols: list[str]) -> str:
@@ -573,9 +592,10 @@ def _semi(hops: list[tuple[dict, bool]], start: str, cond: str) -> str:
     return cond
 
 
-def _follow(project: str, m: dict, o: dict, x: dict, ids: list[str], hid: dict) -> tuple[list, dict]:
+def _follow(project: str, m: dict, o: dict, x: dict, ids: list[str], cols: dict, hid: dict) -> tuple[list, dict]:
     """(the hops, the object type reached) walking links `ids` in order from type `x`, each from its `from` or (its
-    inverse) its `to` type, exactly along its `via`. A join column hidden from the reader refuses (403)."""
+    inverse) its `to` type, exactly along its `via`. A join column the reader can't read (hidden or not loaded)
+    refuses (400) without naming it, alike."""
     objs, links = {t["id"]: t for t in o.get("objects", [])}, {ln["id"]: ln for ln in o.get("links", [])}
     hops = []
     for i in ids:
@@ -588,11 +608,9 @@ def _follow(project: str, m: dict, o: dict, x: dict, ids: list[str], hid: dict) 
         h = walk(m, x["table"], ln["via"] if fwd else ln["via"][::-1])
         if isinstance(h, str):
             raise ActionFailed(400, f"Link '{i}' {h}.")
+        if any(_hidden_join(cols, hid, r) for r, _ in h):
+            raise ActionFailed(400, f"Link '{i}' joins on a column you can't read.")
         hops, x = hops + h, objs[ln["to"] if fwd else ln["from"]]
-    for r, _ in hops:
-        for side in (r["from"], r["to"]):
-            if bad := [c for c in side["columns"] if c.lower() in hid.get(side["table"], ())]:
-                raise ActionFailed(403, f"The walk joins on {side['table']}.{bad[0]}, a column hidden from you.")
     return hops, x
 
 
@@ -622,25 +640,26 @@ class Get(storage.ProjectRef):
 @action(Role.viewer)
 def get_object(conn, user: User, args: Get) -> dict:
     """One object by its key, as you see it (row-level security applies): its properties (the columns not hidden from you, then its one-to-one properties), its type's measures filtered to it, and up to `limit` neighbors (key and title) along each asked link. A hidden object answers like a missing one (404). Every figure you state must come from these rows."""
-    o, m, x, cols = _obj(args.project, args.type)
-    hid, t, keys = rls.hidden(args.project, user.id), x["table"], _keys(m)[x["table"]]
+    o, m, x, cols, hid = _obj(args.project, args.type, user.id)
+    t, keys = x["table"], _keys(m)[x["table"]]
     if len(args.key) != len(keys):
         raise ActionFailed(400, f"{x['name']} is keyed by {', '.join(keys)}: give {len(keys)} value(s), in that order.")
-    walks = {i: _follow(args.project, m, o, x, [i], hid) for i in dict.fromkeys(args.links)}
-    _live(args.project, [t, *(r[s]["table"] for h, _ in walks.values() for r, _ in h for s in ("from", "to"))])
-    where = " AND ".join(f"{storage._q(k)} = {_cast(v, cols[t][k])}" for k, v in zip(keys, args.key))
+    walks = {i: _follow(args.project, m, o, x, [i], cols, hid) for i in dict.fromkeys(args.links)}
     props = _properties(m, x, cols, hid)
     own = [p["column"] for p in props if "." not in p["column"]]
+    ones = []  # one-to-one properties: (table, columns, its relationship onto the type), read only over readable joins
+    for pt in dict.fromkeys(p["column"].split(".", 1)[0] for p in props if "." in p["column"]):
+        r = next((r for r in m.get("relationships", []) if r["from"]["table"] == pt and r["to"]["table"] == t and _one(m, r)), None)
+        if r is not None and not _hidden_join(cols, hid, r):
+            ones.append((pt, [p["column"].split(".", 1)[1] for p in props if p["column"].startswith(pt + ".")], r))
+    _live(args.project, [t, *(pt for pt, _, _ in ones), *(r[s]["table"] for h, _ in walks.values() for r, _ in h for s in ("from", "to"))])
+    where = " AND ".join(f"{storage._q(k)} = {rls.cast_lit(v, cols[t][k])}" for k, v in zip(keys, args.key))
     asked = {"get_object": x["id"], "key": args.key}
     found = _read(args.project, f"SELECT {', '.join(map(storage._q, own))} FROM {storage._q(t)} WHERE {where} LIMIT 1", asked, user.id)
     if not found:  # SE-6: a hidden object and a missing one answer alike
         raise ActionFailed(404, f"No visible {x['name']} with key {json.dumps(args.key)} in project '{args.project}'.")
     columns, row = own, list(found[0])
-    for pt in dict.fromkeys(p["column"].split(".", 1)[0] for p in props if "." in p["column"]):  # one-to-one: a second read
-        pcs = [p["column"].split(".", 1)[1] for p in props if p["column"].startswith(pt + ".")]
-        r = next((r for r in m.get("relationships", []) if r["from"]["table"] == pt and r["to"]["table"] == t and _one(m, r)), None)
-        if r is None or pt not in cols:
-            continue
+    for pt, pcs, r in ones:  # a second read each
         got = _read(args.project, f"SELECT {', '.join(map(storage._q, pcs))} FROM {storage._q(pt)} WHERE {_semi([(r, False)], t, where)}"
                                   " LIMIT 1", asked, user.id)
         columns, row = columns + [f"{pt}.{c}" for c in pcs], row + list(got[0] if got else [None] * len(pcs))
@@ -656,7 +675,7 @@ def get_object(conn, user: User, args: Get) -> dict:
             out["measures_error"] = e.body["message"]
     out |= {"columns": columns, "rows": [row], "links": []}
     for i, (hops, y) in walks.items():
-        yt, show = y["table"], [c for c in dict.fromkeys([*_keys(m)[y["table"]], y["title"]]) if c.lower() not in hid.get(y["table"], ())]
+        yt, show = y["table"], [c for c in dict.fromkeys([*_keys(m)[y["table"]], y["title"]]) if c in _seen(cols, hid, y["table"])]
         sel = ", ".join(map(storage._q, show))
         rows = _read(args.project, f"SELECT {sel} FROM {storage._q(yt)} WHERE {_semi(hops, t, where)} ORDER BY {sel} LIMIT {args.limit + 1}",
                      asked | {"link": i}, user.id)
@@ -690,29 +709,24 @@ class Objects(storage.ProjectRef):
 @action(Role.viewer)
 def list_objects(conn, user: User, args: Objects) -> dict:
     """Lists objects of one type, as you see them (row-level security applies): their columns not hidden from you, filtered on their own properties or on a property of objects reached through a chain of links (`link`: e.g. customers who visited a North café: {link: visited, property: region, op: '=', value: North}), each object once however many ways it links. `search` matches text in the title. `more` says whether another page follows (`offset`). Every figure you state must come from these rows."""
-    o, m, x, cols = _obj(args.project, args.type)
-    hid, t = rls.hidden(args.project, user.id), x["table"]
-    seen = lambda tbl: [c for c in cols.get(tbl, {}) if c.lower() not in hid.get(tbl, ())]  # noqa: E731
-
-    def col(tbl: str, c: str) -> str:
-        if c not in seen(tbl):  # a hidden column reads like a missing one
-            raise ActionFailed(400, f"Table '{tbl}' has no column '{c}' you can read. Use one of: {', '.join(seen(tbl))}.")
-        return c
+    o, m, x, cols, hid = _obj(args.project, args.type, user.id)
+    t = x["table"]
+    col = lambda tbl, c: _col(cols, hid, tbl, c)  # noqa: E731
 
     conds, tables = [], [t]
     for f in args.filters:
-        hops, y = _follow(args.project, m, o, x, f.link.split("."), hid) if f.link else ([], x)
+        hops, y = _follow(args.project, m, o, x, f.link.split("."), cols, hid) if f.link else ([], x)
         tables += [r[s]["table"] for r, _ in hops for s in ("from", "to")]
         c, typ = col(y["table"], f.property), cols[y["table"]][f.property]
         vals = f.value if isinstance(f.value, list) else [f.value]
         if (f.op == "in") != isinstance(f.value, list) or not vals:
             raise ActionFailed(400, "Use op 'in' with a list of values, any other op with one value.")
-        cond = f"{storage._q(c)} IN ({', '.join(_cast(v, typ) for v in vals)})" if f.op == "in" else f"{storage._q(c)} {f.op} {_cast(vals[0], typ)}"
+        cond = f"{storage._q(c)} IN ({', '.join(rls.cast_lit(v, typ) for v in vals)})" if f.op == "in" else f"{storage._q(c)} {f.op} {rls.cast_lit(vals[0], typ)}"
         conds.append(_semi([(r, not a) for r, a in reversed(hops)], y["table"], cond) if hops else cond)
     if args.search:
         conds.append(f"CAST({storage._q(col(t, x['title']))} AS VARCHAR) ILIKE '%{storage._lit(args.search)}%'")  # ponytail: % and _ match any text
     _live(args.project, tables)
-    keys, show = _keys(m)[t], seen(t)
+    keys, show = _keys(m)[t], _seen(cols, hid, t)
     order = [f"{storage._q(col(t, b.property))}{' DESC' if b.desc else ''}" for b in args.order] or [storage._q(x["title"])] * (x["title"] in show)
     order += [storage._q(k) for k in keys if k in show]  # then the key: pages never overlap
     sql = (f"SELECT {', '.join(map(storage._q, show))} FROM {storage._q(t)} WHERE {' AND '.join(conds) or 'TRUE'}"

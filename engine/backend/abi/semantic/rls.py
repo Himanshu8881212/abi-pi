@@ -100,14 +100,18 @@ def _restricted(project: str, user_id: int) -> bool:
     return not row or not (row["workspace_owner"] or (row["role"] and Role[row["role"]] >= Role.editor))
 
 
+def cast_lit(text, typ: str) -> str:
+    """The exact value of `text` (as DuckDB renders it) in DuckDB type `typ`: only ever a quoted, escaped literal."""
+    return f"CAST('{storage._lit(str(text))}' AS {typ})"
+
+
 def _in(cols: list[str], keys: list[tuple]) -> str:
     """`cols IN keys` as list_contains over constants, from `keys` rows of (text, DuckDB type) per column as DuckDB
     rendered them, so `CAST('<text>' AS <type>)` is the exact value (no Python round trip: DECIMAL, TIMESTAMP_NS,
     infinity, nan). IN becomes a MARK join when DuckDB can't push it into the scan (an edited table's CASE columns,
     composite keys), and a join scrambles grid pages (GATE-4-fix-1). A key with a NULL is left out.
     ponytail: no zone-map pruning (IN pushes into the scan); IN for aggregate-only reads if restricted queries get slow"""
-    lit = lambda text, typ: f"CAST('{storage._lit(text)}' AS {typ})"
-    vals = [[lit(*k[i:i + 2]) for i in range(0, len(k), 2)] for k in keys if None not in k]
+    vals = [[cast_lit(*k[i:i + 2]) for i in range(0, len(k), 2)] for k in keys if None not in k]
     if not vals:
         return "FALSE"
     if len(cols) == 1:
