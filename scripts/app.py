@@ -550,7 +550,7 @@ dialog .row.foot{justify-content:flex-end;gap:8px}dialog .row.foot .sp{flex:1}
 p.note.warn{display:flex;gap:8px;align-items:flex-start;background:color-mix(in srgb,var(--signal) 8%,var(--sheet))}p.note.warn .ic{color:var(--signal-ink);margin-top:1px}
 /* configuration notes are notes, not errors: neutral, with an info line */
 p.note,.card .note{background:var(--paper);border-color:var(--line)}
-.card .scroll.all{max-height:none}dialog .srow{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 0}dialog .srow .pwho{flex:1;min-width:0}.cards.vault>.card{max-width:none!important}.card label.l+.checks{margin-top:8px}.card label.l+.checks+label.l{margin-top:18px}
+.card .scroll.all{max-height:none}#changes.pulse{animation:cpulse 1.4s ease-out}@keyframes cpulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--ink) 35%,transparent)}100%{box-shadow:0 0 0 8px transparent}}dialog .srow{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 0}dialog .srow .pwho{flex:1;min-width:0}.cards.vault>.card{max-width:none!important}.card label.l+.checks{margin-top:8px}.card label.l+.checks+label.l{margin-top:18px}
 body:not(.mobile) .pg:has(>.cards.pins) .pghead{flex-wrap:nowrap}
 .slicer.list{height:100%}.slicer.list .opts{flex:1;justify-content:flex-start;gap:6px}.slicer.list .sl{min-height:42px;flex:1 1 0;max-height:76px;align-items:center;font-size:14.5px}.slicer.list .sl small{font-size:13px;font-weight:500;color:var(--ink)}.grid>.card.sized:has(.slicer.list)>.body{display:flex;flex-direction:column}.more>.btn.mbtn{color:color-mix(in srgb,var(--ink) 80%,var(--mute))}.acts button.pin,.srow .acts button.pin{height:34px;padding:0 12px;opacity:1!important;color:var(--ink)}
 .mobile .card h3 button.pin,.mobile .grid>.card>h3 button.pin{width:auto!important;padding:0 10px!important;font-size:12px!important;gap:4px!important;min-height:32px}
@@ -591,6 +591,7 @@ button.tlink{border:0;background:none;padding:0;font:inherit;color:inherit;curso
 body[data-mode=viewer] .rowcard .f{min-height:0;padding:2px 0;border-color:transparent!important;background:none!important}body[data-mode=viewer] .mobile .rows>.rowcard,.mobile body[data-mode=viewer] .rows>.rowcard{gap:6px;padding:14px 16px}
 .mobile body[data-mode=viewer] .rowcard .fld>label.l{margin:6px 0 0;font-size:12px}.mobile body[data-mode=viewer] .rowcard .f{font-size:15px}
 .mpick{mask-image:linear-gradient(to bottom,#000 calc(100% - 14px),transparent);padding-bottom:10px}
+.node{width:250px}.node>span{-webkit-line-clamp:3}.node .ns{color:var(--mute)}.node.ok{border-left-color:var(--ink)}.node.ok .ns{color:var(--ink)}.state.hold{color:var(--ink);background:var(--hover)}.state.hold::before{background:var(--signal);opacity:1}.state.on::before,.msg.ok::before,p.ok::before,.kv span.ok::before,.mode.live::before{background:var(--ink)}.card>.item.sev-bad .txt,.card>details.more>.item.sev-bad .txt{color:var(--ink)}p.rdy{margin:8px 0 0;font-size:13.5px;line-height:1.5;color:var(--ink);text-wrap:pretty}table.prices td.mname{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}.card>h3+p.note{margin:0 0 6px}.qrow{align-items:center}.qrow>.btn{margin:0!important;flex:none}input.f{text-overflow:ellipsis}.card p.empty{text-wrap:pretty}.tcard .stepchips .chip i{font:11.5px var(--mono);font-style:normal;color:color-mix(in srgb,var(--ink) 62%,var(--mute))}.tcard .stepchips .chip{font-size:13px}.more>.btn.mbtn{color:color-mix(in srgb,var(--ink) 78%,var(--mute))}.tcard input[type=checkbox]{border-color:color-mix(in srgb,var(--ink) 45%,var(--line))}.hist td .ic{width:14px;height:14px;color:var(--mute);margin-right:9px;vertical-align:-2px}#switcher .lk{display:grid;grid-template-columns:30px 1fr;column-gap:12px;align-items:center;text-align:left}#switcher .lk>.pav{grid-row:1/3;width:30px;height:30px;border-radius:8px;background:var(--hover);display:grid;place-items:center;font:600 13px var(--display);color:var(--ink)}#switcher .lk.on>.pav{background:var(--signal);color:#fff}#switcher .lk>span:empty{display:none}.person{padding:10px 0}.pmore{margin-top:0}.pmore summary{padding:2px 0 0 42px}.person>.msg:empty{display:none}.chtitle{display:flex;align-items:center;gap:8px;padding:16px 20px 4px;font:600 16px var(--display)}.chtitle .ic{width:17px;height:17px;color:var(--signal)}.chtitle .file{margin-left:auto;font:400 12.5px var(--text)}.mobile #chat header{border-top:0}.mobile body[data-mode=viewer] .rowcard .f.code{font-family:var(--text);letter-spacing:0}.card .card.flat{box-shadow:none;background:none;margin-top:16px}.card .card.flat>label.chk{margin-top:14px}.card .card.flat>.acts{margin-top:20px}
 """
 
 JS = r"""
@@ -653,17 +654,19 @@ function doneDialog(title,lines,acts){document.querySelectorAll('body>.toast:not
  c.append(r);d.append(c);d.onclose=()=>d.remove();document.body.append(d);d.showModal();r.lastChild.focus();return d}
 // a restricted reader's copy has ABI's mask in place of data-derived text: say it in words, and once
 const MASK='[hidden by row-level security]';
+// ABI's readiness findings in the words of the page that fixes them
+const plainReady=m=>String(typeof m==='string'?m:JSON.stringify(m)).replace(/Table '(\w+)' holds ML predictions made from rows that row-level security rules filter;[^.]*\./g,(_,t)=>`“${idsToNames(t)}” holds ML predictions made from rows that row rules filter, and has no row rule of its own, so restricted viewers see none of it. Give it a row rule in Security.`);
 function txt(t,cls){const d=h('div',cls||'txt');String(t??'').replace(/\((\w+) \1\)/g,'($1)').split(MASK).forEach((x,i)=>{if(i){const s=h('span','masked');s.append(ic('lock'),'details hidden for your access');d.append(s)}if(x)d.append(x)});return d}
 // the icon a button's words mean, so the same action looks the same on every page
 const BIC=[[/^(New |\+ |Add )/,'plus'],[/^Render and download|^Download/,'dataexport'],[/^Save rule|^Save schedule|^Save$/,'check'],[/^Test$/,'play'],[/^(Delete|Remove|Revoke)/,'trash'],[/^(Export|Download)/,'dataexport'],[/^(Edit)/,'edits'],[/^Run( now)?$/,'play'],[/^Email/,'mail'],
- [/^Reload|^Check again|^Refresh/,'refresh'],[/^Open/,'open'],[/^Upload/,'upload'],[/^Ask the agent/,'spark'],[/^Publish/,'publish']];
+ [/^Reload|^Check again|^Refresh|^Regenerate/,'refresh'],[/^Read$/,'documents'],[/^Open/,'open'],[/^Upload/,'upload'],[/^Ask the agent/,'spark'],[/^Publish/,'publish']];
 async function api(action,args){
  
  const post=(u,b)=>fetch(u,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json());
  let r=await post('/api/'+action,{project:D.project,...args});
  if(r.confirm){if(!await ask(r.confirm))throw new Error('You declined. Nothing changed.');r=await post('/confirm/'+r.confirm.id)}
   if(r.error)throw new Error(plainErr(r.error));if(/^(set_|save_|delete_|add_|remove_|enable_|create_|edit_|approve_|reject_|undo|commit|publish_|train_|score_)/.test(action))refreshPending();return r.result}
-let PEND_T=null;function refreshPending(){clearTimeout(PEND_T);PEND_T=setTimeout(async()=>{try{D.pending=await (await fetch('/api/changes',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({project:D.project})})).json().then(x=>x.result||D.pending);vc()}catch(e){}},400)}
+let PEND_T=null;function refreshPending(){clearTimeout(PEND_T);PEND_T=setTimeout(async()=>{try{D.pending=await (await fetch('/api/changes',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({project:D.project})})).json().then(x=>x.result||D.pending);vc();const cb=$('#changes');cb.classList.remove('pulse');void cb.offsetWidth;if(D.pending?.files?.length)cb.classList.add('pulse')}catch(e){}},400)}
 let ASK_WHAT='';  // what the person is deleting, for ABI's confirmation
 function ask(c){return new Promise(res=>{const d=$('#confirm'),bad=/\b(delet|remov|drop|revok|stop|disabl|overwrit)/i.test((c.title||'')+' '+(c.message||''));$('#c-yes').classList.toggle('danger-solid',bad);$('#c-yes').textContent=c.yes||(bad?(ASK_WHAT?'Delete':'Yes, go ahead'):'Confirm');$('#confirm h3').textContent=bad&&ASK_WHAT?`Delete “${ASK_WHAT}”?`:c.title||(c.id?'Confirm this change':'Confirm');
  $('#c-msg').textContent=bad&&ASK_WHAT?`“${ASK_WHAT}” leaves the project. It stays an uncommitted change, so Undo in the toast or under Changes takes it back.`:c.lead||people(c.message);$('#c-abi').textContent=c.lead?people(c.message||''):'';$('#c-abi').hidden=!$('#c-abi').textContent;ASK_WHAT='';const pv=plainPreview(c.preview||'');$('#c-prev').textContent=pv;$('#c-prev').hidden=!pv;$('#c-prev').classList.toggle('plain',pv!==(c.preview||''));
@@ -678,7 +681,7 @@ function plainPreview(t){t=String(t||'');const who=Object.fromEntries([...(D.rls
  return out==null?people(t):[people(head),out].filter(Boolean).join('\n\n')}
 // "as user 1" in ABI's words: the person's name
 function people(t){const who=Object.fromEntries([...(D.rls?.accounts||[]).map(a=>[String(a.id),a.name]),...(window.ME?.id?[[String(ME.id),ME.name]]:[])]);return String(t||'').replace(/\s*Confirm to proceed\.?/g,'').replace(/\b(flow|report|ML model|tool|agent) '([a-z0-9_]+)'/g,(m,k,id)=>`${k} “${idsToNames(id)===id?id.replace(/_/g,' ').replace(/^./,c=>c.toUpperCase()):idsToNames(id)}”`).replace(/\buser (\d+)\b/g,(m,u)=>who[u]?who[u]:'a person').replace(/project '[a-z0-9_-]+_pub'/g,'the published version').replace(new RegExp(`project '${D.project}'`,'g'),'this project')}
-function plainErr(m){return String(m||'').replace(/^.*?rejected by the MEL compile:\s*\d+ error\(s\):?\s*/i,'The formula has an error: ').replace(/The formula has an error:\s*[;.]\s*/,'The formula has an error, so nothing changed. Check its column names and brackets; ').replace(/\(DECISIONS [A-Z]-\d+\)/g,'').replace(/\buser (\d+)\b/g,'a person').trim()}
+function plainErr(m){return String(m||'').replace(/^.*?rejected by the MEL compile:\s*\d+ error\(s\):?\s*/i,'The formula has an error: ').replace(/The formula has an error:\s*[;.]\s*/,'The formula has an error, so nothing changed. Check its column names and brackets. ').replace(/(nothing changed\.[^;]*?)[;.]?\s*nothing changed\.?/i,'$1').replace(/\(DECISIONS [A-Z]-\d+\)/g,'').replace(/\buser (\d+)\b/g,'a person').trim()}
 // an id in ABI's text (a measure, a flow, a report) as its name
 function idsToNames(t){const M=new Map([...(D.measures||[]),...(D.flows||[]),...(D.reports||[]),...(D.ml||[]),...(D.datasets||[])].filter(x=>x.id&&x.name).map(x=>[x.id,x.name]));return String(t??'').replace(/\b[a-z][a-z0-9_]{2,}\b/g,w=>M.get(w)||w)}
 // Share a report: its link (for anyone who already has access) and who that is; access is changed in Users & access
@@ -690,6 +693,8 @@ async function shareDialog(rep){const d=h('dialog'),c=h('div','card'),base=windo
   n.append(h('span','av',u.name.slice(0,1).toUpperCase()),h('b','',u.name));row.append(n,h('span','state'+(can?' on':''),can?(u.workspace_owner?'Owner':'Can open'):'No access'));ppl.append(row)});
  const f=h('div','row foot'),mg=btn('Manage access',()=>{d.close();PENDING.share=rep.id;show('people')}),cl=btn('Done',()=>d.close());f.append(mg,h('span','sp'),cl);c.append(f);d.append(c);d.onclose=()=>d.remove();document.body.append(d);d.showModal()}
 function plur(t){return String(t??'').replace(/(\d[\d,]*) ([a-z]+)\(s\)/gi,(m,n,w)=>n==='1'?`${n} ${w}`:`${n} ${w}s`).replace(/\b([a-z]+)\(s\)/gi,'$1s')}
+// a page made a moment ago opens as soon as ABI's data has it (the sidebar learns of it on its next redraw)
+async function openWhenThere(k){for(let i=0;i<40&&!PAGES[k];i++){if(i===3)refreshPending();await wait(300)}if(!PAGES[k]){try{D.flows=(await api('list_flows',{})).flows||D.flows;sidebar()}catch(e){}}PAGES[k]?show(k):toast('It is saved; it shows in the list in a moment.')}
 function h3i(i,t){const x=h('h3');x.append(ic(i),t);return x}
 function say(box,text,bad){box.textContent=text;box.className='msg '+(bad?'bad':'ok')}
 const CARDIC={'Rows':'tables','Edit history':'history','Waiting for approval':'check','Agent':'agents','Usage':'reports','Email':'mail','Single sign-on':'lock','Connect a provider':'plus','Messages':'inbox','Alerts':'alert','Data freshness':'refresh','Model readiness':'model','ML models':'ml','Flows':'flows','Row-level rules':'security','Hidden columns':'lock','Roles':'people','Restrict rows for a person':'filter','Two-step sign-in':'lock','What this controls':'info','Export':'dataexport','Import':'upload','Commits':'history','Search the vault':'search','Saved analyses':'explore','New analysis':'explore','Add a person':'user','Invite':'mail'};
@@ -757,7 +762,7 @@ async function pinCard(p,c){const body=h('div','body'),go=ib('open','Open its pa
    line(`${f?.enabled?'On':'Off'} · last run: ${one.status||'never'}`,one.status==='failed'?'bad':one.status==='ok'?'ok':'')}
   else if(p.kind==='status'){go.onclick=()=>show('monitor');const q=D.quality||{},ix=k=>(q.columns||[]).indexOf(k),rs=q.rows||[];
    if(r==='freshness'){const bad=rs.filter(x=>(x[ix('problems')]||[]).length||x[ix('missing_periods')]);line(bad.length?`${bad.length} of ${rs.length} tables have problems`:`All ${rs.length} tables without problems`,bad.length?'bad':'ok')}
-   else if(r==='model'){const rd=D.readiness||{};line(rd.ready?'Ready':'Not ready',rd.ready?'ok':'bad');(rd.missing||[]).slice(0,3).forEach(m=>line(typeof m==='string'?m:JSON.stringify(m),'file'))}
+   else if(r==='model'){const rd=D.readiness||{};line(rd.ready?'Ready':'Not ready',rd.ready?'ok':'bad');(rd.missing||[]).slice(0,3).forEach(m=>line(plainReady(m),'file'))}
    else if(r==='ml'){const ok=D.ml.filter(m=>m.latest_score?.status==='ok').length;line(`${ok} of ${D.ml.length} ML models scored`,ok<D.ml.length?'bad':'ok')}
    else{const on=D.flows.filter(f=>f.enabled).length;line(`${on} of ${D.flows.length} flows on`)}}
   else if(p.kind==='table'){go.onclick=()=>show('tables');const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),row=(q.rows||[]).find(x=>x[0]===r);
@@ -782,7 +787,7 @@ function home(box){pinsHome(box);const rd=D.readiness||{},q=D.quality||{},ix=c=>
  const last=rowsQ.map(r=>r[ix('last_load')]).filter(Boolean).sort().pop(),problems=rowsQ.flatMap(r=>(r[ix('problems')]||[]).map(p=>`${r[ix('table')]}: ${p}`));
  const g=h('div','home');box.append(g);
  // what needs attention
- const at=card('Needs attention');const al=h('ul','list');[...(rd.missing||[]).map(x=>typeof x==='string'?x:JSON.stringify(x)),...problems].forEach(t=>al.append(h('li','bad',t)));
+ const at=card('Needs attention');const al=h('ul','list');[...(rd.missing||[]).map(plainReady),...problems].forEach(t=>al.append(h('li','',t)));
  if(MODE==='developer')team(at,al);
  if(!al.children.length)al.append(h('li','ok','Nothing: the model is ready and the data is fresh.'));at.append(al);
  // one summary line; the details open on demand (the team's steps arrive later, the line follows them)
@@ -904,12 +909,12 @@ function editsPage(box){const T=D.model?.tables||{},keyed=Object.keys(T).filter(
  const msg=h('div','msg'),body=h('div','body'),pager=h('div','row'),save=h('div','row');grid.append(pager,body,save,msg);
  async function rowsPage(){body.innerHTML='';pager.innerHTML='';save.innerHTML='';staged=[];const t=sel.value,key=T[t]?.key||[];
   const r=await fetch('/edits/rows',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({table:t,offset:off,limit:25})}).then(x=>x.json());
-  if(r.error){say(msg,r.error,1);return}const d=r.result,cols=d.columns.map(c=>c.name),tb=h('table');tb.insertRow().append(...cols.map(c=>h('th','',c+(key.includes(c)?' (key)':''))));
+  if(r.error){say(msg,r.error,1);return}const d=r.result,cols=d.columns.map(c=>c.name),tb=h('table');tb.insertRow().append(...cols.map(c=>{const th=h('th','',colName(c));th.title=c;if(key.includes(c))th.append(h('span','kbadge','key'));return th}));
   d.rows.forEach(row=>{const tr=tb.insertRow();row.forEach((v,i)=>{const td=tr.insertCell();td.textContent=v===null?'—':v;
    if(MODE==='developer'&&!key.includes(cols[i])){td.className='ed-cell';td.title='click to edit';td.onclick=()=>{if(td.querySelector('input'))return;const inp=h('input','f');inp.value=v??'';td.textContent='';td.append(inp);inp.focus();
     const done=()=>{const nv=inp.value;td.textContent=nv||'—';if((nv||null)!==(v===null?null:String(v))){staged=staged.filter(x=>!(x.column===cols[i]&&JSON.stringify(x.key)===JSON.stringify(key.map(k=>row[cols.indexOf(k)]))));
      staged.push({key:key.map(k=>row[cols.indexOf(k)]),column:cols[i],value:nv===''?null:nv,old:v});td.classList.add('changed');sv()}};inp.onblur=done;inp.onkeydown=e=>{if(e.key==='Enter')inp.blur()}}}})});
-  if(MODE==='developer'){const tr=tb.insertRow(),ins=cols.map(c=>{const i=h('input','f');i.placeholder='new '+c;i.setAttribute('aria-label','New row: '+c);tr.insertCell().append(i);return i});
+  if(MODE==='developer'){{const lr=tb.insertRow(),lc=lr.insertCell();lc.colSpan=cols.length+1;lc.className='addcap';lc.append(ic('plus'),'Add a row: fill in its values, then Add row')}const tr=tb.insertRow(),ins=cols.map(c=>{const i=h('input','f');i.placeholder='new '+c;i.setAttribute('aria-label','New row: '+c);tr.insertCell().append(i);return i});
    tr.insertCell().append(btn('Add row',async()=>{const row=Object.fromEntries(cols.map((c,i)=>[c,ins[i].value===''?null:ins[i].value]));
     try{await api('edit_cells',{table:sel.value,add:[row],comment:'row added in the app'});say(msg,'Row added through ABI.');await rowsPage();await history()}catch(e){say(msg,e.message,1)}}))}
   const sc=h('div','scroll all');sc.append(tb);body.append(sc);pager.append(h('span','file',`rows ${off+1}–${off+d.rows.length} of ${d.total}`),
@@ -1005,7 +1010,7 @@ async function usersPage(box){
   if(PENDING.share){const l=[...rx.querySelectorAll('label')].find(x=>x.querySelector('input').value===PENDING.share);if(l){det.open=true;l.classList.add('hl')}}});if(PENDING.share)setTimeout(()=>box.querySelector('label.chk.hl')?.scrollIntoView({block:'center',behavior:'smooth'}),300);PENDING.share=null;PENDING.added=null;
  const mf=card('Two-step sign-in','a code from an authenticator app after the password; each person turns it on by clicking their name');g.append(mf);
  mf.append(h('p','',U.tenants.length?'Require it for everyone in a tenant: the password sessions and personal tokens of its people without it end at once, and at their next sign-in they add the key to an authenticator app before they get in. Single sign-on is not affected.'
-  :'Each person turns it on for themselves: click your name, then Two-step sign-in. Requiring it for a whole group of people needs tenants, which this workspace does not use.'));
+  :'Each person turns it on for themselves: they click their name, then Two-step sign-in, and scan a code with an authenticator app.'));
  U.tenants.forEach(x=>act(mf,(x.mfa_required?'Stop requiring it in ':'Require it for everyone in ')+x.name,async()=>{const y=await post('mfa/require',{tenant:x.id,on:!x.mfa_required});if(y.error)throw new Error(y.error);
   setTimeout(()=>show(CUR),1500);return x.mfa_required?'No longer required in '+x.name+'.':`Required in ${x.name}: ${y.result.signed_out} password session(s) ended; they set it up at their next sign-in.`}));
  const note=card('What this controls','and what it does not');note.append(h('p','','Role, sign-in and row-level security are ABI\'s: they decide what data a person can read or change, everywhere. Sections and reports decide what this app shows them and the app\'s own routes refuse the rest. Row and column rules are on the Security page.'));g.append(note)}
@@ -1015,7 +1020,7 @@ const PRESETS={openai:['OpenAI','openai-responses','https://api.openai.com/v1'],
  openrouter:['OpenRouter','openai-completions','https://openrouter.ai/api/v1'],ollama:['Ollama (local)','openai-completions','http://host.docker.internal:11434/v1'],
  gemini:['Google Gemini','google-generative-ai','https://generativelanguage.googleapis.com/v1beta'],custom:['OpenAI-compatible','openai-completions','https://']};
 // Pi computes a cost only for a model with prices: the rest is counted in tokens, never shown as $0
-const money=r=>r.cost?(r.cost<0.01?'< $0.01':'$'+r.cost.toFixed(2))+(r.unpriced?' (part tokens only)':''):'tokens only';
+const money=r=>r.cost?(r.cost<0.01?'< $0.01':'$'+r.cost.toFixed(2))+(r.unpriced?' (part tokens only)':''):'—';
 async function settingsPage(box){
  const post=(op,b)=>fetch('/admin/'+op,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json());
  let r=await post('settings');if(r.error){box.append(h('p','bad',r.error));return}let S=r.result;const g=h('div','cards top');box.append(g);
@@ -1029,10 +1034,10 @@ async function settingsPage(box){
   const us=card('Usage','the agents\' model work, last 30 days');us.classList.add('wide');g.style.gridAutoFlow='dense';g.append(us);post('usage').then(x=>{const U=x.result;if(!U||!U.model.length){us.append(h('p','empty','No answers yet.'));return}
    const n=v=>Number(v).toLocaleString(),tb=(k,t)=>{us.append(h('label','l',t));const tt=h('table');tt.innerHTML='<tr><th>'+(k==='user'?'Person':'Model')+'</th><th class=n>Answers</th><th class=n>Failed</th><th class=n>Input tokens</th><th class=n>Output tokens</th><th class=n>Cache tokens</th><th class=n>Cost</th></tr>';
     U[k].forEach(r=>{const tr=h('tr');[r.name,n(r.answers),n(r.failed),n(r.input),n(r.output),n(r.cache),money(r)].forEach((v,i)=>tr.append(h('td',i?'n':'',v)));tt.append(tr)});us.append(tt)};tb('user','Per person');tb('model','Per model');
-   if(U.model.some(r=>r.unpriced))us.append(h('p','file','Cost needs a model\'s prices (US dollars per million tokens, on its provider\'s card); without them its answers count tokens only.'))});
+   if(U.model.some(r=>r.unpriced))us.querySelector('h3').after(h('p','note','A Cost of — means the model has no prices yet: set them in US dollars per million tokens on its provider\'s card below, and new answers count their cost.'))});
   S.providers.forEach(p=>{const c=card(p.name,`${p.id} · ${S.apis[p.api]||p.api}`);c.append(h('p','file',p.base_url),h('p','',`Models: ${p.models.join(', ')}`),h('p',p.key_set?'ok':'',p.key_builtin?'Uses the built-in connection\'s key':p.key_set?`API key set, ends in ${p.key_ends}`:'No API key'));
    // each model's prices, US dollars per million tokens: Pi computes every answer's cost from them; none: tokens only
-   const F=['input','output','cacheRead','cacheWrite'],pt=h('table','prices'),pin=p.models.map(m=>{const tr=pt.insertRow();tr.insertCell().textContent=m;
+   const F=['input','output','cacheRead','cacheWrite'],pt=h('table','prices'),pin=p.models.map(m=>{const tr=pt.insertRow(),mc=tr.insertCell();mc.textContent=m;mc.title=m;mc.className='mname';
     return F.map(k=>{const i=h('input','f');i.type='number';i.min='0';i.step='any';i.value=p.prices?.[m]?.[k]??'';i.setAttribute('aria-label',`${m}: ${k} price`);tr.insertCell().append(i);return i})});
    pt.createTHead().innerHTML='<tr><th>Model (US $ per 1M tokens)</th><th>Input $</th><th>Output $</th><th>Cache read $</th><th>Cache write $</th></tr>';c.append(pt);
    act(c,'Save prices',async()=>{const prices={};p.models.forEach((m,j)=>{const v=Object.fromEntries(F.map((k,x)=>[k,pin[j][x].value]).filter(([,v])=>v!=='').map(([k,v])=>[k,+v]));if(Object.keys(v).length)prices[m]=v});
@@ -1052,14 +1057,14 @@ async function settingsPage(box){
   act(add,'Save provider',async()=>{const x=await post('settings/provider',{provider:{id:id.value.trim(),name:nm.value,api:api.value,base_url:base.value.trim(),models:mods.value.split(',').map(s=>s.trim()).filter(Boolean)},key:key.value});if(!mods.value)throw new Error('Fetch models and tick at least one.');
    key.value='';if(x.error)throw new Error(x.error);S=x.result;draw();return 'Saved.'},1);if(S.providers.length){add.classList.add('fold');const o=h('button','btn opener','Connect another provider');o.prepend(ic('plus'));o.onclick=()=>{add.classList.remove('fold');o.remove()};add.querySelector('h3').after(o)}g.append(add);people()};
  const people=async()=>{const r=(await post('sso')).result||{providers:[]},M=r.mail||{},f=(ph,v,t)=>{const i=h('input','f');i.placeholder=ph;i.value=v??'';if(t)i.type=t;i.autocomplete='off';return i};
-  const warn=r.reachable?null:h('p','note','Set ABI_PUBLIC_URL (the address people open, e.g. https://abi.example.com) in .env and restart: emailed links and SSO go there.');
+  const warn=r.reachable?null:h('p','note','Emailed links and single sign-on need the address people open this app at, such as https://abi.example.com. The administrator sets it once for the install (ABI_PUBLIC_URL).');
   const em=card('Email','invites, "forgot your password" links, and every email of a project without its own mail server (reports, Monitor alerts, flows, the agent; a new domain asks once per project); without it you set passwords in Users & access'),host=f('smtp.example.com',M.host),port=f('587',M.port),from=f('abi@example.com',M.from),sec=h('select','f'),us=f('user name (optional)',M.username),pw=f(M.username?'password (stored in ABI; empty keeps it)':'password','','password');
   ['starttls','tls','none'].forEach(x=>sec.append(new Option({starttls:'STARTTLS (port 587)',tls:'TLS (port 465)',none:'none (a local relay)'}[x],x)));sec.value=M.security||'starttls';
   em.append(...(warn?[warn.cloneNode(true)]:[]),h('p','state'+(M.host?' on':''),M.host?`On: ${M.host}:${M.port} from ${M.from}`:'Not set up yet'),h('label','l','Server'),host,h('label','l','Port'),port,h('label','l','Connection'),sec,h('label','l','From'),from,h('label','l','Sign-in'),us,pw);
   act(em,'Save',async()=>{const x=await confirmed(await post('mail',{host:host.value,port:Number(port.value),security:sec.value,from:from.value,username:us.value,password:pw.value}));pw.value='';if(!x)return 'Not changed.';draw();return 'Saved.'},1);
   if(M.host)act(em,'Turn off',async()=>{const x=await confirmed(await post('mail',{off:true}));if(x)draw();return x?'Off.':'Not changed.'});g.append(em);
   const so=card('Single sign-on','people sign in with your company account (OpenID Connect: Google, Microsoft Entra, Okta, Keycloak, …)'),pid=f('id, e.g. google'),pn=f('button name, e.g. Google'),iss=f('issuer, e.g. https://accounts.google.com'),cl=f('client ID'),cs=f('client secret (stored in ABI)','','password');
-  so.append(...(warn?[h('p','note','Needs ABI_PUBLIC_URL too (see Email).')]:[]),h('p','file','Redirect URI at your provider: '+r.callback.replace('<id>','{id}')),...r.providers.map(x=>{const row=h('div','row');row.append(h('span','',x.name+' · '+x.id),btn('Remove',async()=>{const y=await confirmed(await post('sso/remove',{id:x.id}));if(y)draw()}));return row}),
+  so.append(...(warn?[h('p','note','Single sign-on also needs the address people open this app at (see Email).')]:[]),h('p','file','Redirect URI at your provider: '+(r.callback.startsWith('/')?'(the app\'s address)':'')+r.callback.replace('<id>','{id}')),...r.providers.map(x=>{const row=h('div','row');row.append(h('span','',x.name+' · '+x.id),btn('Remove',async()=>{const y=await confirmed(await post('sso/remove',{id:x.id}));if(y)draw()}));return row}),
    h('h4','','Add a provider'),fld('ID',pid),fld('Button name',pn),fld('Issuer',iss),fld('Client ID',cl),fld('Client secret',cs),h('p','','Each person links it once: they sign in with their password, click their name and Link.'));
   act(so,'Add',async()=>{const x=await confirmed(await post('sso/save',{id:pid.value.trim(),name:pn.value.trim(),issuer:iss.value.trim(),client_id:cl.value.trim(),secret:cs.value}));cs.value='';if(!x)return 'Not added.';draw();return 'Added.'},1);g.append(so)};
  draw()}
@@ -1175,7 +1180,7 @@ function newMonitor(box,ck){box.querySelector('.monform')?.remove();ck=ck||{};co
    sum.textContent=kind.value==='measure'?`Alerts when ${nmOf(g.measure)} ${(OPS.find(o=>o[0]===g.op)||[0,g.op])[1]} ${g.against==='measure'?nmOf(g.other):g.against==='prev'?`${g.value}% against its previous period`:fmt(g.value)}${g.by?`, for any ${colName(g.by).toLowerCase()}`:''}. It posts to the Inbox${em.value.trim()?' and emails '+em.value.trim():''}.`
     :kind.value==='fresh'?`Alerts when ${g.table} has gone ${g.hours} hours without a load.`:'Alerts when the flow\'s last run failed.'}catch(e){sum.textContent='Fill in the value to see what it alerts on.'}};
  c.insertBefore(sum,f);c.addEventListener('input',upd);c.addEventListener('change',upd);upd();
- act(c,'Check it now',async m=>{say(m,'Checking with ABI…');const d={id:'preview',name:nm.value||'preview',kind:kind.value,...f.get()};d.condition=monCond(d);const x=await monEval(d);m.className='msg';return (x.ok?'Quiet right now: ':'It would alert now: ')+x.text});
+ act(c,'Check it now',async m=>{say(m,'Checking with ABI…');const d={id:'preview',name:nm.value||'preview',kind:kind.value,...f.get()};d.condition=monCond(d);const x=await monEval(d);m.className='msg';toast(x.ok?'Checked: quiet right now.':'Checked: it would alert now.');return (x.ok?'Quiet right now: ':'It would alert now: ')+x.text});
  act(c,ck.id?'Save':'Create',async()=>{need(nm,nm.value.trim(),'Give it a name, e.g. Revenue below target.');const nc={id:ck.id||nm.value.trim().toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')||'check',name:nm.value.trim(),kind:kind.value,...f.get()};
   if(await monPost({action:'save',check:nc,email:em.value.trim()})){show('monitor');setTimeout(()=>highlight(nc.name),300);toast(`${ck.id?'Saved':'Created'} “${nc.name}”: ABI checks it every minute and posts to the Inbox when it starts to hold.`)}},1);act(c,'Cancel',()=>c.remove());(box.querySelector('.pghead')||box).after(c)}
 // a check and its flow in ABI (/monitor asks ABI's confirmation for the flow, then keeps the check); null: they said no
@@ -1185,7 +1190,7 @@ async function monPost(b){setTimeout(refreshPending,1500);const r=await confirme
 function monitorPage(box){const bar=h('div','row bar top');bar.append(btn('New monitor',()=>newMonitor(box),1));box.append(bar);
  const mine=h('div','cards');box.append(mine);(D.app?.monitor?.checks||[]).forEach(ck=>{const c=card(ck.name);c.querySelector('h3').append(pinBtn({kind:'monitor',ref:ck.id,title:ck.name}));const st=h('p','file','checking…');c.append(st);mine.append(c);
   const bd=h('span','state','Checking');c.querySelector('h3').append(bd);
-  monEval(ck).then(x=>{bd.className='state '+(x.ok?'':'warn');bd.textContent=x.ok?'Quiet':'Holds now';st.className='mtext';st.textContent=x.text}).catch(e=>{bd.className='state bad';bd.textContent='Error';st.className='bad';st.textContent=e.message});
+  monEval(ck).then(x=>{bd.className='state '+(x.ok?'':'hold');bd.textContent=x.ok?'Quiet':'Holds now';st.className='mtext';st.textContent=x.text}).catch(e=>{bd.className='state bad';bd.textContent='Error';st.className='bad';st.textContent=e.message});
   const fl=monFlow(ck);if(MODE==='developer'&&ck.condition)c.append(h('p','file',fl?(fl.enabled?`ABI checks it every minute, also with this page closed; when it starts to hold it posts to the Inbox${monMail(ck)?' and emails '+monMail(ck):''}.`:'Background checks are off: checked only while this page is open.'):'Checked only while this page is open.'));
   if(MODE==='developer'&&ck.condition&&!fl)act(c,'Alert with the page closed',async()=>{if(await monPost({action:'save',check:ck,email:''}))show('monitor')});
   if(MODE==='developer')act(c,'Edit',()=>newMonitor(box,ck));if(MODE==='developer')act(c,'Delete',async()=>{if(await monPost({action:'delete',id:ck.id}))show('monitor')})});
@@ -1194,12 +1199,12 @@ function monitorPage(box){const bar=h('div','row bar top');bar.append(btn('New m
  const fr=card('Data freshness',`ABI data quality; watched tables must load within ${M.fresh_within_hours} h (monitor.json)`),bad=rs.filter(r=>(r[ix('problems')]||[]).length||r[ix('missing_periods')]||old(r));
  fr.append(h('p',bad.length?'bad':q.masked?'':'ok',bad.length?`${bad.length} of ${rs.length} tables have problems`:q.masked?`${rs.length} tables loaded`:`All ${rs.length} tables without problems`));
  const t=h('table'),shown=[...bad,...rs.filter(r=>watch(r[0])&&!bad.includes(r))],probs=r=>plur([...(r[ix('problems')]||[]).map(p=>typeof p==='string'?p:p.message||p.kind||JSON.stringify(p)),...(old(r)?[`no load for over ${M.fresh_within_hours} h`]:[])].join('; '));
- t.insertRow().append(...['Table','Last load','Rows','Missing periods','Problems'].map(x=>h('th','',x)));
+ t.insertRow().append(...['Table','Last load','Rows','Missing periods','Problems'].map((x,i)=>h('th',i===2||i===3?'n':'',x)));
  shown.forEach(r=>{const tr=t.insertRow();[r[0],when(r[ix('last_load')]),r[ix('rows')]==null?'not shown':fmt(r[ix('rows')]),r[ix('missing_periods')]??(q.masked?'not shown':0),probs(r)||'—'].forEach((v,i)=>{const td=tr.insertCell();td.textContent=v;if(i===2||i===3)td.className='n'})});
  if(!shown.length)fr.append(h('p','file',q.masked?'The details of each table are not shown with your access.':'No table is watched for freshness yet: every table loaded without problems.'));
  else if(MOBILE){const l=h('div');shown.forEach(r=>{const x=h('div','srow'),n=h('div','sname'),p=probs(r);n.append(h('b','',r[0]),h('div','file',`last load ${when(r[ix('last_load')])}${p?' · '+p:''}`));x.append(n,h('span','state'+(p?' bad':' on'),p?'Needs a look':'OK'));l.append(x)});fr.append(l)}
  else{const sc=h('div','scroll all');sc.append(t);fr.append(h('p','file','Tables with problems first, then the watched tables.'),sc)}
- const rd=D.readiness||{},mo=card('Model readiness');mo.append(h('p','state'+(rd.ready?' on':' bad'),rd.ready?'Ready: every table, join and measure checks out':'Not ready'),...(rd.missing||[]).map(m=>h('p','file',typeof m==='string'?m:JSON.stringify(m))));
+ const rd=D.readiness||{},mo=card('Model readiness');mo.append(h('p','state'+(rd.ready?' on':' bad'),rd.ready?'Ready: every table, join and measure checks out':'Not ready'),...(rd.missing||[]).map(m=>h('p','rdy',plainReady(m))));if(!rd.ready&&MODE==='developer'&&(rd.missing||[]).some(m=>/row-level|row rule/i.test(plainReady(m))))act(mo,'Open Security',()=>show('security'));if(rd.ready&&MODE==='viewer')mo.append(h('p','file','Checked on the published version, as you see it.'));
  const ml=card('ML models','latest training and scoring');[[fr,'freshness'],[mo,'model'],[ml,'ml']].forEach(([c,r])=>c.querySelector('h3').append(pinBtn({kind:'status',ref:r,title:{freshness:'Data freshness',model:'Model readiness',ml:'ML models'}[r]})));if(!D.ml.length)ml.append(h('p','empty','No ML models yet.'));
  D.ml.forEach(m=>{const tr=m.latest_run||{},sc2=m.latest_score||{};ml.append(h('h4','',m.name||m.id),
   h('p',tr.status==='ok'?'ok':tr.status?'bad':'file',tr.status?`Trained ${tr.status==='ok'?'':tr.status+' '}· ${when(tr.finished||tr.created)}`:MODE==='viewer'?'No training run in the published version':'Not trained yet'),h('p',sc2.status==='ok'?'ok':sc2.status?'bad':'file',sc2.status?`Scored ${sc2.status==='ok'?'':sc2.status+' '}· ${when(sc2.finished||sc2.created)}`:MODE==='viewer'?'No scoring run in the published version':'Not scored yet'))});
@@ -1213,7 +1218,7 @@ function monitorPage(box){const bar=h('div','row bar top');bar.append(btn('New m
 const SEEN='abi-inbox-'+D.project,seen=()=>{try{return +localStorage.getItem(SEEN)||0}catch(e){return 0}};let INBOXN='';
 const ipost=b=>fetch('/inbox',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json());
 async function inboxCount(){const r=await ipost().catch(()=>({}));if(!r.result)return;const s=seen(),b=side.querySelector("button.it[data-k='inbox']");
- INBOXN=r.result.messages.filter(m=>m.id>s).length+r.result.alerts.filter(a=>!a.read).length||'';if(b){b.querySelector('.n')?.remove();if(INBOXN)b.append(h('span','n',String(INBOXN)))}}
+ INBOXN=r.result.messages.filter(m=>m.id>s).length+r.result.alerts.filter(a=>!a.read&&(MODE!=='viewer'||!/^(Semantic model|Flow )/i.test(a.message||''))).length||'';if(b){b.querySelector('.n')?.remove();if(INBOXN)b.append(h('span','n',String(INBOXN)))}}
 async function inboxPage(box){const r=await ipost();if(r.error){box.append(h('p','bad',r.error));return}const {messages:M,alerts:A}=r.result,s=seen(),g=h('div','cards');box.append(g);
  const mc=card('Messages','posted by flows and Monitor, your subscriptions and your test runs');mc.classList.add('wide');
  if(!M.length)mc.append(h('p','empty','No messages yet. A Monitor check posts here when it starts to hold; flows can post here too.'));
@@ -1226,7 +1231,7 @@ async function inboxPage(box){const r=await ipost();if(r.error){box.append(h('p'
  ac.classList.add('wide');
  // alerts that say the same thing (same opening, e.g. 'Semantic model is not Ready') fold under the newest one
  const key=a=>String(a.message||'').split(':')[0].slice(0,60);let last=null,fold=null;const sev=t=>/\b(not ready|fail|failed|error|missing|problem|could not|refused)\b/i.test(t)?'bad':/\b(is ready|recovered|succeeded|finished)\b/i.test(t)?'okay':'info';
- A.filter(a=>MODE!=='viewer'||!/^(Semantic model|Flow )/i.test(a.message||'')).forEach(a=>{const d=h('div','item sev-'+sev(a.message)+(a.read?'':' new')),fl=h('div','file');fl.append(ic(/^Semantic model/.test(a.message)?'model':/^Flow/.test(a.message)?'flows':/^Monitor/.test(a.message)?'monitor':'alert'),cell(a.at));d.append(fl,txt(a.message));
+ A.filter(a=>MODE!=='viewer'||!/^(Semantic model|Flow )/i.test(a.message||'')).forEach(a=>{const d=h('div','item sev-'+sev(a.message)+(a.read?'':' new')),fl=h('div','file');const am=a.message||'';fl.append(ic(/^Semantic model/.test(am)?'model':/^Flow/.test(am)?'flows':/^Monitor/.test(am)?'monitor':/\b(email|mail|smtp)\b/i.test(am)?'mail':/\b(ML|forecast|scor)/.test(am)?'ml':/\b(fresh|load|refresh|missing (days|periods))/i.test(am)?'refresh':/\b(row rule|row-level|security)/i.test(am)?'security':'alert'),cell(a.at));d.append(fl,txt(plainReady(am)));
   if((window.ME||{admin:true}).admin&&!MOBILE&&/\b(smtp|mail server|send_email|email)\b/i.test(a.message||'')){const go=h('button','flink','Check the mail server in Settings › Email');go.onclick=()=>show('settings');d.append(go)}
   if(last&&key(last)===key(a)){if(!fold){fold=h('details','more');fold.append(h('summary',''));ac.append(fold)}fold.append(d);fold.querySelector('summary').textContent=`${fold.children.length-1} earlier like it`}
   else{ac.append(d);fold=null}last=a});
@@ -1304,16 +1309,14 @@ function measures(box){modelBar(box);const top=h('div','row bar top'),q=h('input
 function glossary(box){const list=h('div','cards rows');box.append(list);
  const edit=(t,isNew)=>{const c=card(isNew?'New term':(t.term||t.id)),term=h('input','f'),def=h('textarea','f'),ms=h('input','f');[term,def,ms].forEach(e=>e.classList.add('ed'));term.value=t.term||'';def.value=t.definition||'';ms.value=(t.measures||[]).join(', ');
   term.placeholder='business term';def.placeholder='what it means';ms.placeholder=isNew?'e.g. revenue, units':'no measure: a word for a column';
-  if(t.term===MASK){term.value=colName(t.id||'term');def.value='';def.placeholder='Not shown with your access: it may quote data.';c.classList.add('masked-row');
-   // the business definition from the vault (the documents everyone here may read) in its place
-   vpost('search',{query:term.value,k:1}).then(hs=>{const x=hs?.[0];if(!x)return;def.value=String(x.text).replace(/\s+/g,' ').trim().slice(0,260);def.placeholder='';const n=h('div','file vsrc');n.append(ic('vault'),`From the vault: ${x.document}${x.section?' · '+x.section:''}`);def.closest('.fld')?.append(n)}).catch(()=>{})}
+  if(t.term===MASK){term.value=colName(t.id||'term');def.value='';def.placeholder='Not shown with your access: it may quote data.';c.classList.add('masked-row')}
   if(isNew)c.append(h('label','l','Term'),term,h('label','l','Definition'),def,h('label','l','Implemented by (measure IDs)'),ms);
   else{def.rows=1;rowcard(c,fld('Term',term),fld('Definition',def),fld('Implemented by',ms))}
   act(c,isNew?'Create':'Save',async()=>{await api('set_glossary_term',{term:term.value,definition:def.value,measures:ms.value.split(',').map(x=>x.trim()).filter(Boolean),columns:t.columns||[]});
    Object.assign(t,{term:term.value,definition:def.value});if(isNew)D.glossary.push(t);return 'Saved through ABI.'},1);
   if(!isNew)act(c,'Delete',async()=>{await api('delete_glossary_term',{id:t.id});D.glossary=D.glossary.filter(x=>x!==t);show('glossary')});return c};
  const bar=h('div','row bar top');bar.append(btn('New term',()=>list.firstChild.after(edit({},true)),1));box.insertBefore(bar,list);
- list.append(rowhead('Term','Definition','Implemented by (measure IDs)',''));D.glossary.forEach(t=>list.append(edit(t)));if(!D.glossary.length)list.append(h('p','empty pad','No terms yet. New term adds the first.'))}
+ list.append(rowhead('Term','Definition','Implemented by',''));D.glossary.forEach(t=>list.append(edit(t)));if(!D.glossary.length)list.append(h('p','empty pad','No terms yet. New term adds the first.'))}
 
 // ---------- Data ----------
 async function upload(table,file,sheet){const id=[...crypto.getRandomValues(new Uint8Array(16))].map(b=>b.toString(16).padStart(2,'0')).join(''),N=24<<20;let r;
@@ -1470,7 +1473,7 @@ function canvasKit(box,onArrange){const tools=h('div','row cvtools'),wrap=h('div
  svg.classList.add('links');stage.append(svg);sizer.append(stage);wrap.append(sizer);const kit={z:1,w:0,ht:0,wrap,stage,svg,draw:()=>{}};
  const pct=h('span','pct','100%'),size=()=>{sizer.style.width=kit.w*kit.z+'px';sizer.style.height=kit.ht*kit.z+'px';stage.style.width=kit.w+'px';stage.style.height=kit.ht+'px';
   stage.style.transform=`scale(${kit.z})`;wrap.style.height=Math.max(140,Math.min(kit.ht*kit.z+28,innerHeight*.78))+'px';pct.textContent=Math.round(kit.z*100)+'%'};
- kit.setZ=z=>{kit.z=Math.min(2,Math.max(.25,Math.round(z*100)/100));size();kit.draw()};kit.extent=(w,ht)=>{kit.w=w;kit.ht=ht;size();if(MOBILE&&!kit.fit&&w>0){kit.fit=1;requestAnimationFrame(()=>kit.setZ(Math.min(1,(wrap.clientWidth-24)/Math.max(1,kit.w))))}};  // a phone starts fitted to its width
+ kit.setZ=z=>{kit.z=Math.min(2,Math.max(.25,Math.round(z*100)/100));size();kit.draw()};kit.extent=(w,ht)=>{kit.w=w;kit.ht=ht;size();if(!kit.fit&&w>0&&(MOBILE||wrap.clientWidth&&w>wrap.clientWidth-24)){kit.fit=1;requestAnimationFrame(()=>kit.setZ(Math.min(1,(wrap.clientWidth-24)/Math.max(1,kit.w))))}};  // a phone, or a canvas wider than the page, starts fitted to its width
  const b=(t,title,fn)=>{const x=h('button','btn',t);x.title=title;x.onclick=fn;return x};
  tools.append(b('−','Zoom out',()=>kit.setZ(kit.z-.1)),pct,b('+','Zoom in',()=>kit.setZ(kit.z+.1)),b('Fit','Fit to the window',()=>kit.setZ(Math.min(1,(wrap.clientWidth-24)/Math.max(1,kit.w),(innerHeight*.78)/Math.max(1,kit.ht)))),
   (()=>{const x=b('Auto arrange','Lay the boxes out again',onArrange);x.classList.add('w');return x})());
@@ -1645,7 +1648,7 @@ function agentForm(c){const nm=inpt('e.g. Store manager assistant'),pu=inpt('who
       tables:[...new Set([...[...st.selectedOptions].map(o=>o.value),...cols.map(x=>x.split('.')[0])])]}})(),tools:[...tl.selectedOptions].map(o=>o.value),
    ...(ask.selectedOptions.length?{agents:[...ask.selectedOptions].map(o=>o.value)}:{}),cases:[...cs.children].map(r=>r.get()).filter(Boolean)}}}
 // a new report from a few choices: headline numbers, one measure broken down, its line by month (the starter's defaults)
-function reportForm(c){const nm=inpt('e.g. Sales overview'),de=inpt('what it answers (optional)'),plain=D.measures.filter(m=>!/(_prev|_change|_change_pct)$/.test(m.id)),
+function reportForm(c){const nm=inpt('e.g. Sales overview'),de=inpt('what it answers (optional)'),plain=D.measures.filter(m=>!/(_prev|_change|_change_pct)$/.test(m.id)&&!/of ML model '/.test(m.description||'')),
   money=/revenue|sales|amount|total|value|profit|margin|income|spend|cost/i,
   rank=plain.filter(m=>!/^\s*(AVG\(|SUM\(\s*\w+\.\w*(price|rate|ratio|pct|percent|share|score|discount)\w*\s*\)\s*$)/i.test(m.expression||'')).sort((a,b)=>(!money.test(a.id))-(!money.test(b.id))||(!a.id.endsWith('_rows'))-(!b.id.endsWith('_rows'))),
   kp=lmulti(plain.map(m=>[m.id,m.name||m.id]),rank.slice(0,3).map(m=>m.id)),cm=sel(plain.map(m=>[m.id,m.name||m.id]),(rank[0]||plain[0])?.id),
@@ -1671,7 +1674,7 @@ function newBtn(box,kind){const bar=box.querySelector(':scope>.bar.top')||h('div
    if(kind==='report'){PENDING.open=o.id;if(PAGES['rep:'+o.id]){PENDING.open=null;show('rep:'+o.id)}else c.querySelector(':scope>.msg').textContent='Created: it opens in a moment…';toast(`Created ${o.name}. It is an uncommitted change until you commit.`);return}
    show(FORMS[kind][1]);setTimeout(()=>highlight(o.name),300);
    doneDialog(`${L[0].toUpperCase()+L.slice(1)} created`,[`${o.name} is saved in ABI, which checked it first.`,kind==='flow'?'It is off: switch it on on its card when you want it to run.':kind==='ml'?'Next: train it on its card.':kind==='tool'?'Next: run its tests, then publish it.':'Next: run its evaluation set on its card.','It stays an uncommitted change until you commit.'],
-    [['Close'],...(kind==='flow'?[['Open its canvas',()=>show('flw:'+o.id)]]:[])])},1);
+    [['Close'],...(kind==='flow'?[['Open its canvas',()=>openWhenThere('flw:'+o.id)]]:[])])},1);
   act(c,'Describe it to the agent instead',()=>{openChat(true);inp.value=`Create a ${L} in this project: `;inp.focus()});
   act(c,'Start from JSON',()=>{const e=editor(kind,KIND[kind].tpl,true);c.after(e);e.querySelector('textarea').focus()});
   act(c,'Cancel',()=>c.remove());
@@ -1686,14 +1689,14 @@ function flowPage(box,f){const bar=h('div','row bar lead');bar.append(btn('← F
  const what=x=>x.table||x.tool||x.agent||x.action||x.model||x.report||(x.measure?`${x.measure} ${x.op} ${x.value}`:'')||(x.changed?'data changed':'')||(x.message||'').slice(0,40);
  const nodes=[{id:T0,title:t.type==='schedule'?'On a schedule':t.type==='data_condition'?'When a check holds':t.type==='after_refresh'?'After a refresh':'Trigger',sub:trigWords(t)+(t.tables?' · '+t.tables.join(', '):''),icon:t.type==='schedule'?'history':'monitor'},
   ...steps.map(x=>{const [ti,icn]=stepWords(x);return {id:x.id,title:ti,sub:stepWhat(x),when:x.when,icon:icn}})];
- const H=x=>x.when?118:96,key='abi-flow2-'+D.project+'-'+f.id;let pos={};try{pos=JSON.parse(localStorage.getItem(key)||'{}')}catch(e){}
+ const H=x=>x.when?140:118,key='abi-flow2-'+D.project+'-'+f.id;let pos={};try{pos=JSON.parse(localStorage.getItem(key)||'{}')}catch(e){}
  const save=()=>{try{localStorage.setItem(key,JSON.stringify(pos))}catch(e){}};
  // columns by depth, as many to a row as the canvas fits: a long chain wraps like lines of text
  const layout=()=>{const per=Math.max(2,Math.floor(((kit.wrap.clientWidth||1100)-24)/280)),cols={};nodes.forEach(n=>(cols[depth[n.id]]??=[]).push(n));const tall={};Object.entries(cols).forEach(([d,list])=>{const r=Math.floor(d/per);tall[r]=Math.max(tall[r]||0,list.reduce((a,n)=>a+H(n)+28,0))});
   const top=r=>24+[...Array(r).keys()].reduce((a,i)=>a+(tall[i]||0)+40,0);Object.entries(cols).forEach(([d,list])=>{let y=top(Math.floor(d/per));list.forEach(n=>{if(!pos[n.id])pos[n.id]={x:24+(d%per)*280,y};y=Math.max(y,pos[n.id].y)+H(n)+28})})};
  const extent=()=>kit.extent(Math.max(...nodes.map(n=>pos[n.id].x+260)),Math.max(...nodes.map(n=>pos[n.id].y+H(n)+24)));
  {const tb=h('div','row bar top'),st=h('span','state'+(f.enabled?' on':''),f.enabled?'On':'Off'),lr=h('span','file lastrun','Last run: …');
-  const mark=one=>{Object.values(els).forEach(e=>{e.classList.remove('ok','failed','skipped','running');e.querySelector('.ns')?.remove()});(one.steps||[]).forEach(r=>{const e=els[r.step||r.id];if(!e)return;e.classList.add(r.status);e.append(h('div','ns',r.status==='ok'?'Done':r.status==='failed'?'Failed'+(r.error?': '+String(r.error).slice(0,60):''):r.status))});
+  const mark=one=>{Object.values(els).forEach(e=>{e.classList.remove('ok','failed','skipped','running');e.querySelector('.ns')?.remove()});if(!(one.steps||[]).length)steps.forEach(x=>els[x.id]?.append(h('div','ns','No run yet')));(one.steps||[]).forEach(r=>{const e=els[r.step||r.id];if(!e)return;e.classList.add(r.status);e.append(h('div','ns',r.status==='ok'?'Done':r.status==='failed'?'Failed'+(r.error?': '+String(r.error).slice(0,60):''):r.status))});
    lr.textContent=one.status?`Last run: ${{ok:'finished',failed:'failed',running:'running'}[one.status]||one.status}${one.started?' · '+cell(one.started):''}`:'Not run yet'};
   tb.append(st,lr,btn('Run now',async()=>{const r=await api('run_flow',{flow:f.id});lr.textContent='Running…';for(let i=0;i<150;i++){await wait(2000);const x=await api('flow_runs',{flow:f.id,run:r.run}),one=x.runs?.[0]||x;mark(one);
     if(['ok','failed','stopped','rejected','waiting'].includes(one.status)){toast(`${f.name||f.id}: run ${one.status==='ok'?'finished':one.status}.`,one.status==='failed');return}}toast('Still running: this page follows it.')},1),
@@ -1746,7 +1749,7 @@ function ml(box){newBtn(box,'ml');const g=h('div','cards');box.append(g);if(!D.m
    [['Latest run',`${{train:'Trained',score:'Scored'}[r.kind]||r.kind}${r.finished?' · '+cell(r.finished):''}`],['Status',r.status||'—'],...Object.entries(r.metrics||{}).map(([a,b])=>{const M={mae:['MAE (mean absolute error)'],wape:['WAPE (weighted % error)',{style:'percent',decimals:1}],mape:['MAPE (mean % error)',{style:'percent',decimals:1}],rmse:['RMSE (root mean squared error)'],r2:['R² (fit)'],accuracy:['Accuracy',{style:'percent',decimals:1}],auc:['AUC'],windows:['Backtest windows']}[a]||[a.replace(/_/g,' ')];return [M[0],typeof b==='number'?fmt(b,M[1]):cell(b)]})].forEach(([a,b])=>st.append(h('b','',a),h('span',a==='Status'?(b==='ok'?'ok':b==='failed'?'bad':''):'',a==='Status'&&b==='ok'?'OK':String(b))))};lr();c.append(st);
   // a forecast: its actuals by month, and once scored, the forecast beside them (both ABI's measures)
   if(m.task==='forecast'&&m.target&&['calendar.year','calendar.month'].every(x=>D.dims.includes(x))){const fm=D.measures.find(x=>(x.description||'').includes(`of ML model '${m.id}'`))?.id,ch=h('div','mlchart');
-   c.append(h('div','file',fm?`${mname(m.target)} and its forecast, by month`:`${mname(m.target)} by month. Score the model to draw its forecast beside it.`),ch);
+   c.append(h('div','file',fm?`${mname(m.target)} and its forecast, by month`:MODE==='viewer'?`${mname(m.target)} by month. The forecast shows here once a builder scores the model.`:`${mname(m.target)} by month. Score the model to draw its forecast beside it.`),ch);
    api('semantic_query',{measures:[m.target,...(fm?[fm]:[])],dimensions:['calendar.year','calendar.month'],order_by:[{field:'calendar.year'},{field:'calendar.month'}],limit:240}).then(d=>{d.format=d.format||{};d.type='line';d.id='ml';requestAnimationFrame(()=>chart(ch,d))}).catch(e=>ch.append(h('p','bad',e.message)))}
   const follow=async(kind,m2)=>{await api(kind,{model:m.id});say(m2,`${kind==='train_model'?'training':'scoring'}…`);
    for(let i=0;i<60;i++){await wait(3000);const x=(await api('ml_models',{})).models.find(y=>y.id===m.id);if(x){Object.assign(m,x);lr()}
@@ -1770,9 +1773,9 @@ function docs(box){if(D.docs==null){const sk=h('div','skel');sk.append(h('div','
   api('docs',{}).then(r=>{D.docs=r||{};if(CUR==='docs')show('docs')},e=>{box.textContent=e.message});return}
  const d=D.docs?.projects?.[0];if(!d){box.append(h('p','empty','No documentation yet.'));return}
  const bar=h('div','row bar top'),toc=h('nav','toc');toc.setAttribute('aria-label','Sections');box.append(bar,toc);const secs=[];
- (d.sections||[]).forEach((s,i)=>{const c=h('details','card dsec'),su=h('summary');su.append(h('span','dn',String(i+1)),h('span','dt',s.title),h('span','file',`${(s.items||[]).length} item${(s.items||[]).length===1?'':'s'}`));c.append(su);c.open=!MOBILE&&i===0;c.id='doc-'+i;
+ const VHIDE=/^(Architecture|Data sources|Tools|Agents|Security|Operations runbook|Open issues)$/i;(d.sections||[]).filter(s=>MODE!=='viewer'||!VHIDE.test(s.title||'')).forEach((s,i)=>{const c=h('details','card dsec'),su=h('summary');su.append(h('span','dn',String(i+1)),h('span','dt',s.title),h('span','file',`${(s.items||[]).length} item${(s.items||[]).length===1?'':'s'}`));c.append(su);c.open=!MOBILE&&i===0;c.id='doc-'+i;
   (s.items||[]).forEach(it=>{c.append(h('h4','',it.title));const t=h('table','facts');
-  (it.facts||[]).forEach(([k,v])=>{const r=t.insertRow();r.insertCell().textContent=k;const tv=plur(idsToNames(typeof v==='string'?v:JSON.stringify(v))),cl=r.insertCell();if(/ \| /.test(tv)){const ul=h('ul','list');tv.split(/ \| /).forEach(x=>ul.append(h('li','',x.replace(/^\d+\.\s*/,''))));cl.append(ul)}else cl.textContent=tv});c.append(t)});box.append(c);secs.push(c);
+  (it.facts||[]).filter(([k])=>MODE!=='viewer'||!/^Where to look$/i.test(k)).forEach(([k,v])=>{const r=t.insertRow();r.insertCell().textContent=k;const tv=plur(idsToNames(typeof v==='string'?v:JSON.stringify(v))),cl=r.insertCell();if(/ \| /.test(tv)){const ul=h('ul','list');tv.split(/ \| /).forEach(x=>ul.append(h('li','',x.replace(/^\d+\.\s*/,''))));cl.append(ul)}else cl.textContent=tv});c.append(t)});box.append(c);secs.push(c);
   const go=h('button','chip',s.title);go.onclick=()=>{secs.forEach(x=>x.open=x===c);c.scrollIntoView({behavior:'smooth',block:'start'})};toc.append(go)});
  {const all=h('button','flink','Open all');all.onclick=()=>{const o=secs.some(x=>!x.open);secs.forEach(x=>x.open=o);all.textContent=o?'Fold all':'Open all'};toc.append(all)}
  bar.append(btn('Download PDF',async()=>{try{await pdf();toast('Downloaded the documentation PDF.')}catch(e){toast(e.message,1)}},1),(()=>{const b=btn('Regenerate',async()=>{D.docs=await api('docs',{});show('docs')});b.classList.add('w');b.title='Write the documentation again from the project\'s definitions';return b})());
@@ -1784,18 +1787,20 @@ const VERB={add_data:'Loaded a source',refresh:'Reloaded a source',delete_source
  enable_flow:'Switched a flow on or off',save_ml_model:'Saved an ML model',delete_ml_model:'Deleted an ML model',save_tool:'Saved a tool',delete_tool:'Deleted a tool',publish_tool:'Published a tool',save_agent:'Saved an agent',delete_agent:'Deleted an agent',
  publish_agent:'Published an agent',set_role:'Changed a role',set_rls_rule:'Saved a row rule',set_column_rule:'Saved a column rule',set_auto_commit:'Changed a project setting',import_project:'Imported the project',revert:'Went back to a version',edit_cells:'Edited rows'};
 // a commit message in words: [what, where] ('Loaded a source', 'bronze_trial'); a person's own message stays theirs
+const andj=a=>a.length>1?a.slice(0,-1).join(', ')+' and '+a.at(-1):a[0]||'';
+const VIC=w=>([[/source/i,'sources'],[/steps|table/i,'tables'],[/join|the model/i,'model'],[/measure/i,'measures'],[/glossary/i,'glossary'],[/query/i,'datasets'],[/data model|ML/,'ml'],[/report/i,'reports'],[/flow/i,'flows'],[/tool/i,'tools'],[/agent/i,'agents'],[/role/i,'people'],[/rule/i,'security'],[/setting/i,'settings'],[/import/i,'transfer'],[/version/i,'history'],[/rows/i,'edits']].find(([r])=>r.test(w))||[0,'commit'])[1];
 function plainCommit(m){const ps=String(m||'').split(/\n+|(?<=\.json)(?=[a-z_]+: )/).map(s=>s.trim()).filter(Boolean),one=ps.map(p=>{const x=/^(\w+): (.+)$/.exec(p);if(!x||!VERB[x[1]])return null;
   return [VERB[x[1]],x[2].split(/,\s*/).map(q=>{const r=plainFile('M',q);return idsToNames(r[1]||r[0])}).join(', ')]});
- if(ps.length&&one.every(Boolean)){const w=[...new Set(one.map(x=>x[0]))];return [w.join(' · '),[...new Set(one.map(x=>x[1]))].join(', ')||'—']}return [idsToNames(String(ps[0]||'').replace(/\bSecuritys rls\b/g,'Row rules').replace(/\brls\b/g,'row rules')),ps.length>1?`and ${ps.length-1} more`:'—']}
+ if(ps.length&&one.every(Boolean)){const w=[...new Set(one.map(x=>x[0]))];return [andj(w.map((x,i)=>i?x[0].toLowerCase()+x.slice(1):x)),andj([...new Set(one.map(x=>x[1]).join(', ').split(', ').filter(Boolean))])||'—']}return [idsToNames(String(ps[0]||'').replace(/\bSecuritys rls\b/g,'Row rules').replace(/\brls\b/g,'row rules')),ps.length>1?`and ${ps.length-1} more`:'—']}
 function commits(box){const c=card('Commits','every change is a commit in ABI\'s Git history');if(MODE==='viewer')c.append(h('p','file','The published version\'s history: each publish brings the builders\' commits since the last one.'));const t=h(MOBILE?'div':'table','hist');c.append(t);box.append(c);
  const when=x=>when2(new Date(x.time*1000).toISOString()),who=x=>x.author+(x.by==='agent'?' (agent)':'');
  const fill=()=>{t.innerHTML='';if(!(D.history||[]).length){t.append(h('p','empty','No commits yet.'));return}
-  if(MOBILE){let last=null;(D.history||[]).forEach(x=>{const [w,f]=plainCommit(x.message),k=[w,f,who(x)].join('|');if(last&&last.k===k&&Math.abs(last.t-x.time)<900){last.n++;last.c.textContent=`${last.n} times`;return}
+  if(MOBILE){let last=null;(D.history||[]).forEach(x=>{const [w,f]=plainCommit(x.message),k=[w,f,who(x)].join('|');if(last&&last.k===k){last.n++;last.c.textContent=`${last.n} times`;return}
    const r=h('div','srow'),n=h('div','sname'),c=h('span','cnt');n.append(h('b','',w),h('div','file',[f,who(x),when(x)].filter(Boolean).join(' · ')));r.append(n,c);r.title=x.message;t.append(r);last={k,t:x.time,n:1,c}});return}
   const hd=t.createTHead().insertRow();['What','Where','Who','When','Version'].forEach(x=>hd.append(h('th','',x)));const tb=t.createTBody();
   // a run of the same change (17 measures saved by the seed) is one row with its count
-  let last=null;(D.history||[]).forEach(x=>{const [w,f]=plainCommit(x.message),k=[w,f,who(x)].join('|');if(last&&last.k===k&&Math.abs(last.t-x.time)<900){last.n++;last.c.textContent=`${last.n} times`;last.v.textContent=`${last.id} +${last.n-1}`;last.v.title='and the '+(last.n-1)+' before it';return}
-   const r=tb.insertRow();[w,f,who(x),when(x),x.id.slice(0,7)].forEach((v,i)=>{const td=r.insertCell();td.textContent=v;if(i===4)td.className='code'});r.title=x.message;const c=h('span','cnt');r.cells[0].append(c);last={k,t:x.time,n:1,c,v:r.cells[4],id:x.id.slice(0,7)}})};fill();
+  let last=null;(D.history||[]).forEach(x=>{const [w,f]=plainCommit(x.message),k=[w,f,who(x)].join('|');if(last&&last.k===k){last.n++;last.c.textContent=`${last.n} times`;last.v.textContent=`${last.id} +${last.n-1}`;last.v.title='and the '+(last.n-1)+' before it';return}
+   const r=tb.insertRow();[w,f,who(x),when(x),x.id.slice(0,7)].forEach((v,i)=>{const td=r.insertCell();td.textContent=v;if(i===4)td.className='code'});r.title=x.message;r.cells[0].prepend(ic(VIC(w)));const c=h('span','cnt');r.cells[0].append(c);last={k,t:x.time,n:1,c,v:r.cells[4],id:x.id.slice(0,7)}})};fill();
  act(c,'Reload',async()=>{D.history=(await api('history',{})).commits;fill()})}
 
 function security(box){const g=h('div','cards top');box.append(g);const r=D.rls||{},acc=r.accounts||[],R=x=>x?x[0].toUpperCase()+x.slice(1):'No access';
@@ -1874,18 +1879,23 @@ let MODE='developer',VAULT=[],MODEL='';
 let FOLD={};try{FOLD=JSON.parse(localStorage.getItem('abi-fold')||'{}')}catch(e){}
 function sidebar(){side.innerHTML='';PAGES={};side.setAttribute('aria-label','Pages');{const g=h('button','goto');g.append(ic('search'),h('span','lb','Go to…'),h('kbd','',/Mac|iPhone|iPad/.test(navigator.platform)?'⌘K':'Ctrl K'));g.onclick=()=>goTo();side.append(g)}
  // a phone has no header crumb: the drawer opens with the workspace and project, which switches them
- if(MOBILE){const sw=$('#switch'),b=h('button','proj');b.append(ic('transfer'),h('span','lb',sw.textContent.replace('▾','').replace('/',' / ')),ic('down'));b.onclick=()=>{document.body.classList.remove('menu-open');sw.click()};side.append(b)}nav().forEach(([g,items])=>{const sec=h('div','sec'),hd=h('button','grp'),list=h('div','items');
+ if(MOBILE){const sw=$('#switch'),b=h('button','proj');b.append(ic('transfer'),h('span','lb',sw.textContent.replace('▾','').replace('/',' / ')),ic('down'));b.onclick=()=>{document.body.classList.remove('menu-open');sw.click()};side.append(b)}nav().forEach(([g,items])=>{const sec=h('div','sec'),hd=h('button','grp'),list=h('div','items');sec.dataset.g=g;
  hd.append(h('span','',g),h('span','car'));hd.setAttribute('aria-expanded',String(!FOLD[g]));sec.classList.toggle('folded',!!FOLD[g]);
- hd.onclick=()=>{FOLD[g]=!FOLD[g];sec.classList.toggle('folded',FOLD[g]);hd.setAttribute('aria-expanded',String(!FOLD[g]));try{localStorage.setItem('abi-fold',JSON.stringify(FOLD))}catch(e){}};
+ hd.onclick=()=>{FOLD[g]=!sec.classList.contains('folded');sec.classList.remove('auto');sec.classList.toggle('folded',FOLD[g]);hd.setAttribute('aria-expanded',String(!FOLD[g]));try{localStorage.setItem('abi-fold',JSON.stringify(FOLD))}catch(e){}};
  items.forEach(([k,label,fn,n])=>{PAGES[k]=[label,fn];const b=h('button','it');b.dataset.k=k;
   b.append(ic(k),h('span','lb',label));if(n!==undefined&&n!=='')b.append(h('span','n',String(n)));b.onclick=()=>show(k);list.append(b)});
  sec.append(hd,list);side.append(sec)});D.reports.forEach(r=>PAGES['rep:'+r.id]=[r.name||r.id,b=>report(b,r)]);PAGES['mdl:all']=['Whole model',b=>openModel(b,'')];(D.flows||[]).forEach(f=>PAGES['flw:'+f.id]=[f.name||f.id,b=>flowPage(b,f)]);
  (D.models||[]).forEach(m=>PAGES['mdl:'+m.id]=[m.name,b=>openModel(b,m.id)]);
  // AGPL-3.0 §13: every page offers the running version's source (ABI_SOURCE_URL for a changed build)
  if(window.ME?.source){const a=h('a','src',`ABI-PI ${ME.version} · source code (AGPL-3.0)`);a.href=ME.source;a.target='_blank';a.rel='noopener';side.append(a)}}
+// the nav opens at the top with the active page in view: when it is taller than the screen, the groups other than
+// Start and the active one fold (not remembered; a group the person opened stays open)
+function fitNav(act){side.querySelectorAll('.sec.auto').forEach(s=>s.classList.remove('folded','auto'));side.scrollTop=0;if(MOBILE||!act)return;
+ requestAnimationFrame(()=>{if(side.scrollHeight<=side.clientHeight+2)return;const mine=act.closest('.sec');[...side.querySelectorAll('.sec')].reverse().forEach(s=>{if(side.scrollHeight<=side.clientHeight+2)return;
+  const g=s.dataset.g;if(s===mine||g==='Start'||FOLD[g]===false||s.classList.contains('folded'))return;s.classList.add('folded','auto')});side.scrollTop=0})}
 let PREV='home';
-function show(k){if(!PAGES[k]){if(MOBILE&&k&&k!=='home'&&/^(people|settings|flw:|staged|tools|agents|sources|edits)/.test(k))window.__redir='That page opens on a computer, in Developer: a phone shows the published project.';k='home'}if(k!=='chat'&&CUR!=='chat')PREV=k;else if(k==='chat'&&CUR!=='chat')PREV=CUR;{const cb=$('#chat');if(cb.classList.contains('full')){cb.classList.remove('full');wideT(0);document.body.append(cb);cb.classList.remove('open');document.body.classList.remove('chat-open')}}CUR=k;setTimeout(ctx);const sk=k.startsWith('rep:')?'reports':k.startsWith('mdl:')?'model':k.startsWith('flw:')?'flows':k;side.querySelectorAll('button.it').forEach(b=>{b.classList.toggle('on',b.dataset.k===sk);b.toggleAttribute('aria-current',b.dataset.k===sk)});
- const act=side.querySelector('button.it.on');if(act){act.closest('.sec').classList.remove('folded');requestAnimationFrame(()=>{const y=act.getBoundingClientRect().top-side.getBoundingClientRect().top+side.scrollTop;side.scrollTop=y<side.clientHeight-72?0:Math.max(0,y-side.clientHeight+140)})}
+function show(k){document.querySelectorAll('body>.toast:not([style])').forEach(t=>{if(Date.now()-(+t.dataset.t||0)>1500)t.remove()});if(!PAGES[k]){if(k&&k!=='home')window.__redir=MOBILE?'That page opens on a computer, in Developer: a phone shows the published project.':MODE==='viewer'?'That page has nothing in the published version, so Home opened instead.':'That page is not here any more, so Home opened instead.';k='home'}if(k!=='chat'&&CUR!=='chat')PREV=k;else if(k==='chat'&&CUR!=='chat')PREV=CUR;{const cb=$('#chat');if(cb.classList.contains('full')){cb.classList.remove('full');wideT(0);document.body.append(cb);cb.classList.remove('open');document.body.classList.remove('chat-open')}}CUR=k;setTimeout(ctx);const sk=k.startsWith('rep:')?'reports':k.startsWith('mdl:')?'model':k.startsWith('flw:')?'flows':k;side.querySelectorAll('button.it').forEach(b=>{b.classList.toggle('on',b.dataset.k===sk);b.toggleAttribute('aria-current',b.dataset.k===sk)});
+ const act=side.querySelector('button.it.on');if(act)act.closest('.sec').classList.remove('folded');fitNav(act);
  const box=$('main');box.innerHTML='';const pg=h('div','pg'),head=h('div','pghead'),pn=$('#pgname');pn.textContent=PAGES[k][0];document.title=PAGES[k][0]+' · '+D.project;
  pn.title=(k.startsWith('rep:')?'Filter the report or click a bar to filter by it. Every number comes from ABI.':LEDE[k])||'';
  // the page says what it is and what it is for, above its actions (the header's crumb says where it sits)
@@ -1956,7 +1966,7 @@ function vc(){const n=D.pending?.files?.length||0,cb=$('#changes'),pb=$('#publis
  pb.title=n?'Commit first: Publish sends the last commit.':head===pubc?(ld?'Show the new page layouts to Viewer.':'Viewer already shows the last commit.'):'Make the last commit what Viewer sees.'}
 $('#changes').onclick=()=>{const d=$('#commit'),f=$('.files',d);f.innerHTML='';const fl=D.pending?.files||[];
  $('h3',d).replaceChildren(ic('commit'),fl.length?`${fl.length} change${fl.length>1?'s':''} not committed yet`:'Everything is committed');$('#c-commit').hidden=!fl.length;$('#c-message').hidden=$('label[for=c-message]').hidden=!fl.length;
- if(!fl.length)f.append(h('p','empty',D.pending?.can_undo?'Nothing to commit: every change is in ABI\'s history. Undo last change takes back the last one.':'Nothing to commit or undo: every change is in ABI\'s history.'));fl.forEach(x=>{const det=h('details','chg'),su=h('summary'),[k,n,v]=plainFile(x.status,x.path);su.append(h('span','what',`${k} ${n}`),h('span','state'+(v==='deleted'?' bad':v==='added'?' on':''),v));su.title=x.path;det.append(su,h('pre','',x.patch||''));f.append(det)});
+ if(!fl.length)f.append(h('p','empty',D.pending?.can_undo?'Nothing to commit: every change is in ABI\'s history. Undo last change takes back the last one.':'Nothing to commit: every change is in ABI\'s history.'));fl.forEach(x=>{const det=h('details','chg'),su=h('summary'),[k,n,v]=plainFile(x.status,x.path);su.append(h('span','what',`${k} ${n}`),h('span','state'+(v==='deleted'?' bad':v==='added'?' on':''),v));su.title=x.path;det.append(su,h('pre','',x.patch||''));f.append(det)});
  $('#c-message').value=commitMsg(fl)||'Changes from the app';$('.msg',d).textContent='';$('#c-undo').disabled=!D.pending?.can_undo;$('#c-undo').title=D.pending?.can_undo?'Take back the last change':'Nothing to undo: no change since the last commit';d.showModal()};
 $('#c-close').onclick=()=>$('#commit').close();
 // a changed file in words: Source bronze_trial · changed (the Git path one hover away, the diff one click)
@@ -1967,8 +1977,8 @@ function plainFile(st,p){const m=/^([^/]+)\/(.+?)(\.json|\.md|\.ya?ml)?$/.exec(p
  const T={rls:'Row rules',roles:'Roles',project:'Project settings',descriptions:'Descriptions',security:'Security',environments:'Environments'};
  return !dir?[T[name.replace(/\.json$/,'')]||'File',T[name.replace(/\.json$/,'')]?'':p,v]:dir==='model'?[M[name]||'Model',M[name]?'':name,v]:(dir==='docs'||dir==='security')&&T[name]?[T[name],'',v]:[K[dir]||'File',K[dir]?idsToNames(name):p,v]}
 function commitMsg(fl){const g={};fl.forEach(x=>{const [k,n,v]=plainFile(x.status,x.path),key=k+'|'+v;(g[key]||=[]).push(n)});
- return Object.entries(g).map(([key,ns])=>{const [k,v]=key.split('|'),xs=ns.filter(Boolean),pl=xs.length>1&&!/s$|Security|Docs|Data models|Glossary|Model/.test(k)?k+'s':k;
-  return `${pl}${xs.length?' '+(xs.length>2?xs.slice(0,-1).join(', ')+' and '+xs.at(-1):xs.join(' and ')):''} ${v}`}).join('; ').replace(/^./,c=>c.toUpperCase())}
+ return andj(Object.entries(g).map(([key,ns])=>{const [k,v]=key.split('|'),xs=ns.filter(Boolean),pl=xs.length>1&&!/s$|Security|Docs|Data models|Glossary|Model/.test(k)?k+'s':k;
+  return `${pl}${xs.length?' '+andj(xs):''} ${v}`}).map((x,i)=>i?x[0].toLowerCase()+x.slice(1):x)).replace(/^./,c=>c.toUpperCase())}
 $('#c-commit').onclick=async()=>{try{await api('commit',{message:$('#c-message').value||'Changes from the app'});$('#commit').close();toast('Committed')}catch(e){say($('#commit .msg'),e.message,1)}};
 $('#c-undo').onclick=async()=>{try{const r=await api('undo',{});say($('#commit .msg'),`Undone: ${r.undone}`);D.pending=await api('changes',{});$('#changes').onclick()}catch(e){say($('#commit .msg'),e.message,1)}};
 $('#publish').onclick=async()=>{if(!await ask({message:'Publish the last commit? Viewer will show it from now on.',preview:(D.history||[])[0]?.message||''}))return;
@@ -1978,7 +1988,7 @@ $('#publish').onclick=async()=>{if(!await ask({message:'Publish the last commit?
  {const L=D.app?.layouts;if(L)L.published=structuredClone(L.draft||{})}vc();
  doneDialog('Published',[`Viewers now see “${c0.message?commitMsgOne(c0.message):'the last commit'}”, published ${when2(D.published.at)}.`,'Share a report: tick it for each person under Users & access. Viewers read this published copy until the next Publish.'],
   [['Close'],...((window.ME||{admin:true}).admin&&!MOBILE?[['Share a report',()=>show('people')]]:[])])};
-const commitMsgOne=m=>{const [w,f]=plainCommit(m);return (w+(f?': '+f:'')).slice(0,96)};
+const commitMsgOne=m=>{const [w,f]=plainCommit(m);return (w+(f&&f!=='—'?': '+f:'')).slice(0,110)};
 const sideOff=on=>{document.body.classList.toggle('side-off',on);try{localStorage.setItem('abi-side-off',on?'1':'')}catch(e){}};try{sideOff(localStorage.getItem('abi-side-off')==='1')}catch(e){}
 $('#menu').title='Show or hide the sidebar';$('#menu').classList.add('icon');$('#menu').replaceChildren(ic('menu'));$('#chat-toggle').prepend(ic('spark'));$('#menu').onclick=()=>R.classList.contains('mobile')?document.body.classList.toggle('menu-open'):sideOff(!document.body.classList.contains('side-off'));side.addEventListener('click',e=>{if(e.target.closest('button.it'))document.body.classList.remove('menu-open')});
 // the phone drawer: a tap on its backdrop or Escape closes it
@@ -2019,7 +2029,7 @@ function mfaDialog(){const d=h('dialog'),c=h('div','card'),b=h('div'),m=h('div',
  const inp=(ph,pw)=>{const i=h('input','f');i.placeholder=ph;if(pw){i.type='password';i.autocomplete='current-password'}else{i.autocomplete='one-time-code';i.inputMode='numeric'}return i};
  const step=(...els)=>{b.innerHTML='';const r=h('div','row acts');els.filter(e=>e.tagName==='BUTTON').forEach(e=>r.append(e));b.append(...els.filter(e=>e.tagName!=='BUTTON'),r);m.textContent=''};
  const codes=list=>{const pre=h('pre','',list.join('\n'));step(h('p','','Your recovery codes: each signs you in once if you lose your authenticator app. Save them now: they are shown only this once.'),pre,
-  btn('Copy',async()=>{await navigator.clipboard.writeText(pre.textContent);say(m,'Copied.')}),btn('I saved them',async()=>{await fill();say(m,'Done: from your next sign-in, ABI asks for a code after your password.')},1))};
+  btn('Copy',async()=>{await navigator.clipboard.writeText(pre.textContent);say(m,'Copied.')}),btn('I saved them',async()=>{await fill();say(m,'Done: from your next sign-in, ABI asks for a code after your password.');toast('Two-step sign-in is on.')},1))};
  const on=async()=>{const pw=inp('your password',1);step(h('p','','Your password, to get a key for your authenticator app.'),pw,btn('Show the key',async()=>{const r=await post({op:'start',password:pw.value});pw.value='';if(r.error){say(m,r.error,1);return}
   const k=h('input','f'),a=h('a','',' Open in an authenticator app'),cd=inp('the 6-digit code it shows');k.readOnly=true;k.value=r.result.secret;a.href=r.result.uri;
   step(h('p','','Add this key to an authenticator app such as 1Password, Google Authenticator or Microsoft Authenticator (or open the link on this device), then enter the 6-digit code it shows.'),k,a,cd,btn('Turn on',async()=>{const x=await post({op:'confirm',code:cd.value});if(x.error){say(m,x.error,1);return}codes(x.result.recovery_codes)},1),btn('Cancel',close))},1),btn('Cancel',close))};
@@ -2039,13 +2049,13 @@ window.addEventListener('hashchange',()=>{const k=decodeURIComponent(location.ha
 async function switcher(){let d=$('#switcher');if(d){d.remove();return}
  const r=(await fetch('/projects',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:'{}'}).then(x=>x.json())).result;
  d=h('div','card');d.id='switcher';const ws=h('select','f'),list=h('div','areas');Object.keys(r.workspaces).forEach(w=>ws.append(new Option(w,w)));ws.value=r.workspace;
- const fill=()=>{list.innerHTML='';(r.workspaces[ws.value]||[]).forEach(p=>{const b=h('button','lk');b.append(h('b','',p.id),h('span','',p.name===p.id?'':p.name));
+ const fill=()=>{list.innerHTML='';(r.workspaces[ws.value]||[]).forEach(p=>{const b=h('button','lk');b.append(h('span','pav',(p.name||p.id).slice(0,1).toUpperCase()),h('b','',p.id),h('span','',p.name===p.id?'':p.name));
   if(p.id===r.current)b.classList.add('on');b.onclick=()=>{location.href='/?p='+encodeURIComponent(p.id)+'#home'};list.append(b)})};ws.onchange=fill;fill();
  d.append(h('h3','','Switch project'),h('label','l','Workspace'),ws,h('label','l','Projects in it'),list);document.body.append(d);ws.focus();
  // a popover under the crumb: a click outside or Escape closes it
  const off=e=>{if(e.type==='keydown'?e.key==='Escape':!d.contains(e.target)&&!e.target.closest('#switch,.proj')){d.remove();document.removeEventListener('mousedown',off);document.removeEventListener('keydown',off)}};
  setTimeout(()=>{document.addEventListener('mousedown',off);document.addEventListener('keydown',off)})}
-function toast(t,bad,action){const x=h('div','toast'+(bad?' bad':''));x.append(ic(bad?'alert':action?'info':'check'),h('span','',t));x.setAttribute('role',bad?'alert':'status');document.querySelectorAll('body>.toast:not([style])').forEach(o=>o.remove());
+function toast(t,bad,action){const x=h('div','toast'+(bad?' bad':''));x.dataset.t=Date.now();x.append(ic(bad?'alert':action?'info':'check'),h('span','',t));x.setAttribute('role',bad?'alert':'status');document.querySelectorAll('body>.toast:not([style])').forEach(o=>o.remove());
  if(action){const b=h('button','tact',action[0]);b.onclick=async()=>{x.remove();await action[1]()};x.append(b)}document.body.append(x);setTimeout(()=>x.remove(),action?12000:bad?9000:6000)}
 // a delete is one uncommitted change in ABI: the toast after it offers to take it back (the Changes dialog's Undo)
 function undoToast(what){toast(`${what} deleted.`,0,['Undo',async()=>{try{const r=await api('undo',{});toast(`${what} is back.`);setTimeout(()=>highlight(what),1500)}catch(e){toast(e.message,1)}}])}
@@ -2096,13 +2106,14 @@ $('#chat-pick').onchange=async e=>{if(!e.target.value)return;const c=await cpost
 $('#chat-toggle').onclick=()=>openChat();$('#chat .wide-t').onclick=()=>{if(chatBox.classList.contains('full')){show(PREV||'home');openChat(true)}else show('chat')};$('#chat .x').onclick=()=>openChat(false);
 // the chat's header: icon buttons, their words as names and tooltips
 function wideT(full){const b=$('#chat .wide-t');b.classList.add('icon');b.replaceChildren(ic(full?'narrow':'wide'));b.setAttribute('aria-label',full?'Side panel':'Full page');b.title=full?'Back to the side panel':'Open the chat as a full page'}
+if(MOBILE){const t=h('div','chtitle');t.append(ic('spark'),h('b','','Ask the agent'),h('span','file',MODE==='viewer'?'reads the published version':'reads and proposes changes'));$('#chat').insertBefore(t,$('#chat header'))}
 {const n=$('#chat-new'),x=$('#chat .x');n.classList.add('icon');n.replaceChildren(ic('plus'));n.setAttribute('aria-label','New chat');n.title='New chat';x.classList.add('icon');x.replaceChildren(ic('x'));x.setAttribute('aria-label','Close');x.title='Close the chat';wideT($('#chat').classList.contains('full'))}
 async function sendChat(){const t=inp.value.trim();if(!t)return;
  log.querySelector('.hello')?.remove();log.querySelector('.follow')?.remove();bubble('me',t);inp.value='';steps=null;TURN={shown:false};
  await fetch('/chat',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({message:t,page:CUR})})}
 // ABI's data moved: redraw, but never from under an open filter, menu or dialog (it waits until they close)
 window.__redraw=()=>{const keep=[...document.querySelectorAll('main .card.editor')],typed=[...document.querySelectorAll('main [data-u]')].filter(x=>!x.closest('.card.editor')&&x.type!=='file').map(x=>[fkey(x),x.type==='checkbox'?x.checked:x.value]);sidebar();let k=CUR;if(PENDING.open&&PAGES['rep:'+PENDING.open]){k='rep:'+PENDING.open;PENDING.open=null;keep.length=0}show(k);{const hd=$('main .pghead');if(hd)keep.reverse().forEach(c=>hd.after(c))}
-   if(typed.length){const at=Object.fromEntries([...document.querySelectorAll('main input,main textarea,main select')].map(x=>[fkey(x),x]));typed.forEach(([k,v])=>{const x=at[k];if(!x)return;if(x.type==='checkbox')x.checked=v;else x.value=v;x.dataset.u=1})}vc()}  // a form being filled in survives the redraw, also outside an editor card
+   refreshPending();if(typed.length){const at=Object.fromEntries([...document.querySelectorAll('main input,main textarea,main select')].map(x=>[fkey(x),x]));typed.forEach(([k,v])=>{const x=at[k];if(!x)return;if(x.type==='checkbox')x.checked=v;else x.value=v;x.dataset.u=1})}vc()}  // a form being filled in survives the redraw, also outside an editor card
 let REDRAW=null;function redrawSoon(){if(REDRAW)return;const go=()=>{if(document.querySelector('.fpop,.more>.menu:not([hidden]),dialog[open],#switcher'))return;clearInterval(REDRAW);REDRAW=null;window.__redraw?.()};REDRAW=setInterval(go,400);go()}
 // after an answer that opened no page: the next steps people take, one click each
 var TURN=null;function followUps(){const d=h('div','follow sugg');[['Compare the two periods','Show that as a chart in Explore: the measure and its previous period side by side as bars, by the dimension that explains the change, for the latest complete month.'],['Break it down further','Break that down by the dimension that explains it most, and show it as a chart.']].forEach(([l,q])=>{const b=h('button','sg',l);b.onclick=()=>{inp.value=q;sendChat()};d.append(b)});log.append(d);log.scrollTop=log.scrollHeight}
@@ -3871,7 +3882,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
             import settings  # noqa: PLC0415
             return 200, json.dumps({"result": {"providers": json.loads(b) if st == 200 else [], "public_url": public,
                                                "reachable": bool(public) and not re.match(r"https?://(127\.|localhost)", public),
-                                               "callback": f"{public.rstrip('/')}/api/oidc/<id>/callback", "mail": settings.load().get("mail")}}).encode()
+                                               "callback": f"{public_base(public, '')}/api/oidc/<id>/callback", "mail": settings.load().get("mail")}}).encode()
         if op == "sso/save":
             pid, name, issuer, cid, sec = (str(body.get(k) or "").strip() for k in ("id", "name", "issuer", "client_id", "secret"))
             if not re.fullmatch(r"[a-z][a-z0-9_-]{0,39}", pid) or not name or not re.fullmatch(r"https://[^\s?#]{1,490}", issuer) or not cid:

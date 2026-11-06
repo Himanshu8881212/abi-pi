@@ -116,7 +116,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
  const hb=(rs,m,note)=>{const n=rs.length;if(!n)return;const top=note?18:4,rh=Math.max(14,Math.min(30,(H-top-4)/n)),bh=Math.max(8,rh*.62),lw=Math.min(W*.34,Math.max(...rs.map(i=>String(d.rows[i][0]??'—').length))*6.6+10),x0=lw+10,x1=W-64,mx=Math.max(1e-9,...rs.map(i=>Math.abs(val(i,m))));
   if(note)el('text',{x:0,y:11},svg).textContent=note;svg.setAttribute('viewBox',`0 0 ${W} ${Math.max(H,top+n*rh+4)}`);
   rs.forEach((i,k)=>{const y=top+k*rh,v=val(i,m),w=Math.max(1,(x1-x0)*Math.abs(v)/(mx||1));fit(el('text',{x:lw,y:y+rh/2+4,'text-anchor':'end'},svg),String(d.rows[i][0]??'Not given'),lw-4);
-   mk(el('rect',{x:x0,y:y+(rh-bh)/2,width:w,height:bh,rx:Math.min(3,bh/4),fill:d.rows[i][0]==null?'var(--c4)':k?COL[0]:'var(--signal)'},svg),i,[m]);el('text',{x:x0+w+6,y:y+rh/2+4,class:'val'},svg).textContent=tick(v,m)})};
+   mk(el('rect',{x:x0,y:y+(rh-bh)/2,width:w,height:bh,rx:Math.min(3,bh/4),fill:d.rows[i][0]==null?'var(--c4)':COL[0]},svg),i,[m]);el('text',{x:x0+w+6,y:y+rh/2+4,class:'val'},svg).textContent=tick(v,m)})};
  if(type==='map'){const m=ms[0],ng=idx.filter(i=>d.rows[i][0]==null&&num(i,m)).reduce((a,i)=>a+val(i,m),0);hb(idx.filter(i=>num(i,m)&&d.rows[i][0]!=null).sort((i,j)=>val(j,m)-val(i,m)),m,`${dimLabel(c[0])}, ranked by ${N(m)}${ng?` · not given: ${tick(ng,m)}, not drawn`:''} (the PDF draws the map)`);return}
  // a heatmap: one dimension down, one across, the measure as the cell's shade of the signal colour
  if(type==='heatmap'){const m=ms[0],ys=[...new Set(d.rows.map(r=>r[0]))],xs=[...new Set(d.rows.map(r=>r[1]))],vs=idx.filter(i=>num(i,m)).map(i=>val(i,m)),lo=Math.min(...vs),hi=Math.max(...vs),
@@ -158,12 +158,12 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
   el('text',{x:W-R,y:H-B+32,'text-anchor':'end'},svg).textContent=cut(N(mx),Math.floor((W-L)/7)-2)+' →';el('text',{x:L,y:T-6},svg).textContent='↑ '+cut(N(my),Math.floor((W-L)/7)-2);
   rs.forEach(i=>mk(el('circle',{cx:X(val(i,mx)),cy:Y(val(i,my)),r:4,fill:COL[two?g.indexOf(d.rows[i][1])%6:0]},svg),i,[mx,my]));return}
  // categories (x) and series: one per measure, or per member of the second dimension (its first measure)
- const ord=idx.filter(i=>ms.some(m=>num(i,m))),ix=new Map,S=[];if(per)ord.sort((i,j)=>d.rows[i][yi]-d.rows[j][yi]||d.rows[i][1-yi]-d.rows[j][1-yi]);
+ const ENDS=[],ord=idx.filter(i=>ms.some(m=>num(i,m))),ix=new Map,S=[];if(per)ord.sort((i,j)=>d.rows[i][yi]-d.rows[j][yi]||d.rows[i][1-yi]-d.rows[j][1-yi]);
  ord.forEach(i=>ix.has(key(d.rows[i]))||ix.set(key(d.rows[i]),ix.size));const cats=[...ix.keys()];
  ord.forEach(i=>(two&&!per?[[d.rows[i][1],ms[0]]]:ms.map(m=>[m,m])).forEach(([n,m])=>{let s=S.find(s=>s.n===n);if(!s)S.push(s={n,m,v:cats.map(()=>null),r:cats.map(()=>null)});const k=ix.get(key(d.rows[i]));s.v[k]=val(i,m);s.r[k]=i}));
  if(!S.length)return;
- {const lw=Math.max(...cats.map(v=>Math.min(11,String(v??'—').length)))*6.2+8;if(type==='bar'&&!two&&!per&&S.length===1&&cats.length<=24&&cats.length*lw>W-68){hb(ord,S[0].m);return}}
- const rot=!per&&cats.length>3&&cats.length<=24&&cats.length*(Math.max(...cats.map(v=>Math.min(11,String(v??'—').length)))*6.2+8)>W-L-(type==='combo'?60:8);if(rot)B=Math.min(80,24+Math.max(...cats.map(v=>Math.min(16,String(v??'—').length)))*4.6);
+ {const lw=Math.max(...cats.map(v=>Math.min(11,String(v??'—').length)))*6.2+8;if(type==='bar'&&!two&&!per&&S.length===1&&cats.length>=2&&cats.length<=24){hb(ord,S[0].m);return}}
+ const rot=!per&&cats.length>3&&cats.length<=24&&cats.length*(Math.max(...cats.map(v=>Math.min(11,String(v??'—').length)))*6.2+8)>W-L-(type==='combo'?60:8);if(rot)B=Math.min(84,26+Math.max(...cats.map(v=>Math.min(13,String(v??'—').length)))*5.4);
  const stack=type==='bar'&&two&&!per,combo=type==='combo'&&S.length>1,R=combo?60:type==='line'&&S.length<=2&&!(two&&!per)?58:8,PC=S.length===2&&/_prev$/.test(S[1].m)&&S[1].m.startsWith(S[0].m.replace(/_prev$/,''))?['var(--c1)','var(--c3)']:COL,T=S.length>1&&type!=='waterfall'?legend(svg,W,S.map(s=>two&&!per?s.n:N(s.m)),PC):10,cum=[];  // a measure against its previous period: now in ink, before in grey
  let run=0;if(type==='waterfall')S[0].v.forEach(v=>cum.push([run,run+=v||0]));
  const ax=(vs,m,x,an)=>{const {lo,hi,t}=nice(Math.min(0,...vs),Math.max(0,...vs),Math.max(2,Math.floor((H-B-T)/28))),y=v=>H-B-(v-lo)/(hi-lo)*(H-B-T);
@@ -172,7 +172,7 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
   y2=combo?ax(S.slice(1).flatMap(s=>s.v.map(v=>v||0)),S[1].m,W-R+6,'start'):y;
  el('line',{x1:L,x2:W-R,y1:y(0),y2:y(0),stroke:'var(--line-strong)'},svg);  // the zero line, a shade stronger than the grid
  const n=cats.length,step=(W-L-R)/Math.max(n,1),lab=Math.ceil(n*(Math.min(11,Math.max(...cats.map(v=>String(v??'—').length)))*6.2+8)/(W-L-R)),X=k=>L+step*k+step/2;
- let edge=0;if(rot)cats.forEach((v,k)=>{const t=el('text',{x:X(k),y:H-B+12,'text-anchor':'end',transform:`rotate(-38 ${X(k)} ${H-B+12})`},svg);t.textContent=cut(v,16)});else cats.forEach((v,k)=>{if(k%lab)return;const t=el('text',{x:X(k),y:H-B+14,'text-anchor':'middle'},svg);t.textContent=cut(v,11);  // inside the box, none over the last
+ let edge=0;if(rot)cats.forEach((v,k)=>{if(step<14&&k%2)return;const t=el('text',{x:X(k)+3,y:H-B+12,'text-anchor':'end',transform:`rotate(-55 ${X(k)+3} ${H-B+12})`},svg);t.textContent=cut(v,13)});else cats.forEach((v,k)=>{if(k%lab)return;const t=el('text',{x:X(k),y:H-B+14,'text-anchor':'middle'},svg);t.textContent=cut(v,11);  // inside the box, none over the last
   const w=t.getComputedTextLength()/2,x=Math.min(X(k),W-w-2);if(x-w<edge)return t.remove();t.setAttribute('x',x);edge=x+w+6});
  if(type==='waterfall'){S[0].v.forEach((v,k)=>{if(v==null)return;const [p,q]=cum[k];  // each step floats from the running total; the tooltip shows the row's own value
    mk(el('rect',{x:L+step*k+step*.15,y:Math.min(y(p),y(q)),width:Math.max(step*.7,1),height:Math.max(Math.abs(y(p)-y(q)),1),rx:2,fill:v<0?'var(--signal)':'var(--ink)'},svg),S[0].r[k],[S[0].m]);
@@ -192,8 +192,9 @@ function chart(box,d){const nd=d.columns.length-Object.keys(d.measures).length;c
   pts.forEach((p,k)=>p&&mk(el('circle',{cx:p[0],cy:p[1],r:dot?4:Math.max(2,Math.min(4,step/3)),fill:COL[j%6],opacity:dot?1:.01},svg),s.r[k],[s.m],dot?.7:1));
   // a line ends on its latest value, marked and labelled
   if(!dot&&type==='line'&&S.length<=2&&run.length){const kk=s.v.map((v,k)=>v==null?-1:k).filter(k=>k>=0).at(-1),[lx,ly]=pts[kk];el('circle',{cx:lx,cy:ly,r:3.5,fill:COL[j%6],stroke:'var(--card)','stroke-width':1.5},svg);
-   const g=el('g',{},svg),yy0=Math.max(T+9,Math.min(H-B-4,ly+(S.length>1?(j?9:-9):0))),t=el('text',{x:lx+12,y:yy0+4,class:'endv'},g);t.textContent=tick(s.v[kk],s.m);const tw=t.getComputedTextLength()||30;
-   el('rect',{x:lx+6,y:yy0-8.5,width:tw+12,height:17,rx:4,class:'endb'},g).after(t);g.append(t)}});
+   let yy0=Math.max(T+9,Math.min(H-B-4,ly));const g=el('g',{},svg),t=el('text',{x:lx+16,y:0,class:'endv'},g);t.textContent=tick(s.v[kk],s.m);const tw=t.getComputedTextLength()||30;
+   for(const b of ENDS)if(lx+10<b.x+b.w&&lx+10+tw+12>b.x&&Math.abs(yy0-b.y)<20)yy0=b.y+(yy0>=b.y?20:-20);ENDS.push({x:lx+10,w:tw+12,y:yy0});t.setAttribute('y',yy0+4);
+   el('rect',{x:lx+10,y:yy0-8.5,width:tw+12,height:17,rx:4,class:'endb'},g).after(t);g.append(t)}});
  // a line over time: a guide follows the pointer to the nearest period and the tooltip has every series there
  if(type==='line'&&(!two||per)){const g=el('line',{y1:T,y2:H-B,stroke:'var(--mute)','stroke-dasharray':'3 3',opacity:0,'pointer-events':'none'},svg);
   svg.addEventListener('mousemove',e=>{const r=svg.getBoundingClientRect();if(!r.width)return;const k=Math.round(((e.clientX-r.left)*W/r.width-L-step/2)/step);if(k<0||k>=n){g.setAttribute('opacity',0);return}

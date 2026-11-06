@@ -764,7 +764,7 @@ def test_a_models_prices_become_the_cost_pi_reports_and_usage_shows(tmp_path, mo
     """Every model was registered with Pi at cost 0, so Usage could never show a cost (0 of 25 local rows had one): a
     model's prices in Settings (US dollars per million tokens) go into its registration, Pi computes each answer's cost
     from them (pi-ai's calculateCost: price / 1M x tokens), the app counts it, and the Usage card shows a cost only where
-    there is one: "tokens only" otherwise, never a misleading $0."""
+    there is one: a dash otherwise (the card says it means no prices), never a misleading $0."""
     import types
     import settings
     monkeypatch.setenv("ABI_PI_WORKSPACES", str(tmp_path))
@@ -794,7 +794,7 @@ def test_a_models_prices_become_the_cost_pi_reports_and_usage_shows(tmp_path, mo
     money = re.search(r"const money=r=>.*?;\n", app.JS).group(0)  # the Usage card's cost cell
     shown = subprocess.run(["node", "-e", money + "process.stdout.write(JSON.stringify(JSON.parse(process.argv[1]).map(money)))",
                             json.dumps([by["proxy/a"], by["proxy/b"], tot["user"][0], {"cost": 0.004}])], capture_output=True, text=True, check=True).stdout
-    assert json.loads(shown) == ["$0.01", "tokens only", "$0.01 (part tokens only)", "< $0.01"]
+    assert json.loads(shown) == ["$0.01", "—", "$0.01 (part tokens only)", "< $0.01"]
 
 
 def test_abi_show_with_no_app_open_says_nothing_was_shown():
