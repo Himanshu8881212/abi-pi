@@ -742,7 +742,17 @@ SIDED = {  # a rule only one copy had: the same input, each side's verdict as it
     "typed_lower_plural": ("The Stage view shows North at 76.00.", [ROW], "show me the stages"),
     "typed_filtered_member": ("North and Atlantis took 76.00.", [ROW | {"measures": {"revenue": "Revenue"}, "filters":
                               [{"column": "cafes.city", "op": "=", "value": "atlantis"}]}], "revenue for atlantis"),
+    # round 3: the plural of an ID's word part on the name as written (engine) or lower-cased (harness)
+    "caps_plural": ("ORDERS took 76.00.", [ROW], "", {"fields": ["order_id"]}),
+    "caps_plural_inside": ("North took 76.00 in ORDERS.", [ROW], "", {"fields": ["order_id"]}),
+    # rules both share, through check's other inputs
+    "fields": ("The Format view: North took 76.00.", [ROW], "", {"fields": ["cafes", "format"]}),
+    "members": ("North and Kiosk took 76.00.", [ROW], "", {"members": ["Kiosk", "North"]}),
+    "today": ("On 15 October North took 76.00 in 2026.", [ROW], "", {"today": "2026-10-15"}),
+    "vocab_notes": ("North had 76.00; Detect Model saved the Revenue.", [ROW], "",
+                    {"vocab": ["Revenue"], "notes": [{"status": "ok", "message": "Saved Detect Model"}]}),
 }
+SHARED = {"typed_filtered_member", "caps_plural", "fields", "members", "today", "vocab_notes"}  # the same verdict on both sides
 OLD = r"""
 import importlib.util, json, subprocess, sys, tempfile
 def old(path, name):
@@ -753,7 +763,12 @@ def old(path, name):
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m
-v = lambda m, c: (lambda o: o["numbers"] + o["names"])(m.check(c[0], c[1], asked=c[2]))
+from datetime import date
+def v(m, c):
+    k = dict(c[3]) if len(c) > 3 else {}
+    k |= {x: set(k[x]) for x in ("vocab", "fields", "members") if x in k} | ({"today": date.fromisoformat(k["today"])} if "today" in k else {})
+    o = m.check(c[0], c[1], asked=c[2], **k)
+    return o["numbers"] + o["names"]
 cases = json.load(sys.stdin)
 """
 
@@ -786,5 +801,5 @@ def test_the_one_sided_rules_still_differ_between_the_sides():
     assert "37%" in s["prose"]["engine"][1] and "37%" not in s["prose"]["harness"][1], s["prose"]
     assert "37" in s["clock"]["engine"][1] and "37" not in s["clock"]["harness"][1], s["clock"]
     assert "March" in s["month_name"]["harness"][1] and "March" not in s["month_name"]["engine"][1], s["month_name"]
-    # every other one-sided rule too (a member a query filtered on grounds on neither side: it is shared)
-    assert all(v["engine"][1] != v["harness"][1] for k, v in s.items() if k != "typed_filtered_member"), s
+    # every other one-sided rule too (SHARED: inputs whose verdict both sides share)
+    assert all(v["engine"][1] != v["harness"][1] for k, v in s.items() if k not in SHARED), s

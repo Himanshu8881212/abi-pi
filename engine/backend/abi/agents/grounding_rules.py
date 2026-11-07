@@ -566,7 +566,10 @@ def check(answer: str, results: list, vocab: set[str] = frozenset(), members: se
     common = COMMON | CALENDAR if ENGINE else COMMON
     # M2.2: the plural of a name the results back grounds too ("other Decembers" for a December row)
     ok = lambda n, vocab_ok: _has(n, found) or n.endswith("s") and _has(n[:-1], found) or typed(n) or vocab_ok and (  # noqa: E731
-        ENGINE and _typed(n, asked, asks) or _has(n, words) or _fold(" ".join(n.lower().split())) in spelled or part(n.lower()) or neg(n)
+        ENGINE and _typed(n, asked, asks) or _has(n, words) or _fold(" ".join(n.lower().split())) in spelled
+        # the engine checks the plural on the name as written ("ORDERS" is no plural there), the harness lower-cased
+        or (((f := _fold(n.lower())) in parts or n.endswith("s") and f[:-1] in parts or f + "s" in parts) if ENGINE
+            else part(n.lower())) or neg(n)
         or all(w.lower() in common or _has(w, "\n".join(PRODUCT)) for w in n.split()))
     # M2.2: a hyphenated phrase grounds when each capitalized part does ("North-region", "North-by-café": North)
     # M2.2: ordinary words opening a phrase name nothing ("Weekly North", "Total East": North, East)
