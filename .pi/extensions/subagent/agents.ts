@@ -4,9 +4,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { CONFIG_DIR_NAME, getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
-
-export type AgentScope = "user" | "project" | "both";
+import { CONFIG_DIR_NAME, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 
 export interface AgentConfig {
 	name: string;
@@ -14,7 +12,7 @@ export interface AgentConfig {
 	tools?: string[];
 	model?: string;
 	systemPrompt: string;
-	source: "user" | "project";
+	source: "project";
 	filePath: string;
 }
 
@@ -59,7 +57,7 @@ function parseToolList(value: unknown): string[] | undefined {
 	return tools.length > 0 ? tools : undefined;
 }
 
-function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig[] {
+function loadAgentsFromDir(dir: string): AgentConfig[] {
 	const agents: AgentConfig[] = [];
 
 	if (!fs.existsSync(dir)) {
@@ -97,7 +95,7 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
 			tools: parseToolList(frontmatter.tools),
 			model: typeof frontmatter.model === "string" ? frontmatter.model : undefined,
 			systemPrompt: body,
-			source,
+			source: "project",
 			filePath,
 		});
 	}
@@ -125,24 +123,11 @@ function findNearestProjectAgentsDir(cwd: string): string | null {
 	}
 }
 
-export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryResult {
-	const userDir = path.join(getAgentDir(), "agents");
+/** The project's team only (.pi/agents): never a same-named agent from ~/.pi. */
+export function discoverAgents(cwd: string): AgentDiscoveryResult {
 	const projectAgentsDir = findNearestProjectAgentsDir(cwd);
-
-	const userAgents = scope === "project" ? [] : loadAgentsFromDir(userDir, "user");
-	const projectAgents = scope === "user" || !projectAgentsDir ? [] : loadAgentsFromDir(projectAgentsDir, "project");
-
 	const agentMap = new Map<string, AgentConfig>();
-
-	if (scope === "both") {
-		for (const agent of userAgents) agentMap.set(agent.name, agent);
-		for (const agent of projectAgents) agentMap.set(agent.name, agent);
-	} else if (scope === "user") {
-		for (const agent of userAgents) agentMap.set(agent.name, agent);
-	} else {
-		for (const agent of projectAgents) agentMap.set(agent.name, agent);
-	}
-
+	for (const agent of projectAgentsDir ? loadAgentsFromDir(projectAgentsDir) : []) agentMap.set(agent.name, agent);
 	return { agents: Array.from(agentMap.values()), projectAgentsDir };
 }
 

@@ -24,7 +24,7 @@ import {
 	withFileMutationQueue,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.ts";
+import { type AgentConfig, discoverAgents } from "./agents.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -56,7 +56,7 @@ interface SingleResult {
 
 interface SubagentDetails {
 	mode: "single" | "parallel" | "chain";
-	agentScope: AgentScope;
+	agentScope: "project";
 	projectAgentsDir: string | null;
 	results: SingleResult[];
 }
@@ -370,12 +370,11 @@ export default function (pi: ExtensionAPI) {
 		parameters: SubagentParams,
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const agentScope: AgentScope = "project";  // the team only: never a same-named agent from ~/.pi
 			const dispatchDefaults: DispatchDefaults = {
 				model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined,
 				thinkingLevel: ctx.thinkingLevel,
 			};
-			const discovery = discoverAgents(ctx.cwd, agentScope);
+			const discovery = discoverAgents(ctx.cwd);
 			const agents = discovery.agents;
 			const confirmProjectAgents = params.confirmProjectAgents ?? true;
 
@@ -388,7 +387,7 @@ export default function (pi: ExtensionAPI) {
 				(mode: "single" | "parallel" | "chain") =>
 				(results: SingleResult[]): SubagentDetails => ({
 					mode,
-					agentScope,
+					agentScope: "project",
 					projectAgentsDir: discovery.projectAgentsDir,
 					results,
 				});
@@ -407,7 +406,6 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			if (
-				(agentScope === "project" || agentScope === "both") &&
 				confirmProjectAgents &&
 				ctx.hasUI &&
 				!ctx.isProjectTrusted()
