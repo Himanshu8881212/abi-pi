@@ -429,8 +429,6 @@ ABI is early, and that's the best time to shape it. Bug reports, ideas and pull 
 4. **Test it.** `.venv/bin/python -m pytest -q tests` must pass (CI runs it on every push and pull request); add a test that fails without your fix.
 5. **Small pull requests** with a plain description of what changed and why.
 
-To find your way around the code, `python3 scripts/codegraph.py` writes an Obsidian vault with one note per file.
-
 | Path | What |
 |---|---|
 | `scripts/app.py` | the app: one server for every workspace and project |

@@ -14,6 +14,4 @@ engine/frontend/node_modules/
 workspaces.old-abi/
 .claude/scheduled_tasks.lock
 
-# the Obsidian vault scripts/codegraph.py writes (a copy of the code, the notes, the plugin)
-codegraph/
 backups/
