@@ -22,7 +22,7 @@
   "areas": {
     "data": {
       "about": "load, connect, transform, refresh and delete sources and tables",
-      "words": "load|upload|file|csv|parquet|excel|json|source|connect|database|postgres|mysql|clickhouse|s3|step|clean|transform|dedup|rename|column|refresh|reload|table|import|fresh|quality|restore",
+      "words": "load|upload|file|csv|parquet|excel|json|source|connect|database|postgres|mysql|clickhouse|s3|api|endpoint|step|clean|transform|dedup|rename|column|refresh|reload|table|import|fresh|quality|restore",
       "tools": [
         "add_data",
         "delete_source",
@@ -45,6 +45,7 @@
         "delete_dataset",
         "delete_glossary_term",
         "delete_measure",
+        "delete_model",
         "delete_ontology_item",
         "delete_rls_rule",
         "export_ontology",
@@ -55,6 +56,7 @@
         "remove_relationship",
         "rls_rules",
         "save_dataset",
+        "save_model",
         "save_ontology",
         "set_column_rule",
         "set_date_table",
@@ -166,15 +168,17 @@
     },
     "ml": {
       "about": "ML models: forecast, classify, predict, cluster, anomalies; train, score, pre-fill",
-      "words": "forecast|predict|churn|classif|cluster|segment|anomal|unusual|outlier|train|score|machine learning|ml|next (year|quarter|month|week)|future",
+      "words": "forecast|predict|churn|classif|cluster|segment|anomal|unusual|outlier|train|score|machine learning|ml|next (year|quarter|month|week)|future|tun|hyperparam|trial",
       "tools": [
         "delete_ml_model",
         "ml_history",
+        "ml_trials",
         "pin_ml_run",
         "prefill_input_table",
         "save_ml_model",
         "score_model",
-        "train_model"
+        "train_model",
+        "use_ml_trial"
       ]
     },
     "docs": {
@@ -216,6 +220,7 @@
       "words": "user|role|permission|access|invite|tenant|provider|llm|sso|oidc|sign-in|usage|secret|admin|owner",
       "tools": [
         "confirm_mfa",
+        "create_personal_token",
         "create_tenant",
         "create_user",
         "delete_llm_provider",
@@ -231,8 +236,10 @@
         "list_users",
         "mfa_status",
         "order_llm_providers",
+        "personal_tokens",
         "remove_role",
         "reset_mfa",
+        "revoke_personal_token",
         "rotate_secret_key",
         "set_account_mail",
         "set_llm_provider",

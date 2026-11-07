@@ -4,6 +4,7 @@ ABI's source statically (no import, nothing written there). Writes harness/areas
 
     python3 scripts/gen_areas.py [~/Work/Working/ABI/backend]
 """
+import ast
 import json
 import re
 import sys
@@ -12,50 +13,13 @@ from pathlib import Path
 SRC = Path(sys.argv[1] if len(sys.argv) > 1 else Path(__file__).resolve().parent.parent / "engine/backend").expanduser()
 OUT = Path(__file__).resolve().parent.parent / "harness" / "areas.json"
 
-# copied from abi/agent/__init__.py (CORE, AREAS: description and module prefixes)
-CORE = ["list_projects", "semantic_model", "semantic_query", "explain_change", "how_calculated", "lineage", "docs",
-        "readiness", "detect_model", "data_quality", "list_reports", "list_tools", "list_agents", "list_flows", "ml_models",
-        "remember", "changes"]
-AREAS = {
-    "data": ("load, connect, transform, refresh and delete sources and tables",
-             ("abi.ingest", "abi.storage", "abi.semantic.detect", "abi.semantic.preview_steps", "abi.tools.builtin.refresh")),
-    "model": ("semantic model: tables, keys, relationships, measures, glossary, datasets, date/rates tables, row-level rules",
-              ("abi.semantic", "abi.project.imports")),
-    "reports": ("reports, visuals, snapshots, exports, sharing, share links and embeds",
-                ("abi.reports", "abi.project.sharing", "abi.tools.builtin.report_snapshot", "abi.tools.builtin.export_visual")),
-    "writeback": ("write-back: edit cells and totals, input tables, proposals and approvals, edit history, sync to sources",
-                  ("abi.writeback",)),
-    "tools": ("custom tools: save, test, publish, run", ("abi.tools",)),
-    "agents": ("custom agents (save, test, publish, run) and project memory", ("abi.agents", "abi.agent")),
-    "flows": ("flows and tasks, schedules, conditions and subscriptions, email/message sends, inbox, inbound messages",
-              ("abi.flows", "abi.semantic.subscriptions", "abi.tools.builtin")),
-    "ml": ("ML models: forecast, classify, predict, cluster, anomalies; train, score, pre-fill", ("abi.ml",)),
-    "docs": ("documentation: generate, draft and review descriptions", ("abi.docs",)),
-    "project": ("projects, project JSON import, commits, undo, revert, history, diffs, remotes, push/pull, environments, locale",
-                ("abi.project", "abi.project.imports.import_project")),
-    "admin": ("users, roles, tenants, sign-in providers, LLM providers, usage, secrets list", ("abi.security", "abi.agent.llm")),
-}
-PREFIX = {p: a for a, (_, ps) in AREAS.items() for p in ps}
-# ABI's question keyword stems per area (agent.AREAS third field), matched with \b(...) case-insensitively (D-71)
-WORDS = {
-    "data": ("load|upload|file|csv|parquet|excel|json|source|connect|database|postgres|mysql|clickhouse|s3|step|clean|"
-             "transform|dedup|rename|column|refresh|reload|table|import|fresh|quality|restore"),
-    "model": ("model|measure|relationship|join|glossary|term|dataset|date table|calendar|currency|rate|key|row-level|rls|"
-              "define|definition|formula|kpi|metric|margin|build"),
-    "reports": "report|page|visual|chart|dashboard|export|download|share|sharing|embed|link|pdf|png|snapshot|show me",
-    "writeback": ("edit|write-back|writeback|write back|budget|plan|input table|proposal|propose|approve|adjust|raise|"
-                  "lower|increase|decrease|change the value|sync"),
-    "tools": "tool",
-    "agents": "agent|assistant|bot|eval|memory|remember|forget|convention|notification",
-    "flows": ("flow|task|schedul|every|daily|weekly|monthly|hourly|monday|tuesday|wednesday|thursday|friday|morning|email|"
-              "e-mail|mail|send|post(?!gres)|message|inbox|slack|teams|webhook|alert|subscri|notify|condition|trigger|run"),
-    "ml": ("forecast|predict|churn|classif|cluster|segment|anomal|unusual|outlier|train|score|machine learning|ml|"
-           "next (year|quarter|month|week)|future"),
-    "docs": "doc|describ|description|explain|what does|meaning",
-    "project": ("project|commit|undo|revert|history|diff|change|branch|push|pull|git|remote|environment|production|"
-                "promote|locale|time zone|rename"),
-    "admin": "user|role|permission|access|invite|tenant|provider|llm|sso|oidc|sign-in|usage|secret|admin|owner",
-}
+# CORE and AREAS (description, module prefixes, question keyword stems matched with \b(...), D-71), read from ABI's
+# abi/agent/__init__.py: its pure-literal assignments, never imported
+_LIT = {t.id: n.value for n in ast.parse((SRC / "abi/agent/__init__.py").read_text()).body if isinstance(n, ast.Assign)
+        for t in n.targets if isinstance(t, ast.Name) and t.id in ("CORE", "AREAS")}
+CORE = [ast.literal_eval(e) for e in _LIT["CORE"].elts]  # a set there; its source order here
+AREAS = ast.literal_eval(_LIT["AREAS"])
+PREFIX = {p: a for a, (_, ps, _) in AREAS.items() for p in ps}
 DEF = re.compile(r"^@action\([^\n]*\n(?:@[^\n]*\n)*def (\w+)\(", re.M)
 
 
@@ -75,7 +39,7 @@ def main() -> None:
                 continue
             (groups[a] if (a := area(module, name)) else other).append(name)
     out = {"core": CORE, "unclassified": sorted(other),
-           "areas": {a: {"about": AREAS[a][0], "words": WORDS[a], "tools": sorted(t)} for a, t in groups.items()}}
+           "areas": {a: {"about": AREAS[a][0], "words": AREAS[a][2], "tools": sorted(t)} for a, t in groups.items()}}
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(json.dumps(out, indent=2) + "\n")
     n = len(CORE) + len(other) + sum(map(len, groups.values()))
