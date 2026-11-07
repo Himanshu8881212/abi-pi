@@ -92,7 +92,8 @@
             }
           }
         },
-        "limit": {"type": "integer", "minimum": 1, "maximum": 100000}
+        "limit": {"type": "integer", "minimum": 1, "maximum": 100000},
+        "links": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$"}, "description": "Ontology link IDs (model/ontology.json): each decides how the query reaches its target table, many-to-many too (per-member values, no totals)"}
       }
     },
     "filter": {

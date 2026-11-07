@@ -423,7 +423,8 @@ def _tool_tests(conn, project: str, files: dict) -> list[dict]:
             try:
                 q = tools.query_for(t, test["inputs"])
                 if t.get("kind") != "api":  # an API tool's filled request has nothing to plan
-                    planner.plan(SemanticQuery.model_validate(q).model_dump(mode="json"), measures, files.get("model/model.json") or {})
+                    planner.plan(SemanticQuery.model_validate(q).model_dump(mode="json"), measures, files.get("model/model.json") or {},
+                                 ontology=files.get(ontology.FILE))
             except ActionFailed as e:
                 errs.append(_err(rel, f"$.tests[{i}].inputs", f"{e} {json.dumps(e.body.get('errors', ''))}".strip(),
                                  "Give inputs that match `inputs`, and a default or value for every placeholder."))

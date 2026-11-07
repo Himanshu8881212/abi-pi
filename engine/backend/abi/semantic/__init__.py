@@ -29,7 +29,7 @@ import pyarrow as pa
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
 from fastapi.responses import StreamingResponse
 from psycopg.types.json import Jsonb
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_serializer
 from sqlglot import exp
 
 from abi import actions, db, ops, storage, transform, writeback
@@ -471,6 +471,14 @@ class SemanticQuery(BaseModel):
     totals: list[list[str]] = Field([], description="extra grouping sets (subsets of the dimensions); [] = grand total")
     order_by: list[Order] = []
     limit: int | None = Field(None, ge=1, le=100_000)
+    links: list[Annotated[str, Field(pattern=ID)]] = Field([], description="ontology link IDs (`ontology`): each decides how the query reaches its `to` table, e.g. customers grouped by cafes.region with links [visited]; across a many-to-many link each member gets its value (a row counts once per member), so no totals")
+
+    @model_serializer(mode="wrap")
+    def _no_links(self, dump):  # 1.2.6 M5: a query without links dumps (so plans and logs) exactly as before
+        d = dump(self)
+        if not d.get("links"):
+            d.pop("links", None)
+        return d
 
 
 EXPRESSIONS = 10  # M2.1: inline expressions per query
@@ -589,7 +597,8 @@ def _plan(project: str, q: dict, user_id: int | None = None, expressions: list[d
         hid = rls.hidden(project, user_id)
         parts = {f: rls.key_columns(project, f) for f in rls.filtered(project) if not hid.get(f)} if (
             SHARED_ROWS and shared is not None and not live and rls.restricted(project, user_id)) else None
-        sql = planner.plan(q, measures, mj, copies, live, reads, days, rates, joins, parts, shared)
+        sql = planner.plan(q, measures, mj, copies, live, reads, days, rates, joins, parts, shared,
+                           model._read(project, "ontology.json"))
     except (planner.PlanError, mel.MelError) as e:
         raise ActionFailed(400, str(e))
     if hid:  # D-110: refused, never computed over a column the user can't see

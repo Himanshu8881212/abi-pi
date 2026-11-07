@@ -94,17 +94,24 @@ def _facts(files: dict, measures: list) -> set[str]:
     return out
 
 
-def _joins(files: dict, node: str, measures: list, tables: set):
+def _joins(files: dict, node: str, measures: list, tables: set, named: list = ()):
     """D-06: the relationships the planner joins from the measures' facts to `tables`, the whole snowflake chain, so
-    changing a dimension in the middle of it shows what breaks. A path the planner refuses adds no edge."""
+    changing a dimension in the middle of it shows what breaks; 1.2.6 M5: and the link it follows (`planner.route`:
+    `named`, the query's links, or a default one). A path the planner refuses adds no edge."""
     model = files.get("model/model.json") or {}
+    try:
+        links = planner.links(model, files.get("model/ontology.json"), named)
+    except planner.PlanError:  # a named link that doesn't hold: the query is refused, so the routes are the model's
+        links = planner.links(model, files.get("model/ontology.json"))
     for f in sorted(_facts(files, measures)):
         for t in sorted(tables - {f}):
             try:
-                rels = planner.path(model, f, t)
+                rels, link = planner.route(model, f, t, links=links)
             except planner.PlanError:
                 continue
-            for r in rels:
+            if link:
+                yield node, f"link:{link}", "join"
+            for r, _ in rels:
                 yield node, f"relationship:{r['id']}", "join"
 
 
@@ -117,7 +124,9 @@ def _query(files: dict, node: str, q: dict):
     cols = q.get("dimensions", []) + [f["column"] for f in q.get("filters", [])]
     for c in cols:
         yield node, "table:" + c.split(".", 1)[0], c
-    yield from _joins(files, node, q.get("measures", []), {c.split(".", 1)[0] for c in cols})
+    for ln in q.get("links", []):  # 1.2.6 M5: the links it names decide its routes
+        yield node, f"link:{ln}", "link"
+    yield from _joins(files, node, q.get("measures", []), {c.split(".", 1)[0] for c in cols}, q.get("links", []))
 
 
 def _datasets(files: dict):

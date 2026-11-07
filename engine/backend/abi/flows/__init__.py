@@ -61,7 +61,8 @@ def _condition_errs(rel: str, at: str, c: dict, files: dict) -> list[dict]:
         return [imports._err(rel, at, err, "Compare measures the query reads; a change needs a period and no other dimensions.")]
     ms = {m["id"]: m["expression"] for m in (files.get(imports.MEASURES) or {}).get("measures", [])}
     try:
-        planner.plan(SemanticQuery.model_validate(periods(c)[0]).model_dump(mode="json"), ms, files.get("model/model.json") or {})
+        planner.plan(SemanticQuery.model_validate(periods(c)[0]).model_dump(mode="json"), ms, files.get("model/model.json") or {},
+                     ontology=files.get(ontology.FILE))
     except (planner.PlanError, mel.MelError) as e:
         return [imports._err(rel, f"{at}.query", str(e), "Use measure IDs, tables and columns of this project's model.")]
     return []

@@ -64,8 +64,9 @@ def _query(project: str, r: dict, p: dict, v: dict, interaction: list[dict]) -> 
 
     def reach(f: dict) -> bool:
         t = f["column"].split(".", 1)[0]
-        try:
-            return all(t == x or planner.path(mj, x, t) for x in facts)
+        try:  # 1.2.6 M5: by the path rule, the visual's links too
+            links = planner.links(mj, model._read(project, "ontology.json"), v["query"].get("links"))
+            return all(t == x or planner.route(mj, x, t, links=links) for x in facts)
         except planner.PlanError:
             return False
     off = list(dict.fromkeys(f["column"] for f in interaction if not reach(f)))

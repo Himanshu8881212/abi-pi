@@ -35,8 +35,14 @@ totals: [[dimension, ...]]}. Semantics are the ones the golden suite fixes (work
   listed columns, as DuckDB table `__lake<n>` named in `shared`; the planned SQL then regroups them the same way.
 - Refused (DECISIONS D-8): time intelligence without a date-table dimension, and a filter or grouping on a table a
   fact in the query has no relationship path to, or more than one shortest path to.
+- Links (1.2.6 M5, `route`): a query's `links` (ontology link IDs) decide how each one's `to` table is reached, its `via`
+  after the fact's path to its `from` table; where that path can't be chosen, a `default` link. A route walking a
+  relationship against its direction (many-to-many through a bridge, one-to-many) joins its target as the distinct
+  (source key, columns used) pairs, so each source row counts once per member: no totals, time intelligence, live
+  table, query copy or shared partials there, and one such link per context. One route per table: two are refused.
 """
 
+import contextlib
 import json
 import re
 from dataclasses import dataclass, replace
@@ -147,6 +153,62 @@ def path(model: dict, fact: str, table: str, measure: str = "", dim: str = "") -
         raise PlanError(f"Measure '{measure}': '{fact}' has more than one relationship to '{table}' "
                         f"({ways}); the planner can't choose.")
     return hit[0]
+
+
+def links(model: dict, onto: dict | None, named=()) -> list[dict]:
+    """1.2.6 M5: the links of ontology `onto` a query may follow, each {id, from, to (tables), hops ((relationship,
+    along its many-to-one direction?) walking `via`, ontology.walk), named (in the query's `links`), default}. A named
+    link that's unknown or doesn't walk is refused, and so are two named links to one table (one route per table)."""
+    named, onto = list(named or []), onto or {}
+    if not named and not onto.get("links"):
+        return []
+    from abi.semantic import ontology  # not at top: it imports the semantic package, which imports this module
+
+    if bad := [i for i in named if i not in {ln["id"] for ln in onto.get("links", [])}]:
+        raise PlanError(f"No link {', '.join(bad)} in the ontology: `ontology` lists the links.")
+    objs, out = {x["id"]: x["table"] for x in onto.get("objects", [])}, []
+    for ln in onto.get("links", []):
+        hops = ontology.walk(model, objs.get(ln["from"]), ln["via"])
+        if isinstance(hops, str):
+            if ln["id"] in named:
+                raise PlanError(f"Link '{ln['id']}' {hops}.")
+            continue
+        out.append({"id": ln["id"], "from": objs[ln["from"]], "to": hops[-1][0]["to" if hops[-1][1] else "from"]["table"],
+                    "hops": hops, "named": ln["id"] in named, "default": bool(ln.get("default"))})
+    for t in dict.fromkeys(x["to"] for x in out if x["named"]):
+        if len(two := [x["id"] for x in out if x["named"] and x["to"] == t]) > 1:
+            raise PlanError(f"Links {' and '.join(two)} both reach table '{t}'; a query reaches a table one way only, so ask"
+                            " two queries.")
+    return out
+
+
+def route(model: dict, fact: str, table: str, m: str = "", dim: str = "", links: list = ()) -> tuple[list, str | None]:
+    """1.2.6 M5, the path rule: (the hops fact -> table as (relationship, along its many-to-one direction?), the link
+    followed or None). The link the query names for `table`, walked after `path` from the fact to its `from` table;
+    else `path`; where that refuses, the `default` link for `table` reached so; else refused, naming the links that
+    reach `table`. A route that reaches a table twice is refused (ponytail: no aliasing; ask two queries)."""
+    ln = next((x for x in links if x["named"] and x["to"] == table), None)
+    if ln is None:
+        try:
+            return [(r, True) for r in path(model, fact, table, m, dim)], None
+        except PlanError as e:
+            ways = []  # the links to `table` from a table this fact reaches
+            for x in links:
+                with contextlib.suppress(PlanError):
+                    ways += [x] if x["to"] == table and (x["from"] == fact or path(model, fact, x["from"])) else []
+            if not (ln := next((x for x in ways if x["default"]), None)):
+                if ways:
+                    raise PlanError(f"{e} Or follow a link: add links: [{ways[0]['id']}]"
+                                    f" ({', '.join(x['id'] for x in ways)} reach '{table}').") from None
+                raise
+    pre = [] if ln["from"] == fact else [(r, True) for r in path(model, fact, ln["from"], m, dim)]
+    seen = [fact, *(r["to"]["table"] for r, _ in pre)]
+    for r, along in ln["hops"]:
+        if (t := r["to" if along else "from"]["table"]) in seen:
+            raise PlanError(f"Measure '{m}': following link '{ln['id']}' from '{fact}' reaches table '{t}' a second way;"
+                            " a query reaches a table one way only, so ask two queries.")
+        seen.append(t)
+    return pre + ln["hops"], ln["id"]
 
 
 def local(model: dict, types: dict[str, dict[str, str]], zone: str) -> dict[tuple[str, str], str | None]:
@@ -284,7 +346,7 @@ def pairs_sql(copy: str, column: str, copy_cols, dt: dict) -> str | None:
 def plan(query: dict, measures: dict[str, str], model: dict, copies: dict[str, tuple] | None = None,
          live: dict[str, tuple] | None = None, reads: dict | None = None, days: dict | None = None,
          rates: tuple | None = None, joins: list | None = None, partials: dict[str, list[str]] | None = None,
-         shared: dict | None = None) -> str:
+         shared: dict | None = None, ontology: dict | None = None) -> str:
     """Semantic query -> DuckDB SQL. Columns: dimensions ("table.column", query order), `grouping_id` when totals
     are asked, then measures by ID. `copies`: {fact: (name of its current query copy in lake.query, its columns,
     {DISTINCT_COUNT column: name of its current distinct-pair table})}. `live`: {live table: (its ClickHouse
@@ -293,7 +355,8 @@ def plan(query: dict, measures: dict[str, str], model: dict, copies: dict[str, t
     `rates`: (display currency or None, `zoned(...)`) for CONVERT, which reads model.json `rates_table` (`_converted`).
     `joins` is filled with every relationship the SQL joins on (COL-SEC.2: hidden keys are refused).
     `partials`: {lake fact: more columns to group its partials by}; `shared` is filled with {DuckDB table name: (fact,
-    DuckDB SQL of its partials over the unqualified fact)} for each such read (M3.6).
+    DuckDB SQL of its partials over the unqualified fact)} for each such read (M3.6). `ontology`: model/ontology.json,
+    whose links the query's `links` name (and `default` ones) decide routes (`route`).
     Raises PlanError (query/model problems) or mel.MelError (measures)."""
     names, dims = query.get("measures") or [], query.get("dimensions") or []
     if not names:
@@ -312,6 +375,7 @@ def plan(query: dict, measures: dict[str, str], model: dict, copies: dict[str, t
     totals = bool(query.get("totals"))
     dt = model.get("date_table") or {}
     trees = mel.compile(measures)
+    lks = links(model, ontology, query.get("links"))
 
     subs: dict[Ctx, dict] = {}  # context -> {Agg: output column}
     owner: dict[Ctx, str] = {}  # context -> first measure using it (named in errors)
@@ -347,7 +411,7 @@ def plan(query: dict, measures: dict[str, str], model: dict, copies: dict[str, t
     reads = {} if reads is None else reads
     ctes = {f"s{i}": _aggregate(c, aggs, owner[c], dims, sets, totals, model, dt, (copies or {}).get(c.fact), live or {}, reads,
                                     days or {}, rates, [] if joins is None else joins, partials or {},
-                                    {} if shared is None else shared)
+                                    {} if shared is None else shared, lks)
             for i, (c, aggs) in enumerate(subs.items())}
 
     ids = list(ctes)
@@ -386,7 +450,7 @@ def plan(query: dict, measures: dict[str, str], model: dict, copies: dict[str, t
 
 def _aggregate(c: Ctx, aggs: dict, m: str, dims: list, sets: list, totals: bool, model: dict, dt: dict,
                copy: tuple | None, live: dict[str, tuple], reads: dict, days: dict, rates: tuple | None,
-               joins: list, partials: dict | None = None, shared: dict | None = None) -> exp.Select:
+               joins: list, partials: dict | None = None, shared: dict | None = None, links: list = ()) -> exp.Select:
     """One aggregate query: the fact's rows under context `c`, grouped by the dimensions the context keeps; each
     aggregate in `aggs` ({(filters, Agg): alias}) reads the rows its own filters keep. `copy`: the fact's query copy
     (name, its "table.column" columns); read when it holds every dimension column the context uses. `live`, `reads`:
@@ -436,9 +500,34 @@ def _aggregate(c: Ctx, aggs: dict, m: str, dims: list, sets: list, totals: bool,
         need.update({x.split(".")[0]: x for x in _cols(f)})
     need.pop(c.fact, None)  # a column of the fact itself needs no join
     # {table: relationship joining it} in join order, every hop of each path (D-06). Paths never disagree on a table: a
-    # shortest path's prefix is the shortest path to that table, and `path` refuses two. D-8 checks run with or without a copy
-    rels = {r["to"]["table"]: r for t, d in need.items() for r in path(model, c.fact, t, m, d)}
-    joins += [*rels.values(), *(path(model, c.fact, dt["table"], m, time_dims[0]) if time_dims else ())]
+    # shortest path's prefix is the shortest path to that table, and `path` refuses two. D-8 checks run with or without a copy.
+    # 1.2.6 M5: a route from a link may disagree (refused: ask two queries); from its first hop against a relationship's
+    # direction on, it is `wide`: {target table: those hops}, joined as distinct pairs (`_wide`)
+    rels, wide = {}, {}
+    for t, d in need.items():
+        hops, ln = route(model, c.fact, t, m, d, links)
+        i = next((i for i, (_, along) in enumerate(hops) if not along), len(hops))
+        for r, _ in hops[:i]:
+            if rels.setdefault(r["to"]["table"], r) != r:
+                raise PlanError(f"Measure '{m}' reaches table '{r['to']['table']}' two ways in this query (a link's and"
+                                " the model's); a query reaches a table one way only, so ask two queries.")
+        if hops[i:]:
+            wide[t] = (hops[i:], ln)
+    dated = route(model, c.fact, dt["table"], m, time_dims[0], links)[0] if time_dims else []
+    if wide or not all(a for _, a in dated):
+        on = [x for hops, _ in wide.values() for r, a in hops for x in [r["to" if a else "from"]["table"]]]
+        ln = next(iter(wide.values()))[1] if wide else route(model, c.fact, dt["table"], m, time_dims[0], links)[1]
+        why = ("totals across it are refused: its members overlap, so they don't add up; ask without totals" if totals else
+               f"time intelligence ({fn}) can't run across it" if c.time else
+               f"it reads the live ClickHouse table '{next(t for t in [c.fact, *on] if t in live)}'; many-to-many reads loaded tables"
+               if {c.fact, *on} & set(live) else
+               "a measure can follow one many-to-many link at a time; ask two queries" if len(wide) > 1 else
+               f"it reaches table '{next(t for t in on if t in rels or t == c.fact)}' a second way; ask two queries"
+               if {*on} & {*rels, c.fact} else None)
+        if why:
+            raise PlanError(f"Measure '{m}' follows the many-to-many link '{ln}', and {why}.")
+    joins += [*rels.values(), *(r for r, _ in dated), *(r for hops, _ in wide.values() for r, _ in hops)]
+    copy, lake = (None, False) if wide else (copy, lake)  # its own read: no query copy, no shared partials
     wanted = {d for _, d in kept if d not in time_dims} | {x for fs in fsets for f in fs for x in _cols(f)}
     # S-09-fix-5: DISTINCT_COUNTs of one column, grouped and filtered by year/month (or that column) only, read its
     # distinct-pair table. Its rows are distinct, so when every grouping keeps all its date columns, COUNT is exact.
@@ -453,7 +542,7 @@ def _aggregate(c: Ctx, aggs: dict, m: str, dims: list, sets: list, totals: bool,
     # fact by its foreign key first, then join the dimension to those rows and group again (S-09-fix-4).
     # ponytail: one joined table only; with two, grouping by both keys can make more groups than the join saves.
     # A snowflake chain behind that table (D-06) is fine: the fact is grouped by its one key either way.
-    by_key = (not time_dims and c.fact not in live and not lake and [r["from"]["table"] for r in rels.values()].count(c.fact) == 1
+    by_key = (not time_dims and not wide and c.fact not in live and not lake and [r["from"]["table"] for r in rels.values()].count(c.fact) == 1
               and all(a.fn not in HOLISTIC for _, a in aggs)
               and not {_col(x).table for fs in fsets for f in fs for x in _cols(f)} & set(rels))
 
@@ -475,8 +564,8 @@ def _aggregate(c: Ctx, aggs: dict, m: str, dims: list, sets: list, totals: bool,
     elif whole:  # rendered for ClickHouse at the end (`_live_whole`)
         src = exp.to_table(live[c.fact][0], dialect="clickhouse").as_(c.fact, quoted=True)
     elif c.fact in live or lake:  # a time context also reads the fact's date column, to group the partials per day
-        dated = {**rels, dt["table"]: path(model, c.fact, dt["table"], m, time_dims[0])[0]} if time_dims else rels
-        src, part = _live_fact(c, aggs, fsets, kept, dated, live, reads, (partials[c.fact], shared) if lake else None)
+        src, part = _live_fact(c, aggs, fsets, kept, {**rels, dt["table"]: dated[0][0]} if time_dims else rels, live, reads,
+                               (partials[c.fact], shared) if lake else None)
     if convs:
         src = _converted(src, c.fact, convs, model, rates, m)
     leaves = {alias: _leaf(replace(a, fn="COUNT") if once else a, only(fs), plain, kept and top, part)
@@ -486,7 +575,7 @@ def _aggregate(c: Ctx, aggs: dict, m: str, dims: list, sets: list, totals: bool,
 
     q = exp.select(*(exp.alias_(ref(_col(d)), f"k{i}", quoted=True) for i, d in kept))
     if time_dims:
-        rel, *hops = path(model, c.fact, dt["table"], m, time_dims[0])
+        rel, *hops = [r for r, _ in dated]
         if hops:  # ponytail: the date window reads the fact's own date column; a date reached through a dimension is refused
             raise PlanError(f"Measure '{m}' uses {fn}, which needs a relationship from '{c.fact}' straight to the "
                             f"date table '{dt['table']}' (it reaches it only through {rel['to']['table']}).")
@@ -523,6 +612,8 @@ def _aggregate(c: Ctx, aggs: dict, m: str, dims: list, sets: list, totals: bool,
         q = q.from_(src)
     for t, rel in rels.items():
         q = q.join(table(t), on=_on(rel, days), join_type="left")
+    for t, (hops, _) in wide.items():
+        q = q.join(*_wide(t, hops, wanted, days), join_type="left")
     if totals:
         gid = (exp.Anonymous(this="GROUPING_ID", expressions=[ref(_col(d)) for d in dims])
                if len(kept) == len(dims) and dims else
@@ -560,6 +651,24 @@ def _aggregate(c: Ctx, aggs: dict, m: str, dims: list, sets: list, totals: bool,
         out = out.select(col(alias, f"__m{j}")).join(exp.alias_(exp.Subquery(this=mq), f"__m{j}", quoted=True),
                                                      on=exp.and_(*on) if on else exp.true(), join_type="left")
     return out
+
+
+def _wide(t: str, hops: list, wanted: set, days: dict) -> tuple:
+    """1.2.6 M5 #20: (table t as the distinct (source key, t's columns the context uses) pairs along `hops`, the first
+    against its relationship's direction, joined inner hop by hop; the ON joining them to the source table's row). Each
+    source row then joins once per member it links to, however many bridge rows link them. Tables are unqualified: a
+    restricted reader's are their row-level security views."""
+    (r0, a0), side = hops[0], lambda r, a: (r["from"], r["to"]) if a else (r["to"], r["from"])
+    mine, theirs = side(r0, a0)
+    q = exp.select(*(exp.alias_(exp.column(x, theirs["table"], quoted=True), f"__k{j}", quoted=True)
+                     for j, x in enumerate(theirs["columns"])),
+                   *(exp.column(_col(x).column, t, quoted=True) for x in sorted(wanted) if _col(x).table == t))
+    q = q.distinct().from_(exp.table_(theirs["table"], quoted=True))
+    for r, a in hops[1:]:
+        q = q.join(exp.table_(side(r, a)[1]["table"], quoted=True), on=_on(r, days))
+    on = exp.and_(*(exp.EQ(this=exp.column(f"__k{j}", t, quoted=True), expression=exp.column(x, mine["table"], quoted=True))
+                    for j, x in enumerate(mine["columns"])))
+    return exp.alias_(exp.Subquery(this=q), t, quoted=True), on
 
 
 MEDIAN_BUCKETS = 1024
