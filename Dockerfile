@@ -63,7 +63,3 @@ EXPOSE 8790
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 CMD ["/app/scripts/engine.sh", "health", "http://127.0.0.1:8790/"]
 # tini as PID 1 reaps the engine's exited children (else a stopped worker stays a zombie that looks alive)
 ENTRYPOINT ["tini", "--", "docker/entrypoint.sh"]
-
-# the image (owner, 5 Nov 2026: video always in it, rendered by the engine's Chromium and ffmpeg, scripts/video.py).
-# The last stage, so a plain `docker build .` makes it.
-FROM base AS default

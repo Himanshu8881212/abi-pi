@@ -33,7 +33,6 @@ jobs:
       - uses: docker/build-push-action@v7  # the image for this runner, loaded, to start before anything is published
         with:
           context: .
-          target: default
           load: true
           tags: abi:check
           cache-from: type=gha
@@ -46,7 +45,6 @@ jobs:
       - uses: docker/build-push-action@v7  # the image, both architectures (amd64's layers from the cache)
         with:
           context: .
-          target: default
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.tag.outputs.image }}:${{ steps.tag.outputs.version }},${{ steps.tag.outputs.image }}:latest

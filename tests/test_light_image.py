@@ -31,8 +31,8 @@ def stages() -> dict[str, list[str]]:
 
 def test_the_one_image_has_video_and_release_publishes_it_for_both_architectures():
     s = stages()
-    assert list(s)[-1] == "default" and "video" not in s, "a plain `docker build .` makes the one image"
-    img = "\n".join(s["default"])
+    assert list(s)[-1] == "base" and "video" not in s, "a plain `docker build .` makes the one image"
+    img = "\n".join(s["base"])
     assert "playwright install" in img and "headless_shell" in img  # PDF, PNG, PPTX and report emails need it
     assert re.search(r"apt-get install -y --no-install-recommends \\\n.* ffmpeg ", img), "ffmpeg encodes the videos"
     assert "scripts/video" not in img and "npm ci" not in "\n".join(s["base"])  # the video needs no Node packages
@@ -40,7 +40,7 @@ def test_the_one_image_has_video_and_release_publishes_it_for_both_architectures
     tracked = subprocess.run(["git", "grep", "-il", old], cwd=ROOT, capture_output=True, text=True).stdout
     assert tracked == "", f"the old video renderer is still named in: {tracked}"
     rel = (ROOT / ".github/workflows/release.yml").read_text()
-    assert rel.count("docker/build-push-action") == 2 and "target: default" in rel and "needs: tests" in rel
+    assert rel.count("docker/build-push-action") == 2 and "target:" not in rel and "needs: tests" in rel
     assert "-video" not in rel and rel.count("linux/amd64,linux/arm64") == 1
     # release review: the image is started and checked (tests/image_check.sh) before anything is pushed
     assert rel.index("load: true") < rel.index("bash tests/image_check.sh") < rel.index("push: true")

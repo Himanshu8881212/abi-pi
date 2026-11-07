@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Build the default image for linux/arm64
         run: |
-          docker build --target default -t "$IMAGE" .
+          docker build -t "$IMAGE" .
           docker image inspect --format '{{.Os}}/{{.Architecture}} {{.Size}} bytes' "$IMAGE"
           [ "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$IMAGE")" = linux/arm64 ]
       - name: Start it and check it
