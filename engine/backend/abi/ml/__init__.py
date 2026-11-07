@@ -853,7 +853,7 @@ def save_ml_model(conn, user: User, args: SaveModel) -> dict:
     return {"id": m["id"]}
 
 
-@action(Role.editor, destructive=True, definition=True)
+@action(Role.editor, definition=True, confirms=True)
 def delete_ml_model(conn, user: User, args: ModelRef) -> dict:
     """Deletes an ML model definition. Its training runs stay in the registry."""
     imports.remove(args.project, "ML model", args.model)

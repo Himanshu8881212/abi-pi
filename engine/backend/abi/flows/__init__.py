@@ -47,6 +47,7 @@ from abi.semantic.subscriptions import evaluate, fingerprint, periods, problem
 STEPS = {"refresh": "refresh", "tool": "run_tool", "agent": "run_agent", "snapshot": "report_snapshot",
          "condition": "check_condition", "train": "train_model", "score": "score_model"}  # `condition {changed}` is computed by the run itself (`_changed`)
 IN_FLOW = contextvars.ContextVar("in_flow", default=False)  # D-23: also set inside an agent step's tool calls (via="agent")
+ACTED = contextvars.ContextVar("acted", default=False)  # 1.2.6 M4: the running flow run was started by an object action
 TEST_RUN = contextvars.ContextVar("test_run", default=None)  # AT-4: the owner's user ID while a test run (key test-…) runs
 STEP = contextvars.ContextVar("step", default=None)  # FL-4: (run ID, step ID) of the flow step running now (`sending`)
 TEXT = contextvars.ContextVar("text", default=None)  # D-47: the running post_message step's text before {{ data }} is filled
@@ -526,9 +527,11 @@ def execute(run_id: str, last: bool = True) -> None:
         data = {"trigger": run["trigger"]} if run["trigger"] else {}
         test = TEST_RUN.set(owner.id if run_id.rsplit("/", 1)[1].startswith("test-") else None)
         inbound = actions.INBOUND.set(message)  # D-32: its steps' audit rows hold the text's length + hash only
+        acted = ACTED.set("action" in (run["trigger"] or {}))
         try:
             error, retry, halt = _graph(run_id, f, project, owner, data, done, skipped, sent)
         finally:
+            ACTED.reset(acted)
             TEST_RUN.reset(test)
             actions.INBOUND.reset(inbound)
     except Exception as e:  # noqa: BLE001

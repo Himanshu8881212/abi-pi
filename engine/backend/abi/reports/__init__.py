@@ -422,7 +422,7 @@ def save_report(conn, user: User, args: SaveReport) -> dict:
                                      for p in r["pages"]]}
 
 
-@action(Role.editor, destructive=True, definition=True)
+@action(Role.editor, definition=True, confirms=True)
 def delete_report(conn, user: User, args: ReportRef) -> dict:
     """Deletes a report."""
     imports.remove(args.project, "report", args.report)

@@ -152,11 +152,17 @@ def _system(a: dict, explore: bool, today: str) -> str:
     ])
 
 
+def _asks(a: dict, shared: bool) -> bool:
+    """The agent may ask its `agents` (ask_agent): not past MAX_DEPTH, not for a share recipient (E-03.2: a callee isn't
+    shared with it), and never in a flow run an object action started (1.2.6 M4: its question would carry typed text)."""
+    return bool(a.get("agents")) and NEST.get()[0] < MAX_DEPTH and not shared and not flows.ACTED.get()
+
+
 def _answer(project: str, a: dict, question: str, user: User, via: str, files: dict, ground: bool, dry: bool = False,
             shared: bool = False) -> dict:
     """One run of the tool loop; traced in agent_runs. Returns {run, answer, grounded, retried, template, tools, data, snapshot}."""
     explore = a["mode"] == "exploratory"
-    asks = a.get("agents") and NEST.get()[0] < MAX_DEPTH and not shared  # E-03.2: a callee isn't shared with the recipient
+    asks = _asks(a, shared)
     allowed = [t for t in dict.fromkeys([*a["tools"], *(["semantic_query"] if explore else []), *([studio.ASK] if asks else [])])
                # E-03.2: a share recipient gets only the read tools (no sends, changes or snapshots, nothing queued)
                if not shared or t in actions.SHARE_TOOLS

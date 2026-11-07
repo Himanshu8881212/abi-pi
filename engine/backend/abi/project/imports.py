@@ -6,6 +6,7 @@ HTTP 422 with `errors: [{file, path, error, fix}]` and changes nothing. M-07's r
 target commit's files with `apply`, so the roles rule (D-1) and the table refresh (PC-7) hold there too.
 """
 
+import hashlib
 import json
 import re
 import shutil
@@ -137,10 +138,15 @@ def load(project: str, kind: str, id: str) -> dict:
 
 
 def remove(project: str, kind: str, id: str) -> None:
-    if kind in ("agent", "tool", "report") and (g := flow_grants(bundle.bundle(git.path(project)))):  # 1.2.6 M4: fail closed
-        raise ActionFailed(409, f"Action type(s) {', '.join(g)} start a flow that may run any agent, tool or report of project"
-                                f" '{project}'; change those first (save_ontology), then delete the {kind}.")
-    _file(project, kind, id).unlink()
+    p = _file(project, kind, id)
+    if kind in ("agent", "tool", "report", "ML model"):  # confirms=True actions: one confirmation, the grant's first (1.2.6 M4)
+        gone = [p.relative_to(git.path(project)).as_posix(), *([f"agents/{id}.eval.json"] if kind == "agent" else [])]
+        if ask := grant_check(project, {}, gone):  # the Owner only, before anything is confirmed
+            require_confirmation(f"Deleting {kind} '{id}': action type(s) {', '.join(sorted(ask[1]['grants']))} start a flow that may"
+                                 f" run any agent, tool, report or ML model of project '{project}'. {ask[0]}", ask[1])
+        else:
+            require_confirmation(f"Destructive: deletes {kind} '{id}' of project '{project}'.")
+    p.unlink()
 
 
 def objects(project: str, folder: str) -> list[dict]:
@@ -565,18 +571,19 @@ def grants(files: dict) -> dict[str, dict]:
     to a table an `rls: follow` link walks (`follow`: data there decides who sees which rows, rls.resolve). Saving one,
     or changing it, is the Owner's, with a confirmation saying what it lets people do."""
     o, mj = files.get(ontology.FILE) or {}, files.get("model/model.json") or {}
-    rels = {r["id"]: r for r in mj.get("relationships", [])}
+    rels, objs = {r["id"]: r for r in mj.get("relationships", [])}, {x["id"]: x for x in o.get("objects", [])}
     walked = {rels[i][s]["table"] for ln in o.get("links", []) if ln.get("rls") == "follow" for i in ln.get("via", []) if i in rels
               for s in ("from", "to")}
     out = {}
     for a in o.get("actions", []):
         follow = (a.get("writes") or {}).get("table") in walked
         if a.get("role") == "viewer" or a.get("flow") or follow:  # with what its flow does (its file, but for `enabled`)
-            out[a["id"]] = {"action": a, "follow": follow, "flow": _used(files, a["flow"]) if a.get("flow") else None}
+            out[a["id"]] = {"action": a, "follow": follow, "flow": _used(files, a["flow"]) if a.get("flow") else None,
+                            "object": {k: v for k, v in objs.get(a["object"], {}).items() if k != "description"}}  # what data.object is
     return out
 
 
-DEFS = ("agents/", "tools/", "reports/")
+DEFS = ("agents/", "tools/", "reports/", "ml/")
 NAMED = re.compile(r'"(agents?|tools?|reports?)":')  # a key naming an agent, tool or report, at any depth
 
 
@@ -589,8 +596,9 @@ def _used(files: dict, flow: str) -> dict:
         return {}
     out = {f"flows/{flow}.json": {k: v for k, v in f.items() if k != "enabled"}}
     if NAMED.search(json.dumps(f)) or any(s.get("type") in ("agent", "tool", "snapshot") for s in f.get("steps", [])):
-        out |= {r: {k: v for k, v in x.items() if k != "sharing" and not (k == "description" and r.startswith("reports/"))}
-                if isinstance(x, dict) else x for r, x in files.items() if r.startswith(DEFS)}
+        out |= {r: hashlib.sha256(json.dumps({k: v for k, v in x.items() if k != "sharing" and not (k == "description" and r.startswith("reports/"))}
+                                             if isinstance(x, dict) else x, sort_keys=True, default=str).encode()).hexdigest()
+                for r, x in files.items() if r.startswith(DEFS)}  # a digest each: the preview stays small and quotes no one's text
     return out
 
 
@@ -599,15 +607,16 @@ def flow_grants(files: dict) -> list[str]:
     return sorted(i for i, g in grants(files).items() if g["flow"] and any(r.startswith(DEFS) for r in g["flow"]))
 
 
-def grant_check(project: str, objs: dict) -> tuple[str, dict] | None:
+def grant_check(project: str, objs: dict, gone: list[str] = ()) -> tuple[str, dict] | None:
     """(why, preview) of writing `objs` when it changes an Owner-granted action type (`granted`), after refusing (403)
     anyone but an Owner; None when it changes none, or no person's action writes (a system write)."""
     user = actions._call.get((None,))[0]
     if user is None or not (git.path(project) / ontology.FILE).is_file() or not any(
-            r.startswith(("flows/", *DEFS)) or r in ("model/model.json", ontology.FILE) for r in objs):
+            r.startswith(("flows/", *DEFS)) or r in ("model/model.json", ontology.FILE) for r in [*objs, *gone]):
         return None
     old = bundle.bundle(git.path(project))
-    if not (g := granted(old, old | objs)):
+    new = {k: v for k, v in (old | objs).items() if k not in gone}
+    if not (g := granted(old, new)):
         return None
     from abi import db  # noqa: PLC0415
 
@@ -615,7 +624,7 @@ def grant_check(project: str, objs: dict) -> tuple[str, dict] | None:
         if (role_in(conn, user, project) or 0) < Role.owner:
             raise ActionFailed(403, f"Only a project Owner may change what action type(s) {', '.join(sorted(g))} do (the flow they"
                                     " start, or an agent, tool or report it runs); nothing changed.")
-    return granting(project, old | objs, g), {"grants": g}
+    return granting(project, new, g), {"grants": g}
 
 
 def granted(old: dict, files: dict) -> dict[str, dict]:

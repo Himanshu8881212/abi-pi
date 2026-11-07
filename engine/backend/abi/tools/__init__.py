@@ -192,7 +192,7 @@ def saved(x: dict) -> dict:
             "rows": [[x["status"], x["version"]]]}
 
 
-@action(Role.editor, destructive=True, definition=True)
+@action(Role.editor, definition=True, confirms=True)
 def delete_tool(conn, user: User, args: ToolRef) -> dict:
     """Deletes a tool."""
     imports.remove(args.project, "tool", args.tool)

@@ -183,8 +183,14 @@ def references(files: dict, cols: dict | None = None) -> list[dict]:
         if a.get("approval") and not a.get("writes"):
             err(f"{at}.approval", f"{what}: `approval` makes its write a proposal, but it writes nothing.", "Add `writes`, or drop `approval`.")
         if a.get("flow") in flows and (bad := _templated(files[f"flows/{a['flow']}.json"])):  # a Viewer never picks what runs
-            err(f"{at}.flow", f"{what}: flow '{a['flow']}' names an agent, tool or report with a {{{{ … }}}} template ({bad}),"
-                              " so a run could pick what runs as the flow's owner.", "Name each agent, tool and report literally in that flow.")
+            err(f"{at}.flow", f"{what}: flow '{a['flow']}' selects what runs with a {{{{ … }}}} template ({bad}),"
+                              " so a run could pick what runs as the flow's owner.", "Name each action, flow, agent, tool, report,"
+                              " model, dataset, object type and type literally in that flow.")
+        for j, st in enumerate((files.get(f"flows/{a.get('flow')}.json") or {}).get("steps", [])):  # owner, 7 Nov 2026: an allowlist
+            if not (st["type"] in STEPS_OK or st["type"] == "action" and st.get("action") in ACTIONS_OK):
+                err(f"{at}.flow", f"{what}: step '{st['id']}' of flow '{a['flow']}' ({st.get('action') or st['type']}) isn't one an"
+                                  " action type's flow may run.", f"Use only {', '.join(sorted(STEPS_OK))} steps and the actions"
+                                  f" {', '.join(sorted(ACTIONS_OK))} (step {j}); start other work from a flow no action type starts.")
         if a.get("flow") in flows and (files[f"flows/{a['flow']}.json"].get("trigger") or {}).get("type") != "manual":
             err(f"{at}.flow", f"{what}: flow '{a['flow']}' doesn't have a manual trigger.",
                 "Give the flow trigger {type: manual}; an action starts it with {{ data.trigger.object }} and {{ data.trigger.inputs }}.")
@@ -199,14 +205,22 @@ def references(files: dict, cols: dict | None = None) -> list[dict]:
     return errs
 
 
+# 1.2.6 M4 (owner, 7 Nov 2026): what a flow an action type starts may run, as its owner, for a Viewer's click: loads, sends
+# (recipients as today), an agent (its question quoted), report snapshots, checks, approvals, reads selecting nothing
+STEPS_OK = {"refresh", "agent", "snapshot", "condition", "approval"}
+ACTIONS_OK = {"refresh", "send_email", "post_message", "run_agent", "report_snapshot", "semantic_query", "get_object",
+              "list_objects", "visual_data"}
+SELECTORS = ("action", "flow", "model", "dataset", "object", "type", "agent", "agents", "tool", "tools", "report", "reports")
+
+
 def _templated(x, at: str = "$") -> str | None:
-    """The JSON path of the first agent, tool or report value (`agent`, `tools`, …, at any depth) holding a template."""
+    """The JSON path of the first selector value (`agent`, `flow`, `model`, … at any depth) holding a template."""
     if isinstance(x, list):
         return next((p for i, v in enumerate(x) if (p := _templated(v, f"{at}[{i}]"))), None)
     if not isinstance(x, dict):
         return None
     for k, v in x.items():
-        if k in ("agent", "agents", "tool", "tools", "report", "reports") and "{{" in json.dumps(v):
+        if k in SELECTORS and "{{" in json.dumps(v):
             return f"{at}.{k}"
         if p := _templated(v, f"{at}.{k}"):
             return p

@@ -605,8 +605,8 @@ def test_fail_closed_definitions(acts):
         now = files()
         now["tools/pi_t.json"] = {**now["tools/pi_t.json"], "description": "Revenue by region, said otherwise."}
         editor_refused(acts, "import_project", bundle=now)
-        with pytest.raises(abi.ActionError) as e:
-            sure("delete_tool", project=P, tool="pi_t")
+        with pytest.raises(abi.ActionError) as e:  # round 5 (owner): the Owner's one confirmation, naming the grant
+            abi.call("delete_tool", project=P, tool="pi_t")
         assert e.value.status == 409 and "start a flow" in e.value.body["message"], e.value.body
         assert files()["tools/pi_t.json"]["description"] == "Revenue by region." and "agents/helper.json" in files()
         templated = copy.deepcopy(flow)
@@ -685,3 +685,87 @@ def test_run_logs_blank_for_others(acts):
     finally:
         sure("set_rls_rule", project=P, id="region", table="cafes", column="region",
              users={acts["uid"]["viewer"]: ["North"], acts["uid"]["viewer2"]: ["North"]})
+
+
+# ---------- round 5: an allowlist for a granted flow's steps; the object type and ML in the grant; deletes; nested asks ----------
+
+BAD_STEPS = [
+    {"id": "x", "type": "action", "action": "run_object_action", "input": {"type": "cafe", "key": ["a"], "action": "note"}},
+    {"id": "x", "type": "action", "action": "run_flow", "input": {"flow": "cafe_visit"}},
+    {"id": "x", "type": "action", "action": "test_task", "input": {"flow": "cafe_visit"}},
+    {"id": "x", "type": "action", "action": "edit_cells", "input": {"table": "cafe_contacts"}},
+    {"id": "x", "type": "action", "action": "propose_edit", "input": {"table": "cafe_contacts"}},
+    {"id": "x", "type": "train", "model": "churn"}, {"id": "x", "type": "score", "model": "churn"},
+    {"id": "x", "type": "tool", "tool": "pi_t"}]
+
+
+def test_flow_allowlist(acts):
+    """Round 5 (owner): a flow an action type starts runs only loads, sends, an agent, report snapshots, checks, approvals
+    and reads; any other step, and a templated selector, is refused at save (save_flow here; save_ontology and import
+    run the same check)."""
+    for bad in BAD_STEPS:
+        with pytest.raises(abi.ActionError) as e:
+            abi.call("save_flow", project=P, flow={**FLOW, "steps": FLOW["steps"] + [bad]})
+        errs = json.dumps(e.value.body.get("errors"))
+        assert e.value.status == 422 and "isn't one an action type's flow may run" in errs, (bad, e.value.body)
+    picked = {"id": "x", "type": "action", "action": "get_object", "input": {"type": "{{ data.trigger.inputs.reason }}", "key": ["a"]}}
+    with pytest.raises(abi.ActionError) as e:
+        abi.call("save_flow", project=P, flow={**FLOW, "steps": FLOW["steps"] + [picked]})
+    assert e.value.status == 422 and "template" in json.dumps(e.value.body["errors"]), e.value.body
+    assert len(abi.call("list_flows", project=P)["flows"][0]["steps"]) == 3, "nothing changed"
+
+
+def test_object_type_and_ml_in_grant(acts):
+    """Round 5: a granted action type's object type, and (with a flow naming a definition) the ml/ folder, are part of the
+    grant: an Editor's change to either gets 403; the Owner deletes the ML model with one confirmation naming the grant."""
+    base = onto(acts["format"])
+    changed = copy.deepcopy(base)
+    changed["objects"][0]["title"] = "city"
+    editor_refused(acts, "save_ontology", ontology=changed)
+    sure("set_table", project=P, table="cafe_contacts", description="Who manages each café, and why it is visited.")
+    o = copy.deepcopy(base)
+    o["actions"].append({"id": "lone", "object": "cafe", "name": "Lone", "role": "viewer", "flow": "lone"})
+    ml = {"id": "churn", "name": "Churn", "task": "classification", "dataset": "custs", "target": "customers.segment"}
+    try:
+        abi.call("save_dataset", project=P, id="custs", name="Customers",
+                 query={"measures": ["revenue"], "dimensions": ["customers.customer_id", "customers.segment"]})
+        sure("save_ml_model", project=P, ml=ml)
+        sure("save_agent", project=P, agent={**TRIAGE_AGENT, "id": "lone", "name": "Lone"})
+        sure("save_flow", project=P, flow={"id": "lone", "name": "Lone", "enabled": False, "trigger": {"type": "manual"},
+                                           "steps": [{"id": "ask", "type": "agent", "agent": "lone", "prompt": "Look."}]})
+        sure("save_ontology", project=P, ontology=o)
+        editor_refused(acts, "save_ml_model", ml={**ml, "name": "Churn, changed"})
+        with pytest.raises(abi.ActionError) as e:
+            abi.call("delete_ml_model", project=P, model="churn")
+        body = e.value.body
+        assert e.value.status == 409 and "lone" in body["preview"]["grants"] and "start a flow" in body["message"], body
+        assert all(len(v) == 64 for r, v in body["preview"]["grants"]["lone"]["flow"].items() if not r.startswith("flows/")), \
+            "a digest per definition: the preview quotes no one's text"
+        abi.call("delete_ml_model", project=P, model="churn", confirm=body["confirm_token"])  # one confirmation
+        assert "ml/churn.json" not in files()
+    finally:
+        sure("save_ontology", project=P, ontology=base)
+        for action, args in (("delete_flow", {"flow": "lone"}), ("delete_agent", {"agent": "lone"}), ("delete_ml_model", {"model": "churn"}),
+                             ("delete_dataset", {"id": "custs"})):
+            with contextlib.suppress(abi.ActionError, KeyError):
+                sure(action, project=P, **args)
+
+
+NESTED = r"""
+import json
+import abi.app  # noqa: F401
+from abi import flows
+from abi.agents import runs
+a = {"agents": ["helper"]}
+before = runs._asks(a, False)
+flows.ACTED.set(True)  # as flows.execute sets it for a run an object action started
+print(json.dumps({"before": before, "acted": runs._asks(a, False)}))
+"""
+
+
+def test_nested_ask_off_in_action_runs():
+    """Round 5: an agent in a flow run an object action started can't ask other agents (its question would carry the
+    typed text unquoted); elsewhere it can."""
+    r = engine(NESTED)
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert json.loads(r.stdout.splitlines()[-1]) == {"before": True, "acted": False}

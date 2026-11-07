@@ -134,7 +134,7 @@ def save_agent(conn, user: User, args: SaveAgent) -> dict:
     return saved(a)
 
 
-@action(Role.editor, destructive=True, definition=True)
+@action(Role.editor, definition=True, confirms=True)
 def delete_agent(conn, user: User, args: AgentRef) -> dict:
     """Deletes a custom agent and its evaluation set."""
     imports.remove(args.project, "agent", args.agent)
