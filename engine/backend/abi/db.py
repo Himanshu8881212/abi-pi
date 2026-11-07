@@ -22,7 +22,7 @@ from psycopg_pool import ConnectionPool, PoolTimeout  # procrastinate's psycopg[
 VERSION = tomllib.loads((Path(__file__).parent.parent / "pyproject.toml").read_text())["project"]["version"]
 # H-03.2: bump with every change to SCHEMA (test_H03_schema_number_bumped pins SCHEMA's sha256 to it), so older code
 # refuses a database newer code has upgraded instead of running on it.
-SCHEMA_NUMBER = 5  # 3: ABI-PI 1.2 (flow_conditions.since); 4: load_runs (M3.2); 5: personal_tokens (M4.5)
+SCHEMA_NUMBER = 6  # 3: ABI-PI 1.2 (flow_conditions.since); 4: load_runs (M3.2); 5: personal_tokens (M4.5); 6: 1.2.6 C1 (folded ALTERs, no sources.spec)
 QUEUE = importlib.metadata.version("procrastinate")
 # The Procrastinate of v0.5.0-alpha, the oldest release we upgrade from (D-133); installs before H-03.2 recorded none.
 QUEUE_BASELINE = "3.10.0"
@@ -39,11 +39,34 @@ CREATE TABLE IF NOT EXISTS schema_state (
 # ponytail: CREATE/ALTER ... IF NOT EXISTS at app start, no migration tool; add one when a change can't be written
 # as an idempotent statement (a rename, a type change, a data move).
 SCHEMA = """
+-- SC-9 (E-05.1, D-50): tenants group users and projects; NULL tenant / no project_tenants row = platform
+-- SC-9 branding (E-05.4): logo checked by tenants.check_logo, logo_type from that check, color '#rrggbb'
+CREATE TABLE IF NOT EXISTS tenants (
+  id text PRIMARY KEY,
+  name text NOT NULL,
+  logo bytea,
+  logo_type text,
+  color text,
+  mfa_required boolean NOT NULL DEFAULT false,
+  -- SE-13 (E-11.1): the tenant's time zone (IANA) and display currency (ISO 4217); NULL = unset (project.json overrides)
+  time_zone text,
+  currency text
+);
+-- SC-10 (E-06.2): account email; SC-10 TOTP (E-06.4): secrets as Fernet tokens (on / being enrolled), the last
+-- accepted step (replay)
 CREATE TABLE IF NOT EXISTS users (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   name text NOT NULL UNIQUE,
   password_hash text NOT NULL,
-  workspace_owner boolean NOT NULL DEFAULT false
+  workspace_owner boolean NOT NULL DEFAULT false,
+  tenant text REFERENCES tenants,
+  tenant_admin boolean NOT NULL DEFAULT false,
+  email text UNIQUE CHECK (email = lower(email)),
+  totp_secret bytea,
+  totp_pending bytea,
+  totp_step bigint,
+  CONSTRAINT users_owner_platform CHECK (NOT workspace_owner OR tenant IS NULL),
+  CONSTRAINT users_admin_tenant CHECK (NOT tenant_admin OR tenant IS NOT NULL)
 );
 CREATE TABLE IF NOT EXISTS project_roles (
   user_id bigint NOT NULL REFERENCES users ON DELETE CASCADE,
@@ -54,7 +77,8 @@ CREATE TABLE IF NOT EXISTS project_roles (
 CREATE TABLE IF NOT EXISTS sessions (
   token_hash bytea PRIMARY KEY,
   user_id bigint NOT NULL REFERENCES users ON DELETE CASCADE,
-  created timestamptz NOT NULL DEFAULT now()
+  created timestamptz NOT NULL DEFAULT now(),
+  oidc_provider text
 );
 -- No FK to users: the audit log outlives deleted accounts (SC-6).
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -74,21 +98,21 @@ CREATE TABLE IF NOT EXISTS memory (
   project text NOT NULL,
   text text NOT NULL,
   created_by text NOT NULL,
-  created timestamptz NOT NULL DEFAULT now()
+  created timestamptz NOT NULL DEFAULT now(),
+  terms text[] NOT NULL DEFAULT '{}',  -- glossary links (§5 #6)
+  by_agent boolean NOT NULL DEFAULT true  -- written by an LLM (H-01.4-fix-2); older rows unknown: fail closed
 );
-ALTER TABLE memory ADD COLUMN IF NOT EXISTS terms text[] NOT NULL DEFAULT '{}';  -- glossary links (§5 #6)
-ALTER TABLE memory ADD COLUMN IF NOT EXISTS by_agent boolean NOT NULL DEFAULT true;  -- written by an LLM (H-01.4-fix-2); older rows unknown: fail closed
 -- project NULL = workspace-wide
 CREATE TABLE IF NOT EXISTS notifications (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   at timestamptz NOT NULL DEFAULT now(),
   project text,
   kind text NOT NULL,
-  message text NOT NULL
+  message text NOT NULL,
+  ref text,  -- the object's ID within `kind` (table, tool, flow, agent), for UI links (F-10)
+  -- SE-6/D-47: where data-derived text starts (restricted Viewers see the text before it); NULL = unknown, all hidden
+  detail int
 );
-ALTER TABLE notifications ADD COLUMN IF NOT EXISTS ref text;  -- the object's ID within `kind` (table, tool, flow, agent), for UI links (F-10)
--- SE-6/D-47: where data-derived text starts (restricted Viewers see the text before it); NULL = unknown, all hidden
-ALTER TABLE notifications ADD COLUMN IF NOT EXISTS detail int;
 CREATE TABLE IF NOT EXISTS notification_reads (
   user_id bigint NOT NULL REFERENCES users ON DELETE CASCADE,
   notification_id bigint NOT NULL REFERENCES notifications ON DELETE CASCADE,
@@ -101,13 +125,13 @@ CREATE TABLE IF NOT EXISTS llm_usage (
   agent text NOT NULL,
   model text NOT NULL,
   prompt_tokens int,
-  completion_tokens int
+  completion_tokens int,
+  provider text NOT NULL DEFAULT 'env',  -- AG-6: provider ID, 'env' = OPENAI_* env
+  cost numeric,  -- AG-6: estimated USD from configured prices, NULL without one
+  effort text,  -- D-71: the reasoning effort sent, NULL = none sent
+  reasoning_tokens int,  -- D-71: part of completion_tokens, NULL = not reported
+  cached_tokens int  -- D-117: part of prompt_tokens served from the provider's cache, NULL = not reported
 );
-ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS provider text NOT NULL DEFAULT 'env';  -- AG-6: provider ID, 'env' = OPENAI_* env
-ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS cost numeric;  -- AG-6: estimated USD from configured prices, NULL without one
-ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS effort text;  -- D-71: the reasoning effort sent, NULL = none sent
-ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS reasoning_tokens int;  -- D-71: part of completion_tokens, NULL = not reported
-ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS cached_tokens int;  -- D-117: part of prompt_tokens served from the provider's cache, NULL = not reported
 -- AG-6 (E-12.1): workspace LLM providers, tried in `position` order; api_key is a ${secret:NAME} reference (D-2)
 CREATE TABLE IF NOT EXISTS llm_providers (
   id text PRIMARY KEY,
@@ -115,9 +139,9 @@ CREATE TABLE IF NOT EXISTS llm_providers (
   base_url text NOT NULL,
   api_key text,
   models jsonb NOT NULL,
-  prices jsonb NOT NULL
+  prices jsonb NOT NULL,
+  efforts jsonb NOT NULL DEFAULT '{}'  -- D-71: alias → {levels, default}
 );
-ALTER TABLE llm_providers ADD COLUMN IF NOT EXISTS efforts jsonb NOT NULL DEFAULT '{}';  -- D-71: alias → {levels, default}
 -- D-117: embedding vectors of definition texts (never data rows) by sha256(text) and '<provider>/<model>'; no text kept
 CREATE TABLE IF NOT EXISTS embeddings (
   sha text NOT NULL,
@@ -144,12 +168,14 @@ CREATE TABLE IF NOT EXISTS query_log (
   error text
 );
 -- SC-4: workspace credentials, Fernet-encrypted; referenced as ${secret:NAME}.
+-- SC-9 (E-05.2): a secret belongs to a tenant (NULL = platform); names are unique per tenant, the platform included
 CREATE TABLE IF NOT EXISTS secrets (
-  name text PRIMARY KEY,
-  value bytea NOT NULL
+  name text NOT NULL,
+  value bytea NOT NULL,
+  allowed_hosts text[],  -- D-2 (F-09): hosts a secret may be sent to; NULL = stored before F-09, sent nowhere
+  tenant text REFERENCES tenants,
+  CONSTRAINT secrets_tenant_name UNIQUE NULLS NOT DISTINCT (tenant, name)
 );
--- D-2 (F-09): hosts a secret may be sent to; NULL = stored before F-09, sent nowhere.
-ALTER TABLE secrets ADD COLUMN IF NOT EXISTS allowed_hosts text[];
 -- Runtime state per loaded table (D-9): its files' fingerprint. Definitions live in the repo (sources/<id>.json).
 CREATE TABLE IF NOT EXISTS sources (
   project text NOT NULL,
@@ -171,16 +197,23 @@ CREATE TABLE IF NOT EXISTS flow_runs (
   id text PRIMARY KEY,
   project text NOT NULL,
   flow text NOT NULL,
-  status text NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'ok', 'failed')),
+  -- FL-1/AT-2 (D-03.1): a false condition step ends a run as 'stopped'.
+  -- FL-1 (D-03.3): an approval step pauses a run ('waiting') until approve_flow_run or reject_flow_run ('rejected')
+  status text NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'ok', 'failed', 'stopped', 'waiting', 'rejected')),
   error text,
   created timestamptz NOT NULL DEFAULT now(),
-  finished timestamptz
+  finished timestamptz,
+  started_by bigint,  -- the user whose action started the run (NULL: a trigger no one clicked, i.e. the flow owner), D-31
+  -- FL-4 (D-03-fix-2): when the run was last queued (insert or approval); a run queued over a minute ago with no live
+  -- Procrastinate job lost its defer to a crash, and the minute tick queues it again (flows.requeue).
+  queued timestamptz NOT NULL DEFAULT now(),
+  trigger jsonb  -- FL-2 (X-02.3): what the trigger passed, read as {{ data.trigger.<path> }}
 );
 CREATE TABLE IF NOT EXISTS flow_steps (
   run_id text NOT NULL REFERENCES flow_runs ON DELETE CASCADE,
   pos int NOT NULL,
   step text NOT NULL,
-  status text NOT NULL CHECK (status IN ('ok', 'failed')),
+  status text NOT NULL CHECK (status IN ('ok', 'failed', 'waiting', 'rejected', 'skipped')),  -- skipped: FLOW-DAG when/after
   input jsonb,  -- the action's validated input: SecretStr fields are masked
   output jsonb,
   error text,
@@ -212,10 +245,10 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   retried boolean NOT NULL,
   template boolean NOT NULL,
   prompt_tokens int NOT NULL,
-  completion_tokens int NOT NULL
+  completion_tokens int NOT NULL,
+  reasoning_tokens int NOT NULL DEFAULT 0,  -- D-71
+  effort text  -- D-71: the last answer's effort, NULL = none sent
 );
-ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS reasoning_tokens int NOT NULL DEFAULT 0;  -- D-71
-ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS effort text;  -- D-71: the last answer's effort, NULL = none sent
 -- AG-4 runtime state per published agent: the model + tools + agent hash its evaluation set last ran on; error NOT NULL = disabled.
 CREATE TABLE IF NOT EXISTS agent_state (
   project text NOT NULL,
@@ -237,20 +270,9 @@ CREATE TABLE IF NOT EXISTS inbox (
   sender text NOT NULL,
   text text NOT NULL,
   data jsonb,  -- the attached result {columns, rows}
-  snapshot text
+  snapshot text,
+  recipient bigint  -- AT-4 (T-04.1): only this user sees it (a task test run's owner)
 );
-ALTER TABLE inbox ADD COLUMN IF NOT EXISTS recipient bigint;  -- AT-4 (T-04.1): only this user sees it (a task test run's owner)
--- FL-1/AT-2 (D-03.1): a false condition step ends a run as 'stopped'.
--- FL-1 (D-03.3): an approval step pauses a run ('waiting') until approve_flow_run or reject_flow_run ('rejected');
--- started_by: the user whose action started the run (NULL: a trigger no one clicked, i.e. the flow owner), D-31.
-ALTER TABLE flow_runs DROP CONSTRAINT IF EXISTS flow_runs_status_check;
-ALTER TABLE flow_runs ADD CONSTRAINT flow_runs_status_check CHECK (status IN ('queued', 'running', 'ok', 'failed', 'stopped', 'waiting', 'rejected'));
-ALTER TABLE flow_steps DROP CONSTRAINT IF EXISTS flow_steps_status_check;
-ALTER TABLE flow_steps ADD CONSTRAINT flow_steps_status_check CHECK (status IN ('ok', 'failed', 'waiting', 'rejected', 'skipped'));  -- skipped: FLOW-DAG when/after
-ALTER TABLE flow_runs ADD COLUMN IF NOT EXISTS started_by bigint;
--- FL-4 (D-03-fix-2): when the run was last queued (insert or approval); a run queued over a minute ago with no live
--- Procrastinate job lost its defer to a crash, and the minute tick queues it again (flows.requeue).
-ALTER TABLE flow_runs ADD COLUMN IF NOT EXISTS queued timestamptz NOT NULL DEFAULT now();
 -- FL-4 (D-03-fix-3): a step that began sending (email, message, also from an agent step's tools), committed before the
 -- send leaves; a run resumed after a crash never runs such a step again unless it finished ok (flows.sending).
 CREATE TABLE IF NOT EXISTS flow_sends (
@@ -300,24 +322,24 @@ CREATE TABLE IF NOT EXISTS ml_runs (
   excluded jsonb,
   summary text,
   fitted text,
-  error text
+  error text,
+  query jsonb,  -- ML-5 traceability (X-01.2): the exact dataset query trained on
+  -- ML-5 (X-01.3): a scoring run ('score') names the training run it predicted with
+  kind text NOT NULL DEFAULT 'train' CHECK (kind IN ('train', 'score')),
+  trained uuid,
+  -- ML-6 (X-01.4): `key` names the scoring after a refresh (snapshot-<n>), once per model; `profile` a training run's
+  -- feature and prediction distributions; `drift` a scoring run's check against them
+  key text,
+  profile jsonb,
+  drift jsonb,
+  groups jsonb,  -- ML-4 (E-04.1): a clustering run's per-cluster profiles
+  candidates jsonb,  -- ML-4 (D-99): {method: held-out metrics} of each candidate trained
+  -- AG-2 (UI-DS.8-fix-1): the held-out sizes a summary states ({"holdout share": 0.2} or periods), so a relayed summary grounds
+  holdout jsonb,
+  -- ML-4 (D-99, ML-CANDIDATES.3): the training run scoring uses until unpinned (pin_ml_run), at most one per model
+  pinned timestamptz
 );
-ALTER TABLE ml_runs ADD COLUMN IF NOT EXISTS query jsonb;  -- ML-5 traceability (X-01.2): the exact dataset query trained on
--- ML-5 (X-01.3): a scoring run ('score') names the training run it predicted with
-ALTER TABLE ml_runs ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'train' CHECK (kind IN ('train', 'score'));
-ALTER TABLE ml_runs ADD COLUMN IF NOT EXISTS trained uuid;
--- ML-6 (X-01.4): `key` names the scoring after a refresh (snapshot-<n>), once per model; `profile` a training run's
--- feature and prediction distributions; `drift` a scoring run's check against them
-ALTER TABLE ml_runs ADD COLUMN IF NOT EXISTS key text;
-ALTER TABLE ml_runs ADD COLUMN IF NOT EXISTS profile jsonb;
-ALTER TABLE ml_runs ADD COLUMN IF NOT EXISTS drift jsonb;
 CREATE UNIQUE INDEX IF NOT EXISTS ml_runs_key ON ml_runs (project, model, key);
-ALTER TABLE ml_runs ADD COLUMN IF NOT EXISTS groups jsonb;  -- ML-4 (E-04.1): a clustering run's per-cluster profiles
-ALTER TABLE ml_runs ADD COLUMN IF NOT EXISTS candidates jsonb;  -- ML-4 (D-99): {method: held-out metrics} of each candidate trained
--- AG-2 (UI-DS.8-fix-1): the held-out sizes a summary states ({"holdout share": 0.2} or periods), so a relayed summary grounds
-ALTER TABLE ml_runs ADD COLUMN IF NOT EXISTS holdout jsonb;
--- ML-4 (D-99, ML-CANDIDATES.3): the training run scoring uses until unpinned (pin_ml_run), at most one per model
-ALTER TABLE ml_runs ADD COLUMN IF NOT EXISTS pinned timestamptz;
 CREATE UNIQUE INDEX IF NOT EXISTS ml_runs_pinned ON ml_runs (project, model) WHERE pinned IS NOT NULL;
 -- ML-4 (ML-ZOO.1, D-135): a training run's hyperparameter search, one row per trial (`params` {} = the defaults);
 -- score is the mean of the candidates' metric over folds of the training part; `chosen` = the setting its candidate kept
@@ -381,7 +403,8 @@ CREATE TABLE IF NOT EXISTS inbound_messages (
   user_id bigint NOT NULL REFERENCES users ON DELETE CASCADE,
   channel text NOT NULL,
   text text NOT NULL,
-  reply_to text
+  reply_to text,  -- X-02.5: NULL, Teams answers go to the agent's channel
+  thread jsonb  -- X-02.6: an email's {message_id, references, subject}
 );
 -- RP-6 (X-05.6): view-only share links; the token is kept only as its SHA-256 (D-35), shown once at creation.
 CREATE TABLE IF NOT EXISTS share_links (
@@ -395,9 +418,6 @@ CREATE TABLE IF NOT EXISTS share_links (
   expires timestamptz NOT NULL,
   revoked timestamptz
 );
-ALTER TABLE inbound_messages ALTER COLUMN reply_to DROP NOT NULL;  -- X-02.5: Teams answers go to the agent's channel
-ALTER TABLE inbound_messages ADD COLUMN IF NOT EXISTS thread jsonb;  -- X-02.6: an email's {message_id, references, subject}
-ALTER TABLE flow_runs ADD COLUMN IF NOT EXISTS trigger jsonb;  -- FL-2 (X-02.3): what the trigger passed, read as {{ data.trigger.<path> }}
 -- SC-1 (E-01.1): OIDC providers (client_secret is a ${secret:NAME} reference), single-use sign-in flows, linked identities.
 CREATE TABLE IF NOT EXISTS oidc_providers (
   id text PRIMARY KEY,
@@ -423,7 +443,6 @@ CREATE TABLE IF NOT EXISTS oidc_identities (
   user_id bigint NOT NULL REFERENCES users ON DELETE CASCADE,
   PRIMARY KEY (issuer, sub)
 );
-ALTER TABLE sessions ADD COLUMN IF NOT EXISTS oidc_provider text;
 -- IN-8 (E-10.1): one stats row per successful load of a copied table: its row count and NULL count per column
 CREATE TABLE IF NOT EXISTS quality_loads (
   id bigserial PRIMARY KEY,
@@ -441,17 +460,6 @@ CREATE TABLE IF NOT EXISTS artifacts (
   creator bigint NOT NULL REFERENCES users ON DELETE CASCADE,
   created timestamptz NOT NULL DEFAULT now()
 );
--- SC-9 (E-05.1, D-50): tenants group users and projects; NULL tenant / no project_tenants row = platform
-CREATE TABLE IF NOT EXISTS tenants (id text PRIMARY KEY, name text NOT NULL);
--- SC-9 branding (E-05.4): logo checked by tenants.check_logo, logo_type from that check, color '#rrggbb'
-ALTER TABLE tenants ADD COLUMN IF NOT EXISTS logo bytea, ADD COLUMN IF NOT EXISTS logo_type text,
-  ADD COLUMN IF NOT EXISTS color text;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant text REFERENCES tenants;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_admin boolean NOT NULL DEFAULT false;
-ALTER TABLE users DROP CONSTRAINT IF EXISTS users_owner_platform;
-ALTER TABLE users ADD CONSTRAINT users_owner_platform CHECK (NOT workspace_owner OR tenant IS NULL);
-ALTER TABLE users DROP CONSTRAINT IF EXISTS users_admin_tenant;
-ALTER TABLE users ADD CONSTRAINT users_admin_tenant CHECK (NOT tenant_admin OR tenant IS NOT NULL);
 CREATE TABLE IF NOT EXISTS project_tenants (project text PRIMARY KEY, tenant text NOT NULL REFERENCES tenants);
 -- A tenant account holds roles only in its own tenant's projects, whoever writes the rows. Deferred to commit (or the
 -- SET CONSTRAINTS in actions.run), so writers that move several of these rows (rename, delete) may go in any order.
@@ -485,14 +493,6 @@ DO $$ BEGIN  -- CREATE OR REPLACE is not supported for constraint triggers
       DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION abi_tenant_roles();
   END IF;
 END $$;
--- SC-9 (E-05.2): a secret belongs to a tenant (NULL = platform); names are unique per tenant, the platform included
-ALTER TABLE secrets ADD COLUMN IF NOT EXISTS tenant text REFERENCES tenants;
-ALTER TABLE secrets DROP CONSTRAINT IF EXISTS secrets_pkey;
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'secrets_tenant_name') THEN
-    ALTER TABLE secrets ADD CONSTRAINT secrets_tenant_name UNIQUE NULLS NOT DISTINCT (tenant, name);
-  END IF;
-END $$;
 -- SC-11 (E-07.1): the metering ledger, counts only, tenant stamped at write time (NULL = platform). Like audit_log,
 -- never rewritten by rename/delete_project (git._keyed). ponytail: kept forever; roll up daily and prune if it grows.
 CREATE TABLE IF NOT EXISTS usage (
@@ -504,11 +504,11 @@ CREATE TABLE IF NOT EXISTS usage (
   rows_scanned bigint,
   prompt_tokens int,
   completion_tokens int,
-  cost numeric
+  cost numeric,
+  effort text,  -- D-71: an llm row's reasoning effort (NULL = none sent)
+  reasoning_tokens int,
+  cached_tokens int  -- D-117
 );
-ALTER TABLE usage ADD COLUMN IF NOT EXISTS effort text;  -- D-71: an llm row's reasoning effort (NULL = none sent)
-ALTER TABLE usage ADD COLUMN IF NOT EXISTS reasoning_tokens int;
-ALTER TABLE usage ADD COLUMN IF NOT EXISTS cached_tokens int;  -- D-117
 CREATE TABLE IF NOT EXISTS usage_storage (
   day date NOT NULL,
   tenant text,
@@ -517,35 +517,29 @@ CREATE TABLE IF NOT EXISTS usage_storage (
   file_bytes bigint NOT NULL,
   PRIMARY KEY (day, project)
 );
--- SC-10 (E-06.2): account email, the workspace's account mail server, single-use invite/reset tokens (sha256 only)
-ALTER TABLE users ADD COLUMN IF NOT EXISTS email text UNIQUE CHECK (email = lower(email));
+-- SC-10 (E-06.2): the workspace's account mail server, single-use invite/reset tokens (sha256 only); SC-10 sign-up
+-- (E-06.3): a sign-up token has the email, no account yet
 CREATE TABLE IF NOT EXISTS account_mail (one boolean PRIMARY KEY DEFAULT true CHECK (one), smtp jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS account_tokens (
   hash bytea PRIMARY KEY,
-  kind text NOT NULL CHECK (kind IN ('invite', 'reset')),
-  user_id bigint NOT NULL REFERENCES users ON DELETE CASCADE,
-  expires timestamptz NOT NULL
+  kind text NOT NULL,
+  user_id bigint REFERENCES users ON DELETE CASCADE,
+  expires timestamptz NOT NULL,
+  email text,
+  CONSTRAINT account_tokens_kind_check CHECK (kind IN ('invite', 'reset', 'signup')
+    AND (kind = 'signup') = (user_id IS NULL) AND (kind = 'signup') = (email IS NOT NULL))
 );
--- SC-10 sign-up (E-06.3): a domain belongs to at most one tenant; a sign-up token has the email, no account yet
+-- SC-10 sign-up (E-06.3): a domain belongs to at most one tenant
 CREATE TABLE IF NOT EXISTS tenant_domains (
   domain text PRIMARY KEY CHECK (domain = lower(domain)),
   tenant text NOT NULL REFERENCES tenants ON DELETE CASCADE
 );
-ALTER TABLE account_tokens ADD COLUMN IF NOT EXISTS email text, ALTER COLUMN user_id DROP NOT NULL;
-ALTER TABLE account_tokens DROP CONSTRAINT IF EXISTS account_tokens_kind_check;
-ALTER TABLE account_tokens ADD CONSTRAINT account_tokens_kind_check CHECK (kind IN ('invite', 'reset', 'signup')
-  AND (kind = 'signup') = (user_id IS NULL) AND (kind = 'signup') = (email IS NOT NULL));
--- SC-10 TOTP (E-06.4): secrets as Fernet tokens (on / being enrolled), the last accepted step (replay), recovery codes sha256
-ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret bytea, ADD COLUMN IF NOT EXISTS totp_pending bytea,
-  ADD COLUMN IF NOT EXISTS totp_step bigint;
+-- SC-10 TOTP (E-06.4): recovery codes sha256
 CREATE TABLE IF NOT EXISTS recovery_codes (
   user_id bigint NOT NULL REFERENCES users ON DELETE CASCADE,
   hash bytea NOT NULL,
   PRIMARY KEY (user_id, hash)
 );
-ALTER TABLE tenants ADD COLUMN IF NOT EXISTS mfa_required boolean NOT NULL DEFAULT false;
--- SE-13 (E-11.1): the tenant's time zone (IANA) and display currency (ISO 4217); NULL = unset (project.json overrides)
-ALTER TABLE tenants ADD COLUMN IF NOT EXISTS time_zone text, ADD COLUMN IF NOT EXISTS currency text;
 -- RP-9 (E-08.1): per-project embed signing keys (Fernet-encrypted HS256 secret), the origins that may frame them
 CREATE TABLE IF NOT EXISTS embed_keys (
   kid text PRIMARY KEY,
@@ -576,10 +570,10 @@ CREATE TABLE IF NOT EXISTS chatgpt_links (
   email text,
   tokens bytea,
   expires timestamptz,
-  model text
+  model text,
+  backup text,  -- AG-6/D-80: the plan model tried after `model`
+  effort text  -- D-71: reasoning effort, NULL = the model's default
 );
-ALTER TABLE chatgpt_links ADD COLUMN IF NOT EXISTS backup text;  -- AG-6/D-80: the plan model tried after `model`
-ALTER TABLE chatgpt_links ADD COLUMN IF NOT EXISTS effort text;  -- D-71: reasoning effort, NULL = the model's default
 -- API-SRC.3: OAuth connect flows of API sources (hashed one-time state, `auth` holds only ${secret:NAME} refs) and
 -- each source's refresh token, Fernet-encrypted (SC-4), bound to the token endpoint's host and the API's host (D-2);
 -- `id` is new per connect (the in-memory access token cache keys on it); `used` once bound to a saved source
