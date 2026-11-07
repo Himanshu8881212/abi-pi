@@ -222,33 +222,25 @@ def conditions(project: str, user_id: int, read, types: dict | None = None) -> d
         direct.setdefault(t, []).append(cond)
     mj = model._read(project, "model.json")
     rels, fl, ent = mj.get("relationships", []), follows(project, mj), ontology._keys(mj)
-    away = {f["id"]: set(f["via"]) for f in fl}  # a follow link's own filter, and each filter made from it, never crosses these
+    back = {f["id"]: f["back"] for f in fl}
     vis = lambda x, conds: " AND ".join(c for _, c in conds.get(x, []))  # noqa: E731
-    denied = set(unfiltered_outputs(project))
-    hid = _hidden(project, user_id) if fl else {}
-
-    def blank(t: str) -> bool:
-        """t shows this user no rows whatever its filter: made from filtered rows (`unfiltered_outputs`) or every
-        column hidden (`context`)."""
-        if t in denied:
-            return True
-        if t not in hid:
-            return False
-        cols = (types or {}).get(t) or model.lake_columns(project).get(t, {})
-        return bool(cols) and {c.lower() for c in cols} <= hid[t]
+    blank = _blanks(project, user_id, types) if fl else None
 
     def groups(r: dict, conds: dict) -> list[tuple[frozenset, list[str]]]:
-        """The parts of r's target's filter that cross r, one group per tag (the follow link a part is made from, or
-        none): a part made from a follow link whose `via` holds r stays behind. Onto the target's key, `fk IN (keys of
-        d WHERE A AND B)` keeps the rows `fk IN (A's) AND fk IN (B's)` do, so each group is its own filter; onto other
-        columns all parts go as one, crossing r (more filtered, never less)."""
+        """The parts of r's target's filter that cross r (`crosses`), one group per tag (the follow link a part is
+        made from, or none). Onto the target's key, `fk IN (keys of d WHERE A AND B)` keeps the rows `fk IN (A's) AND
+        fk IN (B's)` do, so each group is its own filter; onto other columns the parts that cross go as one, untagged
+        (filtered further on, never less)."""
         parts = conds.get(d := r["to"]["table"], [])
+        if fl:
+            parts = [(tag, c) for tag, c in parts if crosses(back, r["id"], tag, r["from"]["table"])]
+        if not parts:
+            return []
         if not fl or sorted(r["to"]["columns"]) != sorted(ent.get(d) or [None]):
-            return [(frozenset(), [c for _, c in parts])] if parts else []
+            return [(frozenset(), [c for _, c in parts])]
         out: dict[frozenset, list] = {}
         for tag, c in parts:
-            if not any(r["id"] in away[x] for x in tag):
-                out.setdefault(tag, []).append(c)
+            out.setdefault(tag, []).append(c)
         return list(out.items())
 
     def linked(f: dict, conds: dict) -> str:
@@ -295,8 +287,8 @@ def conditions(project: str, user_id: int, read, types: dict | None = None) -> d
             if f["from"] != t:
                 continue
             tag = frozenset({f["id"]})
-            if f["hops"] is None or f["live"] or blank(f["to"]):  # fail closed: a link that doesn't hold, a T that shows
-                cs.append((tag, "FALSE"))  # no rows anyway. ponytail: follow over live tables denies
+            if f["hops"] is None or f["live"] or any(map(blank, f["on"])):  # fail closed: a link that doesn't hold, a table
+                cs.append((tag, "FALSE"))  # on the way that shows no rows anyway. ponytail: follow over live tables denies
             elif f["to"] in conds:  # T is restricted for this user
                 cs.append((tag, linked(f, conds)))
         return cs
@@ -312,14 +304,38 @@ def conditions(project: str, user_id: int, read, types: dict | None = None) -> d
         last, conds = conds, {t: cs for t in tables if (cs := step(t, conds))}
         grew += skeleton(conds) != skeleton(last)  # parts only ever join (tags never change), so this stays small
         if fl and grew > CAP + 10 * len(tables):  # never: fail closed if it ever does
-            return {t: "FALSE" for t in tables} | {t: "FALSE" for t in denied}
-    return {t: " AND ".join(c for _, c in cs) for t, cs in conds.items()} | {t: "FALSE" for t in denied}
+            return {t: "FALSE" for t in {*tables, *unfiltered_outputs(project)}}
+    return {t: " AND ".join(c for _, c in cs) for t, cs in conds.items()} | {t: "FALSE" for t in unfiltered_outputs(project)}
 
 
 def where(con, schema: str, t: str) -> str | None:
     """M3.6: the row filter user schema `schema`'s view of t applies (None: no filter), as `context` built it; raises
     KeyError when that schema has no view of t."""
     return _where[con][schema][t]
+
+
+def crosses(back: dict, rid: str, tag: frozenset, toward: str) -> bool:
+    """1.2.6 M3, the one crossing rule (`conditions`, `_sources`, `_unfiltered_outputs.roots`): a filter part made
+    from follow links `tag` crosses relationship `rid` into table `toward` unless one of them walks r there from its F's
+    side back toward its T (`back`: {link: {(relationship ID, table)}}, `resolve`). So a follow filter never goes back
+    along its own via (an anonymous order keeps its NULL customer), but crosses its via the other way (orders at a
+    hidden café stay hidden), and a part made from rules alone (no tag) always crosses. The target's key plays no part."""
+    return not any((rid, toward) in back.get(x, ()) for x in tag)
+
+
+def _blanks(project: str, user_id: int | None, types: dict | None = None):
+    """t -> t shows this user no rows whatever its filter: made from filtered rows (`unfiltered_outputs`) or every
+    column hidden (`context`). A follow link reading such a table denies its F."""
+    from abi.semantic import model  # not at top: model imports the semantic package
+
+    denied, hid = set(unfiltered_outputs(project)), _hidden(project, user_id)
+
+    def blank(t: str) -> bool:
+        if t in denied:
+            return True
+        cols = t in hid and ((types or {}).get(t) or model.lake_columns(project).get(t, {}))
+        return bool(cols) and {c.lower() for c in cols} <= hid[t]
+    return blank
 
 
 def key_columns(project: str, t: str) -> list[str]:
@@ -355,7 +371,9 @@ def resolve(o: dict, mj: dict, lv=()) -> list[dict]:
     tables between), cols (F's columns the last hop joins on: the ones the filter tests), live (a live table on the
     way)}: what the link means, all of it (the import gate compares this). A link that doesn't hold (a type,
     relationship or column gone, a hidden table) has hops None and shows restricted users no rows of `from`: F, or
-    every table it may mean when its from type is unknown (fail closed). [] without an ontology."""
+    every table it may mean when its from type is unknown (fail closed). `back`: the (relationship, table) crossings
+    its filter never makes (`crosses`). [] without an ontology. Data written into a table on the way (an input table,
+    write-back) changes which F rows are linked, so who sees what: M4 must gate Viewer actions that write there."""
     from abi.semantic import ontology  # not at top: it imports this module
 
     objs, rels, out = {x["id"]: x["table"] for x in o.get("objects", [])}, {r["id"]: r for r in mj.get("relationships", [])}, []
@@ -366,26 +384,30 @@ def resolve(o: dict, mj: dict, lv=()) -> list[dict]:
         hops = ontology.walk(mj, t, ln["via"][::-1]) if f and t else None
         if isinstance(hops, list) and hops and (end := hops[-1][0]["to" if hops[-1][1] else "from"])["table"] == f:
             on = [t, *(r["to" if a else "from"]["table"] for r, a in hops[:-1])]
+            # walked from T, a hop along its many-to-one direction has T's side as its many side: a filter crossing it
+            # (always into the many side) goes from F's side toward T there
             out.append({"id": ln["id"], "from": f, "to": t, "via": list(ln["via"]), "hops": hops, "on": on, "cols": list(end["columns"]),
-                        "live": bool({f, *on} & set(lv))})
+                        "live": bool({f, *on} & set(lv)), "back": {(r["id"], r["from"]["table"]) for r, a in hops if a}})
             continue
         deny = [f] if f else sorted({t, *(x[s]["table"] for i in ln["via"] if (x := rels.get(i)) for s in ("from", "to"))} - {None})
-        out += [{"id": ln["id"], "from": d, "to": t, "via": list(ln["via"]), "hops": None, "on": [], "cols": [], "live": False} for d in deny]
+        both = {(i, x[s]["table"]) for i in ln["via"] if (x := rels.get(i)) for s in ("from", "to")}  # every via relationship, both ways
+        out += [{"id": ln["id"], "from": d, "to": t, "via": list(ln["via"]), "hops": None, "on": [], "cols": [], "live": False,
+                 "back": both} for d in deny]
     return out
 
 
 def _sources(project: str) -> tuple[dict[str, dict], list[dict], list[dict]]:
     """({filtered table: {what filters it ("rule", ("rel", relationship ID), ("link", follow link ID)): the tags of
     its parts (the follow link each is made from, or none)}}, the relationships, `follows`), as `conditions` builds
-    every user's filters: a relationship carries each part of its target's filter but those made from a follow link
-    whose `via` holds it (all of them onto columns other than the target's key). A follow link whose T shows no rows
-    by default (`unfiltered_outputs`, every column hidden) denies F in `conditions` without being listed here: F's
+    every user's filters: a relationship carries each part of its target's filter that `crosses` it (onto columns
+    other than the target's key, those as one untagged part). A follow link reading a table that shows no rows by
+    default (`unfiltered_outputs`, every column hidden) denies F in `conditions` without being listed here: F's
     filter is then FALSE, which reads no column. Past CAP rounds (never: tags never change), every table is filtered."""
     from abi.semantic import model, ontology  # not at top: both import the semantic package
 
     mj = model._read(project, "model.json")
     rels, fl, ent = mj.get("relationships", []), follows(project, mj), ontology._keys(mj)
-    away, ruled, src = {f["id"]: set(f["via"]) for f in fl}, {r["table"] for r in row_rules(project)}, {}
+    back, ruled, src = {f["id"]: f["back"] for f in fl}, {r["table"] for r in row_rules(project)}, {}
     for _ in range(CAP + 10 * (len(rels) + len(fl) + 1)):
         new: dict[str, dict] = {t: {"rule": {frozenset()}} for t in ruled}
         for f in fl:
@@ -393,10 +415,8 @@ def _sources(project: str) -> tuple[dict[str, dict], list[dict], list[dict]]:
                 new.setdefault(f["from"], {})[("link", f["id"])] = {frozenset({f["id"]})}
         for r in rels:
             d = r["to"]["table"]
-            tags = {g for gs in src.get(d, {}).values() for g in gs}
-            if fl and sorted(r["to"]["columns"]) == sorted(ent.get(d) or [None]):
-                tags = {g for g in tags if not any(r["id"] in away[x] for x in g)}
-            elif tags:
+            tags = {g for gs in src.get(d, {}).values() for g in gs if crosses(back, r["id"], g, r["from"]["table"])}
+            if tags and (not fl or sorted(r["to"]["columns"]) != sorted(ent.get(d) or [None])):
                 tags = {frozenset()}
             if tags:
                 new.setdefault(r["from"]["table"], {})[("rel", r["id"])] = tags
@@ -432,32 +452,35 @@ def unfiltered_outputs(project: str) -> list[str]:
 
 
 def _unfiltered_outputs(project: str) -> list[str]:
-    from abi.semantic import lineage, model, ontology  # not at top: they import the semantic package
+    from abi.semantic import lineage  # not at top: it imports the semantic package
 
     ruled, cols = {r["table"] for r in row_rules(project)}, {r["table"] for r in _file(project).get("columns", [])}
     if not ruled | cols:
         return []
     done, rels, fl = _sources(project)
-    ent = ontology._keys(model._read(project, "model.json"))
     fl = [f for f in fl if f["hops"] is not None and not f["live"] and f["to"] in done]  # the follow links that filter
-    via = {i for f in fl for i in f["via"]}
+    back = {f["id"]: f["back"] for f in fl}
+    pairs = set().union(*back.values())
+    g = lineage.graph(bundle(git.path(project)))
 
     def roots(t: str) -> set[str]:
-        """The ruled tables whose rules filter t: t itself if ruled, and every one its relationships and follow links
-        reach (to T and the tables between, whose rows the follow filter reads), as `conditions` carries filters: one
-        made from a follow link never crosses a relationship of its `via` (onto the target's key) on the way back to t;
-        the link's filter is made anew from T's rows, so the walk beyond it starts afresh."""
+        """The ruled tables whose rules filter t: t itself if ruled, and every one its relationships reach, and a
+        follow link's (T and the tables between, whose rows its filter reads) when its filter reaches t as `conditions`
+        carries it (`crosses` every relationship on the way back to t) and t is the link's F or ML predictions
+        (ml_<id>, ML-5) related to F: any other table built from rows a rule filters stays denied by default, as
+        before follow links. The walk beyond a follow link starts afresh: its filter is made anew from T's rows."""
+        ok = lambda f: t == f["from"] or f"ml:{t[3:]}" in g and t.startswith("ml_") and any(  # noqa: E731
+            r["from"]["table"] == t and r["to"]["table"] == f["from"] for r in rels)
         seen = {(t, frozenset())}
         todo = list(seen)
         while todo:
-            x, past = todo.pop()  # past: the follow links' relationships crossed from t to x
-            todo += (new := {(r["to"]["table"], past | ({r["id"]} & via if sorted(r["to"]["columns"]) == sorted(ent.get(r["to"]["table"]) or [None])
-                                                         else set())) for r in rels if r["from"]["table"] == x} | {
-                (y, frozenset()) for f in fl if f["from"] == x and not past & set(f["via"]) for y in f["on"]}) - seen
+            x, past = todo.pop()  # past: the (relationship, table) crossings from t to x a follow filter may not make
+            todo += (new := {(r["to"]["table"], past | ({(r["id"], x)} & pairs)) for r in rels if r["from"]["table"] == x} | {
+                (y, frozenset()) for f in fl if f["from"] == x and ok(f) and all(
+                    crosses(back, i, frozenset({f["id"]}), z) for i, z in past) for y in f["on"]}) - seen
             seen |= new
         return {x for x, _ in seen} & ruled
 
-    g = lineage.graph(bundle(git.path(project)))
     ups = lambda n: {u.split(":", 1)[1] for u in lineage.reach(g, {n}, "upstream") if u.startswith(("table:", "source:"))}
     return sorted(t for n in g if n.startswith("table:") and (
         (t := n[6:]) not in ruled and set().union(*map(roots, ups(n))) - roots(t) or t not in cols and ups(n) & cols))
@@ -478,10 +501,12 @@ def explain(project: str, user_id: int) -> str:
     lines += [f"-- {t}: only rows whose {fk} is a row of {d} you may see" for t, d, fk in sorted(
         {(r["from"]["table"], r["to"]["table"], ", ".join(r["from"]["columns"])) for r in rels if ("rel", r["id"]) in src.get(r["from"]["table"], ())})]
     # a follow link applies once its `to` table is restricted for the person (`conditions`)
+    blank = _blanks(project, user_id) if fl else None
+    why = lambda f: ("no longer holds" if f["hops"] is None else "crosses a live table" if f["live"]  # noqa: E731
+                     else "reads a table that shows you no rows" if any(map(blank, f["on"])) else None)
     lines += [f"-- {f['from']}: only rows linked by '{f['id']}' ({', '.join(f['via'])}) to a row of {f['to']} you may see"
-              f" ({f['to']} is restricted for you)" if f["hops"] is not None and not f["live"] else
-              f"-- {f['from']}: no rows (link '{f['id']}', which row-level security follows, "
-              f"{'crosses a live table' if f['live'] else 'no longer holds'})"
+              f" ({f['to']} is restricted for you)" if not why(f) else
+              f"-- {f['from']}: no rows (link '{f['id']}', which row-level security follows, {why(f)})"
               for f in sorted(fl, key=lambda f: (f["id"], f["from"])) if ("link", f["id"]) in src.get(f["from"], ())]
     lines += [f"-- {t}: no rows (made from filtered rows; it needs a rule of its own)" for t in unfiltered_outputs(project)]
     return "-- Row-level security (SE-6): every table below is read through these filters\n" + "\n".join(lines) + "\n"

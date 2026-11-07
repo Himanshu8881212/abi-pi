@@ -201,8 +201,9 @@ def _references(conn, project: str, files: dict) -> list[dict]:
     errs = [_err(rel, "$.id", f"The id '{c['id']}' differs from the file name.", f"Set id to '{_id(rel)}' or rename the file.")
             for rel, c in files.items() if _kind(rel) in ("source", "table", "report", "tool", "flow", "agent", "ml") and c["id"] != _id(rel)]
     rids = [r.get("id") for r in (files.get("model/model.json") or {}).get("relationships", [])]
-    errs += [_err("model/model.json", f"$.relationships[{i}].id", f"Two relationships have the id '{x}'.",  # 1.2.6 M3: ontology
-                  "Give each relationship its own id.") for i, x in enumerate(rids) if x in rids[:i]]  # and rls name one by it
+    named = {i for ln in (files.get(ontology.FILE) or {}).get("links", []) if ln.get("rls") == "follow" for i in ln.get("via", [])}
+    errs += [_err("model/model.json", f"$.relationships[{i}].id", f"Two relationships have the id '{x}', which a follow link walks.",
+                  "Give each relationship its own id.") for i, x in enumerate(rids) if x in rids[:i] and x in named]  # 1.2.6 M3
     sources = {_id(rel) for rel in files if _kind(rel) == "source"}  # D-9: a source step names a source file
     raw = _steps(files)
     tables = set(raw) | sources  # each source loads into the table of its name
@@ -573,7 +574,12 @@ def fewer(conn, project: str, old: dict, files: dict) -> str:
         ln = links[i]
         return (f"{names.get(ln['from'], ln['from'])} only when linked by '{i}' to {names.get(ln['to'], ln['to'])} they may see,"
                 f" whenever {names.get(ln['to'], ln['to'])} are restricted for them")
-    out = [f"{who} will see fewer rows: {say(i)}, and only the rows of tables pointing at those." for i in now if i not in was]
+    tables = {x["id"]: x["table"] for x in (files.get(ontology.FILE) or {}).get("objects", [])}
+    ml = lambda i: sorted({r["from"]["table"] for r in (files.get("model/model.json") or {}).get("relationships", [])  # noqa: E731
+                           if r["from"]["table"].startswith("ml_") and r["to"]["table"] == tables.get(links[i]["from"])})
+    out = [f"{who} will see fewer rows: {say(i)}, and only the rows of tables pointing at those"
+           + (f"; ML predictions on them ({', '.join(ml(i))}), denied until now, become readable for those rows." if ml(i) else ".")
+           for i in now if i not in was]
     out += [f"{who} will see different rows (some may see more): '{i}' now means {say(i)}, over changed tables, relationships"
             " or columns." for i in now if i in was and was[i] != now[i]]
     out += [f"{who} will see more rows: no longer {say(i)}." for i in was if i not in now]

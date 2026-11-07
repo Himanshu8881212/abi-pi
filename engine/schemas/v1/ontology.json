@@ -45,7 +45,7 @@
         "via": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"$ref": "#/$defs/id"},
                 "description": "relationship IDs walked from `from`'s table to `to`'s table, each along or against its many-to-one direction"},
         "default": {"type": "boolean", "description": "semantic_query reaches `to`'s table this way when several ways exist"},
-        "rls": {"enum": ["follow"], "description": "row-level security: when the `to` type is restricted for the person, an object of `from` is visible to them only when it links to a visible object of `to` (only a project Owner adds, changes or removes it, or changes the relationships it walks; Editors keep every other relationship)"}}},
+        "rls": {"enum": ["follow"], "description": "row-level security: when the `to` type is restricted for the person, an object of `from` is visible to them only when it links to a visible object of `to` (only a project Owner adds, changes or removes it, or changes the relationships it walks; Editors keep every other relationship; data written into a table it walks changes who sees what)"}}},
     "action": {"type": "object", "required": ["id", "object", "name"], "additionalProperties": false,
       "anyOf": [{"required": ["writes"]}, {"required": ["flow"]}],
       "properties": {
