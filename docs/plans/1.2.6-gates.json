@@ -177,5 +177,16 @@
    "tests/test_optimizers.py::test_opt_rls_scope",
    "tests/test_optimizers.py::test_opt_schema_and_bundle"
   ]
+ },
+ "C1": {
+  "items": "cleanup: the 13 audit cuts, owner-approved 7 Nov 2026",
+  "tests": [
+   "tests/test_ground.py",
+   "tests/test_guardrails.py",
+   "tests/test_engine.py",
+   "tests/test_layout.py",
+   "tests/test_upgrade_schema.py::test_a_1_0_database_upgrades_to_this_schema"
+  ],
+  "note": "net about -1,580 lines and -2 runtime deps; behaviour unchanged; one grounding module shared by engine and harness; the 1.0/1.1 upgrade path proven by test"
  }
 }
