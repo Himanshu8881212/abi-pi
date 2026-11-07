@@ -42,7 +42,6 @@ totals: [[dimension, ...]]}. Semantics are the ones the golden suite fixes (work
   table, query copy or shared partials there, and one such link per context. One route per table: two are refused.
 """
 
-import contextlib
 import json
 import re
 from dataclasses import dataclass, replace
@@ -194,14 +193,22 @@ def route(model: dict, fact: str, table: str, m: str = "", dim: str = "", links:
         except PlanError as e:
             ways = []  # the links to `table` from a table this fact reaches
             for x in links:
-                with contextlib.suppress(PlanError):
+                try:
                     ways += [x] if x["to"] == table and (x["from"] == fact or path(model, fact, x["from"])) else []
+                except PlanError:
+                    pass
+            if len(defaults := [x["id"] for x in ways if x["default"]]) > 1:
+                raise PlanError(f"{e} Links {' and '.join(defaults)} are each a default way there; name one: add links: "
+                                f"[{defaults[0]}].") from None
             if not (ln := next((x for x in ways if x["default"]), None)):
                 if ways:
                     raise PlanError(f"{e} Or follow a link: add links: [{ways[0]['id']}]"
                                     f" ({', '.join(x['id'] for x in ways)} reach '{table}').") from None
                 raise
-    pre = [] if ln["from"] == fact else [(r, True) for r in path(model, fact, ln["from"], m, dim)]
+    try:
+        pre = [] if ln["from"] == fact else [(r, True) for r in path(model, fact, ln["from"], m, dim)]
+    except PlanError as e:
+        raise PlanError(f"Following link '{ln['id']}': {e}") from None
     seen = [fact, *(r["to"]["table"] for r, _ in pre)]
     for r, along in ln["hops"]:
         if (t := r["to" if along else "from"]["table"]) in seen:
@@ -503,9 +510,18 @@ def _aggregate(c: Ctx, aggs: dict, m: str, dims: list, sets: list, totals: bool,
     # shortest path's prefix is the shortest path to that table, and `path` refuses two. D-8 checks run with or without a copy.
     # 1.2.6 M5: a route from a link may disagree (refused: ask two queries); from its first hop against a relationship's
     # direction on, it is `wide`: {target table: those hops}, joined as distinct pairs (`_wide`)
-    rels, wide = {}, {}
+    rels, wide, followed = {}, {}, set()
+    for x in sorted(c.ignored):  # IGNORE across many-to-many is a total in disguise (its members overlap)
+        try:
+            far = _col(x).table != c.fact and not all(a for _, a in route(model, c.fact, _col(x).table, m, x, links)[0])
+        except PlanError:
+            far = False
+        if far:
+            raise PlanError(f"Measure '{m}' ignores {x}, which it reaches through a many-to-many link: its members"
+                            " overlap, so a total across them doesn't add up.")
     for t, d in need.items():
         hops, ln = route(model, c.fact, t, m, d, links)
+        followed.add(ln)
         i = next((i for i, (_, along) in enumerate(hops) if not along), len(hops))
         for r, _ in hops[:i]:
             if rels.setdefault(r["to"]["table"], r) != r:
@@ -513,21 +529,30 @@ def _aggregate(c: Ctx, aggs: dict, m: str, dims: list, sets: list, totals: bool,
                                 " the model's); a query reaches a table one way only, so ask two queries.")
         if hops[i:]:
             wide[t] = (hops[i:], ln)
-    dated = route(model, c.fact, dt["table"], m, time_dims[0], links)[0] if time_dims else []
+    dated, dln = route(model, c.fact, dt["table"], m, time_dims[0], links) if time_dims else ([], None)
+    followed.add(dln)
     if wide or not all(a for _, a in dated):
         on = [x for hops, _ in wide.values() for r, a in hops for x in [r["to" if a else "from"]["table"]]]
-        ln = next(iter(wide.values()))[1] if wide else route(model, c.fact, dt["table"], m, time_dims[0], links)[1]
+        ln = next(iter(wide.values()))[1] if wide else dln
+        loose = sorted({x for fs in fsets for f in fs for x in _cols(f) if _col(x).table in wide} - {d for _, d in kept})
+        first = [r for hops, _ in wide.values() for r in [hops[0][0]]]
         why = ("totals across it are refused: its members overlap, so they don't add up; ask without totals" if totals else
                f"time intelligence ({fn}) can't run across it" if c.time else
                f"it reads the live ClickHouse table '{next(t for t in [c.fact, *on] if t in live)}'; many-to-many reads loaded tables"
                if {c.fact, *on} & set(live) else
                "a measure can follow one many-to-many link at a time; ask two queries" if len(wide) > 1 else
                f"it reaches table '{next(t for t in on if t in rels or t == c.fact)}' a second way; ask two queries"
-               if {*on} & {*rels, c.fact} else None)
+               if {*on} & {*rels, c.fact} else
+               f"it filters on {loose[0]} without grouping by it (a member would count once per value); group by it too,"
+               " or filter on a column you group by" if loose else
+               "its first step goes back along a relationship onto a date; follow it from the other side"
+               if any((r["from"]["table"], x) in days or r["to"]["table"] == dt.get("table") for r in first
+                      for x in r["from"]["columns"]) else None)
         if why:
             raise PlanError(f"Measure '{m}' follows the many-to-many link '{ln}', and {why}.")
     joins += [*rels.values(), *(r for r, _ in dated), *(r for hops, _ in wide.values() for r, _ in hops)]
-    copy, lake = (None, False) if wide else (copy, lake)  # its own read: no query copy, no shared partials
+    # its own read: no query copy (its columns are the model's paths, not the link's), no shared partials
+    copy, lake = (None, False) if wide or followed - {None} else (copy, lake)
     wanted = {d for _, d in kept if d not in time_dims} | {x for fs in fsets for f in fs for x in _cols(f)}
     # S-09-fix-5: DISTINCT_COUNTs of one column, grouped and filtered by year/month (or that column) only, read its
     # distinct-pair table. Its rows are distinct, so when every grouping keeps all its date columns, COUNT is exact.

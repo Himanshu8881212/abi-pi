@@ -61,11 +61,14 @@ def _query(project: str, r: dict, p: dict, v: dict, interaction: list[dict]) -> 
     trees = mel.compile({m["id"]: m["expression"] for m in model._read(project, "measures.json").get("measures", [])})
     facts = {n.col.table for m in v["query"]["measures"] for n in mel._walk(trees.get(m)) if isinstance(n, mel.Agg)}
     mj = model._read(project, "model.json")
+    try:  # 1.2.6 M5: by the path rule, the visual's links too; a link that doesn't hold refuses the visual anyway
+        links = planner.links(mj, model._read(project, "ontology.json"), v["query"].get("links"))
+    except planner.PlanError:
+        links = []
 
     def reach(f: dict) -> bool:
         t = f["column"].split(".", 1)[0]
-        try:  # 1.2.6 M5: by the path rule, the visual's links too
-            links = planner.links(mj, model._read(project, "ontology.json"), v["query"].get("links"))
+        try:
             return all(t == x or planner.route(mj, x, t, links=links) for x in facts)
         except planner.PlanError:
             return False

@@ -83,7 +83,7 @@ def _refused(name: str, payload: dict, allowed: list[str], files: dict, g: dict,
         q = (files.get(f"tools/{name}.json") or {}).get("query")
     # the request's page/visual; render_snapshot checks what is drawn again (`_call` sets builtin.SCOPE)
     snap = _snapshot(files, payload if name == "report_snapshot" else payload.get("report"))
-    if out := list(dict.fromkeys(x for r in [q if isinstance(q, dict) else {}, snap] for x in studio.outside(r, measures, tables, g))):
+    if out := list(dict.fromkeys(x for r in [q if isinstance(q, dict) else {}, snap] for x in studio.outside(r, measures, tables, g, files))):
         return f"Outside your scope: {', '.join(out)}."
     if name in ("refresh", "propose_edit") and payload.get("table") not in tables:
         return f"Table '{payload.get('table')}' is outside your scope."

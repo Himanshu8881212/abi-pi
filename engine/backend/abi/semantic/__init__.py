@@ -675,7 +675,7 @@ def semantic_query(conn, user: User, args: QueryInput) -> dict:
     if args.model:
         from abi.semantic import model  # not at top: model imports this package
 
-        ms, cols = uses(exprs)  # what the expressions read counts too
+        ms, cols = uses(exprs)  # what the expressions read counts too; a link's bridge is a join, shared as all joins are
         model.in_scope(args.project, args.model, [*dict.fromkeys(q["measures"] + ms)],
                        [*dict.fromkeys(q["dimensions"] + [f["column"] for f in q["filters"]] + cols)])
     return query(args.project, q, user.id, exprs, timeout=TIMEOUT)

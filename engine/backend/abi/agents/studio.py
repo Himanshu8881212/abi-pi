@@ -15,7 +15,7 @@ from abi.actions import ActionFailed, action
 from abi.project import ID, SCHEMA, git, imports
 from abi.project.bundle import bundle, loads
 from abi.security import Role, User
-from abi.semantic import lineage, model
+from abi.semantic import lineage, model, planner
 from abi.tools import AGENT_ACTION_TOOLS, saved
 
 BUILTIN = ("semantic_query", "report_snapshot", *AGENT_ACTION_TOOLS)  # every tool an agent may hold besides custom tools
@@ -42,13 +42,32 @@ def scope(a: dict, files: dict, g: dict) -> tuple[set[str], set[str]]:
     return set(s.get("measures", [])) | {n[8:] for n in up if n.startswith("measure:")}, set(s.get("tables", [])).union(*map(_tables, qs))
 
 
-def outside(q: dict, measures: set[str], tables: set[str], g: dict) -> list[str]:
+def _bridged(q: dict, files: dict) -> set[str]:
+    """1.2.6 M5: the tables a query reads across a link (named, or a default one): both sides of each route's hops from
+    its first one against a relationship's direction on (`planner.route`). None without links: as before 1.2.6."""
+    m, out = files.get("model/model.json") or {}, set()
+    try:
+        links = planner.links(m, files.get("model/ontology.json"), q.get("links"))
+    except planner.PlanError:  # the query is refused anyway
+        return out
+    for f in lineage._facts(files, q.get("measures", [])) if links else ():
+        for t in _tables(q) - {f}:
+            try:
+                hops = planner.route(m, f, t, links=links)[0]
+            except planner.PlanError:
+                continue
+            i = next((i for i, (_, along) in enumerate(hops) if not along), len(hops))
+            out |= {r[s]["table"] for r, _ in hops[i:] for s in ("from", "to")}
+    return out
+
+
+def outside(q: dict, measures: set[str], tables: set[str], g: dict, files: dict | None = None) -> list[str]:
     """D-24: what a semantic query reads outside a scope: its measures and every measure they use in MEL (the lineage
-    walk), then its dimension and filter tables. A measure's own columns come with it (§7.2: agent → tools → semantic
-    queries → measures → tables)."""
+    walk), then its dimension and filter tables, and (`files`, 1.2.6 M5) the tables it reads across a link. A
+    measure's own columns come with it (§7.2: agent → tools → semantic queries → measures → tables)."""
     ms = set(q.get("measures", []))
     ms |= {n[8:] for n in lineage.reach(g, {f"measure:{m}" for m in ms}, "upstream") if n.startswith("measure:")}
-    return sorted(ms - measures) + sorted(_tables(q) - tables)
+    return sorted(ms - measures) + sorted((_tables(q) | (_bridged(q, files) if files else set())) - tables)
 
 
 def tools_outside(a: dict, files: dict) -> dict[str, list[str]]:
@@ -56,7 +75,7 @@ def tools_outside(a: dict, files: dict) -> dict[str, list[str]]:
     g = lineage.graph(files)
     measures, tables = scope(a, files, g)
     return {t: out for t in a["tools"] if (tool := files.get(f"tools/{t}.json"))
-            and (out := outside(tool.get("query") or {}, measures, tables, g))}
+            and (out := outside(tool.get("query") or {}, measures, tables, g, files))}
 
 
 def references(rel: str, a: dict, files: dict, old: dict) -> list[dict]:

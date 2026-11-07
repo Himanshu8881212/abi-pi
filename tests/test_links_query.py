@@ -40,6 +40,83 @@ a = json.loads(sys.stdin.read())
 print(json.dumps(semantic._plan(a["project"], a["q"], a.get("uid"))[1]))
 """
 
+SHARED = r"""
+import json, sys
+from abi import semantic
+a = json.loads(sys.stdin.read())
+made = {}
+out = semantic.plan(a["project"], a["q"], a["uid"], [], True, made)[1]
+print(json.dumps({"sql": out, "shared": sorted(made)}))
+"""
+SCOPE = r"""
+import json, sys
+from abi.agents import runs
+from abi.project import bundle, git
+from abi.semantic import lineage
+a = json.loads(sys.stdin.read())
+files = bundle.bundle(git.path(a["project"]))
+print(json.dumps([runs._refused("semantic_query", q, ["semantic_query"], files, lineage.graph(files), {"cust_count"},
+                                {"customers", "cafes"}, []) for q in a["queries"]]))
+"""
+
+# a pure planner model (no data): orders -> customers -> cafes (a home café), orders -> cafes, orders.ordered_at -> calendar
+R = lambda f, fc, t, tc: {"id": f"{f}-{fc}", "from": {"table": f, "columns": [fc]}, "to": {"table": t, "columns": [tc]}}  # noqa: E731
+MODEL = {"tables": [{"table": t} for t in ("orders", "customers", "cafes", "calendar")],
+         "entities": [{"id": t, "table": t, "key": [k]} for t, k in
+                      (("orders", "order_id"), ("customers", "customer_id"), ("cafes", "cafe_id"), ("calendar", "day"))],
+         "relationships": [R("orders", "customer_id", "customers", "customer_id"), R("orders", "cafe_id", "cafes", "cafe_id"),
+                           R("customers", "home_cafe", "cafes", "cafe_id"), R("orders", "ordered_at", "calendar", "day")],
+         "date_table": {"table": "calendar", "column": "day"}}
+PURE_ONTO = {"objects": [{"id": i, "table": t} for i, t in (("order", "orders"), ("customer", "customers"), ("cafe", "cafes"), ("day", "calendar"))],
+             "links": [{"id": i, "from": f, "to": t, "via": v} for i, f, t, v in (
+                 ("visited", "customer", "cafe", ["orders-customer_id", "orders-cafe_id"]),
+                 ("home", "order", "cafe", ["orders-customer_id", "customers-home_cafe"]),
+                 ("active", "customer", "day", ["orders-customer_id", "orders-ordered_at"]),
+                 ("active2", "customer", "day", ["orders-customer_id", "orders-ordered_at"]),
+                 ("seen", "day", "customer", ["orders-ordered_at", "orders-customer_id"]))]}
+PURE_MEASURES = {"revenue": "SUM(orders.revenue)", "custs": "COUNT(customers.customer_id)", "custs_ytd": "YTD([custs])",
+                 "share": "DIVIDE([custs], IGNORE([custs], cafes.region))", "days": "COUNT(calendar.day)"}
+REGION = {"measures": ["custs"], "dimensions": ["cafes.region"], "links": ["visited"]}
+YEAR = {"measures": ["custs"], "dimensions": ["calendar.year"]}  # customers reach no date but through a link
+COPY = {"orders": ["orders__c", ["cafes.region"]]}
+CASES = {  # name: (query and options, what the answer holds, what it must not)
+    "time": ({"q": {"measures": ["custs_ytd"], "dimensions": ["calendar.year"], "links": ["active"]}}, "refused: ", "time intelligence (YTD)"),
+    "live_fact": ({"q": REGION, "live": {"customers": {"customer_id": "INTEGER"}}}, "refused: ", "live ClickHouse table 'customers'"),
+    "live_bridge": ({"q": REGION, "live": {"orders": {"customer_id": "INTEGER"}}}, "refused: ", "live ClickHouse table 'orders'"),
+    "two_m2m": ({"q": {**REGION, "dimensions": ["cafes.region", "calendar.year"], "links": ["visited", "active"]}}, "refused: ",
+                "one many-to-many link at a time"),
+    "second_way": ({"q": {**REGION, "measures": ["revenue"]}}, "refused: ", "reaches table 'orders' a second way"),
+    "totals": ({"q": {**REGION, "totals": [[]]}}, "refused: ", "totals across it are refused"),
+    "far_filter": ({"q": {**REGION, "filters": [{"column": "cafes.format", "op": "in", "value": ["campus", "kiosk"]}]}}, "refused: ",
+                   "filters on cafes.format without grouping by it"),
+    "grouped_filter": ({"q": {**REGION, "filters": [{"column": "cafes.region", "op": "in", "value": ["North"]}]}}, "sql: ",
+                       'SELECT DISTINCT "orders"."customer_id" AS "__k0", "cafes"."region" FROM "orders" JOIN "cafes"'),
+    "copy_no_link": ({"q": {"measures": ["revenue"], "dimensions": ["cafes.region"]}, "copies": COPY}, "sql: ", '"orders__c"'),
+    "copy_link": ({"q": {"measures": ["revenue"], "dimensions": ["cafes.region"], "links": ["home"]}, "copies": COPY}, "sql: ",
+                  '"cafes"."cafe_id" = "customers"."home_cafe"'),
+    "two_defaults": ({"q": YEAR, "defaults": ["active", "active2"]}, "refused: ", "active and active2"),
+    "one_default": ({"q": YEAR, "defaults": ["active"]}, "sql: ", "SELECT DISTINCT"),
+    "ignore": ({"q": {**REGION, "measures": ["share"]}}, "refused: ", "ignores cafes.region"),
+    "date_first": ({"q": {"measures": ["days"], "dimensions": ["customers.segment"], "links": ["seen"]}}, "refused: ", "onto a date"),
+    "unreachable": ({"q": {**REGION, "measures": ["revenue", "custs"], "links": ["home"]}}, "refused: ", "Following link 'home'"),
+}
+PURE = r"""
+import json, sys
+from abi.semantic import planner
+a, out = json.loads(sys.stdin.read()), {}
+for name, c in a["cases"].items():
+    o = json.loads(json.dumps(a["onto"]))
+    for ln in o["links"]:
+        ln["default"] = ln["id"] in c.get("defaults", [])
+    copies = {f: (n, set(cols), {}) for f, (n, cols) in c.get("copies", {}).items()}
+    live = {t: (f'"db"."{t}"', ty) for t, ty in c.get("live", {}).items()}
+    try:
+        out[name] = "sql: " + planner.plan(c["q"], a["measures"], a["model"], copies, live, ontology=o)
+    except planner.PlanError as e:
+        out[name] = f"refused: {e}"
+print(json.dumps(out))
+"""
+
 
 def sql(q: str) -> list:
     return abi.call("sql_query", project=P, sql=q)["rows"]
@@ -54,7 +131,7 @@ def refused(status: int, token: str | None = None, **q) -> str:
     with pytest.raises(abi.ActionError) as e:
         ask(token, **q)
     assert e.value.status == status, e.value.body
-    return e.value.body["message"]
+    return e.value.body.get("message") or json.dumps(e.value.body)
 
 
 def planned(q: dict) -> str:
@@ -104,6 +181,23 @@ def two_dates(default: str | None = None):
     finally:
         sure("save_ontology", project=P, ontology=ONTO)
         sure("remove_relationship", project=P, id=by["ordered_at"])
+
+
+@pytest.fixture(scope="module")
+def pure():
+    r = engine(PURE, timeout=120, stdin=json.dumps({"cases": {k: c for k, (c, _, _) in CASES.items()}, "model": MODEL,
+                                                    "onto": PURE_ONTO, "measures": PURE_MEASURES}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    return json.loads(r.stdout.splitlines()[-1])
+
+
+@pytest.mark.parametrize("case", sorted(CASES))
+def test_planner_link_cases(pure, case):
+    """planner.plan alone, on a small model: each many-to-many refusal, a far-side filter, a query copy beside a link."""
+    _, start, holds = CASES[case]
+    assert pure[case].startswith(start) and holds in pure[case], pure[case]
+    if case == "copy_link":
+        assert "orders__c" not in pure[case] and '"orders"."cafe_id"' not in pure[case], pure[case]  # the link's café
 
 
 # ---------- #18: no links, no change ----------
@@ -210,3 +304,82 @@ def test_m2m_restricted_equals_unrestricted_on_visible(lq):
     [(visitors,)] = sql("SELECT count(DISTINCT o.customer_id) FROM orders o JOIN cafes c USING (cafe_id)"
                         " WHERE c.region = 'North'")
     assert seen["North"] == visitors and all(r[1] == 0 for r in mine if r[0] is None), mine
+
+
+def test_m2m_far_filter_counts_once(lq):
+    """A filter on the far table: on a grouped column the pairs hold, refused on any other (it would count a customer
+    once per value)."""
+    q = {**BY_VISITED, "filters": [{"column": "cafes.region", "op": "in", "value": ["North", "South"]}]}
+    got = {r[0]: r[1] for r in ask(**q)["rows"]}
+    ref = dict(map(tuple, sql("SELECT c.region, count(DISTINCT o.customer_id) FROM orders o JOIN cafes c USING (cafe_id)"
+                              " WHERE o.customer_id IS NOT NULL AND c.region IN ('North', 'South') GROUP BY 1")))
+    assert got == ref, (got, ref)
+    assert '"orders"."customer_id" AS "__k0", "cafes"."region" FROM' in planned(q)
+    fmt = sql("SELECT DISTINCT format FROM cafes ORDER BY 1")
+    msg = refused(400, **{**BY_VISITED, "filters": [{"column": "cafes.format", "op": "in", "value": [r[0] for r in fmt]}]})
+    assert "cafes.format without grouping by it" in msg, msg
+
+
+def test_m2m_invalid_link_id_422(lq):
+    assert refused(422, **{**BY_VISITED, "links": ["Not An Id"]}) == "Invalid input."  # the ID pattern, before planning
+
+
+def test_m2m_restricted_without_follow(lq):
+    """No rule on the fact (customers) nor on the bridge (orders), one on the target (cafes): the Viewer's North is the
+    owner's, and customers with no North visit are in the empty member, as the owner's sql_query counts them."""
+    o = json.loads(json.dumps(ONTO))
+    o["links"][2].pop("rls")
+    sure("save_ontology", project=P, ontology=o)
+    try:
+        mine = {r[0]: r[1] for r in ask(lq["token"], **BY_VISITED)["rows"]}
+        owner = {r[0]: r[1] for r in ask(**BY_VISITED)["rows"]}
+        [(rest,)] = sql("SELECT count(*) FROM customers WHERE customer_id NOT IN (SELECT o.customer_id FROM orders o JOIN"
+                        " cafes c USING (cafe_id) WHERE c.region = 'North' AND o.customer_id IS NOT NULL)")
+        assert mine == {"North": owner["North"], None: rest}, (mine, owner, rest)
+    finally:
+        sure("save_ontology", project=P, ontology=ONTO)
+
+
+def test_m2m_restricted_reads_no_shared_partials(lq):
+    run = lambda q: json.loads(engine(SHARED, timeout=120, stdin=json.dumps({"project": P, "q": q, "uid": lq["uid"]})).stdout.splitlines()[-1])  # noqa: E731
+    m2m = run(BY_VISITED)
+    assert m2m["shared"] == [] and "__lake" not in m2m["sql"] and "SELECT DISTINCT" in m2m["sql"], m2m
+    plain = run({"measures": ["revenue"], "dimensions": ["cafes.city"]})
+    assert plain["shared"], plain  # the same Viewer's read without a link does share partials
+
+
+def test_scoped_agent_refused_across_link(lq):
+    """D-24: an agent scoped to customers and cafés doesn't read orders through `visited`, named or default."""
+    o = json.loads(json.dumps(ONTO))
+    o["links"][2]["default"] = True
+    plain = {"measures": ["cust_count"], "dimensions": ["customers.segment"]}
+    r = engine(SCOPE, timeout=120, stdin=json.dumps({"project": P, "queries": [BY_VISITED, plain]}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert json.loads(r.stdout.splitlines()[-1]) == ["Outside your scope: orders.", None]
+    sure("save_ontology", project=P, ontology=o)
+    try:
+        r = engine(SCOPE, timeout=120, stdin=json.dumps({"project": P, "queries": [{**BY_VISITED, "links": []}]}))
+        assert json.loads(r.stdout.splitlines()[-1]) == ["Outside your scope: orders."], r.stdout
+    finally:
+        sure("save_ontology", project=P, ontology=ONTO)
+
+
+def test_m2m_restricted_link_choices_cached_apart(lq):
+    """Customers by year through two links (when they signed up, the years they ordered): different rows, each its own
+    cache entry for the Viewer. Last: the signup relationship extends the calendar."""
+    abi.call("add_relationship", project=P, **{"from": "customers.signup_date", "to": "calendar.day"})
+    rels = abi.call("semantic_model", project=P, all=True)["relationships"]
+    dated = next(r["id"] for r in rels if r["from"] == {"table": "orders", "columns": ["order_date"]})
+    o = json.loads(json.dumps(ONTO))
+    o["objects"].append({"id": "day", "table": "calendar", "name": "Day", "plural": "Days", "title": "day"})
+    o["links"] += [{"id": "signed", "from": "customer", "to": "day", "name": "signed up", "via": ["customers-signup_date"]},
+                   {"id": "active", "from": "customer", "to": "day", "name": "ordered", "via": ["orders-customer_id", dated]}]
+    try:
+        sure("save_ontology", project=P, ontology=o)
+        q = {"measures": ["cust_count"], "dimensions": ["calendar.year"]}
+        a, b = (ask(lq["token"], **q, links=[x])["rows"] for x in ("signed", "active"))
+        assert a and b and a != b, (a, b)
+        assert ask(lq["token"], **q, links=["signed"])["rows"] == a and ask(lq["token"], **q, links=["active"])["rows"] == b
+    finally:
+        sure("save_ontology", project=P, ontology=ONTO)
+        sure("remove_relationship", project=P, id="customers-signup_date")

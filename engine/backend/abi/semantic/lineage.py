@@ -109,7 +109,7 @@ def _joins(files: dict, node: str, measures: list, tables: set, named: list = ()
                 rels, link = planner.route(model, f, t, links=links)
             except planner.PlanError:
                 continue
-            if link:
+            if link and link not in named:  # a named one has its edge from `_query`
                 yield node, f"link:{link}", "join"
             for r, _ in rels:
                 yield node, f"relationship:{r['id']}", "join"
