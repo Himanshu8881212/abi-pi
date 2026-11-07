@@ -147,7 +147,10 @@ def objects(project: str, folder: str) -> list[dict]:
 
 
 def write(project: str, objs: dict) -> None:
-    """PC-4: writes {rel: object} files that `check` passed, in canonical form."""
+    """PC-4: writes {rel: object} files that `check` passed, in canonical form. 1.2.6 M4: a change to what an
+    Owner-granted action type does (its flow, or an agent, tool or report that flow uses) is the Owner's, confirmed."""
+    if (ask := grant_check(project, objs)) and not actions.confirmed():  # a caller's confirmation already named it
+        require_confirmation(*ask)
     for rel, obj in objs.items():
         p = git.path(project) / rel
         p.parent.mkdir(exist_ok=True)
@@ -566,9 +569,42 @@ def grants(files: dict) -> dict[str, dict]:
     for a in o.get("actions", []):
         follow = (a.get("writes") or {}).get("table") in walked
         if a.get("role") == "viewer" or a.get("flow") or follow:  # with what its flow does (its file, but for `enabled`)
-            flow = {k: v for k, v in (files.get(f"flows/{a['flow']}.json") or {}).items() if k != "enabled"} if a.get("flow") else None
-            out[a["id"]] = {"action": a, "follow": follow, "flow": flow}
+            out[a["id"]] = {"action": a, "follow": follow, "flow": _used(files, a["flow"]) if a.get("flow") else None}
     return out
+
+
+def _used(files: dict, flow: str) -> dict:
+    """The definitions flow `flow` runs (agents and their tools, tools, reports), less what never changes what they do
+    (`enabled`, `description`, `sharing`): part of what an Owner grants with an action type starting it."""
+    f, rels = files.get(f"flows/{flow}.json") or {}, []
+    for s in f.get("steps", []):
+        i = s.get("input") or {}
+        for kind, key in (("agents", "agent"), ("tools", "tool"), ("reports", "report")):
+            if x := s.get(key) or i.get(key):
+                rels.append(f"{kind}/{x}.json")
+                if kind == "agents":
+                    rels += [f"tools/{t}.json" for t in (files.get(f"agents/{x}.json") or {}).get("tools", [])]
+    rels = [r for r in [f"flows/{flow}.json", *rels] if r in files] + [r[:-5] + ".py" for r in rels if r[:-5] + ".py" in files]
+    return {r: {k: v for k, v in files[r].items() if k not in ("enabled", "description", "sharing")} if isinstance(files[r], dict)
+            else files[r] for r in rels}
+
+
+def grant_check(project: str, objs: dict) -> tuple[str, dict] | None:
+    """(why, preview) of writing `objs` when it changes an Owner-granted action type (`granted`), after refusing (403)
+    anyone but an Owner; None when it changes none, or no person's action writes (a system write)."""
+    user = actions._call.get((None,))[0]
+    if user is None or not (git.path(project) / ontology.FILE).is_file():
+        return None
+    old = bundle.bundle(git.path(project))
+    if not (g := granted(old, old | objs)):
+        return None
+    from abi import db  # noqa: PLC0415
+
+    with db.connect() as conn:
+        if (role_in(conn, user, project) or 0) < Role.owner:
+            raise ActionFailed(403, f"Only a project Owner may change what action type(s) {', '.join(sorted(g))} do (the flow they"
+                                    " start, or an agent, tool or report it runs); nothing changed.")
+    return granting(project, old | objs, g), {"grants": g}
 
 
 def granted(old: dict, files: dict) -> dict[str, dict]:
@@ -586,7 +622,8 @@ def granting(project: str, files: dict, g: dict) -> str:
     for i, x in sorted(g.items()):
         a, w = x["action"], x["action"].get("writes")
         does = ([f"write {', '.join(w['set'])} of table {w['table']}"] if w else []) + (
-            [f"start flow '{a['flow']}' (its steps run as the flow's owner)"] if a.get("flow") else [])
+            [f"start flow '{a['flow']}' (its steps run as the flow's owner; the typed inputs reach what it sends,"
+             " posts or remembers as that owner)"] if a.get("flow") else [])
         say = (f"Action type '{i}' lets {a.get('role', 'editor').capitalize()}s of project '{project}' {' and '.join(does)} on"
                f" {names.get(a['object'], a['object'])}" + ", each run confirmed" * bool(a.get("confirm"))
                + ", as a proposal an Editor approves" * bool(a.get("approval")) + ".")

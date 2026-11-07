@@ -229,8 +229,10 @@ def publish_tool(conn, user: User, args: ToolRef) -> dict:
         if role_in(conn, user, args.project) != Role.owner:
             raise ActionFailed(403, f"Publishing API tool '{args.tool}' needs the owner role in project '{args.project}'.")
         host = urlsplit(t["request"]["url"]).hostname
+        ask = imports.grant_check(args.project, {f"tools/{t['id']}.json": {**t, "status": "published", "version": t["version"] + 1}})
         require_confirmation(f"Publishing tool '{args.tool}' lets everyone with the {t['permissions']['role']} role send"
-                             f" requests to the outside host '{host}' through it.", {"host": host} | imports.api_shape(t))
+                             f" requests to the outside host '{host}' through it." + (f" {ask[0]}" if ask else ""),
+                             {"host": host} | imports.api_shape(t) | (ask[1] if ask else {}))
         conn.execute("INSERT INTO send_targets VALUES (%s, %s) ON CONFLICT DO NOTHING", [args.project, "api:" + host])
     if not t["tests"]:
         raise ActionFailed(400, f"Tool '{args.tool}' has no tests; add at least one with save_tool.")

@@ -200,6 +200,16 @@ class Queued(Exception):  # noqa: N818  start(keep=True): the run row is in, its
         self.run = run
 
 
+def _fill(name: str, payload: dict, data: dict) -> dict:
+    """A step's input filled from earlier outputs (`resolve`); an agent's question (`prompt`, or its alias `question`) in
+    a run an object action started through `_prompt`."""
+    keys = [k for k in ("prompt", "question") if isinstance(payload.get(k), str)] \
+        if name == "run_agent" and "action" in (data.get("trigger") or {}) else []
+    raw = {k: payload[k] for k in keys}
+    out = resolve({k: v for k, v in payload.items() if k not in keys}, data, _cap if name == "run_agent" else None)
+    return out | {k: _prompt(v, data) for k, v in raw.items()}
+
+
 def _prompt(text: str, data: dict) -> str:
     """§5.3: an agent step's prompt in a run an object action started: {{ data.trigger.* }} (the object, a person's typed
     inputs) goes in as a JSON-quoted, delimited data block, never as instructions; the rest as `resolve` puts it. One
@@ -327,11 +337,7 @@ def _step(run_id: str, pos: int, step: dict, project: str, owner: User, data: di
                              else f"action '{name}' is not available yet")
         payload = {k: v for k, v in step.items() if k not in ("id", "type", "action", "after", "when", "choices")}
         payload = (payload.get("input", {}) if step["type"] == "action" else payload) | {"project": project}
-        quoted = name == "run_agent" and "action" in (data.get("trigger") or {}) and isinstance(payload.get("prompt"), str)
-        prompt = payload.pop("prompt") if quoted else None
-        text, payload = payload.get("text"), resolve(payload, data, _cap if name == "run_agent" else None)
-        if quoted:
-            payload["prompt"] = _prompt(prompt, data)
+        text, payload = payload.get("text"), _fill(name, payload, data)
         if choices := step.get("choices"):  # FLOW-DAG.3: the verdict is a word from the flow file (principle 7)
             payload["prompt"] = f"{payload['prompt']}\n\nStart your answer with exactly one of these words: {', '.join(choices)}."
         try:
@@ -715,11 +721,8 @@ def _save(conn, user: User, project: str, f: dict) -> dict:
     old = bundle(git.path(project))
     imports.check(conn, project, old | {rel: f})
     why = []
-    if g := imports.granted(old, old | {rel: f}):  # 1.2.6 M4: the flow of an action type the Owner granted
-        if (role_in(conn, user, project) or 0) < Role.owner:
-            raise ActionFailed(403, f"Only a project Owner may change flow '{f['id']}': action type(s) {', '.join(sorted(g))} start it"
-                                    " for others; nothing changed.")
-        why.append(imports.granting(project, old | {rel: f}, g))
+    if ask := imports.grant_check(project, {rel: f}):  # 1.2.6 M4: the flow of an action type the Owner granted
+        why.append(ask[0])
     if f["enabled"] and not (old.get(rel) or {}).get("enabled"):
         why.append(enabling(f))
         enabled_now(conn, project, f["id"])
@@ -730,7 +733,7 @@ def _save(conn, user: User, project: str, f: dict) -> dict:
         for t in targets:
             conn.execute("INSERT INTO send_targets VALUES (%s, %s) ON CONFLICT DO NOTHING", [project, t])
     if why:
-        require_confirmation(" ".join(why), {"grants": g} if g else None)  # one token for every reason
+        require_confirmation(" ".join(why), ask and ask[1])  # one token for every reason
     if (old.get(rel) or {}).get("trigger") != f["trigger"]:  # a new check (also a deleted flow's ID again) starts as never checked
         conn.execute("UPDATE flow_conditions SET holds = false, fired = NULL, since = now() WHERE project = %s AND flow = %s",
                      [project, f["id"]])
@@ -931,12 +934,21 @@ class Runs(storage.ProjectRef):
 @action(Role.viewer)
 def flow_runs(conn, user: User, args: Runs) -> dict:
     """Run history, newest first, with each step's trace: status, input, output, error and timings, and the run's LLM `tokens`. With `run`, only that run: it has ended when its status is ok, failed, stopped or rejected (queued: waiting for the worker or a retry; waiting: for an approval)."""
-    runs = conn.execute("SELECT id, flow, status, error, created, finished FROM flow_runs WHERE project = %s AND flow = coalesce(%s, flow)"
-                        " AND id = coalesce(%s, id) ORDER BY created DESC, id LIMIT %s", [args.project, args.flow, args.run, args.limit]).fetchall()
+    runs = conn.execute("SELECT id, flow, status, error, created, finished, started_by, trigger ? 'action' AS acted FROM flow_runs"
+                        " WHERE project = %s AND flow = coalesce(%s, flow) AND id = coalesce(%s, id) ORDER BY created DESC, id LIMIT %s",
+                        [args.project, args.flow, args.run, args.limit]).fetchall()
+    # 1.2.6 M4: an object action's run carries its runner's typed inputs: theirs, and Editors' and Owners', only
+    editor = (role_in(conn, user, args.project) or 0) >= Role.editor
+    typed = set()
+    for r in runs:
+        if r.pop("acted") and r.pop("started_by") != user.id and not editor:
+            typed.add(r["id"])
+        r.pop("started_by", None)
     ids = [r["id"] for r in runs]
     steps = conn.execute("SELECT run_id, step, status, input, output, error, started, finished FROM flow_steps"
                          " WHERE run_id = ANY(%s) ORDER BY pos", [ids]).fetchall()
     tokens = _tokens(conn, args.project, "run", ids)
+    steps = [s | {"input": None} if s["run_id"] in typed else s for s in steps]
     if rls.restricted(args.project, user.id):  # SE-6: runs read as the owner (FL-6); their data stays theirs
         hide = lambda x: x and rls.HIDDEN
         runs = [r | {"error": hide(r["error"])} for r in runs]

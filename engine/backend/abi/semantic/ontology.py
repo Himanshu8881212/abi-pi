@@ -804,7 +804,9 @@ def run_object_action(conn, user: User, args: RunAction) -> dict:
             raise ActionFailed(422, f"Action type '{a['id']}' can't fill its write: {e}") from None
         t = w["table"]
         con, types, wkey = writeback._table(p, t)
-        kv, cur = _row_of(m, x, t, got["key"]), con.cursor()  # the key as read (a DECIMAL stays exact)
+        kv, cur = [str(v) if isinstance(v, Decimal) else v for v in _row_of(m, x, t, got["key"])], con.cursor()  # a DECIMAL stays exact
+        if gone := sorted(set(vals) - set(types)):
+            raise ActionFailed(409, f"Action type '{a['id']}' writes column(s) {', '.join(gone)} that table '{t}' no longer has: fix the action type.")
         now = writeback._row(cur, writeback._src(cur, t), t, wkey, types, kv)  # a system read: old values hidden from you are masked
         hid = rls.hidden(p, user.id).get(t, ())
         if rls.restricted(p, user.id) and not _read(p, f"SELECT 1 FROM {storage._q(t)} WHERE " + " AND ".join(
@@ -829,12 +831,20 @@ def run_object_action(conn, user: User, args: RunAction) -> dict:
                 {"add": [{**vals, **dict(zip(wkey, kv))}]}))
         except ValidationError as e:
             raise ActionFailed(422, f"Action type '{a['id']}' writes a value that isn't a cell value.", errors=actions.invalid(e)) from None
-        out["write"] = wr = writeback._batch(user, batch, status)
+        try:
+            out["write"] = wr = writeback._batch(user, batch, status)
+        except ActionFailed as e:  # WB-7's "changed to <value>" may quote a value hidden from you
+            if e.status == 409:
+                raise ActionFailed(409, f"What action type '{a['id']}' writes changed since it was read; run it again.") from None
+            raise
         hide = lambda c: c is not None and c.lower() in hid  # noqa: E731  old values from the system read, as the preview masks them
         wr["changes"] = [ch | {"old": rls.MARK} if hide(ch["column"]) else ch for ch in wr["changes"]]
         wr["rows"] = [[*r[:4], rls.MARK] if hide(r[3]) else r for r in wr["rows"]]
         if status == "active":
             writeback._fire(p, t, out["write"]["snapshot"])
+    if a.get("flow") and out.get("write", {}).get("status") == "proposed":  # the flow runs on the write, not on a proposal
+        a, out["note"] = {**a, "flow": None}, (f"The write is a proposal an Editor approves (approve_edit); flow"
+                                               f" '{a['flow']}' doesn't start for a proposal.")
     try:
         run = a.get("flow") and flows.start(p, a["flow"], f"action-{uuid.uuid4().hex}", by=user, keep=True,  # (7) as its owner (FL-6)
                                             trigger={"action": a["id"], "type": x["id"], "key": key, "object": obj, "inputs": args.inputs})

@@ -344,7 +344,9 @@ def publish_agent(conn, user: User, args: studio.AgentRef) -> dict:
     studio.require_ready(args.project)
     if not (files.get(a["evaluation"]) or {}).get("cases"):
         raise ActionFailed(400, f"Agent '{args.agent}' has no evaluation cases; add them with save_agent.")
-    require_confirmation(f"Publishing agent '{a['id']}' makes it available to everyone in project '{args.project}'.")  # §5 #3
+    ask = imports.grant_check(args.project, {f"agents/{a['id']}.json": {**a, "status": "published", "version": a["version"] + 1}})
+    require_confirmation(f"Publishing agent '{a['id']}' makes it available to everyone in project '{args.project}'."  # §5 #3
+                         + (f" {ask[0]}" if ask else ""), ask and ask[1])  # 1.2.6 M4: an Owner-granted flow runs it
     if failed := [c for c in _evaluate(args.project, a, files, user) if not c["passed"]]:
         raise ActionFailed(400, f"Agent '{args.agent}' isn't published: {len(failed)} evaluation case(s) fail.", failures=failed)
     a = {**a, "status": "published", "version": a["version"] + 1}
@@ -417,6 +419,9 @@ def agent_runs(conn, user: User, args: Runs) -> dict:
     tokens = conn.execute("SELECT agent, count(*) AS runs, sum(prompt_tokens)::int AS prompt_tokens, sum(completion_tokens)::int"
                           " AS completion_tokens FROM agent_runs WHERE project = %s AND (%s OR agent = %s AND user_id = %s)"
                           " GROUP BY agent ORDER BY agent", [args.project, not guest, args.agent, user.id]).fetchall()
+    editor = (security.role_in(conn, user, args.project) or 0) >= Role.editor  # 1.2.6 M4: a flow's question quoting someone's typed inputs
+    runs = [r | {"question": None} if not editor and r["user_id"] != user.id and "<data from an object action" in r["question"] else r
+            for r in runs]
     # D-22: quotable; D-114: never the agent ID or the run's question (author/LLM-written, a digit there would ground),
     # and the answer only when AG-2 checked it (grounding off: LLM text nobody verified)
     return {"runs": runs, "tokens": tokens,

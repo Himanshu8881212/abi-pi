@@ -87,6 +87,12 @@ def _confirmed(token: str | None, user: User, name: str, args: str) -> bool:
 
 _call: ContextVar[tuple] = ContextVar("abi_call")  # (user, name, canonical args, confirm token) of the running action
 _memo: ContextVar[dict | None] = ContextVar("abi_memo", default=None)
+_said: ContextVar[bool] = ContextVar("abi_said", default=False)  # the running action's person confirmed a preview
+
+
+def confirmed() -> bool:
+    """The running action already passed a confirmation (its one token is used: never ask a second, different one)."""
+    return _said.get()
 
 
 def memo(key: tuple, fn: Callable):
@@ -109,7 +115,9 @@ def require_confirmation(why: str, preview: dict | None = None) -> None:
     user, name, canon, token = _call.get()
     if preview is not None:
         canon += json.dumps(preview, sort_keys=True)
-    if not _confirmed(token, user, name, canon):
+    if _confirmed(token, user, name, canon):
+        _said.set(True)
+    else:
         exp = str(int(time.time()) + _CONFIRM_TTL)
         raise ActionFailed(409, f"{why} Confirm to proceed.", confirm_token=f"{exp}.{_sign(user, name, canon, exp)}",
                            **({} if preview is None else {"preview": preview}))
@@ -335,6 +343,7 @@ def run(name: str, payload: dict, user: User, via: str, confirm: str | None = No
             if why := production_refusal(name, project, have):
                 raise ActionFailed(403, why)
             _call.set((user, name, json.dumps(logged, sort_keys=True), confirm))
+            _said.set(False)
             if act.destructive and not act.confirms:
                 require_confirmation(f"Destructive: {' '.join((act.fn.__doc__ or '').split())}")  # no action ID in the text
             if via != "rest" and name in PERSON_CLICK:  # every arg shown, uncut: the click approves all of them (a logo is a digest)
