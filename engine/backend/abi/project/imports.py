@@ -565,8 +565,9 @@ def grants(files: dict) -> dict[str, dict]:
     out = {}
     for a in o.get("actions", []):
         follow = (a.get("writes") or {}).get("table") in walked
-        if a.get("role") == "viewer" or a.get("flow") or follow:
-            out[a["id"]] = {"action": a, "follow": follow}
+        if a.get("role") == "viewer" or a.get("flow") or follow:  # with what its flow does (its file, but for `enabled`)
+            flow = {k: v for k, v in (files.get(f"flows/{a['flow']}.json") or {}).items() if k != "enabled"} if a.get("flow") else None
+            out[a["id"]] = {"action": a, "follow": follow, "flow": flow}
     return out
 
 

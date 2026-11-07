@@ -804,11 +804,13 @@ def run_object_action(conn, user: User, args: RunAction) -> dict:
             raise ActionFailed(422, f"Action type '{a['id']}' can't fill its write: {e}") from None
         t = w["table"]
         con, types, wkey = writeback._table(p, t)
-        kv, cur = _row_of(m, x, t, key), con.cursor()
+        kv, cur = _row_of(m, x, t, got["key"]), con.cursor()  # the key as read (a DECIMAL stays exact)
         now = writeback._row(cur, writeback._src(cur, t), t, wkey, types, kv)  # a system read: old values hidden from you are masked
         hid = rls.hidden(p, user.id).get(t, ())
-        if now and rls.restricted(p, user.id) and not _read(p, f"SELECT 1 FROM {storage._q(t)} WHERE " + " AND ".join(
+        if rls.restricted(p, user.id) and not _read(p, f"SELECT 1 FROM {storage._q(t)} WHERE " + " AND ".join(
                 f"{storage._q(k)} = {rls.cast_lit(v, types[k])}" for k, v in zip(wkey, kv)) + " LIMIT 1", {"run_object_action": a["id"]}, user.id):
+            if t in rls.filtered(p) | set(rls.unfiltered_outputs(p)):  # never write a row you can't see; hidden and missing alike
+                raise ActionFailed(404, f"No row of '{t}' you can see for this {x['name']}: action type '{a['id']}' writes only rows you see.")
             hid = {c.lower() for c in vals}  # its row is hidden from you: none of its old values are shown
         preview["writes"] = {"table": t, "row": "changed" if now else "added", "changes": [
             {"column": c, "old": (rls.MARK if c.lower() in hid else now.get(c)) if now else None, "new": v} for c, v in vals.items()]}
@@ -823,15 +825,21 @@ def run_object_action(conn, user: User, args: RunAction) -> dict:
         status = "proposed" if a.get("approval") or actions.by_agent() or actions.inbound() else "active"
         try:
             batch = writeback.Edits(project=p, table=t, comment=f"action {a['id']}", **(
-                {"edits": [writeback.CellEdit(key=kv, column=c, value=v) for c, v in vals.items()]} if now else
+                {"edits": [writeback.CellEdit(key=kv, column=c, value=v, old=now[c]) for c, v in vals.items()]} if now else
                 {"add": [{**vals, **dict(zip(wkey, kv))}]}))
         except ValidationError as e:
             raise ActionFailed(422, f"Action type '{a['id']}' writes a value that isn't a cell value.", errors=actions.invalid(e)) from None
-        out["write"] = writeback._batch(user, batch, status)
+        out["write"] = wr = writeback._batch(user, batch, status)
+        hide = lambda c: c is not None and c.lower() in hid  # noqa: E731  old values from the system read, as the preview masks them
+        wr["changes"] = [ch | {"old": rls.MARK} if hide(ch["column"]) else ch for ch in wr["changes"]]
+        wr["rows"] = [[*r[:4], rls.MARK] if hide(r[3]) else r for r in wr["rows"]]
         if status == "active":
             writeback._fire(p, t, out["write"]["snapshot"])
-    run = a.get("flow") and flows.start(p, a["flow"], f"action-{uuid.uuid4().hex}", by=user,  # (7) runs as its owner (FL-6)
-                                        trigger={"action": a["id"], "type": x["id"], "key": key, "object": obj, "inputs": args.inputs})
+    try:
+        run = a.get("flow") and flows.start(p, a["flow"], f"action-{uuid.uuid4().hex}", by=user, keep=True,  # (7) as its owner (FL-6)
+                                            trigger={"action": a["id"], "type": x["id"], "key": key, "object": obj, "inputs": args.inputs})
+    except flows.Queued as q:  # the write stays; the run waits as queued, and flows.requeue queues it within a minute or two
+        run, out["note"] = q.run, "The flow's run couldn't be queued now; it stays queued and starts once the queue is back."
     if run:
         out["run"] = run
     return out | {"columns": ["status", "run"], "rows": [[out.get("write", {}).get("status"), run and flows.run_key(run)]]}
@@ -852,11 +860,13 @@ def object_history(conn, user: User, args: ObjectRef) -> dict:
     got = get_object(conn, user, Get(project=p, type=args.type, key=args.key))
     key, m, o = _json(got["key"]), model._read(p, "model.json"), read(p)
     x = next(t for t in o["objects"] if t["id"] == args.type)
-    same = lambda k: [str(v) for v in k or []] == [str(v) for v in key]  # noqa: E731  ponytail: keys compared as text
-    runs = [{"at": r["at"], "user": r["user_name"], "via": r["via"], "action": r["input"].get("action"), "inputs": r["input"].get("inputs")}
-            for r in conn.execute("SELECT at, user_name, via, input FROM audit_log WHERE project = %s AND action = 'run_object_action'"
-                                  " AND status = 200 AND input->>'type' = %s ORDER BY at DESC, id DESC LIMIT 10000", [p, x["id"]])
-            if same(r["input"].get("key"))][:args.limit]
+    text = [str(v) for v in key]  # ponytail: keys compared as text (as typed, as read)
+    sees = (role_in(conn, user, p) or 0) >= Role.editor  # inputs are typed text: a Viewer sees only their own
+    runs = [{"at": r["at"], "user": r["user_name"], "via": r["via"], "action": r["input"].get("action"),
+             "inputs": r["input"].get("inputs") if sees or r["user_id"] == user.id else None}
+            for r in conn.execute("SELECT at, user_id, user_name, via, input FROM audit_log WHERE project = %s AND action = 'run_object_action'"
+                                  " AND status = 200 AND input->>'type' = %s AND ARRAY(SELECT jsonb_array_elements_text(input->'key')) = %s"
+                                  " ORDER BY at DESC, id DESC LIMIT %s", [p, x["id"], text, args.limit])]
     edits = []
     for t in dict.fromkeys([x["table"], *(a["writes"]["table"] for a in o.get("actions", []) if a["object"] == x["id"] and a.get("writes"))]):
         try:
@@ -865,9 +875,9 @@ def object_history(conn, user: User, args: ObjectRef) -> dict:
             continue
         edits.append({"table": t, "columns": h["columns"], "rows": h["rows"]})
     started = [{"run": r["id"], "flow": r["flow"], "status": r["status"], "created": r["created"], "finished": r["finished"]}
-               for r in conn.execute("SELECT id, flow, status, created, finished, trigger->'key' AS key FROM flow_runs WHERE project = %s"
-                                     " AND id LIKE %s AND trigger->>'type' = %s ORDER BY created DESC, id", [p, f"{p}/%/action-%", x["id"]])
-               if same(r["key"])][:args.limit]
+               for r in conn.execute("SELECT id, flow, status, created, finished FROM flow_runs WHERE project = %s AND id LIKE %s"
+                                     " AND trigger->>'type' = %s AND ARRAY(SELECT jsonb_array_elements_text(trigger->'key')) = %s"
+                                     " ORDER BY created DESC, id LIMIT %s", [p, f"{p}/%/action-%", x["id"], text, args.limit])]
     # D-22: times and statuses are quotable; inputs are typed text and stay out of `rows`
     rows = [["run", r["at"], 200, r["user"]] for r in runs] + [["flow", r["created"], r["status"], None] for r in started]
     return {"type": x["id"], "key": key, "runs": runs, "edits": edits,
