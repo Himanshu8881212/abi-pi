@@ -541,18 +541,18 @@ def test_a_follow_link_keeps_every_read_each_persons_own(brew):
     drv = brew["drv"]
     abi.call("set_measure", project=P, id="customer_rows", name="customer_rows", expression="COUNT(customers.customer_id)")
     try:
-        before = drv("check", queries=QUERIES + WAS + BY_CUSTOMER)
+        mine = BY_CUSTOMER + QUERIES[:1]
+        before = drv("check", queries=mine)
         sure("save_ontology", project=P, ontology=FOLLOW)
-        r = drv("check", queries=QUERIES + WAS + BY_CUSTOMER)
-        # exact(), less the reads that can't slice: the two over customers as the fact (partials grouped by their key are
-        # too big to share) and the one with DISTINCT_COUNT (never sliced), per person
-        assert r["n"] > 30 and not r["diff"], r["diff"][:3]
-        assert len(r["names"]) >= 5 and r["sliced"] > (r["n"] - len(WHO) * 3) / 2 and not r["old"] and set(r["names"]) <= set(r["have"]), r
-        n = len(QUERIES + WAS)
+        exact(drv("check", queries=QUERIES + WAS))  # every visual and query, shared and sliced as without the link
+        # the reads over customers: the same with and without shared partials (those over customers as the fact
+        # never slice: partials grouped by their key are too big to share)
+        r = drv("check", queries=mine)
+        assert r["n"] > len(WHO) * len(mine) and not r["diff"], r["diff"][:3]
         for w in ("one", "several"):
-            assert r["rows"][f"{w} q:{n + 1}"][1][0][0] < before["rows"][f"{w} q:{n + 1}"][1][0][0], "fewer customers"
-            assert r["rows"][f"{w} q:0"] == before["rows"][f"{w} q:0"], "the same orders (anonymous ones too)"
-        assert r["rows"]["none q:1"][1] == [], "a rule no row passes: still nothing"
+            assert r["rows"][f"{w} q:1"][1][0][0] < before["rows"][f"{w} q:1"][1][0][0], "fewer customers"
+            assert r["rows"][f"{w} q:4"] == before["rows"][f"{w} q:4"], "the same orders (anonymous ones too)"
+        assert r["rows"]["none q:1"][1] == [[0]], "a rule no row passes: no customers"
     finally:
         sure("save_ontology", project=P, ontology={})
         sure("delete_measure", project=P, id="customer_rows")
