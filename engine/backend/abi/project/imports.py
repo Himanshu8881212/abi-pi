@@ -553,6 +553,49 @@ def follow_links(files: dict) -> dict:
     return out
 
 
+def grants(files: dict) -> dict[str, dict]:
+    """1.2.6 M4 (#16, owner answer 3): {action type ID: {action, follow}} of each action type that widens access: one
+    Viewers may run (role viewer), one that starts a flow (its steps run as the flow's owner, FL-6), or one that writes
+    to a table an `rls: follow` link walks (`follow`: data there decides who sees which rows, rls.resolve). Saving one,
+    or changing it, is the Owner's, with a confirmation saying what it lets people do."""
+    o, mj = files.get(ontology.FILE) or {}, files.get("model/model.json") or {}
+    rels = {r["id"]: r for r in mj.get("relationships", [])}
+    walked = {rels[i][s]["table"] for ln in o.get("links", []) if ln.get("rls") == "follow" for i in ln.get("via", []) if i in rels
+              for s in ("from", "to")}
+    out = {}
+    for a in o.get("actions", []):
+        follow = (a.get("writes") or {}).get("table") in walked
+        if a.get("role") == "viewer" or a.get("flow") or follow:
+            out[a["id"]] = {"action": a, "follow": follow}
+    return out
+
+
+def granted(old: dict, files: dict) -> dict[str, dict]:
+    """The `grants` of `files` that `old` doesn't have as they are (new, or changed)."""
+    was = grants(old)
+    return {i: g for i, g in grants(files).items() if was.get(i) != g}
+
+
+def granting(project: str, files: dict, g: dict) -> str:
+    """The confirmation of `granted` action types: who may do what on which objects, and when row-level security reads
+    the table written."""
+    ruled = {r["table"] for r in (files.get(RLS) or {}).get("rules", [])}
+    names = {x["id"]: x["plural"] for x in (files.get(ontology.FILE) or {}).get("objects", [])}
+    out = []
+    for i, x in sorted(g.items()):
+        a, w = x["action"], x["action"].get("writes")
+        does = ([f"write {', '.join(w['set'])} of table {w['table']}"] if w else []) + (
+            [f"start flow '{a['flow']}' (its steps run as the flow's owner)"] if a.get("flow") else [])
+        say = (f"Action type '{i}' lets {a.get('role', 'editor').capitalize()}s of project '{project}' {' and '.join(does)} on"
+               f" {names.get(a['object'], a['object'])}" + ", each run confirmed" * bool(a.get("confirm"))
+               + ", as a proposal an Editor approves" * bool(a.get("approval")) + ".")
+        if w and (x["follow"] or w["table"] in ruled):
+            say += (f" Row-level security reads table {w['table']} ({'a link it follows walks it' if x['follow'] else 'a row rule filters it'}):"
+                    " running it changes which rows restricted readers see, the runner's own too.")
+        out.append(say)
+    return " ".join(out)
+
+
 def fewer(conn, project: str, old: dict, files: dict) -> str:
     """Owner answer 1 (6 Nov 2026): the confirmation of a follow link change says who will see fewer (or other, or
     more) rows, and of what: restricted Viewers and the accounts reading the project's objects through view-only
@@ -646,6 +689,9 @@ def gate(conn, project: str, old: dict, files: dict, asking: bool = False) -> tu
     if (was := follow_links(old)) != (now := follow_links(files)):  # 1.2.6 M3: as a rule change, Owner plus confirmation
         why.append(fewer(conn, project, old, files))
         preview["follow"] = {"old": was, "new": now}
+    if g := granted(old, files):  # 1.2.6 M4, owner answer 3: letting Viewers act, or starting a flow, is a grant
+        why.append(granting(project, files, g))
+        preview["grants"] = g
     if wide := shared_wider(old, files):  # SH-1: a file widens sharing only past the Owner's eye, as set_sharing does
         why.append(f"This shares {', '.join(sorted(wide))} view-only with accounts that have no role in project '{project}'.")
         preview["sharing"] = wide
@@ -692,6 +738,11 @@ def apply(conn, user: User, project: str, files: dict, dry_run: bool = False, as
                                 " (rls: follow), or change the tables, relationships or columns it walks; nothing changed.", errors=[_err(
             ontology.FILE, "$.links", "This change makes restricted readers see other rows through a link.",
             "Ask a project Owner to make it, or keep the follow links and the relationships they walk as they are.")])
+    if (g := granted(old, files)) and (role_in(conn, user, project) or 0) < Role.owner:  # 1.2.6 M4, owner answer 3
+        raise ActionFailed(403, "Only a project Owner may save an action type Viewers may run, one that starts a flow or one"
+                                " writing to a table a link row-level security follows walks; nothing changed.", errors=[_err(
+            ontology.FILE, f"$.actions[id={i}]", f"Action type '{i}' widens who may change data or start a flow.",
+            "Ask a project Owner to save it, or make it an Editor's action type that starts no flow.") for i in sorted(g)])
     if (wide := shared_wider(old, files)) and (role_in(conn, user, project) or 0) < Role.owner:
         raise ActionFailed(403, "Only a project Owner may widen who a report, dataset or agent is shared with; nothing changed.", errors=[
             _err(k.split("#")[0], "$.sharing" if "#" not in k else f"$.datasets[id={k.split('#')[1]}].sharing",

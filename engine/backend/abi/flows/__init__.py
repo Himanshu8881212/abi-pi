@@ -104,7 +104,8 @@ def references(rel: str, f: dict, members: set[str], files: dict) -> list[dict]:
         if not croniter.is_valid(t["cron"]):
             errs.append(err(rel, "$.trigger.cron", f"'{t['cron']}' is not a cron expression.", "Use five fields, e.g. 0 7 * * 1 (Mondays at 7:00)."))
     # step id -> type; a webhook passes {{ data.trigger.body }}, a message {{ data.trigger.text }}, data_quality its problem
-    seen = {"trigger": t["type"]} if t["type"] in ("webhook", "message", "data_quality") else {}
+    # 1.2.6 M4: a manual flow an action type starts gets {{ data.trigger.object }} and {{ data.trigger.inputs }}
+    seen = {"trigger": t["type"]} if t["type"] in ("webhook", "message", "data_quality", "manual") else {}
     up, choices = {}, {}  # FLOW-DAG: step id -> the steps it waits for, directly or through theirs (its ancestors)
     for i, s in enumerate(f["steps"]):
         at = f"$.steps[{i}]"
@@ -799,9 +800,9 @@ def run_flow(conn, user: User, args: RunFlow) -> dict:
 
 def run_key(run_id: str) -> str | None:
     """GATE-9-fix-8.6 (D-22, D-114): the part of a run ID an agent may quote as data, its server-made hex key (manual,
-    test, webhook, message and quality runs). The project and flow IDs in it are agent-chosen, a schedule key is the
+    test, webhook, message, action and quality runs). The project and flow IDs in it are agent-chosen, a schedule key is the
     run's time, an `api-` key the caller's own and an after_refresh/writeback key an internal snapshot number."""
-    m = re.fullmatch(r"(?:manual|test|webhook|message|quality-.+)-([0-9a-f]{16,64})", run_id.rsplit("/", 1)[-1])
+    m = re.fullmatch(r"(?:manual|test|webhook|message|action|quality-.+)-([0-9a-f]{16,64})", run_id.rsplit("/", 1)[-1])
     return m and m[1]
 
 

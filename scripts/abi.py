@@ -137,7 +137,7 @@ def artifact(snapshot: str) -> bytes:
         return r.read()
 
 
-def call(action: str, confirm: str | None = None, **args) -> dict:
+def call(action: str, /, confirm: str | None = None, **args) -> dict:
     """One action as the person (SDK semantics). A 409 with a confirm token raises ActionError: callers show it."""
     return _open("POST", f"/api/actions/{action}", args, {"X-Abi-Confirm": confirm} if confirm else None)[1]
 

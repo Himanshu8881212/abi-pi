@@ -241,7 +241,7 @@ PRODUCTION_READS = frozenset({
     "edit_history", "edit_proposals", "explain_change", "export_visual", "flow_runs", "generate_docs", "get_sharing", "history",
     "how_calculated", "inbound_approvals", "inbox", "lineage", "list_agents", "list_embed_keys", "list_flows",
     "list_reports", "list_secrets", "list_snapshots", "list_share_links", "list_subscriptions", "list_tools", "load_runs", "ml_history", "ml_models", "ml_trials",
-    "ontology", "export_ontology",  # 1.2.6: definitions only
+    "ontology", "export_ontology", "object_history",  # 1.2.6: definitions only; an object's history
     "project_locale", "readiness", "remote_branches", "remote_settings", "report_snapshot", "rls_rules", "run_agent",
     "run_tool", "semantic_model", "semantic_query", "sql_query", "visual_data",
 })
@@ -256,6 +256,7 @@ PRODUCTION_OK = PRODUCTION_READS | PRODUCTION_ACCESS | {
     "pull",  # the promote: Owner and a confirmation with the diff in production (remote.pull)
     "set_role", "remove_role", "set_project_tenant", "set_environment", "set_remote",  # access/environment admin
     "edit_cells", "edit_total", "propose_edit", "approve_edit", "reject_edit", "undo_edits", "sync_edits",  # D-57
+    "run_object_action",  # 1.2.6 M4: a write-back like edit_cells (D-57)
 }
 
 

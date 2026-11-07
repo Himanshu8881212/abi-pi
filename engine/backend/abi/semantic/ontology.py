@@ -11,16 +11,18 @@ preview of what changes and what reads it (lineage).
 
 import json
 import re
+import uuid
+from decimal import Decimal
 from typing import Literal
 from urllib.parse import quote
 
 import duckdb
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
-from abi import semantic, storage
-from abi.actions import ActionFailed, action
+from abi import actions, semantic, storage
+from abi.actions import ActionFailed, action, require_confirmation
 from abi.project import SCHEMA, bundle, git
-from abi.security import Role, User
+from abi.security import Role, User, role_in
 from abi.semantic import lineage, live, model, rls
 
 FILE = "model/ontology.json"
@@ -178,12 +180,17 @@ def references(files: dict, cols: dict | None = None) -> list[dict]:
                 Draft202012Validator.check_schema(a["inputs"])
             except SchemaError as e:
                 err(f"{at}.inputs", f"{what}: `inputs` is not a valid JSON Schema (fails `{e.validator}`).", "Fix it to follow JSON Schema draft 2020-12.")
+        if a.get("flow") in flows and (files[f"flows/{a['flow']}.json"].get("trigger") or {}).get("type") != "manual":
+            err(f"{at}.flow", f"{what}: flow '{a['flow']}' doesn't have a manual trigger.",
+                "Give the flow trigger {type: manual}; an action starts it with {{ data.trigger.object }} and {{ data.trigger.inputs }}.")
         if (w := a.get("writes")) and x is not None:
             if w["table"] not in tables or not keys.get(w["table"]) or not one_to_one(m, w["table"], x["table"]):
                 err(f"{at}.writes.table", f"{what}: table '{w['table']}' is neither '{x['table']}' nor a keyed table one-to-one with it.",
                     f"Write to '{x['table']}' or to an input table keyed by its key with a relationship onto it.")
             for c in w["set"]:
                 column(f"{at}.writes.set", what, w["table"], c)
+                if c in (keys.get(w["table"]) or []):  # the row is the object's: its key comes from the object, never a run
+                    err(f"{at}.writes.set", f"{what}: '{c}' is a key column of '{w['table']}'.", "Set only columns outside the key.")
     return errs
 
 
@@ -735,3 +742,133 @@ def list_objects(conn, user: User, args: Objects) -> dict:
     rows = _read(args.project, sql, {"list_objects": x["id"], **args.model_dump(mode="json", exclude={"project", "type"})}, user.id)
     return {"type": x["id"], "name": x["plural"], "key": keys, "title": x["title"], "columns": show, "rows": rows[:args.limit],
             "offset": args.offset, "more": len(rows) > args.limit}
+
+
+# ---------- action types: run on one object, as the person; its history ----------
+
+def _row_of(m: dict, x: dict, t: str, key: list) -> list:
+    """The key of table t's row for object `key` (in key order) of type x: t is x's table, or one-to-one with it (its
+    whole key a relationship onto x's key)."""
+    if t == x["table"]:
+        return key
+    ks = dict(zip(_keys(m)[x["table"]], key))
+    r = next((r for r in m.get("relationships", []) if r["from"]["table"] == t and r["to"]["table"] == x["table"] and _one(m, r)), None)
+    on = dict(zip(r["from"]["columns"], r["to"]["columns"])) if r else {}
+    if not on or not set(on.values()) <= ks.keys():
+        raise ActionFailed(409, f"Table '{t}' is no longer one-to-one with '{x['table']}': fix the relationship or the action type.")
+    return [ks[on[c]] for c in _keys(m)[t]]
+
+
+def _json(v):
+    """A value read for an object as JSON (a DECIMAL as a number, a date as ISO text), for checks, previews and flows."""
+    return json.loads(json.dumps(v, default=lambda y: float(y) if isinstance(y, Decimal) else str(y)))
+
+
+class RunAction(storage.ProjectRef):
+    type: str = Field(description="an object type ID (`ontology`)")
+    key: list[storage.Value] = Field(min_length=1, description="the object's key value(s), in key column order")
+    action: str = Field(pattern=r"^[a-z][a-z0-9_-]{0,62}$", description="an action type ID of that object type (`ontology`)")
+    inputs: dict = Field({}, description="what the action type's `inputs` JSON Schema asks for")
+
+
+@action(Role.viewer)
+def run_object_action(conn, user: User, args: RunAction) -> dict:
+    """Runs an action type on one object, as you: needs the action type's role (viewer, editor or owner); the object must be visible to you (else 404, as a missing one); `inputs` must match its schema and its checks must hold (else 422 with the check's message). An action type with `confirm` (and any agent call that starts a flow) asks the person to confirm a preview of old and new values first. Its write is one logged, undoable edit batch as you, stored as a proposal an Editor approves when the action type says `approval` or an agent calls it; its flow starts with the object and inputs as {{ data.trigger.object }} and {{ data.trigger.inputs }}."""
+    from abi import flows, tools, writeback  # not at top: they import the semantic package
+
+    p, o = args.project, read(args.project)
+    a = next((a for a in o.get("actions", []) if a["id"] == args.action and a["object"] == args.type), None)
+    if a is None:
+        raise ActionFailed(404, f"No action type '{args.action}' on object type '{args.type}' in project '{p}': `ontology` lists them.")
+    need = Role[a.get("role", "editor")]
+    if (role_in(conn, user, p) or 0) < need:  # (1) run() checked the Viewer role only
+        raise ActionFailed(403, f"Action type '{a['id']}' needs the {need.name} role in project '{p}'.")
+    got = get_object(conn, user, Get(project=p, type=args.type, key=args.key))  # (2) a hidden object: 404, as a missing one
+    obj, key = _json(dict(zip(got["columns"], got["rows"][0]))), _json(got["key"])
+    if errs := tools.validate(a.get("inputs") or {"type": "object", "maxProperties": 0}, args.inputs):  # (3)
+        raise ActionFailed(422, f"Inputs don't match the `inputs` schema of action type '{a['id']}'.", errors=errs)
+    data = {"object": obj, "inputs": args.inputs, "user": {"id": user.id, "name": user.name}}
+    for c in a.get("checks", []):  # (4) the flow `when` shape
+        try:
+            ok = flows._holds(c, data)
+        except ValueError as e:
+            raise ActionFailed(422, f"{c['message']} ({e})") from None
+        if not ok:
+            raise ActionFailed(422, c["message"], check=c["value"])
+    m, x, w = model._read(p, "model.json"), next(t for t in o["objects"] if t["id"] == args.type), a.get("writes")
+    preview: dict = {"action": a["id"], "object": {"type": x["id"], "key": key, "title": _json(got["title"])}, "inputs": args.inputs}
+    if w:
+        try:
+            vals = _json(flows.resolve(w["set"], data))
+        except ValueError as e:
+            raise ActionFailed(422, f"Action type '{a['id']}' can't fill its write: {e}") from None
+        t = w["table"]
+        con, types, wkey = writeback._table(p, t)
+        kv, cur = _row_of(m, x, t, key), con.cursor()
+        now = writeback._row(cur, writeback._src(cur, t), t, wkey, types, kv)  # a system read: old values hidden from you are masked
+        hid = rls.hidden(p, user.id).get(t, ())
+        if now and rls.restricted(p, user.id) and not _read(p, f"SELECT 1 FROM {storage._q(t)} WHERE " + " AND ".join(
+                f"{storage._q(k)} = {rls.cast_lit(v, types[k])}" for k, v in zip(wkey, kv)) + " LIMIT 1", {"run_object_action": a["id"]}, user.id):
+            hid = {c.lower() for c in vals}  # its row is hidden from you: none of its old values are shown
+        preview["writes"] = {"table": t, "row": "changed" if now else "added", "changes": [
+            {"column": c, "old": (rls.MARK if c.lower() in hid else now.get(c)) if now else None, "new": v} for c, v in vals.items()]}
+    if a.get("flow"):
+        preview["flow"] = a["flow"]
+    if a.get("confirm") or a.get("flow") and actions.by_agent():  # (5) the token signs the preview: a changed old value asks again
+        said = [f"{t}.{c['column']}: {json.dumps(c['old'])} → {json.dumps(c['new'])}" for c in preview.get("writes", {}).get("changes", [])]
+        require_confirmation(f"Run '{a['name']}' on {x['name']} {json.dumps(preview['object']['title'])}: "
+                             + "; ".join(said + ([f"starts flow '{a['flow']}'"] if a.get("flow") else [])) + ".", preview)
+    out: dict = {"action": a["id"], "type": x["id"], "key": key}
+    if w:  # (6) as the runner: logged with old and new values, undoable
+        status = "proposed" if a.get("approval") or actions.by_agent() or actions.inbound() else "active"
+        try:
+            batch = writeback.Edits(project=p, table=t, comment=f"action {a['id']}", **(
+                {"edits": [writeback.CellEdit(key=kv, column=c, value=v) for c, v in vals.items()]} if now else
+                {"add": [{**vals, **dict(zip(wkey, kv))}]}))
+        except ValidationError as e:
+            raise ActionFailed(422, f"Action type '{a['id']}' writes a value that isn't a cell value.", errors=actions.invalid(e)) from None
+        out["write"] = writeback._batch(user, batch, status)
+        if status == "active":
+            writeback._fire(p, t, out["write"]["snapshot"])
+    run = a.get("flow") and flows.start(p, a["flow"], f"action-{uuid.uuid4().hex}", by=user,  # (7) runs as its owner (FL-6)
+                                        trigger={"action": a["id"], "type": x["id"], "key": key, "object": obj, "inputs": args.inputs})
+    if run:
+        out["run"] = run
+    return out | {"columns": ["status", "run"], "rows": [[out.get("write", {}).get("status"), run and flows.run_key(run)]]}
+
+
+class ObjectRef(storage.ProjectRef):
+    type: str = Field(description="an object type ID (`ontology`)")
+    key: list[storage.Value] = Field(min_length=1, description="the object's key value(s), in key column order")
+    limit: int = Field(100, ge=1, le=LIMIT, description="entries per kind")
+
+
+@action(Role.viewer)
+def object_history(conn, user: User, args: ObjectRef) -> dict:
+    """What happened to one object, newest first, when it is visible to you (else 404, as a missing one): the runs of its action types (who, when, how, inputs), the edit history of its row in its table and in each table its action types write, and the flow runs its action types started."""
+    from abi import flows, writeback  # not at top: they import the semantic package
+
+    p = args.project
+    got = get_object(conn, user, Get(project=p, type=args.type, key=args.key))
+    key, m, o = _json(got["key"]), model._read(p, "model.json"), read(p)
+    x = next(t for t in o["objects"] if t["id"] == args.type)
+    same = lambda k: [str(v) for v in k or []] == [str(v) for v in key]  # noqa: E731  ponytail: keys compared as text
+    runs = [{"at": r["at"], "user": r["user_name"], "via": r["via"], "action": r["input"].get("action"), "inputs": r["input"].get("inputs")}
+            for r in conn.execute("SELECT at, user_name, via, input FROM audit_log WHERE project = %s AND action = 'run_object_action'"
+                                  " AND status = 200 AND input->>'type' = %s ORDER BY at DESC, id DESC LIMIT 10000", [p, x["id"]])
+            if same(r["input"].get("key"))][:args.limit]
+    edits = []
+    for t in dict.fromkeys([x["table"], *(a["writes"]["table"] for a in o.get("actions", []) if a["object"] == x["id"] and a.get("writes"))]):
+        try:
+            h = writeback.edit_history(conn, user, writeback.History(project=p, table=t, key=_row_of(m, x, t, key), limit=args.limit))
+        except ActionFailed:  # not loaded, or no longer one-to-one: nothing to list
+            continue
+        edits.append({"table": t, "columns": h["columns"], "rows": h["rows"]})
+    started = [{"run": r["id"], "flow": r["flow"], "status": r["status"], "created": r["created"], "finished": r["finished"]}
+               for r in conn.execute("SELECT id, flow, status, created, finished, trigger->'key' AS key FROM flow_runs WHERE project = %s"
+                                     " AND id LIKE %s AND trigger->>'type' = %s ORDER BY created DESC, id", [p, f"{p}/%/action-%", x["id"]])
+               if same(r["key"])][:args.limit]
+    # D-22: times and statuses are quotable; inputs are typed text and stay out of `rows`
+    rows = [["run", r["at"], 200, r["user"]] for r in runs] + [["flow", r["created"], r["status"], None] for r in started]
+    return {"type": x["id"], "key": key, "runs": runs, "edits": edits,
+            "flows": [r | {"run": flows.run_key(r["run"])} for r in started], "columns": ["kind", "time", "status", "user"], "rows": rows}

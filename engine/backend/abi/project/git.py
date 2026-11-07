@@ -390,6 +390,7 @@ def undo(conn, user: User, args: ProjectRef) -> dict:
         gated = imports.ROLES in was and (imports.ROLES not in now or was[imports.ROLES].id != now[imports.ROLES].id) \
             or imports.api_published(old, files) or imports._rules(old) != imports._rules(files) \
             or imports.follow_links(old) != imports.follow_links(files) \
+            or imports.granted(old, files) \
             or imports.shared_wider(old, files) or imports.sends(conn, args.project, old, files) \
             or imports.source_hosts(conn, args.project, old, files)
         if gated:  # its Owner checks first: an Editor's 403 comes before a confirmation naming who sees what
