@@ -11,6 +11,7 @@ import json
 import secrets
 import time
 
+import duckdb
 import pytest
 from conftest import drop
 from test_engine import engine
@@ -180,13 +181,14 @@ def test_anonymous_orders_stay_visible(links):
 
 
 def test_ml_table_follows_object(links):
-    """Predictions on customers (ml_churn), trained on orders the cafés rule filters: denied to restricted Viewers until
-    customers follow that rule; then the predictions of their own customers only."""
-    want = [x[0] for x in sql(VISITED)]
+    """Predictions on customers (ml_churn), trained on orders the cafés rule filters: denied to restricted Viewers with
+    the follow link and without it (owner, round 5: a follow link never makes a table built from filtered rows
+    visible; M9 revisits predictions as properties)."""
     got = mine(links, "sql_query", sql="SELECT customers_customer_id FROM ml_churn ORDER BY 1")["rows"]
-    assert [x[0] for x in got] == want
+    assert got == [], "denied with the link"
     s = state(links)
-    assert "ml_churn" in s["filtered"] and "ml_churn" not in s["denied"] and s["keys"]["ml_churn"] == ["customers_customer_id"]
+    assert "ml_churn" in s["filtered"] and "ml_churn" in s["denied"] and s["keys"]["ml_churn"] == ["customers_customer_id"]
+    assert any("ml_churn" in g for g in abi.call("readiness", project=P)["missing"])
     with saved({**ONTO, "links": [{k: v for k, v in ln.items() if k != "rls"} for ln in ONTO["links"]]}):
         assert mine(links, "sql_query", sql="SELECT count(*) FROM ml_churn")["rows"] == [[0]], "fail closed without the link"
         assert "ml_churn" in state(links)["denied"]
@@ -325,7 +327,7 @@ def test_editor_import_cant_change_what_a_follow_link_means(links):
         assert mine(links, "sql_query", sql="SELECT count(*) FROM customers")["rows"] == n
         assert mine(links, "sql_query", sql=q)["rows"] == orders and orders[0][1] > 0, "orders, anonymous ones too, unchanged"
         s = state(links)
-        assert s["keys"]["customers"] == ["customer_id"] and s["keys"]["orders"] == ["cafe_id"]
+        assert s["keys"]["customers"] == ["customer_id"] and s["keys"]["orders"] == ["cafe_id"] and "ml_churn" in s["denied"]
     finally:
         assert not isinstance(editor_import(links, b), abi.ActionError)
     assert mine(links, "sql_query", sql="SELECT count(*) FROM customers")["rows"] == n
@@ -597,3 +599,97 @@ def test_composite_key_follow(links):
     finally:
         sure("delete_rls_rule", project=P, id="months")
         sure("remove_relationship", project=P, id="plans-cafe_id-month")
+
+
+def loaded(t: str) -> None:
+    end = time.monotonic() + 240
+    while time.monotonic() < end:
+        try:
+            if sql(f"SELECT count(*) FROM {t}")[0][0]:
+                return
+        except abi.ActionError:
+            pass
+        time.sleep(2)
+    pytest.fail(f"{t} didn't load")
+
+
+def test_table_built_from_a_follower_is_denied(links, tmp_path):
+    """A step table built from a table pointing at F (notes on customers, a loaded table, summed) reads rows the
+    follow filter reaches: denied to the Viewer (no rows), as a table built from rule-filtered rows is."""
+    duckdb.sql(f"COPY (SELECT printf('C%06d', i) AS customer_id, 1 AS n FROM range(1, 51) r(i)) TO '{tmp_path}/notes.parquet' (FORMAT parquet)")
+    abi.upload(P, "notes", tmp_path / "notes.parquet")
+    abi.call("add_relationship", project=P, **{"from": "notes.customer_id", "to": "customers.customer_id"})
+    sure("set_steps", project=P, table="notes_sum", steps=[{"type": "source", "table": "notes"}, {
+        "type": "group", "by": [], "aggregations": [{"name": "n", "function": "sum", "column": "n"}]}])
+    loaded("notes_sum")
+    try:
+        assert "notes_sum" in state(links)["denied"]
+        assert mine(links, "sql_query", sql="SELECT count(*) FROM notes_sum")["rows"] == [[0]]
+    finally:
+        sure("remove_relationship", project=P, id="notes-customer_id")
+
+
+def test_new_ml_table_on_f_stays_denied(links):
+    """A new ML model's predictions related to customers stay denied with the follow link."""
+    abi.call("save_ml_model", project=P, ml={"id": "churn2", "name": "Churn 2", "task": "classification", "dataset": "custs",
+                                             "target": "customers.segment"})
+    r = engine(SCORE.replace("ml_churn", "ml_churn2"), timeout=300, stdin=json.dumps({"project": P}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert "ml_churn2" in state(links)["denied"]
+    assert mine(links, "sql_query", sql="SELECT count(*) FROM ml_churn2")["rows"] == [[0]]
+
+
+SIGNUPS = r"""
+import json, sys
+from abi import db, security, storage
+from abi.project import git
+from abi.semantic import model
+P = json.loads(sys.stdin.read())["project"]
+with db.connect() as c:
+    owner = security.user(c, c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"])
+write = lambda cur: cur.execute("CREATE OR REPLACE TABLE lake.model.signups AS SELECT DISTINCT signup_date, 1 AS n FROM lake.model.customers")
+with git.change(P, owner, "signups"):
+    storage._commit(storage.lake(P), write, owner.name, "signups")
+    mj = model.load(P)
+    mj["tables"]["signups"] = {"kind": "fact", "key": None, "description": "Signup days."}
+    mj["relationships"].append({"id": "signups-signup_date", "from": {"table": "signups", "columns": ["signup_date"]},
+                                "to": {"table": "customers", "columns": ["signup_date"]}})  # onto a non-key column
+    model.save(P, mj)
+print("{}")
+"""
+
+
+def test_non_key_relationship_takes_rule_and_follow_parts(links):
+    """A fact related to a column of customers that isn't its key, while customers have a rule part (segment) and a
+    follow part (visited): its rows are those the owner's reference read gives through both."""
+    r = engine(SIGNUPS, timeout=300, stdin=json.dumps({"project": P}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    sure("set_rls_rule", project=P, id="students", table="customers", column="segment", users={links["uid"]: ["Student"]})
+    try:
+        want = sql(f"SELECT signup_date FROM signups WHERE signup_date IN (SELECT signup_date FROM customers WHERE segment = 'Student'"
+                   f" AND customer_id IN ({VISITED})) ORDER BY 1")
+        assert want and len(want) < len(sql("SELECT signup_date FROM signups"))
+        assert mine(links, "sql_query", sql="SELECT signup_date FROM signups ORDER BY 1")["rows"] == want
+    finally:
+        sure("delete_rls_rule", project=P, id="students")
+        sure("remove_relationship", project=P, id="signups-signup_date")
+
+
+def test_derived_f_stays_denied(links):
+    """F built from orders (customers' steps merge each one's revenue from a table built from orders): denied to the
+    Viewer with the follow link too, as before it (last: it changes the fixture's customers, then puts them back)."""
+    assert "sources/customers.json" in files() and "tables/customers.json" not in files()
+    steps = [{"type": "source", "source": "customers"}]  # as loaded
+    sure("set_steps", project=P, table="rev_by_cust", steps=[{"type": "source", "table": "orders"}, {
+        "type": "group", "by": ["customer_id"], "aggregations": [{"name": "revenue", "function": "sum", "column": "revenue"}]}])
+    loaded("rev_by_cust")
+    sure("set_steps", project=P, table="customers", steps=[*steps, {"type": "merge", "table": "rev_by_cust", "on": {"customer_id": "customer_id"},
+                                                                  "columns": ["revenue"]}])
+    try:
+        end = time.monotonic() + 240
+        while "revenue" not in abi.call("sql_query", project=P, sql="SELECT * FROM customers LIMIT 0")["columns"] and time.monotonic() < end:
+            time.sleep(2)
+        assert "customers" in state(links)["denied"]
+        assert mine(links, "sql_query", sql="SELECT count(*) FROM customers")["rows"] == [[0]]
+    finally:
+        sure("set_steps", project=P, table="customers", steps=steps)
