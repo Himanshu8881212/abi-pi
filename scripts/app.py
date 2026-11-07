@@ -62,7 +62,6 @@ READS = {"changes", "check_condition", "data_quality", "dataset_data", "docs", "
          "ml_models", "preview_steps", "readiness", "report_snapshot", "rls_rules", "run_tool", "semantic_model",
          "semantic_query", "test_agent", "test_tool", "visual_data"}
 ALLOWED = READS | WRITES | READS_ONLY  # the page's actions; every other one is ABI's app's
-STATIC = ["Model", "Sources", "Tables", "Security", "Environments"]  # explorer sections shown as they are
 
 CSS = """
 /* layout: a top bar (project, live state, the agent), a left rail grouped by what you want to do, one page at a time with

@@ -44,10 +44,6 @@ def _clean(given: str) -> str:
     return re.sub(r"[\s-]", "", given).upper()
 
 
-def _key(token: bytes) -> bytes:
-    return credentials.decrypt(token)
-
-
 def _shown(name: str, key: bytes) -> dict:
     """The key for an authenticator app: base32 and the otpauth URI (Key Uri Format)."""
     b32 = base64.b32encode(key).decode()
@@ -57,7 +53,7 @@ def _shown(name: str, key: bytes) -> dict:
 def _verify(conn, row: dict, given: str) -> bool:
     """A TOTP of the account's secret (its step recorded) or one of its recovery codes (used up)."""
     g = _clean(given)
-    if (s := match(_key(row["totp_secret"]), g, row["totp_step"])) is not None:
+    if (s := match(credentials.decrypt(row["totp_secret"]), g, row["totp_step"])) is not None:
         conn.execute("UPDATE users SET totp_step = %s WHERE id = %s", [s, row["id"]])
         return True
     return conn.execute("DELETE FROM recovery_codes WHERE user_id = %s AND hash = %s", [row["id"], security._token_hash(g)]).rowcount == 1
@@ -99,8 +95,8 @@ def sign_in(conn, name: str, password: str, given: str | None) -> tuple[bool, in
         if given is None:  # a new key every time (H-01.1-fix-5): a key shown once is void once anyone signs in again
             pending = credentials._fernet().encrypt(secrets.token_bytes(20))
             conn.execute("UPDATE users SET totp_pending = %s WHERE id = %s", [pending, row["id"]])
-            return True, 403, {"mfa": "setup", "message": SETUP, **_shown(name, _key(pending))}
-        if not (pending := row["totp_pending"]) or (s := match(_key(pending), _clean(given), None)) is None:
+            return True, 403, {"mfa": "setup", "message": SETUP, **_shown(name, credentials.decrypt(pending))}
+        if not (pending := row["totp_pending"]) or (s := match(credentials.decrypt(pending), _clean(given), None)) is None:
             return False, 403, {"mfa": "setup", "message": "Wrong code; check the key in your authenticator app."}
         codes = _enable(conn, row["id"], pending, s)
         audit(conn, User(row["id"], name, False), "rest", "confirm_mfa", None, None, 200)  # SC-6: a change at sign-in
@@ -150,7 +146,7 @@ def start_mfa(conn, user: User, args: Password) -> dict:
         raise ActionFailed(409, "Two-step sign-in is already on; turn it off first.")
     if not r:
         raise ActionFailed(403, "Your password is wrong.")
-    return _shown(user.name, _key(pending))
+    return _shown(user.name, credentials.decrypt(pending))
 
 
 class Code(BaseModel):
@@ -167,7 +163,7 @@ def confirm_mfa(conn, user: User, args: Code) -> dict:
         row = c.execute("SELECT totp_pending FROM users WHERE id = %s AND totp_secret IS NULL", [user.id]).fetchone()
         if not (row and row["totp_pending"]):
             return "none"  # not a guess: not counted
-        s = match(_key(row["totp_pending"]), _clean(args.code.get_secret_value()), None)
+        s = match(credentials.decrypt(row["totp_pending"]), _clean(args.code.get_secret_value()), None)
         return s is not None and _enable(c, user.id, row["totp_pending"], s)
 
     if (codes := _attempt(user.name, check)) == "none":
