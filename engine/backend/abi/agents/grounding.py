@@ -16,6 +16,8 @@ from abi.actions import ACTIONS, ActionFailed
 from abi.agents import grounding_rules as rules
 from abi.agents.grounding_rules import DAYS, MARK, _has, _query, mask, numbers  # noqa: F401 (callers use grounding.*)
 
+rules.ENGINE = True  # the engine's own rules (AGENT-CONTEXT-fix-9)
+
 
 def check(*args, **kw) -> dict:
     """`grounding_rules.check` with the engine's vocabulary: MEL's words ground a name, an action name spelled out too."""

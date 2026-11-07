@@ -724,3 +724,67 @@ def test_object_value_number_grounds():
     rows do, in both copies; a figure no object row holds stays flagged."""
     assert [ground.check(t, [OBJ, LIST])["numbers"] for t, _ in VALUES] == [w for _, w in VALUES]
     assert _engine_cases(VALUES)["cases"] == [w for _, w in VALUES]
+
+
+# ---------- 1.2.6 C1 round 2: one rules module, each side's verdicts exactly as before it (5e9d4b3's two copies) ----------
+
+ROW = {"columns": ["cafes.region", "revenue"], "rows": [["North", "76.00"]]}
+SIDED = {  # a rule only one copy had: the same input, each side's verdict as its own copy gave it
+    "prose": ("Revenue rose 37%.", [ROW, {"report": {"pages": [{"id": "main", "title": "Revenue rose 37 percent"}]}}], ""),
+    "clock": ("The load ran at 4:37 and North took 76.00.", [ROW], ""),
+    "month_name": ("In March, North took 76.00.", [ROW], ""),
+    "link_label": ("[Download it](https://example.com/x) North took 76.00.", [ROW], ""),
+    "status_word": ("- **Status:** Saved; North took 76.00.", [ROW], ""),
+    "nonmembers": ("The 76.00 came from Nonmembers.", [{"columns": ["customers.loyalty_member", "revenue"], "rows": [[True, "76.00"]]}], ""),
+    "plural_of_asked": ("North took 76.00 at the Stalls.", [ROW | {"measures": {"revenue": "Revenue"}, "filters":
+                        [{"column": "cafes.format", "op": "=", "value": "Stall"}]}], "revenue for Stall"),
+    "month_opening": ("On 30 November North took 76.00.", [ROW], ""),
+    "typed_lower_plural": ("The Stage view shows North at 76.00.", [ROW], "show me the stages"),
+    "typed_filtered_member": ("North and Atlantis took 76.00.", [ROW | {"measures": {"revenue": "Revenue"}, "filters":
+                              [{"column": "cafes.city", "op": "=", "value": "atlantis"}]}], "revenue for atlantis"),
+}
+OLD = r"""
+import importlib.util, json, subprocess, sys, tempfile
+def old(path, name):
+    f = tempfile.NamedTemporaryFile("w", suffix=".py", delete=False)
+    f.write(subprocess.run(["git", "show", f"5e9d4b3:{path}"], capture_output=True, text=True, check=True).stdout)
+    f.close()
+    spec = importlib.util.spec_from_file_location(name, f.name)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+v = lambda m, c: (lambda o: o["numbers"] + o["names"])(m.check(c[0], c[1], asked=c[2]))
+cases = json.load(sys.stdin)
+"""
+
+
+@functools.cache
+def _sided() -> dict:
+    """{rule: {"engine": (before, now), "harness": (before, now)}}: 5e9d4b3's grounding.py against abi.agents.grounding
+    in the engine, 5e9d4b3's scripts/ground.py against scripts/ground.py here."""
+    from test_engine import engine
+    r = engine(OLD + "from abi.agents import grounding as g\ne = old('engine/backend/abi/agents/grounding.py', 'old_grounding')\n"
+               "print(json.dumps({k: [v(e, c), v(g, c)] for k, c in cases.items()}))", stdin=json.dumps(SIDED))
+    assert r.returncode == 0, r.stderr[-2000:]
+    eng = json.loads(r.stdout.strip().splitlines()[-1])
+    ns: dict = {}
+    exec(OLD.replace("cases = json.load(sys.stdin)\n", ""), ns)
+    h = ns["old"]("scripts/ground.py", "old_ground")
+    return {k: {"engine": tuple(eng[k]), "harness": (ns["v"](h, c), ns["v"](ground, c))} for k, c in SIDED.items()}
+
+
+@pytest.mark.parametrize("rule", list(SIDED))
+def test_each_side_keeps_its_own_grounding_rule(rule):
+    out = _sided()[rule]
+    assert out["engine"][1] == out["engine"][0] and out["harness"][1] == out["harness"][0], out
+
+
+def test_the_one_sided_rules_still_differ_between_the_sides():
+    """The flags matter: the engine still masks a figure only a 3-word title holds and a clock time's minutes, the harness
+    still masks a month name no row date backs."""
+    s = _sided()
+    assert "37%" in s["prose"]["engine"][1] and "37%" not in s["prose"]["harness"][1], s["prose"]
+    assert "37" in s["clock"]["engine"][1] and "37" not in s["clock"]["harness"][1], s["clock"]
+    assert "March" in s["month_name"]["harness"][1] and "March" not in s["month_name"]["engine"][1], s["month_name"]
+    # every other one-sided rule too (a member a query filtered on grounds on neither side: it is shared)
+    assert all(v["engine"][1] != v["harness"][1] for k, v in s.items() if k != "typed_filtered_member"), s

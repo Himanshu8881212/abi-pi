@@ -23,6 +23,7 @@ _spec = importlib.util.spec_from_file_location(
     "grounding_rules", Path(__file__).resolve().parent.parent / "engine/backend/abi/agents/grounding_rules.py")
 _rules = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_rules)
+_rules.HARNESS = True  # the harness's own rules (clock times, link labels, status words, definition prose, ...)
 globals().update({k: v for k, v in vars(_rules).items() if not k.startswith("__")})
 
 

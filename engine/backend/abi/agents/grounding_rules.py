@@ -22,6 +22,10 @@ from datetime import date
 from decimal import Decimal
 from zoneinfo import available_timezones
 
+# Each side's own rules, as before the two copies became one (1.2.6 C1): abi.agents.grounding sets ENGINE on its copy
+# of this module, scripts/ground.py sets HARNESS on the copy it loads. The rules every check shares need neither.
+ENGINE = False
+HARNESS = False
 
 WORDS = {w: i for i, w in enumerate(["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"])}
 WORDS |= {w: 10 * i for i, w in enumerate(["twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"], 2)}
@@ -105,9 +109,9 @@ COMMON = {"monthly", "daily", "weekly", "yearly", "tell", "load", "ask", "traini
           "total", "overall", "christmas", "easter", "new", "year",
           "mom", "yoy", "qoq", "wow", "eve", "boxing"}  # M2.2: "**Volume:** Total orders", "New Year closures";
 # M2 review: "down 14.6% MoM", "Christmas Eve", "Boxing Day"
-# AGENT-CONTEXT-fix-9: English month and weekday names, full and three-letter, are calendar words, never entity names;
-# the figures next to them ("March 2026") are still checked
-COMMON |= {w.lower() for w in [*MONTHS, *ABBR, *DAYS, *calendar.day_abbr]}
+# AGENT-CONTEXT-fix-9 (ENGINE): English month and weekday names, full and three-letter, are calendar words, never entity
+# names; the figures next to them ("March 2026") are still checked
+CALENDAR = {w.lower() for w in [*MONTHS, *ABBR, *DAYS, *calendar.day_abbr]}
 # GATE-9-fix-3: a whole identifier token (URL, email, ISO date/timestamp, IPv4 host, UUID, hyphenated ID starting with
 # a letter and holding a digit such as `claude-sonnet-5-5`) that a result text or the person's question carries is quoted as one ID,
 # never read as figures; only between positive delimiters (the lookbehind's list and ID_END)
@@ -179,7 +183,7 @@ def _numbers(text: str, ids: set[str], lists: bool = False) -> list[tuple[tuple[
         if tok and "_" in tok and re.search("[A-Za-z]", tok):
             continue  # LLM-2-fix-7: digits in an identifier ("llm23_dev"); "5x", "$3B", "FY2023", "7kg" stay figures
         a, b = m.span("n")
-        if m["n"] and b - a == 2 and re.search(r"\d:$", text[:a]) and not re.match(r"[\d.,]", text[b:b + 1]):
+        if HARNESS and m["n"] and b - a == 2 and re.search(r"\d:$", text[:a]) and not re.match(r"[\d.,]", text[b:b + 1]):
             continue  # the minutes of a clock time ("08:00"): the hour is checked, ":00" is no figure
         if (m[0].strip() == m["n"] and m["n"].isdigit() and len(m["n"]) >= 7 and any(i.startswith(m["n"]) for i in ids)
                 and (text[a - 1:a] == text[b:b + 1] == "`" or ID_LABEL.search(text[:a]) and ID_AFTER.match(text, b))):
@@ -254,13 +258,13 @@ def _caps(text: str, quoted: bool = False) -> list[tuple[int, str]]:
     words stays whole."""
     out = []
     for m in CAP.finditer(text):
-        pre = text[:m.start()].rstrip(" \t*_#>•-[")  # a link label ("[Download it](…)") opens like a sentence
+        pre = text[:m.start()].rstrip(" \t*_#>•-[" if HARNESS else " \t*_#>•-")  # HARNESS: a link label ("[Download it](…)") opens like a sentence
         phrase = m[0]
         if (not pre and not quoted) or (pre and pre[-1] in ".!?\n"):  # sentence start (also "1." list items)
             phrase = phrase.partition(" ")[2]
         elif not pre and " " not in phrase:  # LLM-2-fix-4: "Total revenue is 10,863.9" → no "Total"
             phrase = ""
-        elif pre and pre[-1] in ":;(|" and (phrase.partition(" ")[0] in FUNCTION | STATUS  # LLM-2-fix-15: "Note: This sums"
+        elif pre and pre[-1] in ":;(|" and (phrase.partition(" ")[0] in (FUNCTION | STATUS if HARNESS else FUNCTION)  # LLM-2-fix-15: "Note: This sums"
                                             or phrase in LEADS and re.match(r" [a-z0-9+−-]", text[m.end():])):
             phrase = phrase.partition(" ")[2]
         at = m.end() - len(phrase.lstrip())
@@ -499,8 +503,9 @@ def check(answer: str, results: list, vocab: set[str] = frozenset(), members: se
     # 1.1: a figure written in a definition's prose (a report, page or visual title, a description: three words or more
     # in one text, never an ID or a row cell) grounds that same figure exactly, like the person's own words: "the
     # 28-day trend" from a title; never rounded, a ratio or a figure of the data
-    rows = set(cells)
-    typed |= {v for t in texts if t not in rows and len(t.split()) >= 3 for _, v, _, _, _ in numbers(t)}
+    if HARNESS:
+        rows = set(cells)
+        typed |= {v for t in texts if t not in rows and len(t.split()) >= 3 for _, v, _, _, _ in numbers(t)}
     if today:
         typed.add(float(today.year))
         found += "\n" + "\n".join(_day(str(today.year), f"{today.month:02}", f"{today.day:02}"))
@@ -556,20 +561,20 @@ def check(answer: str, results: list, vocab: set[str] = frozenset(), members: se
     # D-114); (b, c): a phrase of COMMON or PRODUCT words only; (b) "Order" for an `orders` table
     part = lambda w: (f := _fold(w)) in parts or f.endswith("s") and f[:-1] in parts or f + "s" in parts  # noqa: E731
     # a yes/no column's other side: "Nonmembers", "Non-members", "Not members" for `loyalty_member` (release run 30 Oct)
-    neg = lambda n: bool(m := re.fullmatch(r"(?:non[- ]?|not |no )([a-z]+)", n.lower())) and part(m[1])  # noqa: E731
-    typed = lambda n: _has(n, asked, case=True) or n.endswith("s") and _has(n[:-1], asked, case=True)  # noqa: E731 ("Mondays" for "Monday")
+    neg = lambda n: HARNESS and bool(m := re.fullmatch(r"(?:non[- ]?|not |no )([a-z]+)", n.lower())) and part(m[1])  # noqa: E731
+    typed = lambda n: _has(n, asked, case=True) or HARNESS and n.endswith("s") and _has(n[:-1], asked, case=True)  # noqa: E731 ("Mondays" for "Monday")
+    common = COMMON | CALENDAR if ENGINE else COMMON
     # M2.2: the plural of a name the results back grounds too ("other Decembers" for a December row)
     ok = lambda n, vocab_ok: _has(n, found) or n.endswith("s") and _has(n[:-1], found) or typed(n) or vocab_ok and (  # noqa: E731
-        _typed(n, asked, asks) or _has(n, words) or _fold(" ".join(n.lower().split())) in spelled or part(n.lower()) or neg(n)
-        or all(w.lower() in COMMON or _has(w, "\n".join(PRODUCT)) for w in n.split()))
+        ENGINE and _typed(n, asked, asks) or _has(n, words) or _fold(" ".join(n.lower().split())) in spelled or part(n.lower()) or neg(n)
+        or all(w.lower() in common or _has(w, "\n".join(PRODUCT)) for w in n.split()))
     # M2.2: a hyphenated phrase grounds when each capitalized part does ("North-region", "North-by-café": North)
     # M2.2: ordinary words opening a phrase name nothing ("Weekly North", "Total East": North, East)
-    core = lambda n: " ".join(ws[next((i for i, w in enumerate(ws) if w.lower() not in COMMON), len(ws) - 1):]) if (  # noqa: E731
+    core = lambda n: " ".join(ws[next((i for i, w in enumerate(ws) if w.lower() not in common), len(ws) - 1):]) if (  # noqa: E731
         ws := n.split()) else n
     # M2.2: a month or weekday opening a phrase is a word of its own ("on 30 November North had": November, North); the
     # engine's COMMON holds them
-    days = {w.lower() for w in [*MONTHS, *ABBR, *DAYS, *calendar.day_abbr]}
-    cal = lambda ws: len(ws) > 1 and ws[0].lower() in days and ok(ws[0], True) and ok(" ".join(ws[1:]), True)  # noqa: E731
+    cal = lambda ws: HARNESS and len(ws) > 1 and ws[0].lower() in CALENDAR and ok(ws[0], True) and ok(" ".join(ws[1:]), True)  # noqa: E731
     bad_names = [(at, n) for n, vocab_ok, at in cands if not ok(n, vocab_ok)
                  and not (vocab_ok and (core(n) != n and ok(core(n), True) or cal(n.split())))
                  and not ("-" in n and all(ok(p, vocab_ok) for p in n.split("-") if p[:1].isupper()))]
