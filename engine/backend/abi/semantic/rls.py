@@ -224,7 +224,7 @@ def conditions(project: str, user_id: int, read, types: dict | None = None) -> d
     rels, fl, ent = mj.get("relationships", []), follows(project, mj), ontology._keys(mj)
     back = {f["id"]: f["back"] for f in fl}
     vis = lambda x, conds: " AND ".join(c for _, c in conds.get(x, []))  # noqa: E731
-    blank = _blanks(project, user_id, types) if fl else None
+    blank, hid = (_blanks(project, user_id, types), _hidden(project, user_id)) if fl else (None, {})
 
     def groups(r: dict, conds: dict) -> list[tuple[frozenset, list[str]]]:
         """The parts of r's target's filter that cross r (`crosses`), one group per tag (the follow link a part is
@@ -233,7 +233,7 @@ def conditions(project: str, user_id: int, read, types: dict | None = None) -> d
         (filtered further on, never less)."""
         parts = conds.get(d := r["to"]["table"], [])
         if fl:
-            parts = [(tag, c) for tag, c in parts if crosses(back, r["id"], tag, r["from"]["table"])]
+            parts = [(tag, c) for tag, c in parts if crosses(back, r, tag)]
         if not parts:
             return []
         if not fl or sorted(r["to"]["columns"]) != sorted(ent.get(d) or [None]):
@@ -287,8 +287,10 @@ def conditions(project: str, user_id: int, read, types: dict | None = None) -> d
             if f["from"] != t:
                 continue
             tag = frozenset({f["id"]})
-            if f["hops"] is None or f["live"] or any(map(blank, f["on"])):  # fail closed: a link that doesn't hold, a table
-                cs.append((tag, "FALSE"))  # on the way that shows no rows anyway. ponytail: follow over live tables denies
+            if f["hops"] is None or f["live"] or any(map(blank, f["on"])) or any(  # fail closed: a link that doesn't hold,
+                    c.lower() in hid.get(r[s]["table"], ()) for r, _ in f["hops"] for s in ("from", "to") for c in r[s]["columns"]):
+                cs.append((tag, "FALSE"))  # a table on the way that shows no rows anyway or a join column hidden on it.
+                # ponytail: follow over live tables denies
             elif f["to"] in conds:  # T is restricted for this user
                 cs.append((tag, linked(f, conds)))
         return cs
@@ -314,13 +316,13 @@ def where(con, schema: str, t: str) -> str | None:
     return _where[con][schema][t]
 
 
-def crosses(back: dict, rid: str, tag: frozenset, toward: str) -> bool:
-    """1.2.6 M3, the one crossing rule (`conditions`, `_sources`, `_unfiltered_outputs.roots`): a filter part made
-    from follow links `tag` crosses relationship `rid` into table `toward` unless one of them walks r there from its F's
-    side back toward its T (`back`: {link: {(relationship ID, table)}}, `resolve`). So a follow filter never goes back
+def crosses(back: dict, r: dict, tag: frozenset) -> bool:
+    """1.2.6 M3, the one crossing rule (`conditions`, `_sources`): a filter part made from follow links `tag` crosses
+    relationship r (always into its many side) unless one of them walks r there from its F's side back toward its T
+    (`back`: {link: {(relationship ID, table)}}, `resolve`). So a follow filter never goes back
     along its own via (an anonymous order keeps its NULL customer), but crosses its via the other way (orders at a
     hidden café stay hidden), and a part made from rules alone (no tag) always crosses. The target's key plays no part."""
-    return not any((rid, toward) in back.get(x, ()) for x in tag)
+    return not any((r["id"], r["from"]["table"]) in back.get(x, ()) for x in tag)
 
 
 def _blanks(project: str, user_id: int | None, types: dict | None = None):
@@ -415,7 +417,7 @@ def _sources(project: str) -> tuple[dict[str, dict], list[dict], list[dict]]:
                 new.setdefault(f["from"], {})[("link", f["id"])] = {frozenset({f["id"]})}
         for r in rels:
             d = r["to"]["table"]
-            tags = {g for gs in src.get(d, {}).values() for g in gs if crosses(back, r["id"], g, r["from"]["table"])}
+            tags = {g for gs in src.get(d, {}).values() for g in gs if crosses(back, r, g)}
             if tags and (not fl or sorted(r["to"]["columns"]) != sorted(ent.get(d) or [None])):
                 tags = {frozenset()}
             if tags:
@@ -426,7 +428,12 @@ def _sources(project: str) -> tuple[dict[str, dict], list[dict], list[dict]]:
         if new == src:
             return src, rels, fl
         src = new
-    return {t: {"rule": {frozenset()}} for t in {*ruled, *(r[s]["table"] for r in rels for s in ("from", "to")), *(f["from"] for f in fl)}}, rels, fl
+    src = {t: {"rule": {frozenset()}} for t in {*ruled, *(r[s]["table"] for r in rels for s in ("from", "to")), *(f["from"] for f in fl)}}
+    for r in rels:  # and every column a filter may read (key_columns)
+        src[r["from"]["table"]][("rel", r["id"])] = {frozenset()}
+    for f in fl:
+        src[f["from"]][("link", f["id"])] = {frozenset({f["id"]})}
+    return src, rels, fl
 
 
 def unfiltered_outputs(project: str) -> list[str]:
@@ -457,33 +464,25 @@ def _unfiltered_outputs(project: str) -> list[str]:
     ruled, cols = {r["table"] for r in row_rules(project)}, {r["table"] for r in _file(project).get("columns", [])}
     if not ruled | cols:
         return []
-    done, rels, fl = _sources(project)
-    fl = [f for f in fl if f["hops"] is not None and not f["live"] and f["to"] in done]  # the follow links that filter
-    back = {f["id"]: f["back"] for f in fl}
-    pairs = set().union(*back.values())
+    _, rels, fl = _sources(project)
     g = lineage.graph(bundle(git.path(project)))
 
-    def roots(t: str) -> set[str]:
-        """The ruled tables whose rules filter t: t itself if ruled, and every one its relationships reach, and a
-        follow link's (T and the tables between, whose rows its filter reads) when its filter reaches t as `conditions`
-        carries it (`crosses` every relationship on the way back to t) and t is the link's F or ML predictions
-        (ml_<id>, ML-5) related to F: any other table built from rows a rule filters stays denied by default, as
-        before follow links. The walk beyond a follow link starts afresh: its filter is made anew from T's rows."""
-        ok = lambda f: t == f["from"] or f"ml:{t[3:]}" in g and t.startswith("ml_") and any(  # noqa: E731
-            r["from"]["table"] == t and r["to"]["table"] == f["from"] for r in rels)
-        seen = {(t, frozenset())}
-        todo = list(seen)
+    def roots(t: str, follow: bool) -> set[str]:
+        """The ruled tables whose rules filter t: t itself if ruled, and every one its relationships reach; with
+        `follow`, also on through every follow link from its F to T and the tables between (whose rows its filter
+        reads). Rows read from upstream follow, t's own (its own source too) don't: a follow link only adds denials, never makes a
+        table built from filtered rows (F derived, ML predictions on F) visible (owner, 1.2.6 M3 round 5)."""
+        seen, todo = {t}, [t]
         while todo:
-            x, past = todo.pop()  # past: the (relationship, table) crossings from t to x a follow filter may not make
-            todo += (new := {(r["to"]["table"], past | ({(r["id"], x)} & pairs)) for r in rels if r["from"]["table"] == x} | {
-                (y, frozenset()) for f in fl if f["from"] == x and ok(f) and all(
-                    crosses(back, i, frozenset({f["id"]}), z) for i, z in past) for y in f["on"]}) - seen
+            x = todo.pop()
+            todo += (new := {r["to"]["table"] for r in rels if r["from"]["table"] == x} | {
+                y for f in fl if follow and f["from"] == x for y in f["on"]}) - seen
             seen |= new
-        return {x for x, _ in seen} & ruled
+        return seen & ruled
 
     ups = lambda n: {u.split(":", 1)[1] for u in lineage.reach(g, {n}, "upstream") if u.startswith(("table:", "source:"))}
     return sorted(t for n in g if n.startswith("table:") and (
-        (t := n[6:]) not in ruled and set().union(*map(roots, ups(n))) - roots(t) or t not in cols and ups(n) & cols))
+        (t := n[6:]) not in ruled and set().union(*(roots(u, u != t) for u in ups(n))) - roots(t, False) or t not in cols and ups(n) & cols))
 
 
 def explain(project: str, user_id: int) -> str:

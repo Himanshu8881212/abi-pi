@@ -567,19 +567,15 @@ def fewer(conn, project: str, old: dict, files: dict) -> str:
         " WHERE r.user_id = u.id AND r.project = %s AND r.role = 'viewer')) AND NOT EXISTS (SELECT 1 FROM project_roles r"
         " WHERE r.user_id = u.id AND r.project = %s AND r.role IN ('editor', 'owner')) ORDER BY u.name", [ids, project, project])]
     people += ["everyone in the workspace it is shared with"] if any(s.get("workspace") for s in sh) else []
-    ruled = people if (files.get(RLS) or {}).get("rules") else []  # D-42: restricted once a row rule exists
+    ruled = people if _rules(files) else []  # D-42/D-110: restricted once a row or column rule exists
     who = f"Restricted readers (Viewers and view-only shared accounts: {', '.join(ruled) or 'none now'})"
 
     def say(i: str) -> str:
         ln = links[i]
         return (f"{names.get(ln['from'], ln['from'])} only when linked by '{i}' to {names.get(ln['to'], ln['to'])} they may see,"
                 f" whenever {names.get(ln['to'], ln['to'])} are restricted for them")
-    tables = {x["id"]: x["table"] for x in (files.get(ontology.FILE) or {}).get("objects", [])}
-    ml = lambda i: sorted({r["from"]["table"] for r in (files.get("model/model.json") or {}).get("relationships", [])  # noqa: E731
-                           if r["from"]["table"].startswith("ml_") and r["to"]["table"] == tables.get(links[i]["from"])})
-    out = [f"{who} will see fewer rows: {say(i)}, and only the rows of tables pointing at those"
-           + (f"; ML predictions on them ({', '.join(ml(i))}), denied until now, become readable for those rows." if ml(i) else ".")
-           for i in now if i not in was]
+    out = [f"{who} will see fewer rows: {say(i)}, and only the rows of tables pointing at those; tables built from"
+           " them stay denied to them, as tables built from rule-filtered rows are." for i in now if i not in was]
     out += [f"{who} will see different rows (some may see more): '{i}' now means {say(i)}, over changed tables, relationships"
             " or columns." for i in now if i in was and was[i] != now[i]]
     out += [f"{who} will see more rows: no longer {say(i)}." for i in was if i not in now]
