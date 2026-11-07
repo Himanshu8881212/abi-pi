@@ -539,23 +539,41 @@ def _rules(files: dict) -> list:
 
 
 def follow_links(files: dict) -> dict:
-    """1.2.6 M3: {link ID: [from, to, via]} of the ontology's `rls: follow` links: each changes who sees which rows."""
-    return {ln["id"]: [ln["from"], ln["to"], ln["via"]] for ln in (files.get(ontology.FILE) or {}).get("links", [])
-            if ln.get("rls") == "follow"}
+    """1.2.6 M3: {link ID: what each `rls: follow` link means, as rls.resolve reads it from the ontology and
+    model.json}: the tables it filters and reads, every relationship it walks with its columns and direction, and the
+    columns it tests. A change to any of it, in either file, changes who sees which rows."""
+    out: dict = {}
+    for f in rls.resolve(files.get(ontology.FILE) or {}, files.get("model/model.json") or {}):
+        out.setdefault(f["id"], []).append({"from": f["from"], "to": f["to"], "cols": f["cols"],
+                                            "hops": [[r, a] for r, a in f["hops"]] if f["hops"] is not None else None})
+    return out
 
 
 def fewer(conn, project: str, old: dict, files: dict) -> str:
-    """Owner answer 1 (6 Nov 2026): the confirmation of a follow link change says who will see fewer rows, and of what."""
+    """Owner answer 1 (6 Nov 2026): the confirmation of a follow link change says who will see fewer (or other, or
+    more) rows, and of what: restricted Viewers and the accounts reading the project's objects through view-only
+    sharing (SH-1), as soon as the link's `to` type is restricted for them."""
     was, now = follow_links(old), follow_links(files)
+    links = {ln["id"]: ln for f in (old, files) for ln in (f.get(ontology.FILE) or {}).get("links", [])}
     names = {x["id"]: x["plural"] for f in (old, files) for x in (f.get(ontology.FILE) or {}).get("objects", [])}
-    viewers = [r["name"] for r in conn.execute("SELECT u.name FROM project_roles r JOIN users u ON u.id = r.user_id WHERE r.project = %s"
-                                               " AND r.role = 'viewer' AND NOT u.workspace_owner ORDER BY u.name", [project])]
-    ruled = viewers if (files.get(RLS) or {}).get("rules") else []  # D-42: Viewers are restricted once a row rule exists
-    who = f"Viewers under row-level security rules ({', '.join(ruled) or 'none now'})"
-    say = lambda i, ln: f"{names.get(ln[0], ln[0])} only when linked by '{i}' to {names.get(ln[1], ln[1])} they may see"  # noqa: E731
-    out = [f"{who} will see fewer rows: {say(i, ln)}, and only the rows of tables pointing at those."
-           for i, ln in now.items() if was.get(i) != ln]
-    out += [f"{who} will see more rows: not {say(i, ln)}." for i, ln in was.items() if i not in now]
+    sh = _sharing(files).values()
+    ids = sorted({int(u) for s in sh for u in s.get("users", []) if str(u).isdigit()})
+    people = [r["name"] for r in conn.execute(
+        "SELECT u.name FROM users u WHERE NOT u.workspace_owner AND (u.id = ANY(%s) OR EXISTS (SELECT 1 FROM project_roles r"
+        " WHERE r.user_id = u.id AND r.project = %s AND r.role = 'viewer')) AND NOT EXISTS (SELECT 1 FROM project_roles r"
+        " WHERE r.user_id = u.id AND r.project = %s AND r.role IN ('editor', 'owner')) ORDER BY u.name", [ids, project, project])]
+    people += ["everyone in the workspace it is shared with"] if any(s.get("workspace") for s in sh) else []
+    ruled = people if (files.get(RLS) or {}).get("rules") else []  # D-42: restricted once a row rule exists
+    who = f"Restricted readers (Viewers and view-only shared accounts: {', '.join(ruled) or 'none now'})"
+
+    def say(i: str) -> str:
+        ln = links[i]
+        return (f"{names.get(ln['from'], ln['from'])} only when linked by '{i}' to {names.get(ln['to'], ln['to'])} they may see,"
+                f" whenever {names.get(ln['to'], ln['to'])} are restricted for them")
+    out = [f"{who} will see fewer rows: {say(i)}, and only the rows of tables pointing at those." for i in now if i not in was]
+    out += [f"{who} will see different rows (some may see more): '{i}' now means {say(i)}, over changed tables, relationships"
+            " or columns." for i in now if i in was and was[i] != now[i]]
+    out += [f"{who} will see more rows: no longer {say(i)}." for i in was if i not in now]
     return f"This changes which rows row-level security shows through links in project '{project}'. " + " ".join(out)
 
 
@@ -666,9 +684,9 @@ def apply(conn, user: User, project: str, files: dict, dry_run: bool = False, as
             "Ask a project Owner to make it, or keep security/rls.json as it is.")])
     if follow_links(old) != follow_links(files) and (role_in(conn, user, project) or 0) < Role.owner:  # 1.2.6 M3, owner answer 1
         raise ActionFailed(403, "Only a project Owner may add, change or remove a link that row-level security follows"
-                                " (rls: follow); nothing changed.", errors=[_err(
-            ontology.FILE, "$.links", "This change makes Viewers see fewer or more rows through a link.",
-            "Ask a project Owner to make it, or keep the links' rls as they are.")])
+                                " (rls: follow), or change the tables, relationships or columns it walks; nothing changed.", errors=[_err(
+            ontology.FILE, "$.links", "This change makes restricted readers see other rows through a link.",
+            "Ask a project Owner to make it, or keep the follow links and the relationships they walk as they are.")])
     if (wide := shared_wider(old, files)) and (role_in(conn, user, project) or 0) < Role.owner:
         raise ActionFailed(403, "Only a project Owner may widen who a report, dataset or agent is shared with; nothing changed.", errors=[
             _err(k.split("#")[0], "$.sharing" if "#" not in k else f"$.datasets[id={k.split('#')[1]}].sharing",
