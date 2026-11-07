@@ -39,7 +39,8 @@ for d in (OLD, NEW):
         got[d] = {k: {json.dumps(r, default=str) for r in c.execute(q).fetchall()} for k, q in Q.items()}
 for d in (OLD, NEW):
     admin.execute(f"DROP DATABASE {d} WITH (FORCE)")
-print(json.dumps({k: sorted(got[NEW][k] - got[OLD][k]) for k in Q} | {"fresh": {k: len(v) for k, v in got[NEW].items()}}))
+print(json.dumps({k: sorted(got[NEW][k] - got[OLD][k]) for k in Q} | {"fresh": {k: len(v) for k, v in got[NEW].items()},
+                  "extra": {k: sorted(got[OLD][k] - got[NEW][k]) for k in Q}}))
 """
 
 
@@ -48,6 +49,8 @@ def test_a_1_0_database_upgrades_to_this_schema():
     r = engine(UPGRADE, timeout=180)
     assert r.returncode == 0, r.stderr[-2000:]
     out = json.loads(r.stdout.strip().splitlines()[-1])
-    fresh = out.pop("fresh")
+    fresh, extra = out.pop("fresh"), out.pop("extra")
     assert fresh["columns"] > 300 and fresh["constraints"] > 100, fresh  # the comparison read the whole schema
     assert out == {"columns": [], "constraints": [], "indexes": [], "triggers": []}, out  # nothing a fresh one has is missing
+    # and nothing more than a fresh one but the column C1 dropped: a fold that lost a column fails here
+    assert extra == {"columns": ['["sources", "spec", "jsonb", "YES", null, "NO"]'], "constraints": [], "indexes": [], "triggers": []}, extra

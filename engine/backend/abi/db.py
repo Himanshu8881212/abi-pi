@@ -24,7 +24,7 @@ VERSION = tomllib.loads((Path(__file__).parent.parent / "pyproject.toml").read_t
 # refuses a database newer code has upgraded instead of running on it.
 SCHEMA_NUMBER = 6  # 3: ABI-PI 1.2 (flow_conditions.since); 4: load_runs (M3.2); 5: personal_tokens (M4.5); 6: 1.2.6 C1 (folded ALTERs, no sources.spec)
 QUEUE = importlib.metadata.version("procrastinate")
-# The Procrastinate of v0.5.0-alpha, the oldest release we upgrade from (D-133); installs before H-03.2 recorded none.
+# The Procrastinate of ABI-PI 1.0 (schema 2), the oldest release we upgrade from (D-133); before H-03.2 none was recorded.
 QUEUE_BASELINE = "3.10.0"
 STATE = """
 CREATE TABLE IF NOT EXISTS schema_state (
@@ -758,6 +758,8 @@ def _upgrade(conn: psycopg.Connection, queue: bool) -> None:
                         f"Procrastinate {was['queue'] or 'not recorded'}); this is ABI {VERSION} (schema {SCHEMA_NUMBER}, Procrastinate "
                         f"{QUEUE}). Older code can't run on newer data: start that version or a newer one, or restore "
                         "a backup taken before the upgrade.")
+    if was and was["app_schema"] < 2:  # older than ABI-PI 1.0: SCHEMA folds what 1.0 added (1.2.6 C1)
+        raise RuntimeError(f"This database has schema {was['app_schema']}, older than ABI-PI 1.0's (2): it can't be upgraded.")
     conn.execute(SCHEMA)
     done = was and was["queue"]
     if queue:
