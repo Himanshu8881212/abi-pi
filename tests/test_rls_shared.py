@@ -544,8 +544,10 @@ def test_a_follow_link_keeps_every_read_each_persons_own(brew):
         before = drv("check", queries=QUERIES + WAS + BY_CUSTOMER)
         sure("save_ontology", project=P, ontology=FOLLOW)
         r = drv("check", queries=QUERIES + WAS + BY_CUSTOMER)
-        assert r["n"] > 30 and not r["diff"], r["diff"][:3]  # exact(), but customers' partials (grouped by their key) are too big to share
-        assert len(r["names"]) >= 5 and r["sliced"] > (r["n"] - len(WHO) * len(BY_CUSTOMER)) / 2 and not r["old"] and set(r["names"]) <= set(r["have"]), r
+        # exact(), less the reads that can't slice: the two over customers as the fact (partials grouped by their key are
+        # too big to share) and the one with DISTINCT_COUNT (never sliced), per person
+        assert r["n"] > 30 and not r["diff"], r["diff"][:3]
+        assert len(r["names"]) >= 5 and r["sliced"] > (r["n"] - len(WHO) * 3) / 2 and not r["old"] and set(r["names"]) <= set(r["have"]), r
         n = len(QUERIES + WAS)
         for w in ("one", "several"):
             assert r["rows"][f"{w} q:{n + 1}"][1][0][0] < before["rows"][f"{w} q:{n + 1}"][1][0][0], "fewer customers"

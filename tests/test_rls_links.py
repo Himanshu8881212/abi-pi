@@ -196,7 +196,8 @@ def test_ml_table_follows_object(links):
 def test_explain_names_follow_rule(links):
     s = state(links)
     lines = s["explain"].splitlines()
-    assert "-- customers: only rows linked by 'visited' (orders-customer_id, orders-cafe_id) to a row of cafes you may see" in lines, lines
+    assert "-- customers: only rows linked by 'visited' (orders-customer_id, orders-cafe_id) to a row of cafes you may see" \
+        " (cafes is restricted for you)" in lines, lines
     assert "-- orders: only rows whose cafe_id is a row of cafes you may see" in lines
     assert not any(x.startswith("-- orders:") and "customer" in x for x in lines), "never back along the link's own via"
     assert {"cafes", "customers", "orders", "ml_churn"} <= set(s["filtered"])
@@ -227,7 +228,8 @@ def test_fixpoint_with_cycle(links):
             assert [x[0] for x in mine(links, "sql_query", sql="SELECT customer_id FROM customers ORDER BY 1")["rows"]] == three
             assert time.monotonic() - start < 60
             lines = state(links)["explain"].splitlines()
-            assert "-- cafes: only rows linked by 'visitors' (orders-cafe_id, orders-customer_id) to a row of customers you may see" in lines
+            assert "-- cafes: only rows linked by 'visitors' (orders-cafe_id, orders-customer_id) to a row of customers you may see" \
+                " (customers is restricted for you)" in lines
     finally:
         sure("delete_rls_rule", project=P, id="few")
 
@@ -261,8 +263,150 @@ def test_follow_needs_owner(links):
     body = e.value.body
     assert e.value.status == 409 and body.get("confirm_token"), body
     assert "fewer rows" in body["message"] and viewer in body["message"] and "Orders only when linked by 'order_customer' to Customers" in body["message"], body
-    assert body["preview"]["follow"]["new"]["order_customer"] == ["order", "customer", ["orders-customer_id"]]
+    [new] = body["preview"]["follow"]["new"]["order_customer"]
+    assert (new["from"], new["to"], new["cols"], [r["id"] for r, _ in new["hops"]]) == ("orders", "customers", ["customer_id"], ["orders-customer_id"])
     assert body["preview"]["changes"] == ["Changes link 'order_customer' (order customer customer, via orders-customer_id): rls."]
     with pytest.raises(abi.ActionError) as e:
         abi.call("save_ontology", project=P, ontology=plain)
     assert "more rows" in e.value.body["message"] and viewer in e.value.body["message"]
+
+
+BUNDLE = r"""
+import json, sys
+from abi.project import bundle, git
+print(json.dumps(bundle.bundle(git.path(json.loads(sys.stdin.read())["project"]))))
+"""
+
+WRITE = r"""
+import json, sys
+from abi.project import git
+a = json.loads(sys.stdin.read())
+p = git.path(a["project"]) / "model/ontology.json"
+old = p.read_text()
+p.write_text(a["text"] if a["text"] is not None else old)
+print(json.dumps({"old": old}))
+"""
+
+
+def files() -> dict:
+    r = engine(BUNDLE, timeout=300, stdin=json.dumps({"project": P}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    return json.loads(r.stdout.splitlines()[-1])
+
+
+def editor_import(links, b: dict) -> abi.ActionError | dict:
+    with abi.as_user(links["tokens"]["editor"]):
+        try:
+            return abi.call("import_project", project=P, bundle=b)
+        except abi.ActionError as e:
+            return e
+
+
+def test_editor_import_cant_change_what_a_follow_link_means(links):
+    """Security H1: every route changing a follow link's meaning, in the ontology or in model.json (a relationship's
+    columns under the same ID), needs the Owner: an Editor's import is refused whole. A changed entity key changes
+    nothing a follow filter reads (it tests the relationship's own columns)."""
+    b, n = files(), mine(links, "sql_query", sql="SELECT count(*) FROM customers")["rows"]
+    o = copy.deepcopy(b["model/ontology.json"])
+    o["links"][2].pop("rls")
+    m = copy.deepcopy(b["model/model.json"])
+    next(r for r in m["relationships"] if r["id"] == "orders-customer_id")["from"]["columns"] = ["order_id"]
+    for x in ({**b, "model/ontology.json": o}, {**b, "model/model.json": m}):
+        e = editor_import(links, x)
+        assert isinstance(e, abi.ActionError) and e.status == 403 and "Only a project Owner" in e.body["message"], e
+    assert files() == b, "nothing changed"
+    k = copy.deepcopy(b["model/model.json"])
+    next(x for x in k["entities"] if x["table"] == "customers")["key"] = ["segment"]
+    e = editor_import(links, {**b, "model/model.json": k})
+    if not isinstance(e, abi.ActionError):  # accepted: the Viewer's customers are the same
+        try:
+            assert mine(links, "sql_query", sql="SELECT count(*) FROM customers")["rows"] == n
+            assert state(links)["keys"]["customers"] == ["customer_id"]
+        finally:
+            assert not isinstance(editor_import(links, b), abi.ActionError)
+    assert mine(links, "sql_query", sql="SELECT count(*) FROM customers")["rows"] == n
+
+
+def test_broken_follow_link_fails_closed(links):
+    """A follow link that no longer holds (a relationship gone from its via, its from type gone), written behind ABI's
+    back: restricted Viewers see none of the rows it may mean, and ml_churn stays denied."""
+    o = copy.deepcopy(files()["model/ontology.json"])
+    gone, ghost = copy.deepcopy(o), copy.deepcopy(o)
+    gone["links"][2]["via"] = ["orders-customer_id", "nope"]
+    ghost["links"][2]["from"] = "ghost"
+    count = lambda t: mine(links, "sql_query", sql=f"SELECT count(*) FROM {t}")["rows"][0][0]  # noqa: E731
+    r = engine(WRITE, timeout=120, stdin=json.dumps({"project": P, "text": json.dumps(gone)}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    old = json.loads(r.stdout.splitlines()[-1])["old"]
+    try:
+        assert count("customers") == 0 and count("ml_churn") == 0 and count("orders") > 0
+        s = state(links)
+        assert "ml_churn" in s["denied"] and "no longer holds" in s["explain"]
+        r = engine(WRITE, timeout=120, stdin=json.dumps({"project": P, "text": json.dumps(ghost)}))
+        assert r.returncode == 0, r.stderr[-2000:]
+        assert count("customers") == count("orders") == count("cafes") == 0, "every table the link may mean"
+    finally:
+        r = engine(WRITE, timeout=120, stdin=json.dumps({"project": P, "text": old}))
+        assert r.returncode == 0, r.stderr[-2000:]
+    assert count("customers") == len(sql(VISITED))
+
+
+def test_cycle_keeps_anonymous_orders(links):
+    """Correctness: a filter made from the follow filter is the link's too, so it never crosses orders-customer_id
+    either. A cycle customers <-> profiles (an input table of three visitors, one-to-one both ways) carries the follow
+    filter round to customers again: anonymous orders still stay visible."""
+    three = [x[0] for x in sql(VISITED)[:3]]
+    q = "SELECT count(*), count(*) FILTER (WHERE customer_id IS NULL) FROM orders"
+    want = sql(f"{q} WHERE cafe_id IN (SELECT cafe_id FROM cafes WHERE region = 'North')")
+    sure("create_input_table", project=P, table="profiles", key=["customer_id"],
+         columns=[{"name": "customer_id", "type": "VARCHAR"}, {"name": "note", "type": "VARCHAR"}])
+    abi.call("edit_cells", project=P, table="profiles", add=[{"customer_id": c, "note": "x"} for c in three])
+    abi.call("add_relationship", project=P, **{"from": "profiles.customer_id", "to": "customers.customer_id"})
+    abi.call("add_relationship", project=P, **{"from": "customers.customer_id", "to": "profiles.customer_id"})
+    try:
+        got = [x[0] for x in mine(links, "sql_query", sql="SELECT customer_id FROM customers ORDER BY 1")["rows"]]
+        assert got == three, "customers: visitors of the North with a profile"
+        assert mine(links, "sql_query", sql=q)["rows"] == want and want[0][1] > 0, "every North order, anonymous ones too"
+        assert state(links)["keys"]["orders"] == ["cafe_id"]
+    finally:
+        for r in ("customers-customer_id", "profiles-customer_id"):
+            sure("remove_relationship", project=P, id=r)
+
+
+def test_undo_and_revert_of_a_follow_change_need_the_owner(links):
+    """Undo and revert across a follow change go through the import's gate: an Editor gets 403 before any
+    confirmation, the Owner a confirmation naming who sees fewer rows (the undo guard: git.py routes it there)."""
+    ed, viewer = links["tokens"]["editor"], links["names"]["viewer"]
+    plain = {**ONTO, "links": [{k: v for k, v in ln.items() if k != "rls"} for ln in ONTO["links"]]}
+    follow = lambda: abi.call("ontology", project=P)["links"][2].get("rls")  # noqa: E731
+    sure("set_auto_commit", project=P, on=False)
+    try:
+        sure("save_ontology", project=P, ontology=plain)
+        for action, args in (("undo", {}),):
+            with abi.as_user(ed), pytest.raises(abi.ActionError) as e:
+                abi.call(action, project=P, **args)
+            assert e.value.status == 403 and viewer not in json.dumps(e.value.body), e.value.body
+        with pytest.raises(abi.ActionError) as e:
+            abi.call("undo", project=P)
+        assert e.value.status == 409 and "fewer rows" in e.value.body["message"] and viewer in e.value.body["message"], e.value.body
+        abi.call("undo", project=P, confirm=e.value.body["confirm_token"])
+        assert follow() == "follow"
+        try:
+            abi.call("commit", project=P, message="follow kept")
+        except abi.ActionError as x:
+            assert x.status == 409, x
+        head = abi.call("history", project=P)["commits"][0]["id"]
+        sure("save_ontology", project=P, ontology=plain)
+        abi.call("commit", project=P, message="follow removed")
+        with abi.as_user(ed), pytest.raises(abi.ActionError) as e:
+            abi.call("revert", project=P, to=head)
+        assert e.value.status == 403 and viewer not in json.dumps(e.value.body), e.value.body
+        assert follow() is None
+        with pytest.raises(abi.ActionError) as e:
+            abi.call("revert", project=P, to=head)
+        assert e.value.status == 409 and "fewer rows" in e.value.body["message"], e.value.body
+        abi.call("revert", project=P, to=head, confirm=e.value.body["confirm_token"])
+        assert follow() == "follow"
+    finally:
+        sure("save_ontology", project=P, ontology=ONTO)
+        sure("set_auto_commit", project=P, on=True)
