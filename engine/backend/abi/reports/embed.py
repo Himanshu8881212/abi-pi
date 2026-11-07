@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from abi import actions, db, storage
 from abi.actions import ActionFailed, action, audit, require_confirmation
 from abi.project import ID
-from abi.reports.share import layout
+from abi.reports.share import SharedVisual, layout
 from abi.security import Role, User, limited, role_in
 from abi.security.credentials import _fernet, decrypt
 
@@ -167,14 +167,8 @@ def embedded_report(x_abi_embed: Token = None) -> dict:
     return layout(c.project, c.report, c.page, c.visual, GONE)
 
 
-class EmbeddedVisual(BaseModel):
-    model_config = ConfigDict(extra="forbid")  # no project, report, viewer or interaction filters from the page
-    page: str = Field(pattern=ID)
-    visual: str = Field(pattern=ID)
-
-
 @router.post("/api/embed/visual_data")
-def embedded_visual(body: EmbeddedVisual, x_abi_embed: Token = None) -> dict:
+def embedded_visual(body: SharedVisual, x_abi_embed: Token = None) -> dict:
     """`visual_data` of one visual the token reaches, as its Viewer (their RLS rules apply)."""
     c, viewer = _open(x_abi_embed, body.model_dump())
     try:

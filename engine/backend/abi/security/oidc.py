@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 
 from abi import db, security
 from abi.actions import ActionFailed, action, audit, require_confirmation
+from abi.agent.llm import ProviderId
 from abi.project import ID
 from abi.security import Role, User, credentials
 from abi.tools import builtin
@@ -45,10 +46,6 @@ class Provider(BaseModel):
     issuer: str = Field(pattern=r"^https://[^\s?#]+$", max_length=500)
     client_id: str = Field(min_length=1, max_length=500)
     client_secret: str = Field(pattern=r"^\$\{secret:[A-Za-z0-9_]+\}$", description="a ${secret:NAME} reference")
-
-
-class ProviderId(BaseModel):
-    id: str = Field(pattern=ID)
 
 
 @action(Role.owner)

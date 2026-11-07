@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 import httpx2
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, Field, model_validator
 
 from abi.actions import ActionFailed
 from abi.security import credentials
@@ -23,16 +23,13 @@ from abi.tools import api
 from abi.transform import _type
 
 from . import oauth
+from .oauth import _Strict
 
 SECRET_ONLY = rf"^{credentials.REF}$"
 POINTER = r"^(/[^/]*)*$"  # RFC 6901; "" is the whole document
 PAGE_MAX, TIMEOUT = 32 << 20, 60  # one page's bytes and seconds; D-17: pages go to disk, never all in memory
 RETRIES, WAIT_MAX = 5, 300  # 429/5xx retries, and the longest total wait for them (seconds)
 _sleep = time.sleep  # tests replace it
-
-
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
 
 
 class Bearer(_Strict):
