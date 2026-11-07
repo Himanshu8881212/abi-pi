@@ -16,6 +16,7 @@ import urllib.request
 
 import pytest
 from conftest import drop
+from test_engine import engine
 from test_pages import PY, sure
 
 import abi
@@ -535,29 +536,62 @@ BY_CUSTOMER = [  # customers as the fact (their filter reads their key) and as a
 ]
 
 
-def test_a_follow_link_keeps_every_read_each_persons_own(brew):
-    """1.2.6 M3: with customers following the cafés rule (rls: follow), every visual and query, the ones over customers
-    too, is each person's own read with shared partials and without; customers are fewer, orders are not."""
+NOTES = r"""
+import json, sys
+from abi import db, security, storage
+from abi.project import git
+from abi.semantic import model
+P = json.loads(sys.stdin.read())["project"]
+with db.connect() as c:
+    owner = security.user(c, c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"])
+write = lambda cur: cur.execute("CREATE OR REPLACE TABLE lake.model.customer_notes AS SELECT customer_id, i AS n FROM lake.model.customers,"
+                                " range(3) r(i) WHERE customer_id <= 'C005000'")
+with git.change(P, owner, "customer notes"):
+    storage._commit(storage.lake(P), write, owner.name, "customer notes")
+    mj = model.load(P)
+    mj["tables"]["customer_notes"] = {"kind": "fact", "key": None, "description": "Three notes per customer."}
+    mj["relationships"].append(model._rel("customer_notes.customer_id", "customers.customer_id"))
+    model.save(P, mj)
+print("{}")
+"""
+BY_NOTES = [{"measures": ["notes_n"]}, {"measures": ["notes_n", "note_rows"], "dimensions": ["customers.segment"]}]
+
+
+def test_a_follow_link_keeps_every_read_each_persons_own(brew, tmp_path):
+    """1.2.6 M3: with customers following the cafés rule (rls: follow), on a new snapshot: every visual and query is
+    each person's own read with shared partials and without, shared as without the link (exact); the reads over
+    customers too; a fact pointing at customers outside the link's via (customer_notes) is sliced through the follow
+    filter and equals the person's own read; customers are fewer, orders are not."""
     drv = brew["drv"]
+    brewline.generate(tmp_path, 0.005)  # the module's files went with the published copy's test: the same data again
+    duckdb.sql(f"COPY (SELECT * FROM read_parquet('{tmp_path}/orders/*.parquet') WHERE order_date < DATE '2025-06-01') TO"
+               f" '{tmp_path}/orders3.parquet' (FORMAT parquet)")
+    abi.upload(P, "orders", tmp_path / "orders3.parquet")  # a fresh snapshot: no partials kept (or failed) from the tests before
+    r = engine(NOTES, timeout=300, stdin=json.dumps({"project": P}))
+    assert r.returncode == 0, r.stderr[-2000:]
     abi.call("set_measure", project=P, id="customer_rows", name="customer_rows", expression="COUNT(customers.customer_id)")
+    abi.call("set_measure", project=P, id="notes_n", name="notes_n", expression="SUM(customer_notes.n)")
+    abi.call("set_measure", project=P, id="note_rows", name="note_rows", expression="COUNT(customer_notes.n)")
     try:
-        mine = BY_CUSTOMER + QUERIES[:1]
+        mine = BY_CUSTOMER + QUERIES[:1] + BY_NOTES
         before = drv("check", queries=mine)
         sure("save_ontology", project=P, ontology=FOLLOW)
-        # every visual and query: the same with shared partials and without, and read through them (sliced). How
-        # many slice is the earlier tests' exact(): at the end of the module it sat on its n/2 margin in the full
-        # suite (32 of 64, three runs of four), so it isn't asked again here
-        r = drv("check", queries=QUERIES + WAS)
-        assert r["n"] > 30 and not r["diff"], r["diff"][:3]
-        assert len(r["names"]) >= 5 and r["sliced"] > 0 and not r["old"] and set(r["names"]) <= set(r["have"]), r
+        exact(drv("check", queries=QUERIES + WAS))  # every visual and query, shared and sliced as without the link
         # the reads over customers: the same with and without shared partials (those over customers as the fact
         # never slice: partials grouped by their key are too big to share)
+        base = drv("check", queries=[])
         r = drv("check", queries=mine)
         assert r["n"] > len(WHO) * len(mine) and not r["diff"], r["diff"][:3]
+        notes = drv("check", queries=BY_NOTES)  # customer_notes: every read sliced through the follow filter
+        assert not notes["diff"] and notes["sliced"] >= base["sliced"] + len(WHO) * len(BY_NOTES), (notes["sliced"], base["sliced"])
+        assert drv("plan", who="one", q=dict(BY_NOTES[1]))["facts"] == ["customer_notes"]
         for w in ("one", "several"):
             assert r["rows"][f"{w} q:1"][1][0][0] < before["rows"][f"{w} q:1"][1][0][0], "fewer customers"
             assert r["rows"][f"{w} q:4"] == before["rows"][f"{w} q:4"], "the same orders (anonymous ones too)"
+            assert r["rows"][f"{w} q:5"][1][0][0] < before["rows"][f"{w} q:5"][1][0][0], "fewer customers' notes"
         assert r["rows"]["none q:1"][1] == [[0]], "a rule no row passes: no customers"
     finally:
         sure("save_ontology", project=P, ontology={})
-        sure("delete_measure", project=P, id="customer_rows")
+        for m in ("customer_rows", "notes_n", "note_rows"):
+            sure("delete_measure", project=P, id=m)
+        sure("remove_relationship", project=P, id="customer_notes-customer_id")

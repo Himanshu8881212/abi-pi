@@ -351,26 +351,102 @@ def test_broken_follow_link_fails_closed(links):
     assert count("customers") == len(sql(VISITED))
 
 
-def test_cycle_keeps_anonymous_orders(links):
+LAKE = r"""
+import json, sys
+from abi import db, security, storage
+from abi.project import git
+from abi.semantic import model
+a = json.loads(sys.stdin.read())
+P, t = a["project"], a["table"]
+with db.connect() as c:
+    owner = security.user(c, c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"])
+rows = " UNION ALL ".join(f"SELECT '{k}' AS customer_id, '{n}' AS note" for k, n in a["rows"])
+with git.change(P, owner, "a lake table"):
+    storage._commit(storage.lake(P), lambda cur: cur.execute(f"CREATE OR REPLACE TABLE lake.model.{t} AS {rows}"), owner.name, "a lake table")
+    mj = model.load(P)
+    mj["tables"][t] = {"kind": "dimension", "key": ["customer_id"], "description": "Profiles."}
+    mj["relationships"] += [model._rel(f"{t}.customer_id", "customers.customer_id"), model._rel("customers.customer_id", f"{t}.customer_id")]
+    model.save(P, mj)
+print("{}")
+"""
+
+
+@pytest.mark.parametrize("kind", ["input", "lake"])
+def test_cycle_keeps_anonymous_orders(links, kind):
     """Correctness: a filter made from the follow filter is the link's too, so it never crosses orders-customer_id
-    either. A cycle customers <-> profiles (an input table of three visitors, one-to-one both ways) carries the follow
-    filter round to customers again: anonymous orders still stay visible."""
+    either, while a part made from a rule always does, each with its own tag. A cycle customers <-> profiles (one row
+    per visitor, one-to-one both ways; an input table or a lake table) carries the follow filter round to customers
+    again: anonymous orders still stay visible. With a rule on profiles, customers whose profile is hidden stay hidden
+    and orders keep exactly what they have without the link (never more)."""
     three = [x[0] for x in sql(VISITED)[:3]]
+    t = "profiles" if kind == "input" else "profiles_l"
     q = "SELECT count(*), count(*) FILTER (WHERE customer_id IS NULL) FROM orders"
     want = sql(f"{q} WHERE cafe_id IN (SELECT cafe_id FROM cafes WHERE region = 'North')")
-    sure("create_input_table", project=P, table="profiles", key=["customer_id"],
-         columns=[{"name": "customer_id", "type": "VARCHAR"}, {"name": "note", "type": "VARCHAR"}])
-    abi.call("edit_cells", project=P, table="profiles", add=[{"customer_id": c, "note": "x"} for c in three])
-    abi.call("add_relationship", project=P, **{"from": "profiles.customer_id", "to": "customers.customer_id"})
-    abi.call("add_relationship", project=P, **{"from": "customers.customer_id", "to": "profiles.customer_id"})
+    notes = [(c, "y" if i == 2 else "x") for i, c in enumerate(three)]
+    if kind == "input":
+        sure("create_input_table", project=P, table=t, key=["customer_id"],
+             columns=[{"name": "customer_id", "type": "VARCHAR"}, {"name": "note", "type": "VARCHAR"}])
+        abi.call("edit_cells", project=P, table=t, add=[{"customer_id": c, "note": n} for c, n in notes])
+        abi.call("add_relationship", project=P, **{"from": f"{t}.customer_id", "to": "customers.customer_id"})
+        abi.call("add_relationship", project=P, **{"from": "customers.customer_id", "to": f"{t}.customer_id"})
+    else:
+        r = engine(LAKE, timeout=300, stdin=json.dumps({"project": P, "table": t, "rows": notes}))
+        assert r.returncode == 0, r.stderr[-2000:]
     try:
         got = [x[0] for x in mine(links, "sql_query", sql="SELECT customer_id FROM customers ORDER BY 1")["rows"]]
         assert got == three, "customers: visitors of the North with a profile"
         assert mine(links, "sql_query", sql=q)["rows"] == want and want[0][1] > 0, "every North order, anonymous ones too"
         assert state(links)["keys"]["orders"] == ["cafe_id"]
+        sure("set_rls_rule", project=P, id="notes", table=t, column="note", users={links["uid"]: ["x"]})
+        try:
+            got = [x[0] for x in mine(links, "sql_query", sql="SELECT customer_id FROM customers ORDER BY 1")["rows"]]
+            assert got == three[:2], "a customer whose profile is hidden stays hidden"
+            q2 = "SELECT customer_id, count(*) FROM orders GROUP BY 1 ORDER BY 1 NULLS FIRST"
+            with_link = mine(links, "sql_query", sql=q2)["rows"]
+            with saved({**ONTO, "links": [{k: v for k, v in ln.items() if k != "rls"} for ln in ONTO["links"]]}):
+                assert mine(links, "sql_query", sql=q2)["rows"] == with_link, "orders: the same rows as without the link"
+            assert [x[0] for x in with_link] == three[:2], "orders of the visible profiles only (no anonymous ones, as without the link)"
+        finally:
+            sure("delete_rls_rule", project=P, id="notes")
     finally:
-        for r in ("customers-customer_id", "profiles-customer_id"):
+        for r in ("customers-customer_id", f"{t}-customer_id"):
             sure("remove_relationship", project=P, id=r)
+
+
+def test_follow_target_with_no_rows_denies(links):
+    """A follow link whose `to` table shows the person no rows by default (every column hidden), though no rule
+    filters it: its `from` objects are none of theirs either (fail closed), not all of them."""
+    o = copy.deepcopy(ONTO)
+    o["objects"].append({"id": "product", "table": "products", "name": "Product", "plural": "Products", "title": "product_name"})
+    o["links"].append({"id": "bought", "from": "customer", "to": "product", "name": "bought", "via": ["orders-customer_id", "orders-product_id"],
+                       "rls": "follow"})
+    cols = abi.call("sql_query", project=P, sql="SELECT * FROM products LIMIT 0")["columns"]
+    with saved(o):
+        assert mine(links, "sql_query", sql="SELECT count(*) FROM customers")["rows"] == [[len(sql(VISITED))]], "products restrict no one"
+        sure("set_column_rule", project=P, id="noproducts", table="products", columns=cols)
+        try:
+            assert mine(links, "sql_query", sql="SELECT count(*) FROM customers")["rows"] == [[0]]
+            assert mine(links, "sql_query", sql="SELECT count(*) FROM orders")["rows"][0][0] > 0, "only the follower is denied"
+        finally:
+            sure("delete_rls_rule", project=P, id="noproducts")
+
+
+def test_editor_add_relationship_on_a_via_refused(links):
+    """Security: add_relationship re-adds a relationship under its ID (orders-customer_id onto another keyed table):
+    what visited walks would change, so an Editor gets 403 with nothing changed; the Owner a confirmation."""
+    sure("create_input_table", project=P, table="people", key=["customer_id"], columns=[{"name": "customer_id", "type": "VARCHAR"}])
+    before = files()["model/model.json"]
+    with abi.as_user(links["tokens"]["editor"]), pytest.raises(abi.ActionError) as e:
+        abi.call("add_relationship", project=P, **{"from": "orders.customer_id", "to": "people.customer_id"})
+    assert e.value.status == 403 and "Only a project Owner" in e.value.body["message"], e.value.body
+    assert files()["model/model.json"] == before, "nothing changed"
+    with pytest.raises(abi.ActionError) as e:
+        abi.call("add_relationship", project=P, **{"from": "orders.customer_id", "to": "people.customer_id"})
+    assert e.value.status == 409 and "different rows" in e.value.body["message"] and links["names"]["viewer"] in e.value.body["message"]
+    assert files()["model/model.json"] == before
+    with abi.as_user(links["tokens"]["editor"]):  # a relationship no follow link walks stays the Editor's
+        abi.call("add_relationship", project=P, **{"from": "people.customer_id", "to": "customers.customer_id"})
+    sure("remove_relationship", project=P, id="people-customer_id")
 
 
 def test_undo_and_revert_of_a_follow_change_need_the_owner(links):
