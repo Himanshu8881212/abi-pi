@@ -8,30 +8,24 @@ Exit codes: 0 ok, 1 rejected, failed test or run, or unreadable input, 2 usage e
 Run from backend/: `uv run python -m abi.cli --help`.
 """
 
+import argparse
 import contextlib
 import os
+import sys
 import time
 import urllib.error
 from pathlib import Path
-from typing import Annotated
-
-import typer
 
 from abi import sdk
 from abi.project import bundle as b
 
-cli = typer.Typer(no_args_is_help=True, add_completion=False)
-Src = Annotated[Path, typer.Argument(exists=True, help="Project folder or project.bundle.json")]
-Project = Annotated[str | None, typer.Option(help="Project ID (default: the folder name)")]
-ProjectId = Annotated[str, typer.Argument(help="Project ID")]
-Url = Annotated[str, typer.Option(envvar="ABI_URL", help="URL of the running app")]
 REFUSED = (401, 403, 404)
 SETTLE = 0.5  # watch: seconds between polls; a change is sent once the folder is unchanged for this long
 
 
 def _fail(code: int, message: str):
-    typer.echo(message, err=True)
-    raise typer.Exit(code)
+    print(message, file=sys.stderr)
+    raise SystemExit(code)
 
 
 def _load(src: Path, project: str | None) -> tuple[dict, str]:
@@ -93,8 +87,8 @@ def _import(src: Path, project: str | None, c: sdk.Client, dry_run: bool) -> dic
     status, out = _post(c, body)
     if status == 409 and "confirm_token" in out:  # MA-3 / D-1: a person confirms, never a flag
         try:
-            ok = typer.confirm(out["message"], default=False)
-        except typer.Abort:  # no terminal (CI)
+            ok = input(f"{out['message']} [y/N]: ").strip().lower() in ("y", "yes")
+        except (EOFError, KeyboardInterrupt):  # no terminal (CI)
             ok = False
         if not ok:
             _fail(3, "Not confirmed; nothing changed.")
@@ -112,60 +106,48 @@ def _import(src: Path, project: str | None, c: sdk.Client, dry_run: bool) -> dic
 
 def _show(out: dict) -> None:
     for c in out["changes"] or ["No changes."]:
-        typer.echo(f"- {c}")
+        print(f"- {c}")
     for k, label in (("refresh", "Tables to refresh"), ("removed", "Tables removed"), ("reports", "Reports affected")):
         if out["impact"][k]:
-            typer.echo(f"{label}: {', '.join(out['impact'][k])}")
+            print(f"{label}: {', '.join(out['impact'][k])}")
 
 
-@cli.command()
-def validate(src: Src, project: Project = None, url: Url = "http://localhost:8000"):
+def validate(src: Path, project: str | None, url: str):
     """Check the project against the app's import pipeline without changing anything."""
     out = _import(src, project, _client(url), dry_run=True)
-    typer.echo(f"Valid: {len(out['changes'])} change(s).")
+    print(f"Valid: {len(out['changes'])} change(s).")
 
 
-@cli.command()
-def diff(src: Src, project: Project = None, url: Url = "http://localhost:8000"):
+def diff(src: Path, project: str | None, url: str):
     """Show what an apply would change, in plain language, and the tables it affects."""
     _show(_import(src, project, _client(url), dry_run=True))
 
 
-@cli.command()
-def apply(src: Src, project: Project = None, url: Url = "http://localhost:8000"):
+def apply(src: Path, project: str | None, url: str):
     """Import the project into the app as one undoable change."""
     _show(_import(src, project, _client(url), dry_run=False))
-    typer.echo("Applied as one uncommitted change; undo or commit it in the app.")
+    print("Applied as one uncommitted change; undo or commit it in the app.")
 
 
-@cli.command("bundle")
-def make_bundle(
-    folder: Annotated[Path, typer.Argument(exists=True, file_okay=False, help="Project folder")],
-    output: Annotated[Path, typer.Option("--output", "-o")] = Path("project.bundle.json"),
-):
+def make_bundle(folder: Path, output: Path):
     """Write the project folder as one project.bundle.json (PC-2)."""
     try:
         output.write_text(b.dumps(b.bundle(folder)), encoding="utf-8")
     except (ValueError, OSError) as e:
         _fail(1, f"{folder}: {e}")
-    typer.echo(f"Wrote {output}")
+    print(f"Wrote {output}")
 
 
-@cli.command()
-def unbundle(
-    src: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="project.bundle.json")],
-    folder: Annotated[Path, typer.Argument(file_okay=False, help="Folder to write the project files into")],
-):
+def unbundle(src: Path, folder: Path):
     """Write a project.bundle.json out as a project folder (PC-2). An invalid bundle writes nothing."""
     try:
         b.unbundle(b.loads(src.read_text(encoding="utf-8")), folder)
     except (ValueError, OSError) as e:
         _fail(1, f"{src}: {e}")
-    typer.echo(f"Wrote {folder}")
+    print(f"Wrote {folder}")
 
 
-@cli.command("test")
-def run_tests(project: ProjectId, url: Url = "http://localhost:8000"):
+def run_tests(project: str, url: str):
     """Run the measure tests, every tool's tests and every custom agent's evaluation set; exit 1 if any fails."""
     c = _client(url)
     if project not in {p["project"] for p in _call(c, "list_projects")["projects"]}:  # an owner would get empty lists
@@ -188,22 +170,14 @@ def run_tests(project: ProjectId, url: Url = "http://localhost:8000"):
     if not rows:  # CI must not pass on a project with nothing in it
         _fail(1, f"Project '{project}' has no measures, tools or agents to test.")
     for kind, id, errors in rows:
-        typer.echo(f"{'FAIL' if errors else 'PASS'}  {kind:<7}  {id}  {' '.join(errors)}".rstrip())
+        print(f"{'FAIL' if errors else 'PASS'}  {kind:<7}  {id}  {' '.join(errors)}".rstrip())
     failed = sum(bool(e) for *_, e in rows)
-    typer.echo(f"{len(rows) - failed} passed, {failed} failed.")
+    print(f"{len(rows) - failed} passed, {failed} failed.")
     if failed:
-        raise typer.Exit(1)
+        raise SystemExit(1)
 
 
-@cli.command()
-def run_flow(
-    project: ProjectId,
-    flow: Annotated[str, typer.Argument(help="Flow ID")],
-    key: Annotated[str | None, typer.Option(help="Idempotency key: a retried call starts no second run")] = None,
-    wait: Annotated[bool, typer.Option(help="Wait until the run ends; exit 1 unless it ends ok")] = False,
-    timeout: Annotated[float, typer.Option(help="Seconds to wait")] = 600,
-    url: Url = "http://localhost:8000",
-):
+def run_flow(project: str, flow: str, key: str | None, wait: bool, timeout: float, url: str):
     """Start a flow run now (FL-7)."""
     c = _client(url)
     try:
@@ -212,26 +186,21 @@ def run_flow(
     except TimeoutError as e:
         _fail(1, str(e))
     if not wait:
-        typer.echo(f"Run {r['run']} {'started' if r['started'] else 'was already started with this key'}.")
+        print(f"Run {r['run']} {'started' if r['started'] else 'was already started with this key'}.")
         return
-    typer.echo(f"Run {r['id']}: {r['status']}" + (f": {r['error']}" if r.get("error") else ""))
+    print(f"Run {r['id']}: {r['status']}" + (f": {r['error']}" if r.get("error") else ""))
     if r["status"] != "ok":
-        raise typer.Exit(1)
+        raise SystemExit(1)
 
 
-@cli.command()
-def docs(
-    project: ProjectId,
-    output: Annotated[Path, typer.Option("--output", "-o", file_okay=False, help="Folder for the Markdown files")] = Path("docs"),
-    url: Url = "http://localhost:8000",
-):
+def docs(project: str, output: Path, url: str):
     """Generate the project's documentation (DC-2) and write its Markdown files into a local folder."""
     files = _call(_client(url), "generate_docs", project=project)["files"]
     try:
         b.unbundle(files, output)  # the same path checks as unbundle: nothing lands outside the folder
     except (ValueError, OSError) as e:
         _fail(1, f"{output}: {e}")
-    typer.echo(f"Wrote {len(files)} file(s) to {output}")
+    print(f"Wrote {len(files)} file(s) to {output}")
 
 
 def _state(folder: Path) -> dict:
@@ -244,16 +213,11 @@ def _state(folder: Path) -> dict:
     return out
 
 
-@cli.command()
-def watch(
-    folder: Annotated[Path, typer.Argument(exists=True, file_okay=False, help="Project folder (your clone)")],
-    project: Project = None,
-    url: Url = "http://localhost:8000",
-):
+def watch(folder: Path, project: str | None, url: str):
     """Hot reload (PC-12): send every saved change of the folder to the app. A valid change applies at once; an
     invalid one prints the file, JSON path and fix and leaves the running project untouched. Ctrl+C stops."""
     c = _client(url)
-    typer.echo(f"Watching {folder} (Ctrl+C to stop).")
+    print(f"Watching {folder} (Ctrl+C to stop).")
     seen = _state(folder)
     while True:
         # ponytail: polls and stats the whole folder every SETTLE s; an OS file watcher if folders get huge
@@ -268,11 +232,65 @@ def watch(
         seen = now
         try:
             out = _import(folder, project, c, dry_run=False)
-        except typer.Exit:  # the error is printed; the project is unchanged
+        except SystemExit:  # the error is printed; the project is unchanged
             continue
-        typer.echo("Applied:")
+        print("Applied:")
         _show(out)
 
 
+def _path(exists: bool = True, file_okay: bool = True, dir_okay: bool = True):
+    """A path argument checked as click checks it (usage error, exit 2)."""
+    def check(s: str) -> Path:
+        p = Path(s)
+        if exists and not p.exists():
+            raise argparse.ArgumentTypeError(f"Path '{s}' does not exist.")
+        if not file_okay and p.is_file():
+            raise argparse.ArgumentTypeError(f"File '{s}' is a file.")
+        if not dir_okay and p.is_dir():
+            raise argparse.ArgumentTypeError(f"Directory '{s}' is a directory.")
+        return p
+    return check
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(prog="python -m abi.cli")
+    sub = parser.add_subparsers(metavar="COMMAND")
+
+    def command(f, name: str | None = None, *args: tuple) -> argparse.ArgumentParser:
+        p = sub.add_parser(name or f.__name__.replace("_", "-"), help=" ".join(f.__doc__.split()), description=f.__doc__)
+        p.set_defaults(run=f)
+        for flags, kw in args:
+            p.add_argument(*flags, **kw)
+        return p
+
+    src = (("src",), {"type": _path(), "help": "Project folder or project.bundle.json"})
+    project = (("--project",), {"help": "Project ID (default: the folder name)"})
+    project_id = (("project",), {"help": "Project ID"})
+    url = (("--url",), {"default": os.environ.get("ABI_URL", "http://localhost:8000"), "help": "URL of the running app [env var: ABI_URL]"})
+    for f in (validate, diff, apply):
+        command(f, None, src, project, url)
+    command(make_bundle, "bundle", (("folder",), {"type": _path(file_okay=False), "help": "Project folder"}),
+            (("--output", "-o"), {"type": Path, "default": Path("project.bundle.json")}))
+    command(unbundle, None, (("src",), {"type": _path(dir_okay=False), "help": "project.bundle.json"}),
+            (("folder",), {"type": _path(exists=False, file_okay=False), "help": "Folder to write the project files into"}))
+    command(run_tests, "test", project_id, url)
+    command(run_flow, None, project_id, (("flow",), {"help": "Flow ID"}),
+            (("--key",), {"help": "Idempotency key: a retried call starts no second run"}),
+            (("--wait",), {"action": argparse.BooleanOptionalAction, "default": False, "help": "Wait until the run ends; exit 1 unless it ends ok"}),
+            (("--timeout",), {"type": float, "default": 600, "help": "Seconds to wait"}), url)
+    command(docs, None, project_id, (("--output", "-o"), {"type": _path(exists=False, file_okay=False), "default": Path("docs"),
+                                                           "help": "Folder for the Markdown files"}), url)
+    command(watch, None, (("folder",), {"type": _path(file_okay=False), "help": "Project folder (your clone)"}), project, url)
+    args = vars(parser.parse_args(argv))
+    if not (run := args.pop("run", None)):  # no command: the help, as a usage error
+        parser.print_help(sys.stderr)
+        raise SystemExit(2)
+    try:
+        run(**args)
+    except KeyboardInterrupt:  # Ctrl+C (watch): as click ended it
+        print("\nAborted!", file=sys.stderr)
+        raise SystemExit(1) from None
+
+
 if __name__ == "__main__":
-    cli()
+    main()
