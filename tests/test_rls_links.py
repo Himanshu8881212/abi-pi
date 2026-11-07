@@ -67,7 +67,7 @@ read = lambda sql, reads: semantic.execute(P, sql, {"test": "rls links"}, reads=
 cols = semantic._columns_of(storage.lake(P).cursor(), "model")
 conds = rls.conditions(P, uid, read, cols)
 print(json.dumps({"explain": rls.explain(P, uid), "filtered": sorted(rls.filtered(P)), "conds": conds,
-                  "keys": {t: rls.key_columns(P, t) for t in ("cafes", "customers", "orders", "ml_churn")},
+                  "keys": {t: rls.key_columns(P, t) for t in a.get("tables", ("cafes", "customers", "orders", "ml_churn"))},
                   "denied": rls.unfiltered_outputs(P)}))
 """
 
@@ -119,8 +119,8 @@ def every(links, **args) -> list:
         offset += 1000
 
 
-def state(links) -> dict:
-    r = engine(RLS, timeout=300, stdin=json.dumps({"project": P, "uid": links["uid"]}))
+def state(links, **more) -> dict:
+    r = engine(RLS, timeout=300, stdin=json.dumps({"project": P, "uid": links["uid"], **more}))
     assert r.returncode == 0, r.stderr[-3000:]
     return json.loads(r.stdout.splitlines()[-1])
 
@@ -317,13 +317,17 @@ def test_editor_import_cant_change_what_a_follow_link_means(links):
     assert files() == b, "nothing changed"
     k = copy.deepcopy(b["model/model.json"])
     next(x for x in k["entities"] if x["table"] == "customers")["key"] = ["segment"]
+    q = "SELECT count(*), count(*) FILTER (WHERE customer_id IS NULL) FROM orders"
+    orders = mine(links, "sql_query", sql=q)["rows"]
     e = editor_import(links, {**b, "model/model.json": k})
-    if not isinstance(e, abi.ActionError):  # accepted: the Viewer's customers are the same
-        try:
-            assert mine(links, "sql_query", sql="SELECT count(*) FROM customers")["rows"] == n
-            assert state(links)["keys"]["customers"] == ["customer_id"]
-        finally:
-            assert not isinstance(editor_import(links, b), abi.ActionError)
+    assert not isinstance(e, abi.ActionError), e  # the key isn't what a follow link means: an Editor's change
+    try:  # and it changes nothing a follow filter does
+        assert mine(links, "sql_query", sql="SELECT count(*) FROM customers")["rows"] == n
+        assert mine(links, "sql_query", sql=q)["rows"] == orders and orders[0][1] > 0, "orders, anonymous ones too, unchanged"
+        s = state(links)
+        assert s["keys"]["customers"] == ["customer_id"] and s["keys"]["orders"] == ["cafe_id"]
+    finally:
+        assert not isinstance(editor_import(links, b), abi.ActionError)
     assert mine(links, "sql_query", sql="SELECT count(*) FROM customers")["rows"] == n
 
 
@@ -486,3 +490,110 @@ def test_undo_and_revert_of_a_follow_change_need_the_owner(links):
     finally:
         sure("save_ontology", project=P, ontology=ONTO)
         sure("set_auto_commit", project=P, on=True)
+
+
+def test_follow_crosses_its_via_toward_f_only(links):
+    """The crossing rule is direction-aware: a follow filter that reaches T's side again (cafés owned by a customer,
+    cafes -> cafe_owner -> customers, outside the via) crosses orders-cafe_id the T-side way, so the orders of a café
+    whose owner is hidden stay hidden, while it never crosses orders-customer_id back from F: anonymous orders stay."""
+    north = [x[0] for x in sql("SELECT cafe_id FROM cafes WHERE region = 'North' ORDER BY 1")]
+    h = north[0]
+    out = sql(f"SELECT min(customer_id) FROM customers WHERE customer_id NOT IN ({VISITED})")[0][0]
+    owner = sql(f"SELECT min(o.customer_id) FROM orders o JOIN cafes c USING (cafe_id) WHERE c.region = 'North' AND o.cafe_id <> '{h}'")[0][0]
+    sure("create_input_table", project=P, table="cafe_owner", key=["cafe_id"],
+         columns=[{"name": "cafe_id", "type": "VARCHAR"}, {"name": "owner", "type": "VARCHAR"}])
+    abi.call("edit_cells", project=P, table="cafe_owner", add=[{"cafe_id": c, "owner": out if c == h else owner} for c in north])
+    abi.call("add_relationship", project=P, **{"from": "cafe_owner.owner", "to": "customers.customer_id"})
+    abi.call("add_relationship", project=P, **{"from": "cafes.cafe_id", "to": "cafe_owner.cafe_id"})
+    try:
+        q = "SELECT count(*), count(*) FILTER (WHERE customer_id IS NULL) FROM orders"
+        want = sql(f"{q} WHERE cafe_id IN (SELECT cafe_id FROM cafes WHERE region = 'North') AND cafe_id <> '{h}'")
+        assert [x[0] for x in mine(links, "sql_query", sql="SELECT cafe_id FROM cafes ORDER BY 1")["rows"]] == north[1:]
+        assert mine(links, "sql_query", sql=f"SELECT count(*) FROM orders WHERE cafe_id = '{h}'")["rows"] == [[0]], "the hidden café's orders"
+        assert mine(links, "sql_query", sql=q)["rows"] == want and want[0][1] > 0, "the rest, anonymous ones too"
+    finally:
+        for r in ("cafes-cafe_id", "cafe_owner-owner"):
+            sure("remove_relationship", project=P, id=r)
+
+
+def test_hidden_table_on_the_way_denies(links):
+    """No follow decision is made from rows the person can't see: orders (between customers and cafés) with every
+    column hidden gives no customers, not all of them."""
+    cols = abi.call("sql_query", project=P, sql="SELECT * FROM orders LIMIT 0")["columns"]
+    sure("set_column_rule", project=P, id="noorders", table="orders", columns=cols)
+    try:
+        assert mine(links, "sql_query", sql="SELECT count(*) FROM customers")["rows"] == [[0]]
+        assert "reads a table that shows you no rows" in state(links)["explain"]
+    finally:
+        sure("delete_rls_rule", project=P, id="noorders")
+    assert mine(links, "sql_query", sql="SELECT count(*) FROM customers")["rows"] == [[len(sql(VISITED))]]
+
+
+def test_derived_table_stays_denied(links):
+    """A per-customer table built from orders (revenue over every café, hidden ones too) related to customers stays
+    denied to the Viewer with and without the follow link: only ML predictions (ML-5) follow it."""
+    sure("set_steps", project=P, table="cust_rev", steps=[{"type": "source", "table": "orders"}, {
+        "type": "group", "by": ["customer_id"], "aggregations": [{"name": "revenue", "function": "sum", "column": "revenue"}]}])
+    end = time.monotonic() + 240
+    while time.monotonic() < end:
+        try:
+            if sql("SELECT count(*) FROM cust_rev")[0][0]:
+                break
+        except abi.ActionError:
+            pass
+        time.sleep(2)
+    abi.call("add_relationship", project=P, **{"from": "cust_rev.customer_id", "to": "customers.customer_id"})
+    try:
+        assert mine(links, "sql_query", sql="SELECT count(*) FROM cust_rev")["rows"] == [[0]]
+        assert "cust_rev" in state(links)["denied"]
+        with saved({**ONTO, "links": [{k: v for k, v in ln.items() if k != "rls"} for ln in ONTO["links"]]}):
+            assert mine(links, "sql_query", sql="SELECT count(*) FROM cust_rev")["rows"] == [[0]]
+    finally:
+        sure("remove_relationship", project=P, id="cust_rev-customer_id")
+
+
+COMPOSITE = r"""
+import json, sys
+from abi import db, security, storage
+from abi.project import git
+from abi.semantic import model
+P = json.loads(sys.stdin.read())["project"]
+with db.connect() as c:
+    owner = security.user(c, c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"])
+rows = "SELECT cafe_id, month::INTEGER AS month FROM (SELECT cafe_id FROM lake.model.cafes ORDER BY 1 LIMIT 2), range(1, 4) r(month)"
+def write(cur):
+    cur.execute(f"CREATE OR REPLACE TABLE lake.model.slots AS SELECT *, 40 AS seats FROM ({rows})")
+    cur.execute(f"CREATE OR REPLACE TABLE lake.model.plans AS SELECT *, 100 * month AS target FROM ({rows})")
+with git.change(P, owner, "slots and plans"):
+    storage._commit(storage.lake(P), write, owner.name, "slots and plans")
+    mj = model.load(P)
+    for t in ("slots", "plans"):
+        mj["tables"][t] = {"kind": "dimension" if t == "slots" else "fact", "key": ["cafe_id", "month"], "description": t}
+    mj["relationships"].append({"id": "plans-cafe_id-month", "from": {"table": "plans", "columns": ["cafe_id", "month"]},
+                                "to": {"table": "slots", "columns": ["cafe_id", "month"]}})
+    model.save(P, mj)
+print("{}")
+"""
+
+
+def test_composite_key_follow(links):
+    """A follow link over a two-column relationship: slots follow plans (a rule on plans.month), the filter a tuple
+    IN over both columns: the Viewer sees the slots of the months they may see, and explain and the key columns say so."""
+    r = engine(COMPOSITE, timeout=300, stdin=json.dumps({"project": P}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    o = copy.deepcopy(ONTO)
+    o["objects"] += [{"id": "slot", "table": "slots", "name": "Slot", "plural": "Slots", "title": "month"},
+                     {"id": "plan", "table": "plans", "name": "Plan", "plural": "Plans", "title": "month"}]
+    o["links"].append({"id": "planned", "from": "slot", "to": "plan", "name": "plan", "via": ["plans-cafe_id-month"], "rls": "follow"})
+    sure("set_rls_rule", project=P, id="months", table="plans", column="month", users={links["uid"]: [1, 2]})
+    try:
+        with saved(o):
+            got = mine(links, "sql_query", sql="SELECT cafe_id, month FROM slots ORDER BY 1, 2")["rows"]
+            assert got == sql("SELECT cafe_id, month FROM slots WHERE month IN (1, 2) ORDER BY 1, 2") and len(got) == 4
+            s = state(links, tables=["slots", "plans"])
+            assert s["keys"] == {"slots": ["cafe_id", "month"], "plans": ["month"]}, s["keys"]
+            assert "-- slots: only rows linked by 'planned' (plans-cafe_id-month) to a row of plans you may see" in s["explain"]
+            assert "list_contains([(CAST(" in s["conds"]["slots"] and "SELECT" not in s["conds"]["slots"].upper()
+    finally:
+        sure("delete_rls_rule", project=P, id="months")
+        sure("remove_relationship", project=P, id="plans-cafe_id-month")
