@@ -61,7 +61,6 @@ def test_scenario1_load_model_top5():
         theirs = subprocess.run(["git", "-C", str(abi.ABI_PROJECTS / project), "show", f"HEAD:{f}"], capture_output=True,
                                 text=True, check=True).stdout
         assert (dest / f).read_text() == theirs, f
-    assert abi.validate_files(dest) == []
 
 
 @pytest.fixture(scope="module")

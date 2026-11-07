@@ -4,11 +4,10 @@ version = "1.2.5"
 requires-python = ">=3.12"
 dependencies = [
     "cryptography>=44,<47",
-    "jsonschema",
 ]
 
 [dependency-groups]
-dev = ["duckdb", "pytest"]  # tests only (scenario 1 checks ABI's figures against DuckDB by hand)
+dev = ["duckdb", "jsonschema", "pytest"]  # tests only (scenario 1 checks ABI's figures against DuckDB by hand)
 
 [tool.pytest.ini_options]
 markers = ["live: drives GPT-6.1 Sol through Pi (ABI_PI_LIVE=1)"]

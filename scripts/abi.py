@@ -34,7 +34,6 @@ WORKSPACES = Path(os.environ.get("ABI_PI_WORKSPACES", ROOT / "workspaces"))
 URL = os.environ.get("ABI_URL", "http://127.0.0.1:8780")
 ABI_PROJECTS = Path(os.environ.get("ABI_PROJECTS_PATH", HERE.parent / "data/projects")).expanduser()
 ABI_CLI = HERE.parent / "engine/backend"
-SCHEMAS = HERE.parent / "engine/schemas/v1"
 PROJECT_ID = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 SKELETON = ["sources", "tables", "model", "reports", "ml", "flows", "agents", "tools", "security", "environments", "docs"]
 DATA = {".csv", ".tsv", ".parquet", ".json", ".jsonl", ".ndjson", ".xlsx", ".avro", ".arrow"}  # what ABI's engine reads
@@ -513,30 +512,6 @@ def health() -> dict:
     return out
 
 
-def validate_files(dest: Path) -> list[str]:
-    """Every JSON file in a project folder against ABI's published schema (schemas/v1/<type>.json)."""
-    import jsonschema  # noqa: PLC0415 (.venv only)
-
-    kinds = {r"project\.json": "project", r"sources/[^/]+\.json": "source", r"tables/[^/]+\.json": "table",
-             r"model/(model|glossary|measures|datasets|ontology)\.json": None, r"security/(roles|rls)\.json": None,
-             r"reports/[^/]+\.json": "report", r"tools/[^/]+\.json": "tool", r"docs/descriptions\.json": "descriptions",
-             r"flows/[^/]+\.json": "flow", r"agents/[^/]+\.eval\.json": "eval", r"agents/[^/]+\.json": "agent",
-             r"ml/[^/]+\.json": "ml", r"environments/[^/]+\.json": "environment"}
-    errs = []
-    for f in sorted(dest.rglob("*.json")):
-        rel = f.relative_to(dest).as_posix()
-        if rel.startswith(".git/"):
-            continue
-        kind = next(((k or Path(rel).stem) for p, k in kinds.items() if re.fullmatch(p, rel)), None)
-        if not kind:
-            errs.append(f"{rel}: no schema for this path")
-            continue
-        schema = json.loads((SCHEMAS / f"{kind}.json").read_text())
-        for e in jsonschema.Draft202012Validator(schema).iter_errors(json.loads(f.read_text())):
-            errs.append(f"{rel} {e.json_path}: {e.message[:200]}")
-    return errs
-
-
 def cli(cmd: str, project: str) -> int:
     """ABI's CLI (`abi validate|diff|apply|watch`) on the folder, sent as a bundle without the .gitkeep files."""
     dest = folder(project)
@@ -588,8 +563,6 @@ def main(argv: list[str]) -> None:
             out = load(args[0], args[1], args[2:])
         elif cmd == "sync":
             out = sync(args[0])
-        elif cmd == "validate-files":
-            out = {"errors": validate_files(folder(args[0]) or Path(args[0]))}
         elif cmd == "pack":
             import pack  # noqa: PLC0415 (sibling script)
             return pack.main(argv[1:])
