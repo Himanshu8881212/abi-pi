@@ -22,7 +22,7 @@ from abi.actions import ActionFailed, action
 from abi.agent import notify, notify_change, relevant
 from abi.project import ID, SCHEMA, git
 from abi.project.bundle import dumps
-from abi.security import Role, User, credentials
+from abi.security import Role, User, credentials, role_in
 from abi.semantic import live, mel, planner
 from abi.semantic.detect import detect
 from abi.storage import COLUMN, _q
@@ -75,7 +75,32 @@ def _file(m: dict) -> dict:
 
 
 def save(project: str, m: dict) -> None:
-    _write(project, "model.json", _file(m))
+    f = _file(m)
+    _follow_kept(project, f)
+    _write(project, "model.json", f)
+
+
+def _follow_kept(project: str, f: dict) -> None:
+    """1.2.6 M3, owner answer 1: every action that saves model.json (add_relationship re-adding a relationship under
+    its ID with other columns, set_table, scoring, ...) and changes what an `rls: follow` link means (rls.resolve:
+    the relationships it walks, their columns, a table on the way hidden) needs the Owner and a confirmation naming
+    who sees other rows, as an import does (imports.gate); an Editor gets 403 before anything is written. Editors keep
+    every other relationship, those the follow links don't walk included."""
+    if not any(ln.get("rls") == "follow" for ln in _read(project, "ontology.json").get("links", [])):
+        return
+    from abi.project import bundle, imports  # not at top: imports imports this module
+
+    old = bundle.bundle(git.path(project))
+    new = old | {"model/model.json": {"$schema": SCHEMA + "model.json", **f}}
+    if (was := imports.follow_links(old)) == (now := imports.follow_links(new)):
+        return
+    user = actions._call.get((None,))[0]
+    with db.connect() as conn:
+        if user is None or (role_in(conn, user, project) or 0) < Role.owner:
+            raise ActionFailed(403, f"Only a project Owner may change the relationships or tables a link that row-level security"
+                                    f" follows walks (rls: follow, model/ontology.json); nothing changed in project '{project}'.")
+        why = imports.fewer(conn, project, old, new)
+    actions.require_confirmation(why, {"follow": {"old": was, "new": now}})
 
 
 def visible(m: dict) -> dict:

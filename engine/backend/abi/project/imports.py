@@ -200,6 +200,9 @@ def _steps(files: dict) -> dict[str, list]:
 def _references(conn, project: str, files: dict) -> list[dict]:
     errs = [_err(rel, "$.id", f"The id '{c['id']}' differs from the file name.", f"Set id to '{_id(rel)}' or rename the file.")
             for rel, c in files.items() if _kind(rel) in ("source", "table", "report", "tool", "flow", "agent", "ml") and c["id"] != _id(rel)]
+    rids = [r.get("id") for r in (files.get("model/model.json") or {}).get("relationships", [])]
+    errs += [_err("model/model.json", f"$.relationships[{i}].id", f"Two relationships have the id '{x}'.",  # 1.2.6 M3: ontology
+                  "Give each relationship its own id.") for i, x in enumerate(rids) if x in rids[:i]]  # and rls name one by it
     sources = {_id(rel) for rel in files if _kind(rel) == "source"}  # D-9: a source step names a source file
     raw = _steps(files)
     tables = set(raw) | sources  # each source loads into the table of its name
