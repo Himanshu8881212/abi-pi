@@ -180,6 +180,11 @@ def references(files: dict, cols: dict | None = None) -> list[dict]:
                 Draft202012Validator.check_schema(a["inputs"])
             except SchemaError as e:
                 err(f"{at}.inputs", f"{what}: `inputs` is not a valid JSON Schema (fails `{e.validator}`).", "Fix it to follow JSON Schema draft 2020-12.")
+        if a.get("approval") and not a.get("writes"):
+            err(f"{at}.approval", f"{what}: `approval` makes its write a proposal, but it writes nothing.", "Add `writes`, or drop `approval`.")
+        if a.get("flow") in flows and (bad := _templated(files[f"flows/{a['flow']}.json"])):  # a Viewer never picks what runs
+            err(f"{at}.flow", f"{what}: flow '{a['flow']}' names an agent, tool or report with a {{{{ … }}}} template ({bad}),"
+                              " so a run could pick what runs as the flow's owner.", "Name each agent, tool and report literally in that flow.")
         if a.get("flow") in flows and (files[f"flows/{a['flow']}.json"].get("trigger") or {}).get("type") != "manual":
             err(f"{at}.flow", f"{what}: flow '{a['flow']}' doesn't have a manual trigger.",
                 "Give the flow trigger {type: manual}; an action starts it with {{ data.trigger.object }} and {{ data.trigger.inputs }}.")
@@ -192,6 +197,20 @@ def references(files: dict, cols: dict | None = None) -> list[dict]:
                 if c in (keys.get(w["table"]) or []):  # the row is the object's: its key comes from the object, never a run
                     err(f"{at}.writes.set", f"{what}: '{c}' is a key column of '{w['table']}'.", "Set only columns outside the key.")
     return errs
+
+
+def _templated(x, at: str = "$") -> str | None:
+    """The JSON path of the first agent, tool or report value (`agent`, `tools`, …, at any depth) holding a template."""
+    if isinstance(x, list):
+        return next((p for i, v in enumerate(x) if (p := _templated(v, f"{at}[{i}]"))), None)
+    if not isinstance(x, dict):
+        return None
+    for k, v in x.items():
+        if k in ("agent", "agents", "tool", "tools", "report", "reports") and "{{" in json.dumps(v):
+            return f"{at}.{k}"
+        if p := _templated(v, f"{at}.{k}"):
+            return p
+    return None
 
 
 def _cols(project: str) -> dict:
@@ -818,13 +837,15 @@ def run_object_action(conn, user: User, args: RunAction) -> dict:
             {"column": c, "old": (rls.MARK if c.lower() in hid else now.get(c)) if now else None, "new": v} for c, v in vals.items()]}
     if a.get("flow"):
         preview["flow"] = a["flow"]
+    proposed = bool(w) and bool(a.get("approval") or actions.by_agent() or actions.inbound())
     if a.get("confirm") or a.get("flow") and actions.by_agent():  # (5) the token signs the preview: a changed old value asks again
         said = [f"{t}.{c['column']}: {json.dumps(c['old'])} → {json.dumps(c['new'])}" for c in preview.get("writes", {}).get("changes", [])]
-        require_confirmation(f"Run '{a['name']}' on {x['name']} {json.dumps(preview['object']['title'])}: "
-                             + "; ".join(said + ([f"starts flow '{a['flow']}'"] if a.get("flow") else [])) + ".", preview)
+        require_confirmation(f"Run '{a['name']}' on {x['name']} {json.dumps(preview['object']['title'])}: " + "; ".join(
+            said + ([f"starts flow '{a['flow']}'"] if a.get("flow") and not proposed else [])) + "." + (
+            " The write is a proposal an Editor approves; no flow starts." if proposed else ""), preview)
     out: dict = {"action": a["id"], "type": x["id"], "key": key}
     if w:  # (6) as the runner: logged with old and new values, undoable
-        status = "proposed" if a.get("approval") or actions.by_agent() or actions.inbound() else "active"
+        status = "proposed" if proposed else "active"
         try:
             batch = writeback.Edits(project=p, table=t, comment=f"action {a['id']}", **(
                 {"edits": [writeback.CellEdit(key=kv, column=c, value=v, old=now[c]) for c, v in vals.items()]} if now else

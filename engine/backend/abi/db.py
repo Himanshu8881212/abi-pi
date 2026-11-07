@@ -249,6 +249,8 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   reasoning_tokens int NOT NULL DEFAULT 0,  -- D-71
   effort text  -- D-71: the last answer's effort, NULL = none sent
 );
+-- 1.2.6 M4: the flow run an agent run ran in (a flow step's, also an agent it asked), NULL outside flows
+ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS flow_run text;
 -- AG-4 runtime state per published agent: the model + tools + agent hash its evaluation set last ran on; error NOT NULL = disabled.
 CREATE TABLE IF NOT EXISTS agent_state (
   project text NOT NULL,

@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 from psycopg.types.json import Jsonb
 from pydantic import AliasChoices, Field, ValidationError
 
-from abi import actions, db, security, semantic, storage, tools
+from abi import actions, db, flows, security, semantic, storage, tools
 from abi.actions import ACTIONS, ActionFailed, action, require_confirmation
 from abi.agent import (
     COMPACTED,
@@ -245,10 +245,12 @@ def _answer(project: str, a: dict, question: str, user: User, via: str, files: d
     with db.connect() as conn:  # own transaction: the trace survives a caller that fails afterwards (AG-3)
         conn.execute(
             "INSERT INTO agent_runs (id, project, agent, version, user_id, via, question, trace, answer, grounded, retried,"
-            " template, prompt_tokens, completion_tokens, reasoning_tokens, effort)"
-            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            " template, prompt_tokens, completion_tokens, reasoning_tokens, effort, flow_run)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             [run_id, project, a["id"], a["version"], user.id, via, question, Jsonb(trace, dumps=lambda o: json.dumps(o, default=str)),
-             text, grounded, retried, template, *tokens[:3], effort])  # cached: per call in llm_usage
+             text, grounded, retried, template, *tokens[:3], effort,
+             # 1.2.6 M4: flows.STEP is set around a flow step's action and inherited by the agents it asks (same context)
+             (flows.STEP.get() or (None,))[0]])  # cached: per call in llm_usage
     # the last tabular tool result, as the tool returned it (principle 7): inbound replies show it (X-02.4)
     data = next((o for o in reversed(outputs) if isinstance(o, dict) and {"columns", "rows"} <= o.keys()
                  and "snapshot" not in o), None)  # GATE-9-fix-3: a load's snapshot row is not the data
@@ -414,14 +416,17 @@ def agent_runs(conn, user: User, args: Runs) -> dict:
     mine = user.id if guest or semantic.rls.restricted(args.project, user.id) else None
     runs = conn.execute(
         "SELECT id::text, at, agent, version, user_id, via, question, trace, answer, grounded, retried, template, prompt_tokens,"
-        " completion_tokens, reasoning_tokens, effort FROM agent_runs WHERE project = %s AND agent = coalesce(%s, agent) AND (%s::bigint IS NULL OR user_id = %s)"
+        " completion_tokens, reasoning_tokens, effort, flow_run FROM agent_runs WHERE project = %s AND agent = coalesce(%s, agent) AND (%s::bigint IS NULL OR user_id = %s)"
         " ORDER BY at DESC, id LIMIT %s", [args.project, args.agent, mine, mine, args.limit]).fetchall()
     tokens = conn.execute("SELECT agent, count(*) AS runs, sum(prompt_tokens)::int AS prompt_tokens, sum(completion_tokens)::int"
                           " AS completion_tokens FROM agent_runs WHERE project = %s AND (%s OR agent = %s AND user_id = %s)"
                           " GROUP BY agent ORDER BY agent", [args.project, not guest, args.agent, user.id]).fetchall()
-    editor = (security.role_in(conn, user, args.project) or 0) >= Role.editor  # 1.2.6 M4: a flow's question quoting someone's typed inputs
-    runs = [r | {"question": None} if not editor and r["user_id"] != user.id and "<data from an object action" in r["question"] else r
-            for r in runs]
+    # 1.2.6 M4: an agent run inside a flow run an object action started carries its runner's typed inputs
+    editor = (security.role_in(conn, user, args.project) or 0) >= Role.editor
+    acted = {r["id"]: r["started_by"] for r in conn.execute("SELECT id, started_by FROM flow_runs WHERE id = ANY(%s) AND trigger ? 'action'",
+                                                           [[r["flow_run"] for r in runs if r["flow_run"]]])}
+    runs = [r | {"question": None, "trace": None, "answer": None} if r["flow_run"] in acted and not editor and acted[r["flow_run"]] != user.id
+            else r for r in runs]
     # D-22: quotable; D-114: never the agent ID or the run's question (author/LLM-written, a digit there would ground),
     # and the answer only when AG-2 checked it (grounding off: LLM text nobody verified)
     return {"runs": runs, "tokens": tokens,

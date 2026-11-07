@@ -137,6 +137,9 @@ def load(project: str, kind: str, id: str) -> dict:
 
 
 def remove(project: str, kind: str, id: str) -> None:
+    if kind in ("agent", "tool", "report") and (g := flow_grants(bundle.bundle(git.path(project)))):  # 1.2.6 M4: fail closed
+        raise ActionFailed(409, f"Action type(s) {', '.join(g)} start a flow that may run any agent, tool or report of project"
+                                f" '{project}'; change those first (save_ontology), then delete the {kind}.")
     _file(project, kind, id).unlink()
 
 
@@ -149,7 +152,7 @@ def objects(project: str, folder: str) -> list[dict]:
 def write(project: str, objs: dict) -> None:
     """PC-4: writes {rel: object} files that `check` passed, in canonical form. 1.2.6 M4: a change to what an
     Owner-granted action type does (its flow, or an agent, tool or report that flow uses) is the Owner's, confirmed."""
-    if (ask := grant_check(project, objs)) and not actions.confirmed():  # a caller's confirmation already named it
+    if (ask := grant_check(project, objs)) and (actions.confirmed() or {}).get("grants") != ask[1]["grants"]:  # named already?
         require_confirmation(*ask)
     for rel, obj in objs.items():
         p = git.path(project) / rel
@@ -573,27 +576,35 @@ def grants(files: dict) -> dict[str, dict]:
     return out
 
 
+DEFS = ("agents/", "tools/", "reports/")
+NAMED = re.compile(r'"(agents?|tools?|reports?)":')  # a key naming an agent, tool or report, at any depth
+
+
 def _used(files: dict, flow: str) -> dict:
-    """The definitions flow `flow` runs (agents and their tools, tools, reports), less what never changes what they do
-    (`enabled`, `description`, `sharing`): part of what an Owner grants with an action type starting it."""
-    f, rels = files.get(f"flows/{flow}.json") or {}, []
-    for s in f.get("steps", []):
-        i = s.get("input") or {}
-        for kind, key in (("agents", "agent"), ("tools", "tool"), ("reports", "report")):
-            if x := s.get(key) or i.get(key):
-                rels.append(f"{kind}/{x}.json")
-                if kind == "agents":
-                    rels += [f"tools/{t}.json" for t in (files.get(f"agents/{x}.json") or {}).get("tools", [])]
-    rels = [r for r in [f"flows/{flow}.json", *rels] if r in files] + [r[:-5] + ".py" for r in rels if r[:-5] + ".py" in files]
-    return {r: {k: v for k, v in files[r].items() if k not in ("enabled", "description", "sharing")} if isinstance(files[r], dict)
-            else files[r] for r in rels}
+    """What an Owner grants with an action type starting flow `flow`: the flow file (but `enabled`) and, fail closed,
+    when the flow names any agent, tool or report anywhere (a step, an input, a nested dict), EVERY file under
+    agents/, tools/ and reports/ (but sharing, and a report's description), so nothing it may reach changes unseen."""
+    f = files.get(f"flows/{flow}.json")
+    if not isinstance(f, dict):
+        return {}
+    out = {f"flows/{flow}.json": {k: v for k, v in f.items() if k != "enabled"}}
+    if NAMED.search(json.dumps(f)) or any(s.get("type") in ("agent", "tool", "snapshot") for s in f.get("steps", [])):
+        out |= {r: {k: v for k, v in x.items() if k != "sharing" and not (k == "description" and r.startswith("reports/"))}
+                if isinstance(x, dict) else x for r, x in files.items() if r.startswith(DEFS)}
+    return out
+
+
+def flow_grants(files: dict) -> list[str]:
+    """The granted action types that start a flow reaching agents, tools and reports (`_used`)."""
+    return sorted(i for i, g in grants(files).items() if g["flow"] and any(r.startswith(DEFS) for r in g["flow"]))
 
 
 def grant_check(project: str, objs: dict) -> tuple[str, dict] | None:
     """(why, preview) of writing `objs` when it changes an Owner-granted action type (`granted`), after refusing (403)
     anyone but an Owner; None when it changes none, or no person's action writes (a system write)."""
     user = actions._call.get((None,))[0]
-    if user is None or not (git.path(project) / ontology.FILE).is_file():
+    if user is None or not (git.path(project) / ontology.FILE).is_file() or not any(
+            r.startswith(("flows/", *DEFS)) or r in ("model/model.json", ontology.FILE) for r in objs):
         return None
     old = bundle.bundle(git.path(project))
     if not (g := granted(old, old | objs)):

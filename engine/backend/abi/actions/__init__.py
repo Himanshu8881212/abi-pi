@@ -87,11 +87,12 @@ def _confirmed(token: str | None, user: User, name: str, args: str) -> bool:
 
 _call: ContextVar[tuple] = ContextVar("abi_call")  # (user, name, canonical args, confirm token) of the running action
 _memo: ContextVar[dict | None] = ContextVar("abi_memo", default=None)
-_said: ContextVar[bool] = ContextVar("abi_said", default=False)  # the running action's person confirmed a preview
+_said: ContextVar[dict | None] = ContextVar("abi_said", default=None)  # the preview the running action's person confirmed
 
 
-def confirmed() -> bool:
-    """The running action already passed a confirmation (its one token is used: never ask a second, different one)."""
+def confirmed() -> dict | None:
+    """The preview the running action already confirmed ({} without one; None: none confirmed). Its one token is used:
+    a later ask needs the same preview, or it can never pass."""
     return _said.get()
 
 
@@ -116,7 +117,7 @@ def require_confirmation(why: str, preview: dict | None = None) -> None:
     if preview is not None:
         canon += json.dumps(preview, sort_keys=True)
     if _confirmed(token, user, name, canon):
-        _said.set(True)
+        _said.set(preview or {})
     else:
         exp = str(int(time.time()) + _CONFIRM_TTL)
         raise ActionFailed(409, f"{why} Confirm to proceed.", confirm_token=f"{exp}.{_sign(user, name, canon, exp)}",
@@ -343,7 +344,7 @@ def run(name: str, payload: dict, user: User, via: str, confirm: str | None = No
             if why := production_refusal(name, project, have):
                 raise ActionFailed(403, why)
             _call.set((user, name, json.dumps(logged, sort_keys=True), confirm))
-            _said.set(False)
+            _said.set(None)
             if act.destructive and not act.confirms:
                 require_confirmation(f"Destructive: {' '.join((act.fn.__doc__ or '').split())}")  # no action ID in the text
             if via != "rest" and name in PERSON_CLICK:  # every arg shown, uncut: the click approves all of them (a logo is a digest)
