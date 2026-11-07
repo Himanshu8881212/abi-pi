@@ -742,6 +742,8 @@ SIDED = {  # a rule only one copy had: the same input, each side's verdict as it
     "typed_lower_plural": ("The Stage view shows North at 76.00.", [ROW], "show me the stages"),
     "typed_filtered_member": ("North and Atlantis took 76.00.", [ROW | {"measures": {"revenue": "Revenue"}, "filters":
                               [{"column": "cafes.city", "op": "=", "value": "atlantis"}]}], "revenue for atlantis"),
+}
+MORE = {
     # round 3: the plural of an ID's word part on the name as written (engine) or lower-cased (harness)
     "caps_plural": ("ORDERS took 76.00.", [ROW], "", {"fields": ["order_id"]}),
     "caps_plural_inside": ("North took 76.00 in ORDERS.", [ROW], "", {"fields": ["order_id"]}),
@@ -752,7 +754,6 @@ SIDED = {  # a rule only one copy had: the same input, each side's verdict as it
     "vocab_notes": ("North had 76.00; Detect Model saved the Revenue.", [ROW], "",
                     {"vocab": ["Revenue"], "notes": [{"status": "ok", "message": "Saved Detect Model"}]}),
 }
-SHARED = {"typed_filtered_member", "caps_plural", "fields", "members", "today", "vocab_notes"}  # the same verdict on both sides
 OLD = r"""
 import importlib.util, json, subprocess, sys, tempfile
 def old(path, name):
@@ -774,23 +775,23 @@ cases = json.load(sys.stdin)
 
 
 @functools.cache
-def _sided() -> dict:
+def _sided(which: str = "SIDED") -> dict:
     """{rule: {"engine": (before, now), "harness": (before, now)}}: 5e9d4b3's grounding.py against abi.agents.grounding
     in the engine, 5e9d4b3's scripts/ground.py against scripts/ground.py here."""
     from test_engine import engine
     r = engine(OLD + "from abi.agents import grounding as g\ne = old('engine/backend/abi/agents/grounding.py', 'old_grounding')\n"
-               "print(json.dumps({k: [v(e, c), v(g, c)] for k, c in cases.items()}))", stdin=json.dumps(SIDED))
+               "print(json.dumps({k: [v(e, c), v(g, c)] for k, c in cases.items()}))", stdin=json.dumps(globals()[which]))
     assert r.returncode == 0, r.stderr[-2000:]
     eng = json.loads(r.stdout.strip().splitlines()[-1])
     ns: dict = {}
     exec(OLD.replace("cases = json.load(sys.stdin)\n", ""), ns)
     h = ns["old"]("scripts/ground.py", "old_ground")
-    return {k: {"engine": tuple(eng[k]), "harness": (ns["v"](h, c), ns["v"](ground, c))} for k, c in SIDED.items()}
+    return {k: {"engine": tuple(eng[k]), "harness": (ns["v"](h, c), ns["v"](ground, c))} for k, c in globals()[which].items()}
 
 
-@pytest.mark.parametrize("rule", list(SIDED))
+@pytest.mark.parametrize("rule", [*SIDED, *MORE])
 def test_each_side_keeps_its_own_grounding_rule(rule):
-    out = _sided()[rule]
+    out = (_sided() | _sided("MORE"))[rule]
     assert out["engine"][1] == out["engine"][0] and out["harness"][1] == out["harness"][0], out
 
 
@@ -801,5 +802,7 @@ def test_the_one_sided_rules_still_differ_between_the_sides():
     assert "37%" in s["prose"]["engine"][1] and "37%" not in s["prose"]["harness"][1], s["prose"]
     assert "37" in s["clock"]["engine"][1] and "37" not in s["clock"]["harness"][1], s["clock"]
     assert "March" in s["month_name"]["harness"][1] and "March" not in s["month_name"]["engine"][1], s["month_name"]
-    # every other one-sided rule too (SHARED: inputs whose verdict both sides share)
-    assert all(v["engine"][1] != v["harness"][1] for k, v in s.items() if k not in SHARED), s
+    # every other one-sided rule too (a member a query filtered on grounds on neither side: it is shared)
+    assert all(v["engine"][1] != v["harness"][1] for k, v in s.items() if k != "typed_filtered_member"), s
+    m = _sided("MORE")  # round 3: an all-caps plural of an ID's word part passes only the harness (as written vs lower-cased)
+    assert "ORDERS" in m["caps_plural_inside"]["engine"][1] and m["caps_plural_inside"]["harness"][1] == [], m
