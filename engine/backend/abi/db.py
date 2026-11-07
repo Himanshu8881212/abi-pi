@@ -148,18 +148,15 @@ CREATE TABLE IF NOT EXISTS secrets (
   name text PRIMARY KEY,
   value bytea NOT NULL
 );
--- D-2 (F-09): hosts a secret may be sent to; NULL = stored before F-09, bound on the first replay of its source.
+-- D-2 (F-09): hosts a secret may be sent to; NULL = stored before F-09, sent nowhere.
 ALTER TABLE secrets ADD COLUMN IF NOT EXISTS allowed_hosts text[];
 -- Runtime state per loaded table (D-9): its files' fingerprint. Definitions live in the repo (sources/<id>.json).
--- spec: pre-M-10 definitions only; the worker's first refresh writes them to sources/<id>.json, then NULLs them.
 CREATE TABLE IF NOT EXISTS sources (
   project text NOT NULL,
   table_name text NOT NULL,
-  spec jsonb,
   fingerprint text,
   PRIMARY KEY (project, table_name)
 );
-ALTER TABLE sources ALTER COLUMN spec DROP NOT NULL;
 -- TL-4 runtime state per published tool: the model + tool hash its tests last ran on; error NOT NULL = disabled.
 CREATE TABLE IF NOT EXISTS tool_state (
   project text NOT NULL,

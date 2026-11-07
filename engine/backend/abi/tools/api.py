@@ -146,7 +146,7 @@ def call(project: str, tool: str, raw: dict, req: dict, rows: str) -> list[dict]
                     for k, v in req.get(part, {}).items()}
 
         headers, params = fill("headers"), fill("query")
-        credentials.allow(conn, used, host, False)  # D-2 on the host TLS verifies; a 403 is audited by actions.run
+        credentials.allow(used, host)  # D-2 on the host TLS verifies; a 403 is audited by actions.run
     hide = hidden(used)
     try:  # resolve once: the request goes to this address, never to a second lookup (DNS rebinding)
         addrs = checked(host, port)

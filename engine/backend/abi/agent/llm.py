@@ -387,7 +387,7 @@ def _send(p: dict, name: str, kw: dict, embed: bool = False):
     used: dict = {}
     with db.connect() as conn:
         key = credentials.resolve(conn, p["api_key"], used, None) if p["api_key"] else "none"
-        credentials.allow(conn, used, urllib.parse.urlsplit(p["base_url"]).hostname, False)
+        credentials.allow(used, urllib.parse.urlsplit(p["base_url"]).hostname)
     # SC-4/D-27: no proxy from the environment, no redirect carries the key elsewhere; failover is the retry
     with httpx2.Client(verify=builtin._tls(), trust_env=False, follow_redirects=False) as h:
         client = OpenAI(api_key=key, base_url=p["base_url"], max_retries=0, http_client=h)

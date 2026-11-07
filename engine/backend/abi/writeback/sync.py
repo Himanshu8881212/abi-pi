@@ -110,7 +110,7 @@ def sync_edits(conn, user: User, args: Target) -> dict:
         for _, k, c, o, n in changes], "skipped": skipped}
     used: dict = {}
     login = (credentials.resolve(conn, src.database.user, used, p), credentials.resolve(conn, src.database.password, used, p))
-    credentials.allow(conn, used, host, replay=False)  # D-2, before any connection (403, audited by actions.run)
+    credentials.allow(used, host)  # D-2, before any connection (403, audited by actions.run)
     sql = _Sql(kind, schema, name)
     try:
         with _connect(kind, m, login) as s:

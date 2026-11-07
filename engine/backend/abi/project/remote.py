@@ -36,9 +36,9 @@ pygit2.settings.server_timeout = 10_000
 
 
 class _Callbacks(pygit2.RemoteCallbacks):
-    def __init__(self, conn, netloc: str, username: str | None, used: dict):
+    def __init__(self, netloc: str, username: str | None, used: dict):
         super().__init__()
-        self.conn, self.netloc, self.username, self.used, self.rejected = conn, netloc, username, used, None
+        self.netloc, self.username, self.used, self.rejected = netloc, username, used, None
 
     def credentials(self, url, username_from_url, allowed_types):
         if not self.username or not allowed_types & CredentialType.USERPASS_PLAINTEXT:
@@ -46,7 +46,7 @@ class _Callbacks(pygit2.RemoteCallbacks):
         u = urlsplit(url)
         if u.scheme != "https" or u.netloc.lower() != self.netloc:  # D-2 (refusals are audited by actions.run)
             raise ActionFailed(403, f"The remote's password goes only to {self.netloc}; nothing was sent.")
-        credentials.allow(self.conn, self.used, u.hostname, replay=False)
+        credentials.allow(self.used, u.hostname)
         return pygit2.UserPass(self.username, next(iter(self.used.values()))[0])
 
     def push_update_reference(self, refname, message):
@@ -76,7 +76,7 @@ def _remote(conn, r: pygit2.Repository, project: str):
         if not re.fullmatch(rf"^{credentials.REF}$", str(s.get("password"))):
             raise ActionFailed(400, "settings.remote.password must be exactly ${secret:NAME}.")
         credentials.resolve(conn, s["password"], used, project)
-    return r.remotes.create_anonymous(s["url"]), _Callbacks(conn, m[1].lower(), s.get("username"), used), used
+    return r.remotes.create_anonymous(s["url"]), _Callbacks(m[1].lower(), s.get("username"), used), used
 
 
 @contextmanager

@@ -156,7 +156,7 @@ def smtp_password(conn, smtp: dict, project: str | None) -> tuple[str | None, di
     (D-2), before anything connects (audited by actions.run, SC-6)."""
     used = {}
     password = smtp.get("password") and credentials.resolve(conn, smtp["password"], used, project)
-    credentials.allow(conn, used, smtp["host"].lower(), False)
+    credentials.allow(used, smtp["host"].lower())
     return password, used
 
 
@@ -219,7 +219,7 @@ def _channel_url(conn, project: str, channel: str, ch: dict) -> tuple[httpx2.URL
         url = httpx2.URL(credentials.resolve(conn, ch["url"], used, project))
     except httpx2.InvalidURL:
         raise ActionFailed(400, f"Channel '{channel}': its URL is invalid once its secrets are filled in.")
-    credentials.allow(conn, used, url.host, False)  # the host httpx connects to (D-2); 403 audited by actions.run
+    credentials.allow(used, url.host)  # the host httpx connects to (D-2); 403 audited by actions.run
     return url, used
 
 

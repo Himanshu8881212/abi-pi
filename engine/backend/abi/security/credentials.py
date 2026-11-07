@@ -163,15 +163,11 @@ def resolve(conn, text: str, used: dict[str, tuple[str, list | None]], project: 
     return re.sub(REF, value, text)
 
 
-def allow(conn, used: dict, host: str | None, replay: bool) -> None:
+def allow(used: dict, host: str | None) -> None:
     """Raise 403 unless every used secret may go to `host` (None = no network host); the caller audits it (SC-6).
-
-    A secret stored before F-09 has no list (NULL). It binds to the host of its first use, but only on a `replay`
-    of a source stored before, so an Editor can't choose where it goes."""
+    A secret with no list (NULL, stored before F-09) goes nowhere until the workspace owner sets one."""
     for name, (_, hosts) in used.items():
-        if hosts is None and host and replay:
-            conn.execute("UPDATE secrets SET allowed_hosts = %s WHERE name = %s AND tenant IS NULL", [[host], name])  # pre-F-09: platform
-        elif host not in (hosts or []):
+        if host not in (hosts or []):
             where = f"host '{scrub(host, used)}'" if host else "this location (server path or unclear URL host)"
             raise ActionFailed(403, f"Secret '{name}' may not be sent to {where}; the workspace owner sets its allowed_hosts.")
 

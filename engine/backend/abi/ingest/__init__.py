@@ -398,22 +398,6 @@ def _source(project: str, sid: str, table: str) -> Source:
         raise ActionFailed(400, f"sources/{sid}.json: {e}")
 
 
-def _migrate(conn, project: str, steps: dict) -> None:
-    """D-9: write pre-M-10 definitions (the Postgres `spec`) to sources/<id>.json; `refresh` NULLs each `spec` once
-    that table's replay passed (so a failed first refresh can still bind a legacy secret later, F-09).
-
-    Worker only (`refresh_changed`, never `refresh`, which revert/add_data call inside git.change), as plain file writes
-    (uncommitted changes, PC-6): inside an action's change, `undo` would delete a definition whose Postgres copy is gone."""
-    rows = conn.execute("SELECT table_name, spec FROM sources WHERE project = %s AND spec IS NOT NULL", [project]).fetchall()
-    if rows:
-        git.repo(project)  # 404 when the project has no repo: nowhere to put the files
-    for r in rows:
-        t = r["table_name"]
-        if (t in steps and steps[t][0].source != t) or (git.path(project) / "sources" / f"{t}.json").exists():
-            continue  # a stepped table's copy of its source's spec, or already a file
-        _write(Source.model_validate(r["spec"]))
-
-
 # ponytail: per process, so a worker restart retries at once; keep it in the `sources` row if several workers refresh
 BACKOFF: dict[tuple[str, str], tuple[int, float]] = {}  # (project, table) -> (failures in a row, next try, unix time)
 CHECK: ContextVar[bool] = ContextVar("check_only", default=False)  # M4.1: refresh_changed(check=True) loads nothing
@@ -465,8 +449,6 @@ def refresh(conn, project: str, after: set[str] | None, author: str, reload: set
                                            [project, t]).fetchone() or {}).get("fingerprint")
                 unless = None if forced else prints.get(t)
                 snap = _build(c, project, t, author, unless) if built else _load(c, src, author, unless=unless, used=used)
-                # replayed (legacy secrets bound in `allow`, same transaction): drop the pre-M-10 spec, the file holds it now
-                c.execute("UPDATE sources SET spec = NULL WHERE project = %s AND table_name = %s", [project, t])
                 BACKOFF.pop(key, None)
                 if snap is not None:
                     done.add(t)
@@ -712,9 +694,7 @@ def _load(conn, src: Source, author: str, unless: str | None = None, used: dict 
         elif fmt == "arrow":
             storage.lake(src.project).execute("LOAD nanoarrow")  # a community extension: never autoloaded
     con = storage.lake(src.project)
-    # F-09 replay: only a pre-M-10 spec still in Postgres (NULL once migrated), so no source file picks a legacy secret's host
-    stored = conn.execute("SELECT spec FROM sources WHERE project = %s AND table_name = %s", [src.project, src.table]).fetchone()
-    credentials.allow(conn, used, host, replay=stored is not None and stored["spec"] == src.spec())  # before any connection
+    credentials.allow(used, host)  # before any connection
     tmp = None
     try:
         if opts:
@@ -1030,9 +1010,8 @@ def refresh_changed(only: str | None = None, check: bool = False) -> dict[str, f
                     continue
                 error = None
                 try:
-                    _migrate(conn, p, transform.tables(p))
                     due[p] = frozenset(t for t, e in refresh(conn, p, None, "worker").items() if e is DUE)
-                except (ValueError, ActionFailed) as e:  # invalid tables/*.json, a cycle, legacy rows without a repo
+                except (ValueError, ActionFailed) as e:  # invalid tables/*.json, a cycle
                     error = f"{e} The previous snapshots stay live."
                 notify_change("refresh", p, "Refreshing tables: ", error, "works again.")  # D-10
     finally:

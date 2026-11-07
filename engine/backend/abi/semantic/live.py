@@ -143,7 +143,7 @@ def _fetch(project: str, table: str, sql: str, fmt: str = "Parquet", timeout: in
     with db.connect() as conn:
         user = credentials.resolve(conn, src.database.user, used, project)
         password = credentials.resolve(conn, src.database.password, used, project)
-        credentials.allow(conn, used, m[2].lower(), replay=False)  # D-2: before any connection
+        credentials.allow(used, m[2].lower())  # D-2: before any connection
     try:  # D-27: every connection value explicit
         client = clickhouse_connect.get_client(
             host=m[2], port=int(m[3] or port), database=m[4], username=user, password=password, secure=secure,

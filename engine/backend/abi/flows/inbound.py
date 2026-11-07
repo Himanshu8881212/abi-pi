@@ -681,7 +681,7 @@ def _poll(project: str, cfg: dict) -> None:
     try:
         with db.connect() as conn:
             password = credentials.resolve(conn, cfg["password"], used, project)
-            credentials.allow(conn, used, cfg["host"].lower(), False)  # D-2, before connecting
+            credentials.allow(used, cfg["host"].lower())  # D-2, before connecting
     except ActionFailed as e:
         Call("email", project, "imap").audit(e.status, e.body["message"])
         return

@@ -66,8 +66,8 @@ def _creds(conn, project: str, a: OAuthClient | OAuthCode, api_host: str, used: 
     `api_host`, where the access token they buy goes."""
     cid = credentials.resolve(conn, a.client_id, used, project)
     sec = a.client_secret and credentials.resolve(conn, a.client_secret, used, project)
-    credentials.allow(conn, used, httpx2.URL(a.token_url).host, False)
-    credentials.allow(conn, used, api_host, False)
+    credentials.allow(used, httpx2.URL(a.token_url).host)
+    credentials.allow(used, api_host)
     return cid, sec
 
 

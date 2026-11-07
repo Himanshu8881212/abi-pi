@@ -145,7 +145,7 @@ def _exchange(conn, row, doc: dict, code: str, verifier: str) -> str:
     """Code -> ID token. The client secret goes only to the discovery token_endpoint host, through D-2 (SC-4)."""
     used: dict = {}
     secret = credentials.resolve(conn, row["client_secret"], used, None)
-    credentials.allow(conn, used, urllib.parse.urlsplit(doc["token_endpoint"]).hostname, False)
+    credentials.allow(used, urllib.parse.urlsplit(doc["token_endpoint"]).hostname)
     q = urllib.parse.quote_plus
     basic = base64.b64encode(f"{q(row['client_id'])}:{q(secret)}".encode()).decode()
     form = {"grant_type": "authorization_code", "code": code, "redirect_uri": _redirect_uri(row["id"]), "code_verifier": verifier}
