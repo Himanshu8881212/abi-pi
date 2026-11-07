@@ -187,7 +187,7 @@ def references(files: dict, cols: dict | None = None) -> list[dict]:
                               " so a run could pick what runs as the flow's owner.", "Name each action, flow, agent, tool, report,"
                               " model, dataset, object type and type literally in that flow.")
         for j, st in enumerate((files.get(f"flows/{a.get('flow')}.json") or {}).get("steps", [])):  # owner, 7 Nov 2026: an allowlist
-            if not (st["type"] in STEPS_OK or st["type"] == "action" and st.get("action") in ACTIONS_OK):
+            if not step_ok(st):
                 err(f"{at}.flow", f"{what}: step '{st['id']}' of flow '{a['flow']}' ({st.get('action') or st['type']}) isn't one an"
                                   " action type's flow may run.", f"Use only {', '.join(sorted(STEPS_OK))} steps and the actions"
                                   f" {', '.join(sorted(ACTIONS_OK))} (step {j}); start other work from a flow no action type starts.")
@@ -211,6 +211,11 @@ STEPS_OK = {"refresh", "agent", "snapshot", "condition", "approval"}
 ACTIONS_OK = {"refresh", "send_email", "post_message", "run_agent", "report_snapshot", "semantic_query", "get_object",
               "list_objects", "visual_data"}
 SELECTORS = ("action", "flow", "model", "dataset", "object", "type", "agent", "agents", "tool", "tools", "report", "reports")
+
+
+def step_ok(st: dict) -> bool:
+    """A step a flow an action type starts may run (STEPS_OK, ACTIONS_OK)."""
+    return st["type"] in STEPS_OK or st["type"] == "action" and st.get("action") in ACTIONS_OK
 
 
 def _templated(x, at: str = "$") -> str | None:

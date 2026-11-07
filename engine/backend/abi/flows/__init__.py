@@ -40,7 +40,7 @@ from abi.agent import _cap, _secret, notify_change
 from abi.project import ID, SCHEMA, git, imports
 from abi.project.bundle import bundle
 from abi.security import Role, User, credentials, role_in
-from abi.semantic import SemanticQuery, mel, planner, rls
+from abi.semantic import SemanticQuery, mel, ontology, planner, rls
 from abi.semantic.subscriptions import evaluate, fingerprint, periods, problem
 
 # Step type -> action. `action` steps name their action.
@@ -519,15 +519,21 @@ def execute(run_id: str, last: bool = True) -> None:
     try:
         f = _load(project, flow)
         message = run_id.rsplit("/", 1)[1].startswith("message-")  # §11 #12: an inbound message's run is its sender's
+        # 1.2.6 M4 (owner, 7 Nov 2026): a run an object action started is its runner's: every step, a retry or a resume
+        # after an approval too, sees and does only what the person who clicked may (row-level security, roles, sends)
+        acting = "action" in (run["trigger"] or {})
+        if acting and (bad := [s["id"] for s in f["steps"] if not ontology.step_ok(s)]):  # the save-time allowlist, again
+            raise ValueError(f"step(s) {', '.join(bad)} aren't ones an action type's flow may run.")
         with db.connect() as conn:
-            owner = security.user(conn, run["started_by"] if message else int(f["owner"]))
+            owner = security.user(conn, run["started_by"] if message or acting else int(f["owner"]))
         if owner is None:
-            raise ValueError("its sender no longer exists." if message else f"its owner (user {f['owner']}) no longer exists.")
-        head = f"Flow {f['name']} ({'sender' if message else 'owner'} {owner.name}): "
+            raise ValueError("its sender no longer exists." if message else "the person who ran its action no longer exists." if acting
+                             else f"its owner (user {f['owner']}) no longer exists.")
+        head = f"Flow {f['name']} ({'sender' if message else 'runner' if acting else 'owner'} {owner.name}): "
         data = {"trigger": run["trigger"]} if run["trigger"] else {}
         test = TEST_RUN.set(owner.id if run_id.rsplit("/", 1)[1].startswith("test-") else None)
         inbound = actions.INBOUND.set(message)  # D-32: its steps' audit rows hold the text's length + hash only
-        acted = ACTED.set("action" in (run["trigger"] or {}))
+        acted = ACTED.set(acting)
         try:
             error, retry, halt = _graph(run_id, f, project, owner, data, done, skipped, sent)
         finally:
@@ -760,11 +766,12 @@ def enable_flow(conn, user: User, args: Enable) -> dict:
     return _save(conn, user, args.project, _load(args.project, args.flow) | {"enabled": args.enabled})
 
 
-@action(Role.editor, destructive=True, definition=True)
+@action(Role.editor, definition=True, confirms=True)
 def delete_flow(conn, user: User, args: FlowRef) -> dict:
-    """Deletes a flow. Its run history stays. Refused while an action type starts it."""
+    """Deletes a flow (asks the user to confirm). Its run history stays. Refused while an action type starts it."""
     if used := [a["id"] for a in imports.ontology.read(args.project).get("actions", []) if a.get("flow") == args.flow]:
         raise ActionFailed(409, f"Flow '{args.flow}' is started by action type(s) {', '.join(used)}; change those first (save_ontology).")
+    require_confirmation(f"Destructive: deletes flow '{args.flow}' of project '{args.project}'.")  # after the refusal: no preview
     imports.remove(args.project, "flow", args.flow)  # its webhook token goes with it (drop_stale_tokens)
     return {}
 

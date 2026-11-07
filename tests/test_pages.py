@@ -31,7 +31,7 @@ def sure(action: str, **args):
     try:
         return abi.call(action, **args)
     except abi.ActionError as e:
-        if e.status != 409:
+        if e.status != 409 or "confirm_token" not in e.body:  # a 409 refusal (in use, conflict) is no question
             raise
         return abi.call(action, confirm=e.body["confirm_token"], **args)
 

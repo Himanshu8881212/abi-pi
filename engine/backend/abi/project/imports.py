@@ -596,7 +596,7 @@ def _used(files: dict, flow: str) -> dict:
         return {}
     out = {f"flows/{flow}.json": {k: v for k, v in f.items() if k != "enabled"}}
     if NAMED.search(json.dumps(f)) or any(s.get("type") in ("agent", "tool", "snapshot") for s in f.get("steps", [])):
-        out |= {r: hashlib.sha256(json.dumps({k: v for k, v in x.items() if k != "sharing" and not (k == "description" and r.startswith("reports/"))}
+        out |= {r: hashlib.sha256(json.dumps({k: v for k, v in x.items() if k != "sharing" and not (k == "description" and r.startswith(("reports/", "ml/")))}
                                              if isinstance(x, dict) else x, sort_keys=True, default=str).encode()).hexdigest()
                 for r, x in files.items() if r.startswith(DEFS)}  # a digest each: the preview stays small and quotes no one's text
     return out

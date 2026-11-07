@@ -769,3 +769,127 @@ def test_nested_ask_off_in_action_runs():
     r = engine(NESTED)
     assert r.returncode == 0, r.stderr[-2000:]
     assert json.loads(r.stdout.splitlines()[-1]) == {"before": True, "acted": False}
+
+
+# ---------- round 6 (owner): a flow an object action starts runs as the person who clicked ----------
+
+Q = {"id": "q", "type": "action", "action": "semantic_query", "input": {"measures": ["revenue"]}}
+SOUTH = {"id": "c", "type": "condition", "query": {"measures": ["revenue"], "filters": [{"column": "cafes.region", "op": "=", "value": "South"}]},
+         "measure": "revenue", "op": ">", "value": 0}
+PROBES = [{"id": "probe", "name": "Probe", "enabled": False, "trigger": {"type": "manual"}, "steps": [Q, SOUTH]},
+          {"id": "probe_wait", "name": "Probe after a yes", "enabled": False, "trigger": {"type": "manual"},
+           "steps": [{"id": "wait", "type": "approval", "message": "Go on?"}, Q]},
+          {"id": "mailer", "name": "Mailer", "enabled": False, "trigger": {"type": "manual"}, "steps": [
+              {"id": "m", "type": "action", "action": "send_email", "input": {"to": ["ops@example.com"], "subject": "Rows", "body": "Rows.",
+                                                                             "data": "{{ data.trigger.inputs.d }}"}}]},
+          {"id": "asker", "name": "Asker", "enabled": False, "trigger": {"type": "manual"},
+           "steps": [{"id": "ask", "type": "agent", "agent": "lone", "prompt": "Look."}]}]
+
+
+@pytest.fixture(scope="module")
+def probes(acts):
+    """Four flows Viewer action types start: reads and a condition, an approval then a read, a send whose `data` is the
+    Viewer's whole input, an agent; and a tool, so the agent's flow puts every definition into the grant."""
+    base = onto(acts["format"])
+    o = copy.deepcopy(base)
+    o["actions"] += [{"id": f["id"], "object": "cafe", "name": f["name"], "role": "viewer", "flow": f["id"],
+                      "inputs": {"type": "object", "properties": {"d": {"type": "object"}}}} for f in PROBES]
+    sure("set_table", project=P, table="cafe_contacts", description="Who manages each café, and why it is visited.")
+    try:
+        sure("save_tool", project=P, tool=TOOL)
+        sure("save_agent", project=P, agent={**TRIAGE_AGENT, "id": "lone", "name": "Lone"})
+        for f in PROBES:
+            sure("save_flow", project=P, flow=f)
+        sure("save_ontology", project=P, ontology=o)
+        yield {"mine": mine_revenue(acts), "all": float(abi.call("semantic_query", project=P, measures=["revenue"])["rows"][0][0])}
+    finally:
+        sure("save_ontology", project=P, ontology=base)
+        for action, args in [*(("delete_flow", {"flow": f["id"]}) for f in PROBES), ("delete_agent", {"agent": "lone"}), ("delete_tool", {"tool": "pi_t"})]:
+            with contextlib.suppress(abi.ActionError, KeyError):
+                sure(action, project=P, **args)
+
+
+def mine_revenue(acts):
+    with abi.as_user(acts["tokens"]["viewer"]):
+        return float(abi.call("semantic_query", project=P, measures=["revenue"])["rows"][0][0])
+
+
+def got(steps: dict) -> float:
+    """The revenue the read step `q` saw."""
+    return float(steps["q"]["output"]["rows"][0][0])
+
+
+def probe(acts, flow: str, **inputs) -> dict:
+    r = run(acts["tokens"]["viewer"], type="cafe", key=[acts["good"]], action=flow, inputs=inputs)
+    return {s["step"]: s for s in finished(r["run"])["steps"]} | {"_run": finished(r["run"])}
+
+
+def test_action_flow_reads_as_runner(acts, probes):
+    """A read step sees the Viewer's rows, not the owner's; a condition can't read hidden rows (South cafés), so it
+    is no oracle: the run stops there. The same flow run by its owner reads every row and the condition holds."""
+    assert probes["mine"] != probes["all"]
+    steps = probe(acts, "probe")
+    assert got(steps) == probes["mine"], steps["q"]
+    assert steps["_run"]["status"] == "stopped", steps["_run"]
+    own = finished(abi.call("run_flow", project=P, flow="probe")["run"])
+    assert own["status"] == "ok" and got({s["step"]: s for s in own["steps"]}) == probes["all"], own
+
+
+def test_action_flow_send_with_whole_input_is_the_runners(acts, probes):
+    """send_email whose `data` is the Viewer's whole input runs as the Viewer: a Viewer may not send, so it fails
+    plainly and reaches no row; never as the owner."""
+    steps = probe(acts, "mailer", d={"measures": ["revenue"]})
+    assert steps["_run"]["status"] == "failed" and "editor" in (steps["m"]["error"] or "").lower(), steps
+
+
+def test_action_flow_agent_runs_as_runner(acts, probes):
+    """The agent step runs as the Viewer, so its tools would too: a Viewer may not run a draft agent (only Editors
+    testing it), so the step says so; as the owner it would have run (and its tools with the owner's rights)."""
+    steps = probe(acts, "asker")
+    assert steps["_run"]["status"] == "failed" and "draft" in (steps["ask"]["error"] or "").lower(), steps
+
+
+def test_resumed_run_keeps_runner(acts, probes):
+    """A run resumed after an approval still reads as the Viewer who clicked."""
+    r = run(acts["tokens"]["viewer"], type="cafe", key=[acts["good"]], action="probe_wait")
+    end = time.monotonic() + 120
+    while abi.call("flow_runs", project=P, run=r["run"])["runs"][0]["status"] != "waiting":
+        assert time.monotonic() < end
+        time.sleep(1)
+    sure("approve_flow_run", project=P, run=r["run"])
+    x = finished(r["run"])
+    assert x["status"] == "ok" and got({s["step"]: s for s in x["steps"]}) == probes["mine"], x
+
+
+REQUEUED = r"""
+import json, sys
+import abi.app  # noqa: F401
+from abi import actions, db, flows, security
+a = json.loads(sys.stdin.read())
+with db.connect() as c:
+    u = security.user(c, a["uid"])
+def down(*x, **k):
+    raise RuntimeError("queue down")
+flows._defer = down
+print(json.dumps(actions.run("run_object_action", a["args"], u, "rest"), default=str))
+"""
+
+
+def test_requeued_run_keeps_runner(acts, probes):
+    """A run queued again by flows.requeue (the queue was down) still reads as the Viewer who clicked."""
+    r = engine(REQUEUED, timeout=300, stdin=json.dumps({"uid": acts["uid"]["viewer"], "args": {
+        "project": P, "type": "cafe", "key": [acts["good"]], "action": "probe", "inputs": {}}}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    out = json.loads(r.stdout.splitlines()[-1])
+    assert "queued" in out["note"], out
+    x = finished(out["run"])
+    assert got({s["step"]: s for s in x["steps"]}) == probes["mine"], x
+
+
+def test_editor_delete_refused_before_any_preview(acts, probes):
+    """An Editor's delete of a definition a granted flow may reach gets 403, and of a flow an action type starts 409,
+    each before any confirmation or preview."""
+    for action, args, status in (("delete_tool", {"tool": "pi_t"}, 403), ("delete_flow", {"flow": "probe"}, 409)):
+        with abi.as_user(acts["tokens"]["editor"]), pytest.raises(abi.ActionError) as e:
+            abi.call(action, project=P, **args)
+        assert e.value.status == status and "confirm_token" not in e.value.body and "preview" not in e.value.body, (action, e.value.body)
