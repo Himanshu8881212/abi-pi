@@ -21,7 +21,7 @@ export type VisualData = {
   // V-02 C-7: `table`/`key`/`columns` when the visual's dimensions include a table's key (`columns` maps visual columns
   // to its columns); WB-11: `total` = the SUM measures whose aggregated cells spread via `edit_total`, `filters` the visual's
   edit?: { table?: string; key?: string[]; columns?: Record<string, string>; total?: string[];
-    filters?: { column: string; op: string; value: unknown }[] } | null;
+    filters?: { column: string; op: string; value: unknown }[]; links?: string[] } | null; // 1.2.6 M5: the visual's links
   live?: string[]; // RP-7: the live (ClickHouse) tables these numbers read
   time_zone?: string; currency?: string | null; // SE-13: the zone of its days and the display currency
 };
@@ -379,5 +379,5 @@ export function cellMode(v: VisualData, row: Value[], column: string): "row" | "
 /** WB-11 `edit_total` body: the visual's filters plus each member the cell doesn't roll up; `old` = the total shown (WB-7). */
 export function totalEdit(v: VisualData, row: Value[], column: string, text: string) {
   const members = dims(v).filter((d) => !rolled(v, row, d)).map((d) => ({ column: d, op: "=", value: row[col(v, d)] }));
-  return { measure: column, filters: [...v.edit!.filters!, ...members], value: text, old: row[col(v, column)] };
+  return { measure: column, filters: [...v.edit!.filters!, ...members], value: text, old: row[col(v, column)], links: v.edit!.links ?? [] };
 }

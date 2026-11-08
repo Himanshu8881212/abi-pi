@@ -56,10 +56,10 @@ def _bridged(q: dict, files: dict) -> set[str]:
     for f in facts if links else ():
         for t in _tables(q) - {f}:
             try:
-                hops = planner.route(m, f, t, links=links)[0]
+                hops, ln = planner.route(m, f, t, links=links)
             except planner.PlanError:
-                continue
-            i = next((i for i, (_, along) in enumerate(hops) if not along), len(hops))
+                continue  # a named link: every table on its steps (and the fact's path to it); else from the first reverse one
+            i = 0 if ln in q.get("links", []) else next((i for i, (_, along) in enumerate(hops) if not along), len(hops))
             out |= {r[s]["table"] for r, _ in hops[i:] for s in ("from", "to")}
     return out - facts  # a measure's own fact comes with it
 

@@ -63,6 +63,14 @@ a = json.loads(sys.stdin.read())
 files = bundle.bundle(git.path(a["project"]))
 print(json.dumps(sorted(studio.scope({"scope": {"datasets": a["datasets"]}}, files, lineage.graph(files))[1])))
 """
+BRIDGED = r"""
+import json, sys
+from abi.agents import studio
+a = json.loads(sys.stdin.read())
+files = {"model/model.json": a["model"], "model/ontology.json": a["onto"],
+         "model/measures.json": {"measures": [{"id": "revenue", "expression": "SUM(orders.revenue)"}]}}
+print(json.dumps([sorted(studio._bridged(q, files)) for q in a["queries"]]))
+"""
 SCOPE = r"""
 import json, sys
 from abi.agents import runs
@@ -480,3 +488,32 @@ def test_explain_change_refuses_m2m_dimension(lq):
             assert "cafes.region" not in r["dimensions"] + r["also_checked"], r
     finally:
         sure("remove_relationship", project=P, id="customers-signup_date")
+
+
+def test_agent_scope_named_many_to_one_link():
+    """D-24: a named link of many-to-one steps only (orders -> customers -> home café) reads every table on its steps."""
+    q = {"measures": ["revenue"], "dimensions": ["cafes.region"]}
+    r = engine(BRIDGED, timeout=120, stdin=json.dumps({"model": MODEL, "onto": PURE_ONTO, "queries": [{**q, "links": ["home"]}, q]}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert json.loads(r.stdout.splitlines()[-1]) == [["cafes", "customers"], []]
+
+
+def test_edit_total_from_a_linked_visual(lq):
+    """WB-11 as the app does it: visual_data's `edit` carries the visual's links, the edit_total body is built from it
+    (charts.ts totalEdit) and spreads the new total over the rows the visual reads."""
+    vis = {"id": "v1", "type": "table", "layout": {"x": 0, "y": 0, "w": 4, "h": 4}, "query": {
+        "measures": ["revenue"], "dimensions": ["calendar.day"], "links": ["order_day"], "order_by": [{"field": "calendar.day"}], "limit": 1}}
+    with two_dates():
+        abi.call("save_report", project=P, report={"id": "linked", "name": "Linked", "pages": [{"id": "p1", "name": "P", "visuals": [vis]}]})
+        try:
+            v = abi.call("visual_data", project=P, report="linked", page="p1", visual="v1")
+            assert v["edit"]["links"] == ["order_day"] and "revenue" in v["edit"]["total"], v["edit"]
+            day, old = v["rows"][0]
+            new = round(float(old) + 100, 2)
+            body = {"measure": "revenue", "filters": [*v["edit"]["filters"], {"column": "calendar.day", "op": "=", "value": day}],
+                    "value": str(new), "old": old, "links": v["edit"].get("links", [])}  # what totalEdit posts
+            abi.call("edit_total", project=P, **body)
+            [(got,)] = sql(f"SELECT sum(revenue) FROM orders WHERE order_date = '{str(day)[:10]}'")
+            assert round(float(got), 2) == new, (got, new)
+        finally:
+            sure("delete_report", project=P, report="linked")

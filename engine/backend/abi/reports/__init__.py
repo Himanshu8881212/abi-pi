@@ -300,7 +300,7 @@ def editable(project: str, q: dict, trees: dict) -> dict | None:
             break
     total = [m for m in q["measures"] if isinstance(tr := trees.get(m), mel.Agg) and tr.fn == "SUM" and type(tr.col) is mel.Col
              and (tables.get(t := tr.col.table) or {}).get("key") and t != model.CALENDAR and not live.is_live(project, t)]
-    return out | {"total": total, "filters": q.get("filters", [])} if total else out or None
+    return out | {"total": total, "filters": q.get("filters", []), "links": q.get("links", [])} if total else out or None
 
 
 def explain(project: str, q: dict, user_id: int | None) -> dict:
