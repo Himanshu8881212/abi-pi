@@ -68,8 +68,9 @@ def _query(project: str, r: dict, p: dict, v: dict, interaction: list[dict]) -> 
 
     def reach(f: dict) -> bool:
         t = f["column"].split(".", 1)[0]
-        try:
-            return all(t == x or planner.route(mj, x, t, links=links) for x in facts)
+        try:  # across many-to-many only when grouped by that column: otherwise it doesn't filter the visual (members overlap)
+            return all(t == x or planner.route(mj, x, t, links=links) and (
+                f["column"] in v["query"].get("dimensions", []) or not planner.many(mj, x, t, links)) for x in facts)
         except planner.PlanError:
             return False
     off = list(dict.fromkeys(f["column"] for f in interaction if not reach(f)))

@@ -48,6 +48,21 @@ made = {}
 out = semantic.plan(a["project"], a["q"], a["uid"], [], True, made)[1]
 print(json.dumps({"sql": out, "shared": sorted(made)}))
 """
+REACH = r"""
+import json, sys
+from abi.reports import _query
+a = json.loads(sys.stdin.read())
+print(json.dumps([_query(a["project"], {"filters": []}, {"filters": []}, {"query": v}, [f])[2] for v, f in a["cases"]]))
+"""
+SCOPED = r"""
+import json, sys
+from abi.agents import studio
+from abi.project import bundle, git
+from abi.semantic import lineage
+a = json.loads(sys.stdin.read())
+files = bundle.bundle(git.path(a["project"]))
+print(json.dumps(sorted(studio.scope({"scope": {"datasets": a["datasets"]}}, files, lineage.graph(files))[1])))
+"""
 SCOPE = r"""
 import json, sys
 from abi.agents import runs
@@ -55,7 +70,7 @@ from abi.project import bundle, git
 from abi.semantic import lineage
 a = json.loads(sys.stdin.read())
 files = bundle.bundle(git.path(a["project"]))
-print(json.dumps([runs._refused("semantic_query", q, ["semantic_query"], files, lineage.graph(files), {"cust_count"},
+print(json.dumps([runs._refused("semantic_query", q, ["semantic_query"], files, lineage.graph(files), {"cust_count", "cafes_count"},
                                 {"customers", "cafes"}, []) for q in a["queries"]]))
 """
 
@@ -75,7 +90,8 @@ PURE_ONTO = {"objects": [{"id": i, "table": t} for i, t in (("order", "orders"),
                  ("active2", "customer", "day", ["orders-customer_id", "orders-ordered_at"]),
                  ("seen", "day", "customer", ["orders-ordered_at", "orders-customer_id"]))]}
 PURE_MEASURES = {"revenue": "SUM(orders.revenue)", "custs": "COUNT(customers.customer_id)", "custs_ytd": "YTD([custs])",
-                 "share": "DIVIDE([custs], IGNORE([custs], cafes.region))", "days": "COUNT(calendar.day)"}
+                 "share": "DIVIDE([custs], IGNORE([custs], cafes.region))", "days": "COUNT(calendar.day)",
+                 "campus_custs": "WHERE([custs], cafes.format = 'campus')"}
 REGION = {"measures": ["custs"], "dimensions": ["cafes.region"], "links": ["visited"]}
 YEAR = {"measures": ["custs"], "dimensions": ["calendar.year"]}  # customers reach no date but through a link
 COPY = {"orders": ["orders__c", ["cafes.region"]]}
@@ -98,6 +114,10 @@ CASES = {  # name: (query and options, what the answer holds, what it must not)
     "one_default": ({"q": YEAR, "defaults": ["active"]}, "sql: ", "SELECT DISTINCT"),
     "ignore": ({"q": {**REGION, "measures": ["share"]}}, "refused: ", "ignores cafes.region"),
     "date_first": ({"q": {"measures": ["days"], "dimensions": ["customers.segment"], "links": ["seen"]}}, "refused: ", "onto a date"),
+    "where_far": ({"q": {**REGION, "measures": ["campus_custs"]}}, "refused: ", "filters on cafes.format without grouping by it"),
+    "middle": ({"q": {**REGION, "filters": [{"column": "orders.channel", "op": "=", "value": "app"}]}}, "refused: ",
+               "Table 'orders' is a step of link 'visited'"),
+    "ignore_ungrouped": ({"q": {**REGION, "measures": ["share"], "dimensions": ["customers.segment"]}}, "sql: ", "SELECT"),
     "unreachable": ({"q": {**REGION, "measures": ["revenue", "custs"], "links": ["home"]}}, "refused: ", "Following link 'home'"),
 }
 PURE = r"""
@@ -210,6 +230,18 @@ def test_query_without_links_plans_identically(lq):
     assert r.returncode == 0, r.stderr[-3000:]
     got = json.loads(r.stdout.splitlines()[-1])["plans"]
     assert len(want) >= 15 and any(v.startswith("refused") for v in want.values())
+    diff = sorted(k for k in got.keys() | want.keys() if got.get(k) != want.get(k))
+    assert not diff, f"{len(diff)} changed, first {diff[0]}:\n1.2.5: {want.get(diff[0])}\nnow:   {got.get(diff[0])}"
+
+
+def test_restricted_plans_unchanged_without_links(lq):
+    """The same for a restricted Viewer (a rule on cafes.region; visited follows it): every golden query and visual
+    plans as the golden North Viewer's."""
+    want = {k: v for k, v in json.loads(GOLDEN.read_text())["plans"].items() if k.startswith("north ")}
+    r = engine(CAPTURE, timeout=600, stdin=json.dumps({"project": P, "users": {"north": lq["uid"]}, "queries": QUERIES + EXTRA}))
+    assert r.returncode == 0, r.stderr[-3000:]
+    got = {k: v for k, v in json.loads(r.stdout.splitlines()[-1])["plans"].items() if k.startswith("north ")}
+    assert len(want) >= 15
     diff = sorted(k for k in got.keys() | want.keys() if got.get(k) != want.get(k))
     assert not diff, f"{len(diff)} changed, first {diff[0]}:\n1.2.5: {want.get(diff[0])}\nnow:   {got.get(diff[0])}"
 
@@ -382,4 +414,69 @@ def test_m2m_restricted_link_choices_cached_apart(lq):
         assert ask(lq["token"], **q, links=["signed"])["rows"] == a and ask(lq["token"], **q, links=["active"])["rows"] == b
     finally:
         sure("save_ontology", project=P, ontology=ONTO)
+        sure("remove_relationship", project=P, id="customers-signup_date")
+
+
+@contextlib.contextmanager
+def visited_default():
+    o = json.loads(json.dumps(ONTO))
+    o["links"][2]["default"] = True
+    sure("save_ontology", project=P, ontology=o)
+    try:
+        yield
+    finally:
+        sure("save_ontology", project=P, ontology=ONTO)
+
+
+def test_agent_scope_expressions_and_datasets(lq):
+    """D-24: an inline expression's fact counts as the query's (it reads orders through visited); a scoped dataset
+    with a link brings what it reads across it."""
+    q = {"measures": ["cafes_count"], "dimensions": ["cafes.region"], "links": ["visited"],
+         "expressions": [{"name": "n", "expr": "COUNT(customers.customer_id)"}]}
+    r = engine(SCOPE, timeout=120, stdin=json.dumps({"project": P, "queries": [q, {**q, "links": []}]}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert json.loads(r.stdout.splitlines()[-1]) == ["Outside your scope: orders.", None]
+    r = engine(SCOPED, timeout=120, stdin=json.dumps({"project": P, "datasets": ["visitors"]}))
+    assert json.loads(r.stdout.splitlines()[-1]) == ["cafes", "orders"], r.stdout  # its measure's fact comes with the measure
+
+
+def test_slicer_across_m2m_doesnt_filter(lq):
+    """A cross-filter on a table a visual reaches only through a many-to-many link (here a default one) leaves it
+    unfiltered, unless it groups by that column."""
+    region = {"column": "cafes.region", "op": "=", "value": "North"}
+    fmt = {"column": "cafes.format", "op": "=", "value": "campus"}
+    cases = [({"measures": ["cust_count"], "dimensions": ["customers.segment"]}, region),
+             ({"measures": ["cust_count"], "dimensions": ["cafes.region"]}, region),
+             ({"measures": ["cust_count"], "dimensions": ["cafes.region"]}, fmt),  # a far-side slicer
+             ({"measures": ["revenue"], "dimensions": ["customers.segment"]}, region)]  # many-to-one: it filters
+    with visited_default():
+        r = engine(REACH, timeout=120, stdin=json.dumps({"project": P, "cases": cases}))
+        assert r.returncode == 0, r.stderr[-2000:]
+        assert json.loads(r.stdout.splitlines()[-1]) == [["cafes.region"], [], ["cafes.format"], []]
+        assert ask(**cases[0][0], filters=[])["rows"]  # the visual itself still answers
+
+
+def test_edit_total_follows_the_visuals_links(lq):
+    [(day, total)] = sql("SELECT order_date, sum(revenue) FROM orders GROUP BY 1 ORDER BY 1 LIMIT 1")
+    cell = {"measure": "revenue", "filters": [{"column": "calendar.day", "op": "=", "value": str(day)}], "value": 1, "old": -1}
+    with two_dates():
+        with pytest.raises(abi.ActionError) as e:
+            abi.call("edit_total", project=P, **cell)
+        assert e.value.status == 400 and "order_day" in e.value.body["message"], e.value.body
+        with pytest.raises(abi.ActionError) as e:  # planned through the link: only the stale total refuses it
+            abi.call("edit_total", project=P, **cell, links=["order_day"])
+        assert e.value.status == 409 and "changed" in e.value.body["message"] and total, e.value.body
+
+
+def test_explain_change_refuses_m2m_dimension(lq):
+    """Members across a many-to-many link don't add up to the total, so explain_change doesn't break a change into them."""
+    abi.call("add_relationship", project=P, **{"from": "customers.signup_date", "to": "calendar.day"})
+    try:
+        with visited_default():
+            with pytest.raises(abi.ActionError) as e:
+                abi.call("explain_change", project=P, measure="cust_count", period="year", dimensions=["cafes.region"])
+            assert e.value.status == 400 and "many-to-many" in e.value.body["message"], e.value.body
+            r = abi.call("explain_change", project=P, measure="cust_count", period="year")
+            assert "cafes.region" not in r["dimensions"] + r["also_checked"], r
+    finally:
         sure("remove_relationship", project=P, id="customers-signup_date")

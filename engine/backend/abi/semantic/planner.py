@@ -181,6 +181,15 @@ def links(model: dict, onto: dict | None, named=()) -> list[dict]:
     return out
 
 
+def many(model: dict, fact: str, table: str, links: list) -> bool:
+    """1.2.6 M5: does `route` from fact to table take a step against a relationship's direction (many-to-many or
+    one-to-many: members overlap)? False when it doesn't route at all (planning says why)."""
+    try:
+        return not all(a for _, a in route(model, fact, table, links=links)[0])
+    except PlanError:
+        return False
+
+
 def route(model: dict, fact: str, table: str, m: str = "", dim: str = "", links: list = ()) -> tuple[list, str | None]:
     """1.2.6 M5, the path rule: (the hops fact -> table as (relationship, along its many-to-one direction?), the link
     followed or None). The link the query names for `table`, walked after `path` from the fact to its `from` table;
@@ -201,6 +210,9 @@ def route(model: dict, fact: str, table: str, m: str = "", dim: str = "", links:
                 raise PlanError(f"{e} Links {' and '.join(defaults)} are each a default way there; name one: add links: "
                                 f"[{defaults[0]}].") from None
             if not (ln := next((x for x in ways if x["default"]), None)):
+                if mid := [x for x in links if x["named"] and table in {r[s]["table"] for r, _ in x["hops"] for s in ("from", "to")}]:
+                    raise PlanError(f"{e} Table '{table}' is a step of link '{mid[0]['id']}', which a query reads only at its"
+                                    f" end ('{mid[0]['to']}'): filter or group by a column of '{mid[0]['to']}'.") from None
                 if ways:
                     raise PlanError(f"{e} Or follow a link: add links: [{ways[0]['id']}]"
                                     f" ({', '.join(x['id'] for x in ways)} reach '{table}').") from None
@@ -415,6 +427,11 @@ def plan(query: dict, measures: dict[str, str], model: dict, copies: dict[str, t
         return _sql(n, None)
 
     finals = {m: walk(trees[m], Ctx(filters=filters), m) for m in names}
+    asked = set(dims) | {x for f in filters for x in _cols(f)}
+    for c in subs:  # IGNORE of a column the query reads across many-to-many is a total in disguise (members overlap)
+        if x := next((x for x in sorted(c.ignored & asked) if _col(x).table != c.fact and many(model, c.fact, _col(x).table, lks)), None):
+            raise PlanError(f"Measure '{owner[c]}' ignores {x}, which it reaches through a many-to-many link: its members"
+                            " overlap, so a total across them doesn't add up.")
     reads = {} if reads is None else reads
     ctes = {f"s{i}": _aggregate(c, aggs, owner[c], dims, sets, totals, model, dt, (copies or {}).get(c.fact), live or {}, reads,
                                     days or {}, rates, [] if joins is None else joins, partials or {},
@@ -511,14 +528,6 @@ def _aggregate(c: Ctx, aggs: dict, m: str, dims: list, sets: list, totals: bool,
     # 1.2.6 M5: a route from a link may disagree (refused: ask two queries); from its first hop against a relationship's
     # direction on, it is `wide`: {target table: those hops}, joined as distinct pairs (`_wide`)
     rels, wide, followed = {}, {}, set()
-    for x in sorted(c.ignored):  # IGNORE across many-to-many is a total in disguise (its members overlap)
-        try:
-            far = _col(x).table != c.fact and not all(a for _, a in route(model, c.fact, _col(x).table, m, x, links)[0])
-        except PlanError:
-            far = False
-        if far:
-            raise PlanError(f"Measure '{m}' ignores {x}, which it reaches through a many-to-many link: its members"
-                            " overlap, so a total across them doesn't add up.")
     for t, d in need.items():
         hops, ln = route(model, c.fact, t, m, d, links)
         followed.add(ln)

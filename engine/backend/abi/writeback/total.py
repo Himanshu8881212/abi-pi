@@ -11,11 +11,13 @@ import math
 import re
 from decimal import Decimal
 from fractions import Fraction
+from typing import Annotated
 
 from pydantic import Field
 
 from abi import semantic, storage
 from abi.actions import ActionFailed, action
+from abi.project import ID
 from abi.security import Role, User
 from abi.semantic import mel, model
 from abi.writeback import CellEdit, Edits, _table, edit_cells
@@ -67,6 +69,7 @@ class Total(storage.ProjectRef):
     old: Decimal | None = Field(None, description="the total the user saw; if it changed since, the edit is refused"
                                                   " with 'value changed, reload?' (WB-7)")
     comment: str | None = Field(None, max_length=2000)
+    links: list[Annotated[str, Field(pattern=ID)]] = Field([], description="the visual's links (its semantic query's)")
 
 
 @action(Role.editor)  # SC-2: Editor = write-back
@@ -86,7 +89,7 @@ def edit_total(conn, user: User, args: Total) -> dict:
     places = scale(types[col])
     rows = semantic.query(args.project, {
         "measures": [args.measure], "dimensions": [f"{t}.{k}" for k in key],
-        "filters": [f.model_dump() for f in args.filters], "limit": MAX_ROWS + 1}, user.id)["rows"]
+        "filters": [f.model_dump() for f in args.filters], "links": args.links, "limit": MAX_ROWS + 1}, user.id)["rows"]
     if not rows:
         raise ActionFailed(404, "No rows match this cell's filters, so there is nothing to spread the total over.")
     if len(rows) > MAX_ROWS:

@@ -74,7 +74,7 @@ def _refused(name: str, payload: dict, allowed: list[str], files: dict, g: dict,
             q = None  # actions.run refuses it with the details
     if name == "semantic_query" and isinstance(q, dict) and isinstance(payload.get("expressions"), list):
         ms, cols = uses(payload["expressions"])  # M2.1: what its inline expressions read is in the query too
-        q = q | {"measures": q["measures"] + ms, "dimensions": q["dimensions"] + cols}
+        q = q | {"measures": q["measures"] + ms, "dimensions": q["dimensions"] + cols, "expressions": payload["expressions"]}
     if isinstance(q, dict) and isinstance(q.get("tool"), str):
         if q["tool"] not in allowed:
             return f"Tool '{q['tool']}' is not one of your tools."

@@ -17,7 +17,7 @@ from pydantic import Field
 from abi import semantic, storage
 from abi.actions import ActionFailed, action
 from abi.security import Role, User
-from abi.semantic import mel, rls
+from abi.semantic import mel, planner, rls
 from abi.storage import COLUMN
 
 COLUMNS = ["dimension", "member", "period_a", "period_b", "a", "b", "change", "change_pct", "share_pct"]
@@ -160,6 +160,14 @@ def explain_change(conn, user: User, args: Explain) -> dict:
     span = [{"column": day, "op": ">=", "value": str(min(a, b))},
             {"column": day, "op": "<", "value": str(max(after(a, grain), after(b, grain)))}]
     dims = list(dict.fromkeys(args.dimensions)) or candidates(p, user.id, tree, model.scope(p, args.model)[0] if args.model else None)
+    # 1.2.6 M5: members reached through a many-to-many link overlap, so they don't add up to the total (Owner answer 4)
+    mj, facts = model._read(p, "model.json"), {n.col.table for n in mel._walk(tree) if type(n) is mel.Agg}
+    links = planner.links(mj, model._read(p, "ontology.json"))
+    wide = [d for d in dims if any(planner.many(mj, f, d.split(".", 1)[0], links) for f in facts)]
+    if wide and args.dimensions:
+        raise ActionFailed(400, f"explain_change breaks a change into members that add up to the total; {wide[0]} is reached"
+                                " through a many-to-many link, whose members overlap. Ask semantic_query for its values.")
+    dims = [d for d in dims if d not in wide]
 
     def read(d: str | None) -> list:  # M2 review: bounded, not every member of a dimension into Python
         q = {"measures": [], "dimensions": [d] if d else [], "filters": scope + span}

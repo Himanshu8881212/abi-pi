@@ -15,7 +15,7 @@ from abi.actions import ActionFailed, action
 from abi.project import ID, SCHEMA, git, imports
 from abi.project.bundle import bundle, loads
 from abi.security import Role, User
-from abi.semantic import lineage, model, planner
+from abi.semantic import lineage, mel, model, planner
 from abi.tools import AGENT_ACTION_TOOLS, saved
 
 BUILTIN = ("semantic_query", "report_snapshot", *AGENT_ACTION_TOOLS)  # every tool an agent may hold besides custom tools
@@ -39,7 +39,8 @@ def scope(a: dict, files: dict, g: dict) -> tuple[set[str], set[str]]:
     ds = s.get("datasets", [])
     qs = [d["query"] for d in (files.get("model/datasets.json") or {}).get("datasets", []) if d["id"] in ds]
     up = lineage.reach(g, {f"dataset:{d}" for d in ds}, "upstream")
-    return set(s.get("measures", [])) | {n[8:] for n in up if n.startswith("measure:")}, set(s.get("tables", [])).union(*map(_tables, qs))
+    return set(s.get("measures", [])) | {n[8:] for n in up if n.startswith("measure:")}, set(s.get("tables", [])).union(
+        *map(_tables, qs), *(_bridged(q, files) for q in qs))  # 1.2.6 M5: and what they read across a link
 
 
 def _bridged(q: dict, files: dict) -> set[str]:
@@ -50,7 +51,9 @@ def _bridged(q: dict, files: dict) -> set[str]:
         links = planner.links(m, files.get("model/ontology.json"), q.get("links"))
     except planner.PlanError:  # the query is refused anyway
         return out
-    for f in lineage._facts(files, q.get("measures", [])) if links else ():
+    facts = lineage._facts(files, q.get("measures", [])) | {  # inline expressions aggregate facts too (M2.1)
+        n.col.table for e in q.get("expressions", []) for n in _parsed(e) if type(n) is mel.Agg}
+    for f in facts if links else ():
         for t in _tables(q) - {f}:
             try:
                 hops = planner.route(m, f, t, links=links)[0]
@@ -58,7 +61,14 @@ def _bridged(q: dict, files: dict) -> set[str]:
                 continue
             i = next((i for i, (_, along) in enumerate(hops) if not along), len(hops))
             out |= {r[s]["table"] for r, _ in hops[i:] for s in ("from", "to")}
-    return out
+    return out - facts  # a measure's own fact comes with it
+
+
+def _parsed(e) -> list:
+    try:
+        return mel._walk(mel.parse(e["expr"])) if isinstance(e, dict) and isinstance(e.get("expr"), str) else []
+    except mel._Bad:
+        return []
 
 
 def outside(q: dict, measures: set[str], tables: set[str], g: dict, files: dict | None = None) -> list[str]:
