@@ -89,7 +89,7 @@ def _refused(name: str, payload: dict, allowed: list[str], files: dict, g: dict,
             cond = c["query"] | {"dimensions": list(dict.fromkeys([*c["query"]["dimensions"], *([c["period"]] if c["period"] else [])]))}
         except ValidationError:
             pass  # no condition: read as before (actions.run refuses what is neither)
-    if isinstance(q, dict) and "measures" in q:
+    if isinstance(q, dict):  # anything that is no valid query (a tool call, a condition, junk) reads as none here
         try:
             q = SemanticQuery.model_validate(q).model_dump(mode="json")
         except ValidationError:
@@ -123,7 +123,8 @@ def _defs(names: list[str], files: dict, agents: list[str]) -> list[dict]:
                 f"{x}: {o.get('purpose', '')}" for x in agents if (o := files.get(f"agents/{x}.json")))
         elif n in studio.BUILTIN:
             s = ACTIONS[n].input.model_json_schema()
-            s = s | {"properties": {k: v for k, v in s["properties"].items() if k != "project"},
+            drop = {"project", "docs"} if n == "send_email" else {"project"}  # `docs` is the whole project's: never an agent's (`_refused`)
+            s = s | {"properties": {k: v for k, v in s["properties"].items() if k not in drop},
                      "required": [r for r in s.get("required", []) if r != "project"]}
             desc = ACTIONS[n].fn.__doc__ or ""
         else:  # a custom tool: its own typed inputs

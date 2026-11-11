@@ -60,7 +60,7 @@ const UNCHECKED = "I couldn't check my answer against the tool results (the grou
 
 // 1.2.6 M6 round 2: what the agents of one Lead process share for grounding. The Lead makes the folder (always its
 // own, never one inherited from a parent process; removed when it exits) and only its specialists inherit the path:
-// wrote.jsonl holds the text any of them sent as a tool input (a bare number or date aside), so a title a specialist
+// wrote.jsonl holds the text any of them sent as a tool input (a single ID, number or date token aside), so a title a specialist
 // saved grounds no figure for the Lead either; asked.txt holds the person's own messages, which are a specialist's
 // `asked` (never the Lead's task text: a figure the Lead made up would ground in the specialist and come back to the
 // Lead as a row). No folder (it couldn't be made): nothing is shared, and a specialist's `asked` is empty (closed).
@@ -78,7 +78,8 @@ if (SHARED && !process.env.ABI_PI_AGENT) process.on("exit", () => { try { fs.rmS
 const share = (file: string, s: string) => { try { if (SHARED) fs.appendFileSync(path.join(SHARED, file), s, { mode: 0o600 }); } catch {} };
 const shared = (file: string) => { try { return SHARED ? fs.readFileSync(path.join(SHARED, file), "utf8") : ""; } catch { return ""; } };
 function prose(x: unknown, out: string[] = []): string[] {
-	if (typeof x === "string") { if (/\p{L}/u.test(x)) out.push(x); }
+	// prose: not a single ID, number or date token (grounding_rules.check's own rule), and a letter or digit in it (else no figure)
+	if (typeof x === "string") { if ((/\p{L}/u.test(x) || /\p{N}/u.test(x)) && !/^[\p{L}\p{N}_.:+-]*$/u.test(x)) out.push(x); }
 	else if (x && typeof x === "object") Object.values(x).forEach((v) => prose(v, out));
 	return out;
 }
@@ -469,6 +470,8 @@ export default async function abi(pi: ExtensionAPI) {
 		wroteIt(event.input);
 		const name = event.toolName;
 		if (name === "subagent" && !sub) {
+			// no shared folder: a specialist would know neither the person's words nor what the team wrote, so none is started
+			if (!SHARED) return { block: true, reason: "Delegation is off in this session: the harness couldn't make the private folder its specialists' answers are checked with. Do the work yourself, and tell the person that restarting the app brings the team back." };
 			const inp: any = event.input ?? {};
 			const items = inp.chain?.length ? inp.chain : inp.tasks?.length ? inp.tasks : inp.agent ? [{ agent: inp.agent, task: inp.task }] : [];
 			if (!items.length) return { block: true, reason: "Team guard: say which agent and which plan task." };
@@ -751,8 +754,9 @@ export default async function abi(pi: ExtensionAPI) {
 		const all = (k: keyof Sources) => state.ex.flatMap((e) => e[k]);
 		// every agent of the session's own prose (wrote.jsonl; this process's inputs whole too); a specialist's `asked` is the person's
 		const theirs = shared("wrote.jsonl").split("\n").filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return ""; } });
-		// a chain step: the prior specialist's answer the harness put into this task for {previous} passed its own check, so
-		// its figures ground here as a row (only that file of the shared folder, never the Lead's own task text)
+		// a chain step: the prior specialist's final answer that the harness put into this task for {previous}, handed over
+		// only when that message held no tool call (the message its own grounding hook checks): its figures ground here
+		// as a row (only that file of the shared folder, never the Lead's own task text)
 		const prev = sub && SHARED && path.dirname(process.env.ABI_PI_PREVIOUS ?? "") === SHARED ? shared(path.basename(process.env.ABI_PI_PREVIOUS!)) : "";
 		const req = { answer, results: all("results").concat(prev ? [{ rows: [[prev]] }] : []), notes: all("notes"), pending: all("pending"), asked: sub ? shared("asked.txt") : state.asked, wrote: state.wrote.concat(theirs),
 			vocab: [...AREAS.core, ...Object.values(AREAS.areas).flatMap((a) => a.tools), "ABI", "Pi", "GPT", ...APP],

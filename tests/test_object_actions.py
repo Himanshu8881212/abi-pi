@@ -1087,10 +1087,11 @@ try:
         owner = c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"]
     v, w = a["viewer"], a["viewer2"]
     out["owner_first"] = holds("schedule-1", None, [[100]])  # the flow's own run, as its owner: nothing before it
-    out["viewer_action"] = holds("action-1", v, [[60]], ACT, True)
+    out["viewer_action"] = holds("action-1", v, [[50]], ACT, True)
     out["owner_after_action"] = holds("manual-2", owner, [[100]])  # with schedule-1 (same rows), never the Viewer's action-1
-    out["owner_like_action"] = holds("schedule-3", None, [[60]])  # moved from manual-2; equal to the Viewer's action-1 says nothing
-    out["viewer_action_after_owner"] = holds("action-2", v, [[100]], ACT, True)  # with their own action-1, never the owner's runs
+    out["owner_like_action"] = holds("schedule-3", None, [[60]])  # moved from manual-2 (100)
+    # with their own action-1 (50): changed. Against the latest run of anyone (schedule-3: 60) it would not hold
+    out["viewer_action_after_owner"] = holds("action-2", v, [[60]], ACT, True)
     out["sender_first"] = holds("message-1", v, [[80]], MSG)  # a message's run reads as its sender: their first
     out["other_sender"] = holds("message-2", w, [[80]], MSG)  # another sender with the same rows: their first too, no bit about v
     out["sender_again"] = holds("message-3", v, [[80]], MSG)

@@ -530,7 +530,8 @@ picks = type(builtin.SendEmail.model_validate(both).data).__name__
 files = bundle.bundle(git.path(a["project"])) | a.get("files", {})
 files["model/measures.json"] = {**files["model/measures.json"], "measures": files["model/measures.json"]["measures"] + a.get("measures", [])}
 g = lineage.graph(files)
-print(json.dumps({"builtin": list(studio.BUILTIN), "picks": picks, "save_agent": actions.ACTIONS["save_agent"].input.model_json_schema()["properties"]["agent"]["description"], "cases": {
+offered = {d["function"]["name"]: sorted(d["function"]["parameters"]["properties"]) for d in runs._defs(["send_email", "post_message"], files, [])}
+print(json.dumps({"builtin": list(studio.BUILTIN), "picks": picks, "offered": offered, "save_agent": actions.ACTIONS["save_agent"].input.model_json_schema()["properties"]["agent"]["description"], "cases": {
     k: runs._refused(c["name"], c["payload"], c.get("allowed", ["get_object", "list_objects", "report_snapshot"]), files, g,
                      set(c.get("measures", ["revenue", "orders_rows"])), set(c["tables"]), []) for k, c in a["cases"].items()}}))
 """
@@ -845,3 +846,29 @@ def test_delete_of_an_item_a_term_names_says_the_term(saved):
             sure("delete_glossary_term", project=P, id="pi-bought")
         except abi.ActionError:
             pass
+
+
+# ---------- 1.2.6 M6 round 4 ----------
+
+def test_junk_beside_a_tool_or_a_query_is_refused_never_a_crash(saved):
+    """Round 4: what is no valid query reads as none in the scope check, whatever else the dict holds: junk beside a
+    held tool is checked as the tool, junk alone and a semantic_query without measures pass through to the action's
+    own validation. None raises. And the send_email a custom agent is offered has no `docs`."""
+    tool = {"id": "pi_t", "query": {"measures": ["revenue"], "dimensions": ["products.category"]}}
+    send = lambda data, **more: {"name": "send_email", "payload": {"to": ["a@example.com"], "subject": "s", "body": "b", "data": data},  # noqa: E731
+                                 "allowed": ["send_email", "semantic_query", "pi_t"], "measures": ["revenue"], "tables": ["products"], **more}
+    out = refusals({
+        "junk_beside_tool": send({"tool": "pi_t", "inputs": {}, "filters": [5]}),
+        "junk_beside_tool_out": send({"tool": "pi_t", "inputs": {}, "filters": [5], "dimensions": 7}, tables=[]),
+        "junk_alone": send({"filters": [5]}),
+        "junk_types": send({"measures": "revenue", "dimensions": [1], "filters": "x"}),
+        "expressions_no_measures": {"name": "semantic_query", "payload": {"expressions": [{"name": "x", "expr": "SUM(orders.revenue)"}]},
+                                    "allowed": ["semantic_query"], "tables": []},
+        "expressions_as_before": {"name": "semantic_query", "payload": {"measures": ["revenue"], "expressions": [{"name": "x", "expr": "SUM(orders.quantity)"}]},
+                                  "allowed": ["semantic_query"], "measures": ["revenue"], "tables": []},
+    }, files={"tools/pi_t.json": tool})
+    c = out["cases"]
+    assert c["junk_beside_tool"] is None and c["junk_alone"] is None and c["junk_types"] is None and c["expressions_no_measures"] is None, c
+    assert c["junk_beside_tool_out"] == "Outside your scope: products." and c["expressions_as_before"] == "Outside your scope: orders.", c
+    assert "docs" not in out["offered"]["send_email"] and {"to", "subject", "body", "data", "report"} <= set(out["offered"]["send_email"]), out["offered"]
+    assert "project" not in out["offered"]["post_message"] and "data" in out["offered"]["post_message"], out["offered"]

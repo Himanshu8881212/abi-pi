@@ -73,6 +73,17 @@ function getFinalOutput(messages: Message[]): string {
 	return "";
 }
 
+// abi-pi (1.2.6 M6): the final output when the assistant message it comes from holds no tool call, else nothing. The
+// specialist's grounding hook checks only messages without a tool call, so narration beside one was never checked
+function getCheckedOutput(messages: Message[]): string {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const msg = messages[i];
+		if (msg.role === "assistant" && msg.content.some((part) => part.type === "text"))
+			return msg.content.some((part) => part.type === "toolCall") ? "" : getFinalOutput([msg]);
+	}
+	return "";
+}
+
 function isFailedResult(result: SingleResult): boolean {
 	return result.exitCode !== 0 || result.stopReason === "error" || result.stopReason === "aborted";
 }
@@ -239,8 +250,9 @@ async function runSingleAgent(
 				cwd: cwd ?? defaultCwd,
 				shell: false,
 				// abi-pi: the child may only activate the tools its agent file lists (the ABI extension enforces it)
-				// abi-pi (1.2.6 M6): a chain step's {previous} is the prior specialist's answer, which passed its own grounding
-				// check: handed over as a file of the session's shared folder, so this one may quote its figures
+				// abi-pi (1.2.6 M6): a chain step's {previous}, when it is the prior specialist's final answer from a message
+				// with no tool call (the one its grounding hook checks; `getCheckedOutput`): handed over as a file of the
+				// session's shared folder, so this one may quote its figures. Narration beside a tool call is never handed on
 				env: { ...process.env, ABI_PI_ALLOWED: (agent.tools ?? []).join(","), ABI_PI_AGENT: agent.name, ABI_PI_PREVIOUS: handPrevious(previous, step) },
 				stdio: ["ignore", "pipe", "pipe"],
 			});
@@ -448,11 +460,12 @@ export default function (pi: ExtensionAPI) {
 
 			if (params.chain && params.chain.length > 0) {
 				const results: SingleResult[] = [];
-				let previousOutput = "";
+				let previousText = "";  // what {previous} is replaced with in the next task (as upstream)
+				let previousOutput = "";  // abi-pi: the same, only when its message was checked (`getCheckedOutput`): what grounds there
 
 				for (let i = 0; i < params.chain.length; i++) {
 					const step = params.chain[i];
-					const taskWithContext = step.task.replace(/\{previous\}/g, previousOutput);
+					const taskWithContext = step.task.replace(/\{previous\}/g, previousText);
 
 					// Create update callback that includes all previous results
 					const chainUpdate: OnUpdateCallback | undefined = onUpdate
@@ -493,7 +506,8 @@ export default function (pi: ExtensionAPI) {
 							isError: true,
 						};
 					}
-					previousOutput = getFinalOutput(result.messages);
+					previousText = getFinalOutput(result.messages);
+					previousOutput = getCheckedOutput(result.messages);
 				}
 				return {
 					content: [{ type: "text", text: getFinalOutput(results[results.length - 1].messages) || "(no output)" }],

@@ -896,6 +896,8 @@ def test_short_own_prose_a_bare_number_and_a_chain_steps_previous_answer():
     assert check("Sales are up 37% in the top 10.", [ROW, patch])["numbers"] == []
     assert check("Sales are up 37% in the top 10.", [ROW, patch], wrote=["Up 37%"])["numbers"] == ["37%"], "two words are prose too"
     assert check("Sales are up 37% in the top 10.", [ROW, patch], wrote=[{"limit": 10}, "10", "2025-10-10", "Up 37%"])["numbers"] == ["37%"]
+    # round 4: "37%" as an own string is prose now (below), so the diff grounds no 37 for it; a row that holds it still does
+    patch = patch | {"columns": ["sales_change"], "rows": [[0.37]]}
     assert check("Sales are up 37% in the top 10.", [ROW, patch], wrote=[{"limit": 37}, "37", "37%"])["numbers"] == [], "a bare number is no prose"
     previous = {"rows": [["North took 76.00 and South 12.50, the analyst found."]]}
     assert check("As found before, South took 12.50.", [previous])["numbers"] == [] and check("South took 13.50.", [previous])["numbers"] == ["13.50"]
@@ -905,3 +907,26 @@ def test_short_own_prose_a_bare_number_and_a_chain_steps_previous_answer():
     lead = TS[TS.index('let SHARED = "";'):TS.index("const share = ")]
     assert lead.index("if (!process.env.ABI_PI_AGENT) {") < lead.index("delete process.env.ABI_PI_SHARED;") < lead.index("fs.mkdtempSync(") < lead.index("} catch {}")
     assert "if (SHARED) fs.appendFileSync" in TS and 'SHARED ? fs.readFileSync' in TS and "/\\p{L}/u.test(x)" in TS
+
+
+def test_own_prose_is_anything_but_a_single_id_number_or_date_token():
+    """Round 4: an own string is prose unless it is one ID, number or date token. A title that is only "37%", "+37%" or
+    "€1,200" is the agent's own and grounds nothing when a diff shows it again; a timestamp, "page-10", "v10" or "Q10"
+    it sent is no prose and never masks a person's "Top 10". A chain hands on only an answer its specialist's
+    grounding hook saw (a message with no tool call), and a Lead with no shared folder doesn't delegate."""
+    diff = {"files": [{"path": "reports/sales.json", "patch": '+  "title": "37%"\n+  "title": "+37%"\n+  "title": "€1,200"\n+  "title": "Top 10 cafés by revenue"'}]}
+    said = "Growth of 37% on 1,200 in the top 10."
+    check = ground.check
+    assert check(said, [ROW, diff])["numbers"] == []
+    assert check(said, [ROW, diff], wrote=["37%"])["numbers"] == ["37%"] == check(said, [ROW, diff], wrote=["+37%"])["numbers"]
+    assert check(said, [ROW, diff], wrote=[{"title": "€1,200"}])["numbers"] == ["1,200"]
+    assert check(said, [ROW, diff], wrote=["37 %", "€1,200"])["numbers"] == ["37%", "1,200"]
+    assert check(said, [ROW, diff], wrote=["2025-10-10T00:00:00Z", "page-10", "v10", "Q10", "10", {"limit": 10}])["numbers"] == []
+    assert "!/^[\\p{L}\\p{N}_.:+-]*$/u.test(x)" in TS, "the harness shares the same strings"
+    sub = (ROOT / ".pi/extensions/subagent/index.ts").read_text()
+    checked = sub[sub.index("function getCheckedOutput("):sub.index("function isFailedResult(")]
+    assert 'msg.content.some((part) => part.type === "toolCall") ? "" : getFinalOutput([msg])' in checked
+    assert "previousOutput = getCheckedOutput(result.messages);" in sub and "step.task.replace(/\\{previous\\}/g, previousText)" in sub
+    assert sub.count("getFinalOutput(results[results.length - 1].messages)") == 1, "what the Lead receives is as before"
+    guard = TS[TS.index('if (name === "subagent" && !sub) {'):TS.index("const inp: any = event.input ?? {};")]
+    assert 'if (!SHARED) return { block: true, reason: "Delegation is off in this session' in guard
