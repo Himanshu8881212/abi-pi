@@ -92,3 +92,6 @@ In 1.2.6 the app's action buttons and form cards are for **Editors and Owners, i
 the published version are read-only: they show objects and their pages, but no action buttons and no form cards, and
 Publish leaves action types and form cards out of the published copy. A `role: viewer` action can still be run by a
 Viewer through the API or an agent. Forms for Viewers in the published app are planned for 1.2.7.
+
+The published version carries the loaded data, not what actions and edits wrote in the working project: there, a
+property an action set (a manager, a visit reason) can read "—". The working project, in Developer, shows it.

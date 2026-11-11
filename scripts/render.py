@@ -60,6 +60,7 @@ function showTip(e,t){tip.textContent=t;tip.style.display='block';tip.style.left
 function hideTip(){tip.style.display='none'}
 function fmt(v,f){if(v===null||v===undefined)return'—';if(typeof v!=='number')return String(v);f=f||{};
  const o={maximumFractionDigits:f.decimals??2};if(f.compact)o.notation='compact';
+ if(f.fixed&&f.decimals!==undefined)o.minimumFractionDigits=f.decimals;  // every row with its decimals (1,928.70 beside 952.00): a column reads as one
  if(f.style==='percent')return new Intl.NumberFormat(undefined,{...o,style:'percent'}).format(v);
  if(f.style==='currency'&&f.currency)return new Intl.NumberFormat(undefined,{...o,style:'currency',currency:f.currency}).format(v);
  return new Intl.NumberFormat(undefined,o).format(v)}
@@ -297,8 +298,8 @@ def report_pages(project: str, rid: str, rep: dict, measures: dict, ex=None) -> 
 
 def diagram(model: dict, kinds: dict) -> str:
     """Tables as boxes (facts left, filled) and relationships as lines. 1.2.6 M7, the object-type graph (`objects`):
-    a relationship with a `name` is a link between two types, drawn with its name and `cardinality`; two boxes of one
-    column are joined by an arc on their right."""
+    the types in one column, so a phone reads the whole picture, and each link an arc on their right with its name and
+    `cardinality`."""
     tables = sorted(set(kinds) | {r[s]["table"] for r in model.get("relationships", []) for s in ("from", "to")})
     if not tables:
         return "<p class=empty>No model yet: build_model creates it.</p>"
@@ -306,22 +307,23 @@ def diagram(model: dict, kinds: dict) -> str:
     dims = [t for t in tables if t not in facts]
     H = 60 + 56 * max(len(facts), len(dims))
     pos = {t: (40, 40 + 56 * i) for i, t in enumerate(facts)} | {t: (460, 40 + 56 * i) for i, t in enumerate(dims)}
-    named = bool(model.get("objects"))  # the object-type graph: room for the labels and the arcs, no table kinds
-    out = [f"<svg viewBox='0 0 {960 if named else 700} {H}' width=100% style='max-width:{1040 if named else 760}px'>"]
+    named = bool(model.get("objects"))
+    if named:  # one column of outlined boxes, no table kinds
+        facts, H, pos = [], 44 + 72 * len(tables), {t: (40, 40 + 72 * i) for i, t in enumerate(tables)}
+    out = [f"<svg viewBox='0 0 {520 if named else 700} {H}' width=100% style='max-width:{560 if named else 760}px'>"]
     for i, r in enumerate(model.get("relationships", [])):
         (x1, y1), (x2, y2) = pos[r["from"]["table"]], pos[r["to"]["table"]]
-        d, at = f"M{x1 + 200},{y1 + 18} C{x1 + 300},{y1 + 18} {x2 - 100},{y2 + 18} {x2},{y2 + 18}", ((x1 + 200 + x2) // 2, (y1 + y2) // 2 + 12, "middle")
-        if named and x1 == x2:
-            b = 50 + 30 * (i % 4)
-            d, at = f"M{x1 + 200},{y1 + 18} C{x1 + 200 + b},{y1 + 18} {x1 + 200 + b},{y2 + 18} {x1 + 200},{y2 + 18}", (x1 + 206 + b * 3 // 4, (y1 + y2) // 2 + 22, "start")
+        d, b = f"M{x1 + 200},{y1 + 18} C{x1 + 300},{y1 + 18} {x2 - 100},{y2 + 18} {x2},{y2 + 18}", 40 + 24 * (i % 4)
+        if named:  # the arc bulges a little more for each link, so two between the same boxes stay apart
+            d = f"M{x1 + 200},{y1 + 18} C{x1 + 200 + b},{y1 + 18} {x1 + 200 + b},{y2 + 18} {x1 + 200},{y2 + 18}"
         out.append(f"<path d='{d}' fill=none stroke='var(--ink)' stroke-width=1.5>"
                    f"<title>{esc(r['from']['table'])}.{esc(','.join(r['from']['columns']))} → {esc(r['to']['table'])}.{esc(','.join(r['to']['columns']))} ({esc(r.get('cardinality') or 'many-to-one')})</title></path>")
-        if r.get("name"):
-            out.append(f"<text x={at[0]} y={at[1]} text-anchor={at[2]} style='fill:var(--ink);paint-order:stroke;stroke:var(--card);stroke-width:4px'>"
+        if named:
+            out.append(f"<text x={x1 + 206 + b * 3 // 4} y={(y1 + y2) // 2 + 23} style='fill:var(--ink);font-size:15px;paint-order:stroke;stroke:var(--card);stroke-width:5px'>"
                        f"{esc(r['name'])} · {esc(r.get('cardinality') or '')}</text>")
     for t, (x, y) in pos.items():
         out.append(f"<rect x={x} y={y} width=200 height=36 fill='{'var(--ink)' if t in facts else 'var(--card)'}' stroke='var(--ink)' stroke-width='2'/>"
-                   f"<text x={x + 10} y={y + 22} style='fill:{'var(--paper)' if t in facts else 'var(--ink)'};font-size:13px;font-weight:600'>{esc(t)}</text>"
+                   f"<text x={x + 10} y={y + 22} style='fill:{'var(--paper)' if t in facts else 'var(--ink)'};font-size:{16 if named else 13}px;font-weight:600'>{esc(t)}</text>"
                    f"<text x={x + 190} y={y + 22} text-anchor=end style='fill:{'var(--paper)' if t in facts else 'var(--mute)'}'>{esc('' if named else kinds.get(t) or '')}</text>")
     return "".join(out) + "</svg>"
 
@@ -344,15 +346,14 @@ def _cardinality(model: dict, start: str, via: list[str]) -> str:
 
 
 def objects(o: dict, model: dict) -> str:
-    """1.2.6 M7: the object-type graph of model/ontology.json as `diagram` draws it: each type a box by its name, each
-    link a line with its name and cardinality; the types no link leads to stand on the left.
+    """1.2.6 M7: the object-type graph of model/ontology.json as `diagram` draws it: each type a box by its plural
+    name (as the app's canvas and lists say it), each link an arc with its name and cardinality.
     ponytail: types are told apart by their display names; two types of one name would share a box."""
-    name, table = {x["id"]: x["name"] for x in o.get("objects", [])}, {x["id"]: x["table"] for x in o.get("objects", [])}
+    name, table = {x["id"]: x["plural"] for x in o.get("objects", [])}, {x["id"]: x["table"] for x in o.get("objects", [])}
     rels = [{"from": {"table": name[ln["from"]], "columns": [ln["name"]]}, "to": {"table": name[ln["to"]], "columns": [ln.get("inverse") or ""]},
              "name": ln["name"], "cardinality": _cardinality(model, table[ln["from"]], ln["via"])}
             for ln in o.get("links", []) if ln["from"] in name and ln["to"] in name]
-    led = {r["to"]["table"] for r in rels}
-    return diagram({"relationships": rels, "objects": True}, {n: None if n in led else "fact" for n in name.values()})
+    return diagram({"relationships": rels, "objects": True}, dict.fromkeys(name.values()))
 
 
 def cards(files: list[Path], dest: Path, fn) -> str:

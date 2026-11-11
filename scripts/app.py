@@ -63,6 +63,7 @@ READS = {"changes", "check_condition", "data_quality", "dataset_data", "docs", "
          "ml_models", "preview_steps", "readiness", "report_snapshot", "rls_rules", "run_tool", "semantic_model",
          "semantic_query", "test_agent", "test_tool", "visual_data", "ontology", "get_object", "list_objects", "object_history"}  # 1.2.6 M6, M7: object reads
 ALLOWED = READS | WRITES | READS_ONLY  # the page's actions; every other one is ABI's app's
+ACCOUNT = {"set_password", "create_personal_token", "revoke_personal_token", "start_mfa", "confirm_mfa", "disable_mfa"}  # the confirmations Viewer mode still redeems
 
 CSS = """
 /* layout: a top bar (project, live state, the agent), a left rail grouped by what you want to do, one page at a time with
@@ -601,7 +602,7 @@ body[data-mode=viewer] .rowcard .f{min-height:0;padding:2px 0;border-color:trans
 .canvas text.lbl{fill:var(--ink);font-size:11.5px}
 .kv.okv{grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:14px 28px}.okv b{display:block;font-size:12px;margin-bottom:2px}.okv span{font-size:14px}
 .card>.kpis{gap:20px 24px;grid-template-columns:repeat(auto-fill,minmax(170px,1fr))}.card>.kpis .kpi{min-width:0}.card>.kpis .kpi .v{font-size:28px}
-.odiag{overflow-x:auto;margin:0 0 12px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--sheet);padding:8px}.odiag svg{min-width:960px;display:block}
+.odiag{overflow-x:auto;margin:0 0 12px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--sheet);padding:8px}.odiag svg{display:block;margin:0 auto}
 .mlist2 .stepchips .file{margin:0 4px 0 0}#chat a.olink{color:var(--ink);text-decoration:underline;text-decoration-color:var(--signal);text-underline-offset:3px}
 .canvas rect.lblbg{fill:var(--paper)}
 """
@@ -685,7 +686,7 @@ async function api(action,args){
   if(r.error)throw Object.assign(new Error(plainErr(r.error)),{fields:r.fields});if(/^(set_|save_|delete_|add_|remove_|enable_|create_|edit_|approve_|reject_|undo|commit|publish_|train_|score_)/.test(action))refreshPending();return r.result}
 let PEND_T=null;function refreshPending(){clearTimeout(PEND_T);PEND_T=setTimeout(async()=>{try{D.pending=await (await fetch('/api/changes',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({project:D.project})})).json().then(x=>x.result||D.pending);vc();const cb=$('#changes');cb.classList.remove('pulse');void cb.offsetWidth;if(D.pending?.files?.length)cb.classList.add('pulse')}catch(e){}},400)}
 let ASK_WHAT='';  // what the person is deleting, for ABI's confirmation
-function ask(c){return new Promise(res=>{const d=$('#confirm'),bad=/\b(delet|remov|drop|revok|stop|disabl|overwrit)/i.test((c.title||'')+' '+(c.message||''));$('#c-yes').classList.toggle('danger-solid',bad);$('#c-yes').textContent=c.yes||(bad?(ASK_WHAT?'Delete':'Yes, go ahead'):'Confirm');$('#confirm h3').textContent=bad&&ASK_WHAT?`Delete “${ASK_WHAT}”?`:c.title||(c.id?'Confirm this change':'Confirm');
+function ask(c){return new Promise(res=>{const d=$('#confirm'),bad=!c.plain&&/\b(delet|remov|drop|revok|stop|disabl|overwrit)/i.test((c.title||'')+' '+(c.message||''));$('#c-yes').classList.toggle('danger-solid',bad);$('#c-yes').textContent=c.yes||(bad?(ASK_WHAT?'Delete':'Yes, go ahead'):'Confirm');$('#confirm h3').textContent=bad&&ASK_WHAT?`Delete “${ASK_WHAT}”?`:c.title||(c.id?'Confirm this change':'Confirm');
  $('#c-msg').textContent=bad&&ASK_WHAT?`“${ASK_WHAT}” leaves the project. It stays an uncommitted change, so Undo in the toast or under Changes takes it back.`:c.lead||people(c.message);$('#c-abi').textContent=c.lead?people(c.message||''):'';$('#c-abi').hidden=!$('#c-abi').textContent;ASK_WHAT='';const pv=plainPreview(c.preview||'');$('#c-prev').textContent=pv;$('#c-prev').hidden=!pv;$('#c-prev').classList.toggle('plain',pv!==(c.preview||''));
  d.showModal();$('#c-yes').onclick=()=>{d.close();res(true)};$('#c-no').onclick=()=>{d.close();res(false)}})}
 // ABI's preview of what it will do, in words where it is a known shape (a role change: "editor1: Viewer → Editor")
@@ -736,7 +737,7 @@ async function confirmed(x){if(x.confirm){if(!await ask(x.confirm))return null;x
 function act(c,label,fn,pri){const m=c.querySelector(':scope>.msg')||c.appendChild(h('div','msg'));
  if(!c.dataset.clr){c.dataset.clr=1;c.addEventListener('input',()=>{if(m.classList.contains('bad'))m.textContent=''})}  /* an error goes once the person fixes the field */
  let r=c.querySelector(':scope>.acts');if(!r){r=h('div','row acts');c.insertBefore(r,m)}
- const b0=btn(label,async()=>{c.querySelectorAll('.invalid').forEach(x=>x.classList.remove('invalid'));ASK_WHAT=/^Delete/.test(label)?ttl(c):'';try{const t=await fn(m);c.querySelectorAll('[data-u]').forEach(x=>delete x.dataset.u);if(label==='Delete'){undoToast(ttl(c)||'It');return}if(t)c.isConnected?say(m,t):toast(t)}catch(e){c.isConnected?say(m,e.message,1):toast(e.message,1)}},pri);
+ const b0=btn(label,async()=>{c.querySelectorAll('.invalid').forEach(x=>x.classList.remove('invalid'));ASK_WHAT=/^Delete/.test(label)?ttl(c):'';try{const t=await fn(m);c.querySelectorAll('[data-u]').forEach(x=>delete x.dataset.u);if(label==='Delete'){undoToast(ttl(c)||'It');return}if(t)c.isConnected?say(m,t):toast(t)}catch(e){c.isConnected?say(m,e.message,1):toast(e.message,1)}finally{ASK_WHAT=''}},pri);
  if(/^(Delete|Remove|Edit as JSON)\b/.test(label)){b0.classList.add('mi');b0.setAttribute('role','menuitem');more(r).append(b0)}else{const mm=r.querySelector(':scope>.more');mm?r.insertBefore(b0,mm):r.append(b0)}return m}
 // a field the action needs: marked and focused, and the action stops with what to do
 // a builder on a phone reads the published project: say where the building happens
@@ -829,8 +830,10 @@ nav().filter(([gname])=>gname!=='Start'&&line[gname]).forEach(([gname,items])=>{
 
 // ---------- Analyze: one report per entry; filters and cross-filter ----------
 var RFLT={},v0odd=null;  // each report's filters, kept across ABI's redraws
+// Viewer reads the published version: said under the page's head (a report, an object's page)
+function pubNote(box){const ro=(window.ME||{}).role,all=ro==='owner'||ro==='editor'||(window.ME||{}).admin,n=h('p','file pubnote',all?`Published version · you see every row: ${ro==='editor'?'editors':'owners'} aren't limited by row rules.`:'Published version, as your access allows.');setTimeout(()=>{const hd=box.querySelector('.pghead');hd?hd.after(n):box.prepend(n)})}
 function report(box,rep){let flt=PENDING.filters||RFLT[rep.id]||[];PENDING.filters=null;
- if(MODE==='viewer'){const ro=(window.ME||{}).role,all=ro==='owner'||ro==='editor'||(window.ME||{}).admin,n=h('p','file pubnote',all?`Published version · you see every row: ${ro==='editor'?'editors':'owners'} aren't limited by row rules.`:'Published version, as your access allows.');setTimeout(()=>{const hd=box.querySelector('.pghead');hd?hd.after(n):box.prepend(n)})}
+ if(MODE==='viewer')pubNote(box);
  {const tb=h('div','row bar top');let ed=null;tb.append(btn('Edit report',()=>{if(ed){ed.remove();ed=null;return}ed=editor('report',rep.spec||{id:rep.id,name:rep.name},false);box.querySelector('.pghead').after(ed)}));box.append(tb)}
  {const tb=box.querySelector(':scope>.bar.top');let ex=null;const eb=h('button','btn pri','Export');eb.onclick=()=>{if(ex){ex.remove();ex=null;return}ex=exportCard(rep,()=>flt,()=>cur);act(ex,'Cancel',()=>{ex.remove();ex=null});(MOBILE?box.querySelector(':scope>.fbar'):null||box.querySelector('.pghead')).after(ex)};if(MOBILE){eb.classList.remove('pri');eb.prepend(ic('dataexport'));eb.classList.add('fexp');tb.append(eb)}else tb.prepend(eb)
   let mc=null;tb.append(btn('Email this report',()=>{if(mc){mc.remove();mc=null;return}mc=mailCard(rep);act(mc,'Cancel',()=>{mc.remove();mc=null});box.querySelector('.pghead').after(mc)}));
@@ -1590,11 +1593,11 @@ const low=T=>T.name.toLowerCase(),RANK={viewer:1,editor:2,owner:3},myRank=()=>RA
 const dayOf=v=>{const d=new Date(v+'T00:00');return isNaN(d)?v:d.toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'})};
 const pval=(T,p,v)=>v===null||v===undefined?null:v===MASK?'hidden for your access':typeof v==='boolean'?(v?'Yes':'No'):typeof v!=='number'?(/^\d{4}-\d\d-\d\d$/.test(v)?dayOf(v):cell(v)):
  p.meaning==='identifier'||T.key.includes(p.column)||p.column===T.title||PLAIN.test(p.column)?String(v):p.meaning==='probability'?fmt(v,{style:'percent',decimals:1}):v;
-// a figure with its format's decimals on every row (1,928.70 beside 952.00), so a column reads as one
-const figure=(v,f)=>typeof v!=='number'||!f||f.compact||f.style==='percent'||f.decimals===undefined?fmt(v,f):new Intl.NumberFormat(undefined,{minimumFractionDigits:f.decimals,maximumFractionDigits:f.decimals}).format(v);
 // obj:<type> is that type's list, obj:<type>:<key> one object's page, the key as JSON. The address bar holds the key
 // percent-encoded once (hashOf) and it is read back once (boot, hashchange)
 const okey=(t,k)=>'obj:'+t+':'+JSON.stringify(k),hashOf=k=>{const i=k.startsWith('obj:')?k.indexOf(':',4):-1;return '#'+(i<0?k:k.slice(0,i+1)+encodeURIComponent(k.slice(i+1)))};
+// the page the address bar names: decoded once; a hand-typed hash that isn't valid percent-encoding is read as it is
+function hashKey(){const x=location.hash.slice(1);try{return decodeURIComponent(x)}catch(e){return x}}
 // opening an object keeps the page it was opened from in the browser's history: Back returns there
 function openObj(t,k){try{history.pushState(null,'',location.href)}catch(e){}show(okey(t,k))}
 function objReg(k){const i=k.indexOf(':',4),T=otype(i<0?k.slice(4):k.slice(4,i));if(!T)return;if(i<0){PAGES[k]=[T.plural,b=>objectsPage(b,T)];return}
@@ -1619,17 +1622,16 @@ function objTable(box,T,fixed,n){n=n||50;const bar=h('div','row obar'),q=h('inpu
   bar.hidden=!!fixed&&!(r.more||st.offset||some);foot.textContent=head.textContent='';
   // nothing to list: say what to do next, and never whether rows exist that this person can't see
   if(!r.rows.length){out.replaceChildren(h('p','empty',some?`No ${low(T)} matches. Clear the search${flt.length?' or the filter':''} to see them all.`:(fixed?'None to show here':`No ${T.plural.toLowerCase()} to show`)+(D.rls?.restricted?' with your access. A project owner sets what you see in Security.':'.')));return}
-  const shown=cols.filter(c=>ix(c)>=0),F={};st.keys=r.rows.map(x=>r.key.map(k=>x[ix(k)]));
-  const d={columns:[...shown],measures:Object.fromEntries(shown.map(c=>[c,pname(P(c),T)])),format:{},rows:r.rows.map(x=>shown.map(c=>pval(T,P(c),x[ix(c)])))};
-  shown.forEach((c,i)=>{if(P(c).meaning==='money')F[i]={decimals:2}});
+  const shown=cols.filter(c=>ix(c)>=0);st.keys=r.rows.map(x=>r.key.map(k=>x[ix(k)]));
+  // a figure keeps its decimals on every row (fmt's `fixed`): money, and each measure in its own format
+  const d={columns:[...shown],measures:Object.fromEntries(shown.map(c=>[c,pname(P(c),T)])),format:Object.fromEntries(shown.filter(c=>P(c).meaning==='money').map(c=>[c,{decimals:2,fixed:true}])),rows:r.rows.map(x=>shown.map(c=>pval(T,P(c),x[ix(c)])))};
   // the type's measures for this page's objects: one read by the key, with each measure's own format (left out when
   // ABI refuses it). ponytail: a type with a several-column key lists no measures; its object pages show them
   if(ms.length&&T.key.length===1){const kc=`${T.table}.${T.key[0]}`;try{const m=await api('visual_data',{query:{measures:ms,dimensions:[kc],filters:[{column:kc,op:'in',value:st.keys.map(k=>k[0])}]},type:'table'}),by=new Map(m.rows.map(x=>[String(x[0]),x.slice(1)]));
-    if(my!==st.n)return;ms.forEach((id,j)=>F[d.columns.length+j]=m.format?.[id]);d.columns.push(...ms);Object.assign(d.measures,m.measures);d.rows.forEach((x,i)=>x.push(...(by.get(String(st.keys[i][0]))||ms.map(()=>null))))}catch(e){}}
+    if(my!==st.n)return;ms.forEach(id=>d.format[id]={...m.format?.[id],fixed:!m.format?.[id]?.compact});d.columns.push(...ms);Object.assign(d.measures,m.measures);d.rows.forEach((x,i)=>x.push(...(by.get(String(st.keys[i][0]))||ms.map(()=>null))))}catch(e){}}
   rows(out,d);out.classList.add('pick');
-  // after each draw (a sort draws again): no column id in a header's tooltip, a row reachable by keyboard, figures with their decimals
-  const mark=()=>{out.querySelectorAll('th').forEach(th=>th.removeAttribute('title'));out.querySelectorAll('tr[data-r]').forEach(tr=>{tr.tabIndex=0;tr.setAttribute('role','link');
-    Object.entries(F).forEach(([i,f])=>{const td=tr.cells[i],s=figure(d.rows[tr.dataset.r]?.[i],f);if(td&&f&&td.textContent!==s)td.textContent=s})})};
+  // after each draw (a sort draws again): no column id in a header's tooltip, a row reachable by keyboard
+  const mark=()=>{out.querySelectorAll('th').forEach(th=>th.removeAttribute('title'));out.querySelectorAll('tr[data-r]').forEach(tr=>{tr.tabIndex=0;tr.setAttribute('role','link')})};
   mark();new MutationObserver(mark).observe(out.querySelector('table'),{childList:true,subtree:true});
   // the pages: under the table, and for a whole list (50 rows a page) above it too, in reach without scrolling
   if(st.offset||r.more){const b=(t,on,fn)=>{const x=h('button','btn',t);x.disabled=!on;x.onclick=fn;return x};
@@ -1640,7 +1642,7 @@ function objectsPage(box,T){objBar(box,'obj:'+T.id);if(T.description&&T.descript
 // no canvas: it reads the picture ABI draws from the project's files (render.sections) and each type as a card
 function objectsHome(box){objBar(box,'objects');const L=(D.ontology.links||[]).filter(l=>otype(l.from)&&otype(l.to)),ids=OT().map(t=>t.id);
  const props=T=>{const p=T.properties.filter(p=>(p.name||p.meaning)&&p.column!==T.title);return (p.length?p:T.properties).slice(0,6)};
- if(MOBILE){const pic=h('div','odiag'),g=h('div','cards mlist2');{const t=h('div');t.insertAdjacentHTML('beforeend',D.sections?.Objects||'');const svg=t.querySelector('svg');if(svg){pic.append(svg);box.append(h('p','file','How they connect (swipe sideways):'),pic)}}
+ if(MOBILE){const pic=h('div','odiag'),g=h('div','cards mlist2');{const t=h('div');t.insertAdjacentHTML('beforeend',D.sections?.Objects||'');const svg=t.querySelector('svg');if(svg){pic.append(svg);box.append(pic)}}
   OT().forEach(T=>{const c=card(T.plural),cl=h('div','stepchips');if(T.description&&T.description!==MASK)c.append(h('p','mtext',T.description));
    if(T.links.length)cl.append(h('span','file','Connections'));T.links.forEach(w=>{const b=h('button','chip',`${w.name} → ${otype(w.to)?.plural||''}`);b.onclick=()=>show('obj:'+w.to);cl.append(b)});if(T.links.length)c.append(cl);
    act(c,'Open',async()=>show('obj:'+T.id));g.append(c)});box.append(g);return}
@@ -1679,11 +1681,11 @@ async function objectPage(box,T,key){const bar=h('div','row bar lead');bar.appen
     fc=actionForm(a,()=>key,async r=>{show(CUR);return actDone(a,r)});act(fc,'Cancel',shut);tb.hidden=true;box.querySelector('.pghead').after(fc);fc.querySelector('.fld input,.fld select,.fld textarea,.acts .btn')?.focus()};
    if(i){b.setAttribute('role','menuitem');more(tb).append(b)}else tb.append(b)});box.append(tb)}
  let o;try{o=await api('get_object',{type:T.id,key})}catch(e){if(box.isConnected){tb?.remove();eb.remove();box.append(emptyBox('lock','Not available',e.message,[`Open ${T.plural.toLowerCase()}`,async()=>show('obj:'+T.id)]))}return}
- if(!box.isConnected)return;const title=String(o.title??key.join(' · '));box.querySelector('.pghead h1').textContent=title;$('#pgname').textContent=title;document.title=title+' · '+D.project;if(PAGES[CUR])PAGES[CUR][0]=title;setTimeout(ctx);
+ if(!box.isConnected)return;if(COPY())pubNote(box);const title=String(o.title??key.join(' · '));box.querySelector('.pghead h1').textContent=title;$('#pgname').textContent=title;document.title=title+' · '+D.project;if(PAGES[CUR])PAGES[CUR][0]=title;setTimeout(ctx);
  if(T.description&&T.description!==MASK)tt.append(h('p','',T.description));
  // the columns that point at another object aren't properties here: that object is in its connection's section below
  const g=h('div','cards'),pc=card('Properties'),kv=h('div','kv okv'),R=D.model?.relationships||[],there=new Set((D.ontology.links||[]).filter(l=>l.via.length===1&&[l.from,l.to].includes(T.id)).flatMap(l=>R.find(r=>r.id===l.via[0]&&r.from.table===T.table)?.from.columns||[]));
- o.columns.forEach((c,i)=>{const p=T.properties.find(p=>p.column===c);if(!p||c===T.title||there.has(c))return;const v=pval(T,p,o.rows[0][i]),d=h('div');d.append(h('b','',pname(p,T)),h('span','',v===null?'—':typeof v==='number'?figure(v,p.meaning==='money'?{decimals:2}:null):String(v)));kv.append(d)});
+ o.columns.forEach((c,i)=>{const p=T.properties.find(p=>p.column===c);if(!p||c===T.title||there.has(c)&&!T.key.includes(c))return;const v=pval(T,p,o.rows[0][i]),d=h('div');d.append(h('b','',pname(p,T)),h('span','',v===null?'—':typeof v==='number'?fmt(v,p.meaning==='money'?{decimals:2,fixed:true}:null):String(v)));kv.append(d)});
  pc.classList.add('wide');pc.append(kv);g.append(pc);
  // its measures as a report's headline numbers: ABI's visual_data, filtered to the object, each in its own format
  if((T.measures||[]).length){const mc=card('Measures'),ks=h('div','kpis');mc.classList.add('wide');mc.append(ks);g.append(mc);
@@ -1693,13 +1695,13 @@ async function objectPage(box,T,key){const bar=h('div','row bar lead');bar.appen
   objTable(c,Y,key.map((v,i)=>({link:w.link,property:T.key[i],op:'=',value:v})),10);g.append(c)});
  const hc=card('History');hc.classList.add('wide');g.append(hc);box.append(g);
  // the published copy keeps no history: it is the working project's
- if(COPY())hc.append(h('p','empty',`The history of this ${low(T)} is kept in the working project, not in the published version. Editors see it in Developer.`));else objHistory(hc,T,key)}
+ if(COPY())hc.append(h('p','empty',`The history of this ${low(T)} is kept in the working project, not in the published version. The same goes for what an action or an edit wrote: the published version shows the loaded data, so such a value can read “—” here. Editors see both in Developer.`));else objHistory(hc,T,key)}
 // what happened to an object, newest first: the actions run on it, the changes to it and what those started
 async function objHistory(c,T,key){let x;try{x=await api('object_history',{type:T.id,key,limit:50})}catch(e){c.append(h('p','empty',e.message));return}
  const ts=v=>{const d=new Date(String(v).replace(' ','T'));return isNaN(d)?String(v??''):d.toISOString()},e0=v=>v===null||v===undefined||v===''?'(empty)':v===MASK?'(hidden for your access)':String(v),
   P=c=>pname(T.properties.find(p=>p.column===c||p.column.endsWith('.'+c))||{column:c},T);
  // a whole row added to a table kept beside the object's (its first note, say) is no event of the object: its cells' changes are listed
- const all=[...x.runs.map(r=>[ts(r.at),OA().find(a=>a.id===r.action)?.name||'Action',r.user||'',r.inputs?Object.entries(r.inputs).map(([k,v])=>`${colName(k)}: ${e0(v)}`).join(', '):'']),
+ const all=[...x.runs.map(r=>{const a=OA().find(a=>a.id===r.action);return [ts(r.at),a?.name||'Action',r.user||'',r.inputs?Object.entries(r.inputs).map(([k,v])=>`${a?.inputs?.properties?.[k]?.title||colName(k)}: ${e0(v)}`).join(', '):'']}),
   ...x.edits.flatMap(e=>{const i=n=>e.columns.indexOf(n);return e.rows.filter(r=>r[i('column')]||e.table===T.table).map(r=>[ts(r[i('reviewed_at')]||r[i('timestamp')]),r[i('column')]?`${P(r[i('column')])} changed`:'Added',r[i('user')]||'',
     (r[i('column')]?`${e0(r[i('old_value')])} → ${e0(r[i('new_value')])}`:'')+({active:'',synced:''}[r[i('status')]]??` (${r[i('status')]})`)])}),
   ...x.flows.map(f=>[ts(f.created),`${(D.flows||[]).find(y=>y.id===f.flow)?.name||'Follow-up'}: ${{ok:'finished',failed:'failed',running:'running',queued:'waiting to start'}[f.status]||f.status}`,'',''])].sort((a,b)=>b[0].localeCompare(a[0]));
@@ -1726,14 +1728,14 @@ function actionForm(a,getKey,done){const c=card(a.name),S=a.inputs?.properties||
   F[k]=[e,ty,lbl,s];c.append(fld(lbl+(e.required||ty==='boolean'?'':' (optional)'),e,s.description))});
  r.append(go);c.append(r,m);c.addEventListener('input',()=>{if(m.classList.contains('bad'))m.textContent=''});
  // its own button, not act(): an action may be called anything ("Remove the visit flag") and is never a project delete
- go.onclick=async()=>{go.disabled=true;c.querySelectorAll('.invalid').forEach(x=>x.classList.remove('invalid'));
+ go.onclick=async()=>{go.disabled=true;c.querySelectorAll('.invalid').forEach(x=>{x.classList.remove('invalid');x.removeAttribute('aria-invalid')});
   try{const inputs={},key=await getKey();Object.entries(F).forEach(([k,[e,ty,lbl,s]])=>{need(e,e.checkValidity(),`${lbl}: ${e.validationMessage}`);
     if(ty==='boolean')inputs[k]=e.checked;else if(e.value!=='')inputs[k]=s.enum?JSON.parse(e.value):ty==='integer'||ty==='number'?+e.value:e.value});
    const t=await done(await api('run_object_action',{type:a.object,key,action:a.id,inputs}));c.isConnected?say(m,t):toast(t)}
   catch(e){if(/^You declined/.test(e.message)){m.className='msg';m.textContent=e.message;return}  // a no is no error
    // ABI's own check of the inputs: each field it names is marked, with the rule in words
    const bad=(e.fields||[]).flatMap(([p,why])=>{const [,rule,val]=/^fails `(\w+)`: ([\s\S]*)$/.exec(why)||[];let ks=[p.replace(/^\$\.?/,'').split(/[.\[]/)[0]];if(rule==='required')try{ks=JSON.parse(val).filter(k=>F[k]?.[0].value==='')}catch(x){}
-    return ks.filter(k=>F[k]).map(k=>{F[k][0].classList.add('invalid');return `${F[k][2]} ${(RULE[rule]||'doesn\'t fit').replace('$',val)}.`})}),t=bad.length?[...new Set(bad)].join('\n'):e.message;
+    return ks.filter(k=>F[k]).map(k=>{F[k][0].classList.add('invalid');F[k][0].setAttribute('aria-invalid','true');return `${F[k][2]} ${(RULE[rule]||'doesn\'t fit').replace('$',val)}.`})}),t=bad.length?[...new Set(bad)].join('\n'):e.message;
    c.isConnected?say(m,t,1):toast(t,1)}
   finally{go.disabled=false}};return c}
 // what an action did, in words: saved (or sent for approval) and what it started
@@ -1744,14 +1746,14 @@ function actDone(a,r){const w=r.write?.status,f=a.flow&&(D.flows||[]).find(x=>x.
 // its title, then what was entered and what changes (plainPreview → actWords). The yes stays the person's click. A
 // proposal (an approval action, or an agent's call) starts no flow, so none is named
 function actAsk(c){let j;try{j=JSON.parse(c.preview)}catch(e){return c}const a=OA().find(x=>x.id===j?.action),T=otype(j?.object?.type),prop=/proposal an Editor approves/.test(c.message||'');if(!a||!T)return c;
- return {...c,title:`${a.name}?`,yes:a.name,message:'',preview:JSON.stringify(prop?{...j,flow:undefined}:j),lead:`${T.name} “${j.object.title??j.object.key.join(', ')}”.`+(prop?' An editor approves the change before it applies.':'')}}
+ return {...c,plain:true,title:`${a.name}?`,yes:a.name,message:'',preview:JSON.stringify(prop?{...j,flow:undefined}:j),lead:`${T.name} “${j.object.title??j.object.key.join(', ')}”.`+(prop?' An editor approves the change before it applies.':'')}}
 function actWords(j){const a=OA().find(x=>x.id===j.action),T=otype(j.object?.type),S=a?.inputs?.properties||{},v=x=>x===null||x===undefined||x===''?'(empty)':x===MASK?'(hidden for your access)':String(x),
   pn=c=>pname((T?.properties||[]).find(p=>p.column===c||p.column===`${j.writes.table}.${c}`)||{column:c},T);
  return [...Object.entries(j.inputs||{}).map(([k,x])=>`${S[k]?.title||colName(k)}: ${v(x)}`),...(j.writes?.changes||[]).map(c=>`${pn(c.column)}: ${v(c.old)} → ${v(c.new)}`),
   ...(j.flow?[`Then starts “${(D.flows||[]).find(f=>f.id===j.flow)?.name||'its follow-up'}”.`]:[])].join('\n')}
 // the chat agent's step asks (the harness's wording: ABI's message, "Preview:", its JSON, "Proceed?"): an action on an
 // object reads as a form's own confirmation does; anything else as before
-function chatAsk(e){const m=/^([\s\S]*?)\n\nPreview:\n([\s\S]*)\n\nProceed\?\s*$/.exec(e.message||''),c=m?actAsk({message:m[1],preview:m[2]}):null;
+function chatAsk(e){const m=/^(Run '[\s\S]*?)\n\nPreview:\n([\s\S]*)\n\nProceed\?\s*$/.exec(e.message||''),c=m?actAsk({message:m[1],preview:m[2]}):null;
  return c?.lead?c:{message:e.title||'ABI asks for your confirmation',preview:e.message}}
 // ABI's words about objects in the person's: display names for ids, and what to do next
 function objWords(t){const L=D.ontology?.links||[],nm=(l,i)=>l.find(x=>x.id===i)?.name||i;
@@ -1778,7 +1780,7 @@ function objClicks(body,dim,d){const T=objCol(dim);if(!T)return;body.classList.a
 function objPick(T,set){const w=h('div','opick'),q=h('input','f'),ls=h('div','hits');let tm,n=0;q.type='search';q.placeholder=`Search ${T.plural.toLowerCase()}`;w.append(q,ls);
  const find=async()=>{const my=++n;let r;try{r=await api('list_objects',{type:T.id,...(q.value.trim()?{search:q.value.trim()}:{}),limit:8})}catch(e){if(my===n)ls.replaceChildren(h('span','file',e.message));return}
   if(my!==n)return;const ti=r.columns.indexOf(r.title),kx=r.key.map(c=>r.columns.indexOf(c)),id=x=>kx.map(i=>x[i]).join(' · ');
-  const apart=x=>{const same=r.rows.filter(y=>y[ti]===x[ti]);if(ti<0||same.length<2)return '';const i=r.columns.findIndex((c,i)=>i!==ti&&!kx.includes(i)&&new Set(same.map(y=>String(y[i]))).size===same.length);return ' · '+(i<0?id(x):pval(T,T.properties.find(p=>p.column===r.columns[i])||{},x[i]))};
+  const apart=x=>{const same=r.rows.filter(y=>y[ti]===x[ti]);if(ti<0||same.length<2)return '';const i=r.columns.findIndex((c,i)=>i!==ti&&!kx.includes(i)&&new Set(same.map(y=>String(y[i]))).size===same.length);const v=i<0?id(x):pval(T,T.properties.find(p=>p.column===r.columns[i])||{},x[i]);return v===null||v===''?'':' · '+v};
   ls.replaceChildren(...r.rows.map(x=>{const b=h('button','sl',String(x[ti]??id(x))+apart(x));b.type='button';b.onclick=()=>{set(kx.map(i=>x[i]));q.value=b.textContent;q.classList.remove('invalid');ls.replaceChildren()};return b}));
   if(!r.rows.length)ls.append(h('span','file','No match.'))};
  q.oninput=()=>{set(null);clearTimeout(tm);tm=setTimeout(find,250)};q.onfocus=()=>{if(!ls.children.length&&!q.value)find()};return w}
@@ -2122,7 +2124,7 @@ const LEDE={vault:'Your business definitions, finance rules and KPI specs. The a
  objects:'The things the business works with (a café, a customer): what each one is, its numbers, what it connects to and what you can do with it.',
  security:'Who sees which rows. Roles are set in ABI itself.',environments:'Where each environment reads its data from.',history:'Every change is a commit in ABI. Newest first.'};let PAGES={},CUR='home';const side=$('aside');
 // what a page is for, said to a Viewer (who reads, and does not build)
-const VLEDE={sources:'Bronze: the data as it landed, one source per file or bucket folder, and when each last loaded.',staged:'Silver: the cleaned and combined tables between the sources and the final tables.',
+const VLEDE={objects:'The things the business works with (a café, a customer): what each one is, its numbers and what it connects to.',sources:'Bronze: the data as it landed, one source per file or bucket folder, and when each last loaded.',staged:'Silver: the cleaned and combined tables between the sources and the final tables.',
  tables:'Gold: the final business tables the model and measures are built on.',measures:'The business numbers and how each one is calculated.',flows:'Automations and their last runs.',
  ml:'Forecasts, segments and anomaly models, with their latest runs.',tools:'Calculations your agents can call.',agents:'Custom agents for this project: ask one a question.',
  edits:'Corrections to the gold tables, applied on top of the loaded data; every query sees them.',glossary:'What the business words mean and which measures implement them.',
@@ -2162,7 +2164,7 @@ function show(k){document.querySelectorAll('body>.toast:not([style])').forEach(t
  pn.title=(k.startsWith('rep:')?'Filter the report or click a bar to filter by it. Every number comes from ABI.':LEDE[k])||'';
  // the page says what it is and what it is for, above its actions (the header's crumb says where it sits)
  {const tt=h('div','ttl'),rp=k.startsWith('rep:')&&D.reports.find(r=>'rep:'+r.id===k),sec=nav().find(([,its])=>its.some(([x])=>x===navKey(k)))?.[0];
-  if(sec&&sec!=='Start')tt.append(h('div','eyebrow',sec));tt.append(h('h1','',PAGES[k][0]));const ld=rp?(rp.spec?.description||rp.description||(OT().length?'Filter it, or click a bar or a slice to filter by that member; Open, beside the filter, shows that member\'s own page. Every number comes from ABI.':'Filter it, or click a bar or a slice to filter by that member. Every number comes from ABI.')):(MODE==='viewer'&&VLEDE[k])||LEDE[k];
+  if(sec&&sec!=='Start')tt.append(h('div','eyebrow',sec));tt.append(h('h1','',PAGES[k][0]));const ld=rp?(rp.spec?.description||rp.description||(rp.pages.some(p=>p.visuals.some(v=>v.dim&&objCol(v.dim)))?'Filter it, or click a bar or a slice to filter by that member; Open, beside the filter, shows that member\'s own page. Every number comes from ABI.':'Filter it, or click a bar or a slice to filter by that member. Every number comes from ABI.')):(MODE==='viewer'&&VLEDE[k])||LEDE[k];
   if(ld)tt.append(h('p','',ld));head.append(tt)}
  {const h0=box.offsetHeight;if(h0)box.style.minHeight=h0+'px'}pg.append(head);if(window.__redir){const n=h('p','note');n.append(ic('info'),h('span','',window.__redir));pg.append(n);window.__redir=''}box.append(pg);{const r=PAGES[k][1](pg);if(r?.then){const sk=h('div','skel');sk.append(h('div','sk w40'),h('div','sk'),h('div','sk w70'));const tm=setTimeout(()=>pg.append(sk),350);r.finally(()=>{clearTimeout(tm);sk.remove();box.style.minHeight=''})}else requestAnimationFrame(()=>box.style.minHeight='')}setTimeout(()=>names(pg),60);new MutationObserver(()=>{clearTimeout(pg._nm);pg._nm=setTimeout(()=>names(pg),120)}).observe(pg,{childList:true,subtree:true});lay(pg,k);new MutationObserver(()=>lay(pg,k)).observe(pg,{childList:true,subtree:true});
  const top=pg.querySelector(':scope>.bar.top'),lead=pg.querySelector(':scope>.bar.lead');if(lead)lead.classList.contains('seg')?head.append(lead):head.querySelector('.ttl').prepend(lead);if(top)head.append(top);if(MODE==='viewer')pg.querySelectorAll('.ed').forEach(e=>e.readOnly=true);
@@ -2303,9 +2305,9 @@ function mfaDialog(){const d=h('dialog'),c=h('div','card'),b=h('div'),m=h('div',
 {const q=new URLSearchParams(location.search).get('signin');if(q){setTimeout(()=>toast({linked:'Linked: you can sign in with it now.',conflict:'That account is linked to another person here.'}[q]||'Linking didn\'t work: try again.'));history.replaceState(null,'',location.pathname+location.hash)}}
 if(window.ME?.signin){const w=h('button','btn who');w.append(h('span','av',(ME.name||'?').slice(0,1).toUpperCase()),h('span','nm',ME.name));w.title='Your password, personal tokens and two-step sign-in';w.onclick=pwDialog;const f=h('form');f.method='post';f.action='/signout';f.className='so';f.hidden=true;f.append(ib('out','Sign out'));const r0=$('header .right');r0.prepend(w,f)}
 if(window.ME&&!['editor','owner'].includes(ME.role))$('.modes').hidden=true;/* Viewer access only: no switch at all */$('#m-dev').onclick=()=>pickMode('developer');$('#m-view').onclick=()=>pickMode('viewer');
-let first=decodeURIComponent(location.hash.slice(1));if(!first)try{first=localStorage.getItem('abi-app-'+D.project)}catch(e){}setTimeout(()=>show(first||'home'));  // after the whole script: the chat page's parts are declared further down
+let first=hashKey();if(!first)try{first=localStorage.getItem('abi-app-'+D.project)}catch(e){}setTimeout(()=>show(first||'home'));  // after the whole script: the chat page's parts are declared further down
 boot.then(()=>{sidebar();show(CUR);inboxCount();setTimeout(()=>{if(D.docs==null&&PAGES.docs)api('docs',{}).then(r=>{if(D.docs==null){D.docs=r||{};if(CUR==='docs')show('docs')}}).catch(()=>{})},1200)});setMode('developer');vc();
-window.addEventListener('hashchange',()=>{const k=decodeURIComponent(location.hash.slice(1));if(k&&k!==CUR)show(k)});
+window.addEventListener('hashchange',()=>{const k=hashKey();if(k&&k!==CUR)show(k)});
 
 // ---------- the agent: it steers this page, the page follows its changes, and the person talks to it here ----------
 async function switcher(){let d=$('#switcher');if(d){d.remove();return}
@@ -2603,10 +2605,16 @@ def read_only(bundle: dict) -> None:
     Developer, on the project itself."""
     if isinstance(o := bundle.get("model/ontology.json"), dict):
         o.pop("actions", None)
+    at = lambda v: v.get("layout") or {}  # noqa: E731
     for rel, r in bundle.items():
         if rel.startswith("reports/") and isinstance(r, dict):
             for p in r.get("pages") or []:
-                p["visuals"] = [v for v in p.get("visuals") or [] if v.get("type") != "form"]
+                vs = p.get("visuals") or []
+                p["visuals"] = keep = [v for v in vs if v.get("type") != "form"]
+                for g in (v for v in vs if v.get("type") == "form" and "w" in at(v)):  # the card left of it in its row takes its width: no empty half
+                    if row := [v for v in keep if "w" in at(v) and at(v).get("y") == at(g).get("y") and at(v)["x"] < at(g)["x"]]:
+                        last = max(row, key=lambda v: at(v)["x"])
+                        last["layout"] = at(last) | {"w": min(12, at(last)["w"] + at(g)["w"])}
 
 
 def publish_bundle(project: str) -> tuple[str, dict, str]:
@@ -4044,7 +4052,9 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                     team.pending_done(project, item["id"], "declined")
                     return self.reply(200, json.dumps({"result": "declined"}).encode())
                 action = item["action"].removeprefix("mcp__abi__")
-                if action not in ALLOWED or action == "run_object_action":  # an agent's object write is a proposal (ABI's own call); a person's Approve here would make it an active write
+                if action == "run_object_action":  # an agent's object write is a proposal (ABI's own call); a person's Approve here would make it an active write
+                    return self.reply(403, json.dumps({"error": "Approve can't run an action on an object for you. Run it from the object's page, then decline this step."}).encode())
+                if action not in ALLOWED:
                     return self.reply(403, json.dumps({"error": f"'{action}' is a step for ABI's own app."}).encode())
                 return self.reply(200, json.dumps(run(action, {**item["args"], "project": project}, None,
                                                       lambda: team.pending_done(project, item["id"], "ok") or "done"), default=str).encode())
@@ -4087,7 +4097,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                 job = pending.pop(cid, None) if pending.get(cid, (None,) * 5)[4] == hub.hid else None
                 if not job:
                     return self.reply(410, b'{"error":"That confirmation expired; try again."}')
-                if hub.mode == "viewer" and (job[0] in WRITES or job[0] in READS_ONLY):  # asked in Developer, answered after the switch: as /api refuses it
+                if hub.mode == "viewer" and job[0] not in ACCOUNT:  # asked in Developer, answered after the switch: Viewer changes nothing but your own account
                     return self.reply(403, json.dumps({"error": "Viewer mode is read-only. Switch to Developer in the top bar to change things."}).encode())
                 return self.reply(200, json.dumps(run(*job[:4]), default=str).encode())  # job: action, args, token, after, hub
             action = self.path.removeprefix("/api/")
