@@ -88,7 +88,8 @@ def _alone(tick):
 
 @app.task(retry=RetryStrategy(max_attempts=RETRIES, exponential_wait=10), pass_context=True)  # FL-4: 3 retries after 10 s, 100 s, 1000 s
 def run_flow(context: JobContext | None = None, *, run_id: str) -> None:
-    """FL-1, FL-5, FL-6: run a queued flow run's steps in order as the flow's owner; a retry resumes it (FL-4).
+    """FL-1, FL-5, FL-6: run a queued flow run's steps in order as the flow's owner (a run an object action or a message started:
+    as its runner or sender, flows.execute); a retry resumes it (FL-4).
     No context (a direct call): treated as the last attempt."""
     flows.execute(run_id, last=context is None or context.job.attempts >= RETRIES)
 

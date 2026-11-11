@@ -7,7 +7,8 @@ ABI grounds its own chat; MCP/REST callers are not grounded, so the harness chec
 numbers only from tool-result `rows` (or the person's own words), names from any tool-result text. The harness passes
 this exchange's results and the previous one's, never older ones.
 
-    echo '{"answer": "...", "results": [...], "asked": "...", "vocab": [...], "project": "...", "model": {...}}' \
+    echo '{"answer": "...", "results": [...], "asked": "...", "vocab": [...], "project": "...", "model": {...},
+           "wrote": [the inputs of the agent's own tool calls: prose it saved itself grounds no figure]}' \
         | python scripts/ground.py
     -> {"numbers": [...], "names": [...], "masked": "...", "final": "..." | null, "retry": "..."}
 """
@@ -218,7 +219,7 @@ def run(req: dict) -> dict:
 
     def flags(text: str) -> dict:
         return check(text, results, set(req.get("vocab", [])), members, fields, req.get("asked", ""), req.get("notes", []),
-                     req.get("pending", []), spans=True, today=today, labels=names) if numbers(text) else {
+                     req.get("pending", []), spans=True, today=today, labels=names, wrote=req.get("wrote", [])) if numbers(text) else {
             "numbers": [], "names": [], "spans": []}
 
     bad = flags(req["answer"])

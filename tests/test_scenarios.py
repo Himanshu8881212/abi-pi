@@ -117,3 +117,30 @@ def test_scenario5_weekly_email_stops_at_first_send(yt):
     assert r.called("save_flow") or flows, [t[0] for t in r.tools]
     assert not any(f.get("enabled") for f in flows), "the flow waits for the person: never enabled by the agent"
     assert "[not verified]" not in r.answer, r.answer
+
+
+@pytest.fixture(scope="module")
+def cafes(tmp_path_factory):
+    """Brewline with an ontology (cafés, their orders), as test_ontology builds it."""
+    from conftest import drop
+    from test_ontology_nobreak import brew
+    from test_pages import sure
+    p = "pi_objects_live"
+    brew(p, tmp_path_factory.mktemp("objects"))
+    sure("save_ontology", project=p, ontology={
+        "objects": [{"id": "cafe", "table": "cafes", "name": "Café", "plural": "Cafés", "title": "cafe_name", "measures": ["revenue"]},
+                    {"id": "order", "table": "orders", "name": "Order", "plural": "Orders", "title": "order_id"}],
+        "links": [{"id": "order_cafe", "from": "order", "to": "cafe", "name": "café", "inverse": "orders", "via": ["orders-cafe_id"]}]})
+    yield p
+    drop([p])
+
+
+def test_object_question_uses_get_object(cafes):
+    """1.2.6 M6 #22: a question about one thing is answered with the object reads (the digest's `objects` line and
+    SYSTEM.md point there), and its figures are the object's own rows."""
+    name, key, seats = abi.call("sql_query", project=cafes, sql="SELECT cafe_name, cafe_id, seats FROM cafes ORDER BY cafe_id LIMIT 1")["rows"][0]
+    r = ask(f"In project {cafes}: tell me about the café {name}: its city, how many seats it has and its revenue.")
+    assert r.called("get_object") or r.called("list_objects"), [t[0] for t in r.tools]
+    revenue = abi.call("get_object", project=cafes, type="cafe", key=[key])
+    assert "[not verified]" not in r.answer and str(seats) in r.answer, r.answer
+    assert f"{float(revenue['rows'][0][revenue['columns'].index('revenue')]):,.2f}" in r.answer, r.answer

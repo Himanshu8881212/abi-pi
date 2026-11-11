@@ -24,7 +24,7 @@
       }
     },
     "tools": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1},
-              "description": "The exact tools it may call: custom tool IDs (tools/<id>.json), semantic_query, report_snapshot, and only the action tools send_email, post_message, refresh, propose_edit (DECISIONS D-3)"},
+              "description": "The exact tools it may call: custom tool IDs (tools/<id>.json), semantic_query, report_snapshot, the object reads get_object and list_objects (within the scope's tables and measures), and only the action tools send_email, post_message, refresh, propose_edit (DECISIONS D-3)"},
     "agents": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$"},
                "description": "Other published agents of the project it may ask (tool ask_agent): each runs as the asking user with its own scope, tools and grounding, at most two levels deep"},
     "mode": {"enum": ["tools_only", "exploratory"], "default": "tools_only", "description": "exploratory may also run read-only semantic queries within the scope"},

@@ -19,6 +19,8 @@
           "term": {"type": "string", "minLength": 1},
           "definition": {"type": "string", "minLength": 1},
           "measures": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "Measure IDs"},
+          "objects": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "Object type IDs (model/ontology.json) the term is about"},
+          "links": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "Link IDs (model/ontology.json) the term is about"},
           "columns": {
             "type": "array",
             "items": {

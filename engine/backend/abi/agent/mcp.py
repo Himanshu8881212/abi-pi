@@ -28,7 +28,8 @@ from abi.security import user_for_personal, user_for_token
 # person (row-level and column rules hold). Nothing that changes anything, confirms, runs an agent, tool or flow, renders
 # a file, spends model tokens or lists secrets, rules, share links or people.
 OUTSIDE = frozenset({"list_projects", "semantic_model", "semantic_query", "visual_data", "dataset_data", "list_reports",
-                     "explain_change", "how_calculated", "lineage", "docs", "readiness", "data_quality", "project_locale"})
+                     "explain_change", "how_calculated", "lineage", "docs", "readiness", "data_quality", "project_locale",
+                     "ontology", "get_object", "list_objects"})  # 1.2.6 M6: objects as the person sees them
 
 
 async def _list_tools(ctx, params) -> types.ListToolsResult:

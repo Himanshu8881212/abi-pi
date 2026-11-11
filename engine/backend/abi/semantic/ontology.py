@@ -184,7 +184,7 @@ def references(files: dict, cols: dict | None = None) -> list[dict]:
             err(f"{at}.approval", f"{what}: `approval` makes its write a proposal, but it writes nothing.", "Add `writes`, or drop `approval`.")
         if a.get("flow") in flows and (bad := _templated(files[f"flows/{a['flow']}.json"])):  # a Viewer never picks what runs
             err(f"{at}.flow", f"{what}: flow '{a['flow']}' selects what runs with a {{{{ … }}}} template ({bad}),"
-                              " so a run could pick what runs as the flow's owner.", "Name each action, flow, agent, tool, report,"
+                              " so a run could pick what runs.", "Name each action, flow, agent, tool, report,"
                               " model, dataset, object type and type literally in that flow.")
         for j, st in enumerate((files.get(f"flows/{a.get('flow')}.json") or {}).get("steps", [])):  # owner, 7 Nov 2026: an allowlist
             if not step_ok(st):
@@ -205,7 +205,7 @@ def references(files: dict, cols: dict | None = None) -> list[dict]:
     return errs
 
 
-# 1.2.6 M4 (owner, 7 Nov 2026): what a flow an action type starts may run, as its owner, for a Viewer's click: loads, sends
+# 1.2.6 M4 (owner, 7 Nov 2026): what a flow an action type starts may run, as the person who clicks (a Viewer too): loads, sends
 # (recipients as today), an agent (its question quoted), report snapshots, checks, approvals, reads selecting nothing
 STEPS_OK = {"refresh", "agent", "snapshot", "condition", "approval"}
 ACTIONS_OK = {"refresh", "send_email", "post_message", "run_agent", "report_snapshot", "semantic_query", "get_object",
@@ -315,6 +315,24 @@ def describe(project: str, user_id: int | None) -> dict:
     return {"objects": out, "links": links, "actions": [mask(a) for a in o.get("actions", [])]}
 
 
+def terms(o: dict, hide: bool = False) -> list[dict]:
+    """1.2.6 M6: the described object types, properties and links of an ontology (the file, or `describe`'s answer,
+    masked already) as glossary terms: the description is the definition. Their IDs (object:…, property:…, link:…)
+    are never glossary.json's, so memory links only to free terms, as before. `hide`: definitions as rls.MARK."""
+    said = lambda x: rls.MARK if hide else x["description"]  # noqa: E731
+    out = []
+    for x in o.get("objects", []):
+        if x.get("description"):
+            out.append({"id": f"object:{x['id']}", "term": x["name"], "definition": said(x), "objects": [x["id"]]})
+        for p in x.get("properties", []):
+            if p.get("description"):
+                t, _, c = p["column"].rpartition(".")
+                out.append({"id": f"property:{x['id']}.{p['column']}", "term": p.get("name") or _label(c), "definition": said(p),
+                            "objects": [x["id"]], "columns": [{"table": t or x["table"], "column": c}]})
+    return out + [{"id": f"link:{ln['id']}", "term": ln["name"], "definition": said(ln), "links": [ln["id"]]}
+                  for ln in o.get("links", []) if ln.get("description")]
+
+
 @action(Role.viewer)
 def ontology(conn, user: User, args: storage.ProjectRef) -> dict:
     """The project's ontology (model/ontology.json): object types (table, key, title column, properties with their lake types and meanings, measures), links in both directions with their derived cardinality (one-to-one, many-to-one, one-to-many, many-to-many) and the relationships they walk, and action types. Columns hidden from you are left out."""
@@ -418,14 +436,19 @@ def propose(project: str, user_id: int | None) -> dict:
                     add(types[a["to"]["table"]], types[b["to"]["table"]], [a["id"], b["id"]], f"_via_{model.slug(_singular(f))}")
                     m2m += 1
     doc = {"$schema": SCHEMA + "ontology.json", "objects": objects, "links": links}
-    return {"ontology": doc, "cardinality": cards,
+    # 1.2.6 M6: the glossary terms whose columns belong to a proposed type (set_glossary_term {objects} attaches them)
+    attach = [{"term": g["id"], "objects": about} for g in model._read(project, "glossary.json").get("terms", [])
+              if (about := sorted({types[c["table"]]["id"] for c in g.get("columns", []) if c["table"] in types} - set(g.get("objects", []))))]
+    return {"ontology": doc, "cardinality": cards, **({"glossary": attach} if attach else {}),
             "note": "A draft from the model and your data, not saved. Names are naive: refine names, plurals and descriptions"
-                    " (search the vault and cite it), drop what isn't wanted, then save_ontology; the person confirms."}
+                    " (search the vault and cite it), drop what isn't wanted, then save_ontology; the person confirms."
+                    + (" `glossary` lists the terms whose columns belong to a type: once it is saved, attach each with"
+                       " set_glossary_term {objects} (send the term's other fields again)." if attach else "")}
 
 
 @action(Role.viewer)
 def propose_ontology(conn, user: User, args: storage.ProjectRef) -> dict:
-    """Drafts an ontology from the model and the data, as you (row-level security applies), and saves nothing: each visible keyed table but the date table as an object type (title column and property meanings from names, types and value counts), each relationship between two types as a many-to-one link, each table linking two types as a many-to-many link per pair (several ways between two types stay separate links; none is picked). Refine names and descriptions, then save_ontology."""
+    """Drafts an ontology from the model and the data, as you (row-level security applies), and saves nothing: each visible keyed table but the date table as an object type (title column and property meanings from names, types and value counts), each relationship between two types as a many-to-one link, each table linking two types as a many-to-many link per pair (several ways between two types stay separate links; none is picked); `glossary` suggests the glossary terms to attach to a type (their columns are its table's). Refine names and descriptions, then save_ontology."""
     return propose(args.project, user.id)
 
 
@@ -811,7 +834,7 @@ class RunAction(storage.ProjectRef):
 
 @action(Role.viewer)
 def run_object_action(conn, user: User, args: RunAction) -> dict:
-    """Runs an action type on one object, as you: needs the action type's role (viewer, editor or owner); the object must be visible to you (else 404, as a missing one); `inputs` must match its schema and its checks must hold (else 422 with the check's message). An action type with `confirm` (and any agent call that starts a flow) asks the person to confirm a preview of old and new values first. Its write is one logged, undoable edit batch as you, stored as a proposal an Editor approves when the action type says `approval` or an agent calls it; its flow starts with the object and inputs as {{ data.trigger.object }} and {{ data.trigger.inputs }}."""
+    """Runs an action type on one object, as you: needs the action type's role (viewer, editor or owner); the object must be visible to you (else 404, as a missing one); `inputs` must match its schema and its checks must hold (else 422 with the check's message). An action type with `confirm` (and any agent call that starts a flow) asks the person to confirm a preview of old and new values first. Its write is one logged, undoable edit batch as you, stored as a proposal an Editor approves when the action type says `approval` or an agent calls it; its flow starts with the object and inputs as {{ data.trigger.object }} and {{ data.trigger.inputs }}, and every step of that run runs as you (your role and row-level security), not as the flow's owner."""
     from abi import flows, tools, writeback  # not at top: they import the semantic package
 
     p, o = args.project, read(args.project)
@@ -886,7 +909,7 @@ def run_object_action(conn, user: User, args: RunAction) -> dict:
         a, out["note"] = {**a, "flow": None}, (f"The write is a proposal an Editor approves (approve_edit); flow"
                                                f" '{a['flow']}' doesn't start for a proposal.")
     try:
-        run = a.get("flow") and flows.start(p, a["flow"], f"action-{uuid.uuid4().hex}", by=user, keep=True,  # (7) as its owner (FL-6)
+        run = a.get("flow") and flows.start(p, a["flow"], f"action-{uuid.uuid4().hex}", by=user, keep=True,  # (7) every step as the runner (flows.execute)
                                             trigger={"action": a["id"], "type": x["id"], "key": key, "object": obj, "inputs": args.inputs})
     except flows.Queued as q:  # the write stays; the run waits as queued, and flows.requeue queues it within a minute or two
         run, out["note"] = q.run, "The flow's run couldn't be queued now; it stays queued and starts once the queue is back."

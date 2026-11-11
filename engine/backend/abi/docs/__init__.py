@@ -41,7 +41,7 @@ from abi.ml import unsupervised
 from abi.project import SCHEMA, bundle, git, imports
 from abi.project.bundle import dumps
 from abi.security import MEMBERS, Role, User, credentials, role_in, tenants
-from abi.semantic import lineage, model
+from abi.semantic import lineage, model, ontology
 from abi.tools import builtin
 
 MARKS = "docs/descriptions.json"
@@ -345,7 +345,9 @@ def _glossary(c):
     return [_item(c, f"term:{t['id']}", t["term"], [
         ("Definition", t["definition"]), ("Measures", _names(f"measure:{x}" for x in t.get("measures", []))),
         ("Columns", _names(f"{x['table']}.{x['column']}" for x in t.get("columns", []))),
-    ]) for t in model.masked(c.project, (c.files.get("model/glossary.json") or {}).get("terms", []), c.hide)]
+        ("Object types", _names(t.get("objects", []))), ("Links", _names(t.get("links", []))),
+    ]) for t in model.masked(c.project, (c.files.get("model/glossary.json") or {}).get("terms", []), c.hide)
+        + ontology.terms(c.files.get(ontology.FILE) or {}, c.hide)]  # 1.2.6 M6: the ontology's descriptions are definitions too
 
 
 def _reports(c):

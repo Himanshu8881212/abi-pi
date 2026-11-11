@@ -48,14 +48,18 @@ def _load(files: dict, project: str, agent: str) -> dict:
     return a
 
 
-def _snapshot(files: dict, s) -> dict:
-    """D-24: a report snapshot request as a query of every measure on its page or visual."""
+def _snapshot(files: dict, s) -> list[dict]:
+    """D-24: a report snapshot request as the queries it draws: each visual's own on its page (measures, dimensions,
+    filters, links), with the report's, the page's and the request's filters (1.2.6 M6: not only the measures)."""
     if not isinstance(s, dict):
-        return {}
+        return []
     r = files.get(f"reports/{s.get('report')}.json") or {"pages": []}
     pages = s.get("pages") if isinstance(s.get("pages"), list) else [s.get("page")]  # MULTI-EXPORT.1
-    return {"measures": [m for p in r["pages"] if s.get("pages") == "all" or p["id"] in pages for v in p["visuals"]
-                         if s.get("visual") in (None, v["id"]) for m in (v.get("query") or {}).get("measures", [])]}
+    more = [f for f in [*r.get("filters", []), *(s["filters"] if isinstance(s.get("filters"), list) else [])]
+            if isinstance(f, dict) and isinstance(f.get("column"), str)]
+    return [q | {"filters": [*q.get("filters", []), *p.get("filters", []), *more]}
+            for p in r["pages"] if s.get("pages") == "all" or p["id"] in pages for v in p["visuals"]
+            if s.get("visual") in (None, v["id"]) and (q := v.get("query"))]
 
 
 def _refused(name: str, payload: dict, allowed: list[str], files: dict, g: dict, measures: set[str], tables: set[str],
@@ -81,9 +85,14 @@ def _refused(name: str, payload: dict, allowed: list[str], files: dict, g: dict,
         q = (files.get(f"tools/{q['tool']}.json") or {}).get("query")  # schema-checked: placeholders only in values
     if name not in studio.BUILTIN:  # a custom tool reads its own query
         q = (files.get(f"tools/{name}.json") or {}).get("query")
+    if name in studio.OBJECTS:  # 1.2.6 M6: every table the call reads or walks, and the type's measures
+        try:
+            q = studio.walked(name, ACTIONS[name].input.model_validate(payload | {"project": "p"}).model_dump(mode="json"), files)
+        except ValidationError:
+            q = None  # actions.run refuses it with the details
     # the request's page/visual; render_snapshot checks what is drawn again (`_call` sets builtin.SCOPE)
     snap = _snapshot(files, payload if name == "report_snapshot" else payload.get("report"))
-    if out := list(dict.fromkeys(x for r in [q if isinstance(q, dict) else {}, snap] for x in studio.outside(r, measures, tables, g, files))):
+    if out := list(dict.fromkeys(x for r in [q if isinstance(q, dict) else {}, *snap] for x in studio.outside(r, measures, tables, g, files))):
         return f"Outside your scope: {', '.join(out)}."
     if name in ("refresh", "propose_edit") and payload.get("table") not in tables:
         return f"Table '{payload.get('table')}' is outside your scope."

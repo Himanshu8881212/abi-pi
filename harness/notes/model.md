@@ -19,6 +19,11 @@
 - `save_ontology` with the whole refined draft; the person confirms its preview (changes and what reads them). Links
   with `rls: follow` and action types change who sees or does what: say so. `ontology` reads it back, `lineage
   link:<id>` shows what a change breaks, `delete_ontology_item` removes one item.
+- Reading: `list_objects {type, filters, search}` finds objects (a filter's `link` walks to a linked type), `get_object
+  {type, key, links}` reads one with its measures and neighbors; `semantic_query {links: [id]}` measures across a link.
+- A description on a type, property or link is its definition: `semantic_model.glossary` and the docs list them as
+  terms (object:…, property:…, link:…). `propose_ontology.glossary` names the free terms to attach to a type:
+  `set_glossary_term {…, objects: [type], links: [link]}` with the term's other fields as they are.
 
 # measures (MEL)
 - `set_measure {id, name, expression, description}`; IDs lowercase snake_case. Checked against loaded columns.

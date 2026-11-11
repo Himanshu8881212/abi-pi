@@ -806,3 +806,59 @@ def test_the_one_sided_rules_still_differ_between_the_sides():
     assert all(v["engine"][1] != v["harness"][1] for k, v in s.items() if k != "typed_filtered_member"), s
     m = _sided("MORE")  # round 3: an all-caps plural of an ID's word part passes only the harness (as written vs lower-cased)
     assert "ORDERS" in m["caps_plural_inside"]["engine"][1] and m["caps_plural_inside"]["harness"][1] == [], m
+
+
+# ---------- 1.2.6 M6: prose the agent saved itself, a check that can't run, the digest's objects ----------
+
+TS = (ROOT / ".pi/extensions/abi/index.ts").read_text()
+
+
+def test_prose_the_agent_saved_itself_grounds_no_figure():
+    """The 1.1 rule lets a figure in a definition's prose (a title, a description) ground the same figure, as the
+    project's own words. A title the agent saved itself in this session is its own words coming back: the harness
+    passes the inputs of the agent's tool calls (`wrote`), and prose found there grounds no figure. A person's title,
+    the person's own words and every row ground as before; the engine's side never took prose."""
+    rep = {"report": {"id": "sales", "pages": [{"id": "main", "title": "Revenue rose 37 percent"}]}}
+    old = {"reports": [{"id": "daily_revenue_28d", "title": "Revenue over the last 28 days", "pages": [{"layout": {"w": 12}}]}]}
+    wrote = [{"project": "brew", "measures": ["revenue"]},  # a read's input
+             {"project": "brew", "report": {"id": "sales", "name": "Sales", "pages": [{"id": "main", "title": "Revenue  rose 37 Percent"}]}}]
+    check = ground.check
+    assert check("Revenue rose 37%.", [ROW, rep])["numbers"] == [], "a title nobody here wrote: as since 1.1"
+    assert check("Revenue rose 37%.", [ROW, rep], wrote=wrote)["numbers"] == ["37%"], "the agent's own title (spacing and case aside)"
+    assert check("North took 76.00 and revenue rose 37%.", [ROW, rep], wrote=wrote)["numbers"] == ["37%"], "rows still ground"
+    assert check("The page shows revenue over the last 28 days.", [rep, old], wrote=wrote)["numbers"] == [], "a person's title beside it"
+    assert check("Revenue rose 37%.", [ROW, rep], asked="Title it: revenue rose 37%", wrote=wrote)["numbers"] == [], "the person's own words"
+    out = ground.run({"answer": "Revenue rose 37%.", "results": [ROW, rep], "wrote": wrote})
+    assert out["numbers"] == ["37%"] and "37" not in out["masked"] and "37" not in (out["final"] or ""), out
+    assert ground.run({"answer": "Revenue rose 37%.", "results": [ROW, rep]})["numbers"] == []
+    # the harness records every tool call's input, a resumed session's too, and sends them with each check
+    assert "state.wrote.push(event.input)" in TS and "state.wrote.push(c.arguments)" in TS and "wrote: state.wrote" in TS
+
+
+def test_an_answer_the_check_could_not_read_is_withheld():
+    """Fail closed: when ground.py crashes or prints no JSON the harness shows a plain "couldn't check" line instead of
+    the answer; it used to let the answer through unchecked. ground.py itself exits non-zero with nothing on stdout."""
+    r = subprocess.run([sys.executable, str(ROOT / "scripts/ground.py")], input='{"answer": 5}', capture_output=True, text=True, timeout=120)
+    assert r.returncode != 0 and r.stdout.strip() == "", (r.returncode, r.stdout[:200])
+    fn = TS[TS.index("function ground(answer: string)"):TS.index("// ---------- provider payload")]
+    assert fn.count("grounding_error") == 2 == fn.count("resolve(FAILED)") and "resolve(null)" not in fn, "both failure paths withhold"
+    assert re.search(r"const FAILED: Grounded = \{[^}]*final: null[^}]*error: true \}", TS)
+    end = TS[TS.index('pi.on("message_end"'):TS.index('pi.on("agent_before_settle"')]
+    assert "if (bad.error) shown = UNCHECKED;" in end and "retry: !state.retried && !bad.error" in end, "withheld at once, no retry"
+    assert "so I won't state it" in re.search(r'const UNCHECKED = "(.*?)";', TS)[1]
+
+
+def test_the_digest_lists_objects_and_their_names_ground():
+    """The context's model digest gains an `objects:` line from semantic_model (each type with its table, title and
+    link IDs), and that semantic_model is a note of the exchange: an object type's names ground as the model's own
+    words, never a figure."""
+    sm = {"tables": {"sites": {"kind": "dimension", "key": ["site_id"]}}, "measures": [], "objects": [
+        {"id": "roastery", "name": "Roastery", "plural": "Roasteries", "table": "sites", "key": ["site_id"], "title": "site_name",
+         "links": [{"link": "supplies", "name": "supplied by", "to": "cafe", "cardinality": "many-to-many", "inverse": True}]}],
+        "links": [{"id": "supplies", "from": "cafe", "to": "roastery", "name": "supplies", "cardinality": "many-to-many"}]}
+    said = "Of the Roasteries, North took 76.00."
+    assert ground.check(said, [ROW])["names"] == ["Roasteries"]
+    assert ground.check(said, [ROW], notes=[sm]) == {"numbers": [], "names": []}
+    assert ground.check("North has 12 Roasteries.", [ROW], notes=[sm | {"count": 12}])["numbers"] == ["12"], "a note grounds no figure"
+    digest = TS[TS.index("async function digest("):TS.index("async function today(")]
+    assert "sm.objects" in digest and re.search(r"objects: \$\{objs", digest) and "l.link" in digest and "now().notes.push(sm)" in digest

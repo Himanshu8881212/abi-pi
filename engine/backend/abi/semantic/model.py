@@ -438,22 +438,33 @@ class ModelInput(storage.ProjectRef):
 
 @action(Role.viewer)
 def semantic_model(conn, user: User, args: ModelInput) -> dict:
-    """What semantic_query can ask for (in one named model with `model`; `models` lists them): measures (ID, display name, MEL expression, description), model tables (kind, key, description) with their columns, relationships, the date table, datasets (ID, name) and glossary terms (ID, term, definition, linked measures and columns). Hidden staging tables are left out. In a large project only the tables, measures and terms relevant to your question are listed (`relevant` says so); `all` lists every one."""
+    """What semantic_query can ask for (in one named model with `model`; `models` lists them): measures (ID, display name, MEL expression, description), model tables (kind, key, description) with their columns, relationships, the date table, datasets (ID, name), glossary terms (ID, term, definition, linked measures, columns, object types and links) and, with an ontology, its object types (table, key, title column, each link by ID with the type it leads to) and links, whose descriptions are listed as glossary terms too (IDs object:…, property:…, link:…). Hidden staging tables are left out. In a large project only the tables, measures and terms relevant to your question are listed (`relevant` says so); `all` lists every one."""
     ms = [{k: x[k] for k in ("id", "name", "expression", "description") if k in x} for x in _read(args.project, "measures.json").get("measures", [])]
     m = load(args.project)
     cols = {t: c for t, c in lake_columns(args.project).items() if not m["tables"].get(t, {}).get("hidden")}
     out = {**visible(m), "columns": cols, "measures": ms,
            "datasets": [{"id": d["id"], "name": d["name"]} for d in _read(args.project, "datasets.json").get("datasets", [])],
-           "glossary": [{k: t[k] for k in ("id", "term", "definition", "measures", "columns") if k in t} for t in masked(
+           "glossary": [{k: t[k] for k in ("id", "term", "definition", "measures", "columns", "objects", "links") if k in t} for t in masked(
                args.project, _read(args.project, "glossary.json").get("terms", []), semantic.rls.restricted(args.project, user.id))],
            "models": named_models(args.project)}
+    from abi.semantic import ontology  # not at top: ontology imports this module
+    if (git.path(args.project) / ontology.FILE).is_file():  # 1.2.6 M6: object types and links, as the reader sees them
+        d = ontology.describe(args.project, user.id)
+        out["objects"] = [{k: x[k] for k in ("id", "name", "plural", "table", "key", "title", "description", "measures", "links", "actions")
+                           if x.get(k)} for x in d["objects"]]
+        out["links"] = [{k: ln[k] for k in ("id", "from", "to", "name", "inverse", "cardinality", "description") if ln.get(k)} for ln in d["links"]]
+        out["glossary"] += ontology.terms(d)  # their descriptions are their definitions, beside the free terms
     if args.model:
         tables, keep = scope(args.project, args.model)
         out |= {"model": args.model, "tables": {t: i for t, i in out["tables"].items() if t in tables},
                 "columns": {t: c for t, c in out["columns"].items() if t in tables},
                 "relationships": [r for r in out["relationships"] if {r["from"]["table"], r["to"]["table"]} <= tables],
                 "measures": [x for x in out["measures"] if x["id"] in keep]}
-    return out if args.all else _relevant(user, args.project, out)
+    out = out if args.all else _relevant(user, args.project, out)
+    if "objects" in out:  # only the types on a listed table, and the links between them
+        out["objects"] = [x for x in out["objects"] if x["table"] in out["tables"]]
+        out["links"] = [ln for ln in out["links"] if {ln["from"], ln["to"]} <= {x["id"] for x in out["objects"]}]
+    return out
 
 
 def _relevant(user: User, project: str, out: dict) -> dict:
@@ -494,11 +505,13 @@ class Term(storage.ProjectRef):
     definition: str = Field(min_length=1, max_length=2000)
     columns: list[str] = Field([], description="table.column items that implement the term")
     measures: list[str] = Field([], description="measure IDs that implement the term")
+    objects: list[str] = Field([], description="object type IDs (`ontology`) the term is about")
+    links: list[str] = Field([], description="link IDs (`ontology`) the term is about")
 
 
 @action(Role.editor, definition=True)
 def set_glossary_term(conn, user: User, args: Term) -> dict:
-    """Adds or replaces a glossary term: a business term, its definition and the columns/measures that implement it. Returns its ID."""
+    """Adds or replaces a glossary term: a business term, its definition, the columns/measures that implement it and the ontology's object types and links it is about. Returns its ID."""
     cols = lake_columns(args.project)
     for c in args.columns:
         if not re.fullmatch(COLUMN, c) or c.split(".", 1)[1] not in cols.get(c.split(".", 1)[0], {}):
@@ -509,6 +522,13 @@ def set_glossary_term(conn, user: User, args: Term) -> dict:
     t = {"id": slug(args.term), "term": args.term, "definition": args.definition}
     t |= {"columns": [dict(zip(("table", "column"), c.split(".", 1))) for c in args.columns]} if args.columns else {}
     t |= {"measures": sorted(set(args.measures))} if args.measures else {}
+    if args.objects or args.links:  # 1.2.6 M6
+        from abi.semantic import ontology  # not at top: ontology imports this module
+        o = ontology.read(args.project)
+        for k in ("objects", "links"):
+            if missing := sorted(set(getattr(args, k)) - {x["id"] for x in o.get(k, [])}):
+                raise ActionFailed(400, f"No {k[:-1]} {missing} in the ontology of project '{args.project}'.")
+            t |= {k: sorted(set(getattr(args, k)))} if getattr(args, k) else {}
     g = _read(args.project, "glossary.json").get("terms", [])
     _write(args.project, "glossary.json", {"terms": [x for x in g if x["id"] != t["id"]] + [t]})
     if actions.VIA.get() == "rest" and not actions.inbound():  # a person typed it (not an LLM, flow or inbound text)

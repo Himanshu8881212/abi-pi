@@ -893,3 +893,157 @@ def test_editor_delete_refused_before_any_preview(acts, probes):
         with abi.as_user(acts["tokens"]["editor"]), pytest.raises(abi.ActionError) as e:
             abi.call(action, project=P, **args)
         assert e.value.status == status and "confirm_token" not in e.value.body and "preview" not in e.value.body, (action, e.value.body)
+
+
+# ---------- 1.2.6 M6: the M4 review's low findings ----------
+
+GRANT_TEXT = r"""
+import json
+import abi.app  # noqa: F401
+from abi import actions
+from abi.project import imports
+obj = {"id": "cafe", "table": "cafes", "name": "Café", "plural": "Cafés", "title": "cafe_name"}
+act = {"id": "flag", "object": "cafe", "name": "Flag", "role": "viewer", "flow": "visit", "writes": {"table": "cafe_contacts", "set": {"visit_reason": "x"}}}
+files = {"model/ontology.json": {"objects": [obj], "actions": [act, {**act, "id": "plain", "flow": None, "writes": {"table": "cafes", "set": {"seats": 1}}}]},
+         "flows/visit.json": {"id": "visit", "name": "Visit", "enabled": False, "trigger": {"type": "manual"}, "steps": []},
+         "flows/on_edit.json": {"id": "on_edit", "name": "On edit", "enabled": True, "trigger": {"type": "writeback", "tables": ["cafe_contacts"]}, "steps": []}}
+docs = {n: actions.ACTIONS[n].fn.__doc__ for n in ("approve_flow_run", "run_flow", "run_object_action")}
+print(json.dumps({"text": imports.granting("p", files, imports.grants(files)), "docs": docs}))
+"""
+
+
+def test_grant_says_the_flow_runs_as_the_person_who_clicks():
+    """LOW-1, LOW-2, LOW-5: the Owner's confirmation of an action type that starts a flow says its steps run as the
+    person who clicks (round 6), never as the flow's owner, and that each write also starts the flows edits of that
+    table trigger (those do run as their owners); the tools' own descriptions say the same."""
+    r = engine(GRANT_TEXT)
+    assert r.returncode == 0, r.stderr[-2000:]
+    out = json.loads(r.stdout.splitlines()[-1])
+    text = out["text"]
+    assert "start flow 'visit' (its steps run as the person who clicks, with their permissions" in text, text
+    assert "flow's owner" not in text and "that owner" not in text, text
+    assert "write visit_reason of table cafe_contacts (each write also starts the flows that edits of cafe_contacts trigger, as their owners: now on_edit)" in text
+    assert "write seats of table cafes (each write also starts the flows that edits of cafes trigger, as their owners)" in text, text
+    assert "as the flow owner" not in out["docs"]["approve_flow_run"] and "as the person who ran that action" in out["docs"]["approve_flow_run"]
+    assert "as the person who clicked" in out["docs"]["run_flow"] and "runs as you" in out["docs"]["run_object_action"]
+
+
+RUNNER = r"""
+import json, sys, types, uuid
+import abi.app  # noqa: F401
+from abi import actions, db, flows, security
+from abi.agent import llm
+from abi.agents import runs
+from abi.project import bundle, git
+a = json.loads(sys.stdin.read())
+P, calls = a["project"], []
+AGENT = {"id": "pi_runner", "name": "Runner", "purpose": "Reads.", "instructions": "Read.", "version": 1, "mode": "standard",
+         "tools": ["semantic_query"], "scope": {"measures": ["revenue"], "tables": []}, "grounding": False, "status": "published"}
+flows._load = lambda project, flow: {"id": flow, "name": flow, "owner": str(a["owner"]), "enabled": False, "trigger": {"type": "manual"}, "steps": a["steps"]}
+tool = types.SimpleNamespace(id="c1", function=types.SimpleNamespace(name="semantic_query", arguments=json.dumps({"measures": ["revenue"]})),
+                             model_dump=lambda include=None: {"id": "c1", "type": "function", "function": {"name": "semantic_query", "arguments": "{}"}})
+turns = iter([types.SimpleNamespace(tool_calls=[tool], content=None), types.SimpleNamespace(tool_calls=None, content="Done.")])
+llm.complete = lambda *x, **k: types.SimpleNamespace(effort=None, spent=[0, 0, 0, 0], choices=[types.SimpleNamespace(message=next(turns), finish_reason="stop")])
+def spy(name, payload, user, via="rest"):
+    calls.append([name, user.id, via])
+    if name == "run_agent":  # the action's own last line, with the user it was run as (no model, no published agent needed)
+        return runs._answer(P, AGENT, payload.get("question") or payload["prompt"], user, via, bundle.bundle(git.path(P)), ground=False)
+    return {"snapshot": "artifact:x/y.png"} if name == "report_snapshot" else {"columns": ["revenue"], "rows": [[1]]}
+actions.run = spy
+run_id = f"{P}/pi_runner_flow/action-{uuid.uuid4().hex}"
+with db.connect() as c:
+    c.execute("INSERT INTO flow_runs (id, project, flow, started_by, trigger) VALUES (%s, %s, 'pi_runner_flow', %s, %s)",
+              [run_id, P, a["runner"], json.dumps({"action": "x", "type": "cafe", "key": ["k"], "object": {}, "inputs": {}})])
+raised = None
+try:
+    flows.execute(run_id, last=a["last"])
+except RuntimeError as e:  # what makes the queue retry the run
+    raised = str(e)
+with db.connect() as c:
+    run = c.execute("SELECT status, error FROM flow_runs WHERE id = %s", [run_id]).fetchone()
+    c.execute("DELETE FROM flow_steps WHERE run_id = %s", [run_id])
+    c.execute("DELETE FROM agent_runs WHERE flow_run = %s", [run_id])
+    c.execute("DELETE FROM flow_runs WHERE id = %s", [run_id])
+print(json.dumps({"calls": calls, "run": run, "raised": raised}, default=str))
+"""
+
+
+def runner(acts, steps: list, last: bool = True) -> dict:
+    """A run of `steps` an object action of the Viewer started, executed as the worker does, with every action the run
+    calls recorded as [action, user ID, via] instead of run."""
+    owner = abi.call("list_flows", project=P)["flows"][0]["owner"]
+    r = engine(RUNNER, timeout=300, stdin=json.dumps({"project": P, "owner": owner, "runner": acts["uid"]["viewer"], "steps": steps, "last": last}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    return json.loads(r.stdout.splitlines()[-1]) | {"owner": int(owner)}
+
+
+def test_action_flow_snapshot_and_agent_tool_run_as_runner(acts):
+    """LOW-6: in a run an object action started, a snapshot step renders as the person who clicked (their row-level
+    security), and an agent step and each tool call of that agent run as them too: never as the flow's owner."""
+    out = runner(acts, [{"id": "snap", "type": "snapshot", "report": "overview", "page": "overview"},
+                        {"id": "ask", "type": "agent", "agent": "pi_runner", "prompt": "Look.", "after": ["snap"]}])
+    me = int(acts["uid"]["viewer"])
+    assert out["owner"] != me and out["run"]["status"] == "ok", out
+    assert out["calls"] == [["report_snapshot", me, "flow"], ["run_agent", me, "flow"], ["semantic_query", me, "agent"]], out
+
+
+def test_runtime_allowlist_refusal_is_final(acts):
+    """LOW-4: a run an object action started whose flow now holds a step outside the allowlist fails at once: the
+    refusal is no failure a retry can fix, so the queue isn't asked to run it again (and nothing of it runs)."""
+    out = runner(acts, [{"id": "t", "type": "tool", "tool": "pi_t"}], last=False)
+    assert out["raised"] is None and out["calls"] == [], out
+    assert out["run"]["status"] == "failed" and "aren't ones an action type's flow may run" in out["run"]["error"], out
+
+
+CHANGED = r"""
+import json, sys, uuid
+import abi.app  # noqa: F401
+from abi import db, flows
+P, F = "pi_m6_changed", "f"
+viewer = json.loads(sys.stdin.read())["viewer"]
+def holds(key, who, rows, acted=True):
+    # one more finished run of flow F whose agent step `ask` answered from `rows`: does `condition {changed: ask}` hold in it?
+    run, ask = f"{P}/{F}/{key}", str(uuid.uuid4())
+    with db.connect() as c:
+        c.execute("INSERT INTO flow_runs (id, project, flow, started_by, trigger) VALUES (%s, %s, %s, %s, %s)",
+                  [run, P, F, who, json.dumps({"action": "x"}) if acted else None])
+        c.execute("INSERT INTO agent_runs (id, project, agent, version, user_id, via, question, trace, answer, grounded, retried, template,"
+                  " prompt_tokens, completion_tokens, flow_run) VALUES (%s, %s, 'a', 0, %s, 'flow', 'q', %s, 'x', NULL, false, false, 0, 0, %s)",
+                  [ask, P, who, json.dumps([{"tool": "semantic_query", "input": {}, "output": {"result": {"rows": rows}}}]), run])
+        c.execute("INSERT INTO flow_steps (run_id, pos, step, status, output, started) VALUES (%s, 0, 'ask', 'ok', %s, now())", [run, json.dumps({"run": ask})])
+    def as_(acting):
+        t = flows.ACTED.set(acting)
+        try:
+            return flows._changed(run, "ask", {"ask": {"run": ask}})["holds"]
+        finally:
+            flows.ACTED.reset(t)
+    return as_
+out = {}
+try:
+    with db.connect() as c:
+        owner = c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"]
+    holds("action-1", owner, [[100]])  # the owner sees every row
+    mine = holds("action-2", viewer, [[100]])  # the Viewer's rows answer the same: so they see what the owner sees?
+    out |= {"first_as_runner": mine(True), "first_as_before": mine(False)}
+    out["same_again"] = holds("action-3", viewer, [[100]])(True)
+    out["moved"] = holds("action-4", viewer, [[60]])(True)
+    out["owners_own_run"] = holds("manual-5", owner, [[60]], acted=False)(False)
+finally:
+    with db.connect() as c:
+        c.execute("DELETE FROM flow_steps WHERE run_id LIKE %s", [P + "/%"])
+        c.execute("DELETE FROM agent_runs WHERE project = %s", [P])
+        c.execute("DELETE FROM flow_runs WHERE project = %s", [P])
+print(json.dumps(out))
+"""
+
+
+def test_changed_condition_compares_only_the_runners_own_runs(acts):
+    """LOW-3: `condition {changed}` in a run an object action started compares the agent step's result with the same
+    person's previous such run, never with someone else's: against the owner's it said, in one bit, whether the rows
+    hidden from a Viewer matter ("unchanged" = you see what the owner sees). A first run counts as changed; other
+    runs compare as before (the owner's own run with the latest run before it, whoever started that)."""
+    r = engine(CHANGED, stdin=json.dumps({"viewer": acts["uid"]["viewer"]}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    out = json.loads(r.stdout.splitlines()[-1])
+    assert out["first_as_before"] is False, "the oracle, as it was: the Viewer's first run compared with the owner's"
+    assert out == {"first_as_runner": True, "first_as_before": False, "same_again": False, "moved": True, "owners_own_run": False}, out

@@ -457,7 +457,8 @@ def _flat(results: list) -> list:
 
 def check(answer: str, results: list, vocab: set[str] = frozenset(), members: set[str] = frozenset(),
           fields: set[str] = frozenset(), asked: str = "", notes: list = (), pending: list = (), question: str = "",
-          spans: bool = False, today: date | None = None, labels: list[str] = (), terms: tuple = (), actions: tuple = ()) -> dict:
+          spans: bool = False, today: date | None = None, labels: list[str] = (), terms: tuple = (), actions: tuple = (),
+          wrote: list = ()) -> dict:
     """AG-2: {"numbers": [...], "names": [...]} in `answer` not backed by `results` (tool outputs/result rows only).
     `terms`, `actions` = the engine's MEL words and action names (abi.agents.grounding passes them; the harness's
     `vocab` carries its own): words that ground a name like vocab, and IDs spelled out ("Detect Model").
@@ -503,9 +504,16 @@ def check(answer: str, results: list, vocab: set[str] = frozenset(), members: se
     # 1.1: a figure written in a definition's prose (a report, page or visual title, a description: three words or more
     # in one text, never an ID or a row cell) grounds that same figure exactly, like the person's own words: "the
     # 28-day trend" from a title; never rounded, a ratio or a figure of the data
+    # 1.2.6 M6: only prose a person wrote. `wrote` = the inputs of the agent's own tool calls (the harness sees each):
+    # a title or description the agent saved itself comes back in a result as its own words, and grounds no figure.
+    # ponytail: told apart by this session's calls only (a result names no author); text an agent saved in another
+    # session, or a specialist did, still grounds: per-definition authorship from the engine closes that.
     if HARNESS:
-        rows = set(cells)
-        typed |= {v for t in texts if t not in rows and len(t.split()) >= 3 for _, v, _, _, _ in numbers(t)}
+        rows, own = set(cells), []
+        _walk(list(wrote), [], own)
+        own = {" ".join(t.split()).lower() for t in own}
+        typed |= {v for t in texts if t not in rows and len(t.split()) >= 3 and " ".join(t.split()).lower() not in own
+                  for _, v, _, _, _ in numbers(t)}
     if today:
         typed.add(float(today.year))
         found += "\n" + "\n".join(_day(str(today.year), f"{today.month:02}", f"{today.day:02}"))

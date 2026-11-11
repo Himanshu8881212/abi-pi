@@ -56,6 +56,7 @@ const DATA_FILE = /\.(csv|tsv|parquet|xlsx?|avro|arrow|feather|jsonl|ndjson|db|d
 const PREFS = path.join(os.homedir(), ".abi-pi", `prefs-${process.env.ABI_USER || "admin"}.json`);
 const LOG = path.join(ROOT, "logs", `harness-${new Date().toISOString().slice(0, 10)}.jsonl`);
 const WITHHELD = "I couldn't back the numbers and names in my answer with a tool result, so I won't state it.";
+const UNCHECKED = "I couldn't check my answer against the tool results (the grounding check failed to run), so I won't state it. Please ask again.";
 
 function log(entry: Record<string, unknown>) {
 	try {
@@ -159,6 +160,7 @@ export default async function abi(pi: ExtensionAPI) {
 		model: undefined as { project: string; sm: any } | undefined,  // the digest's semantic_model: ground.py's reads
 		retry: "",
 		asked: "",
+		wrote: [] as unknown[],  // 1.2.6 M6: the inputs of this session's tool calls: prose the agent saved itself grounds no figure
 		retried: false,
 		needRetry: false,
 		flags: 0,
@@ -252,7 +254,7 @@ export default async function abi(pi: ExtensionAPI) {
 		"data_quality", "list_reports", "list_tools", "list_agents", "list_flows", "ml_models", "changes", "visual_data", "dataset_data", "rls_rules",
 		"list_snapshots", "preview_steps", "edit_history", "edit_proposals", "flow_runs", "agent_runs", "history", "diff", "ml_history", "get_sharing",
 		"list_share_links", "shared_with_me", "test_tool", "run_tool", "test_agent", "sql_query", "project_locale", "remote_settings", "check_condition",
-		"load_runs"]);
+		"load_runs", "ontology", "get_object", "list_objects", "object_history", "export_ontology", "propose_ontology"]);  // 1.2.6 M6
 	const READ_STEPS = new Set(["abi_tools", "abi_show", "abi_explore", "abi_sync", "abi_health", "abi_cli", "abi_prefs", "abi_vault", "read", "ls", "grep", "find", "subagent", "tool_search"]);
 	let readsFrom: string | undefined;
 	let modeAt = 0, modeNow = process.env.ABI_PI_MODE === "viewer" ? "viewer" : "developer";
@@ -437,6 +439,7 @@ export default async function abi(pi: ExtensionAPI) {
 	// ---------- guard: ABI is the only door to data ----------
 	pi.on("tool_call", async (event, ctx) => {
 		state.started.set(event.toolCallId, Date.now());
+		state.wrote.push(event.input);
 		const name = event.toolName;
 		if (name === "subagent" && !sub) {
 			const inp: any = event.input ?? {};
@@ -647,9 +650,13 @@ export default async function abi(pi: ExtensionAPI) {
 			Object.entries<any>(cols).filter(([c, ty]) => /VARCHAR|DATE|TIMESTAMP|BOOLEAN/.test(ty) || /^(year|month|quarter|week)/.test(c)).map(([c]) => `${t}.${c}`));
 		const ms = (sm.measures ?? []).map((m: any) => `${m.id} (${m.name})`);
 		const rels = (sm.relationships ?? []).map((x: any) => `${x.from?.table ?? x.from}->${x.to?.table ?? x.to}`);
+		// 1.2.6 M6: the object types with their link IDs (→ along the link, ← its inverse) and the type each leads to
+		const objs = (sm.objects ?? []).map((x: any) => `${x.id} (${x.table}, title ${x.title}` +
+			`${x.links?.length ? "; " + x.links.map((l: any) => `${l.link}${l.inverse ? "←" : "→"}${l.to}`).join(", ") : ""})`);
 		return `Model of ${p} (semantic_model digest; call semantic_model for expressions and descriptions):\n` +
 			`tables: ${tables.join(", ")}\nrelationships: ${rels.join(", ") || "none"}\nmeasures: ${ms.join(", ") || "none"}\n` +
-			`dimensions: ${dims.slice(0, 150).join(", ")}${dims.length > 150 ? ", …" : ""}`;
+			`dimensions: ${dims.slice(0, 150).join(", ")}${dims.length > 150 ? ", …" : ""}` +
+			(objs.length ? `\nobjects: ${objs.slice(0, 60).join(", ")}${objs.length > 60 ? ", …" : ""}` : "");
 	}
 
 	async function today(p?: string): Promise<string> {
@@ -677,11 +684,12 @@ export default async function abi(pi: ExtensionAPI) {
 		const bad = await ground(answer);
 		if (!bad) return;
 		state.flags++;
-		log({ event: "grounding", numbers: bad.numbers.length, names: bad.names.length, retry: !state.retried,
+		log({ event: "grounding", numbers: bad.numbers.length, names: bad.names.length, retry: !state.retried && !bad.error,
 			// counts only, like ABI's audit row; the flagged values only when debugging locally
 			...(process.env.ABI_PI_DEBUG ? { flagged: [...bad.numbers, ...bad.names] } : {}) });
 		let shown: string;
-		if (!state.retried) {
+		if (bad.error) shown = UNCHECKED;  // 1.2.6 M6: fail closed: an answer the check couldn't read is never shown
+		else if (!state.retried) {
 			state.retried = state.needRetry = true;
 			state.retry = bad.retry;  // M2.2: the hidden retry names what failed and lists the rows it may quote
 			shown = bad.masked; // the draft the retry rewrites shows [not verified] where the flagged values were
@@ -706,12 +714,14 @@ export default async function abi(pi: ExtensionAPI) {
 	// the app's own words the agent offers (abi_show's pages, the sidebar's sections and labels, the modes): never data
 	const APP = [...PAGES, "My analyses", "Start", "Data", "Data Model", "Diagram", "Queries", "Visualizations", "Automate", "Knowledge",
 		"Govern", "Settings", "Usage", "Developer", "Viewer", "Alert with the page closed", "Email this report"];
-	type Grounded = { numbers: string[]; names: string[]; masked: string; final: string | null; retry: string };
+	type Grounded = { numbers: string[]; names: string[]; masked: string; final: string | null; retry: string; error?: boolean };
+	// 1.2.6 M6: ground.py crashed or answered no JSON: the answer is withheld like an ungrounded one, never let through
+	const FAILED: Grounded = { numbers: [], names: [], masked: "", final: null, retry: "", error: true };
 	/** scripts/ground.py on an answer: the sources of this exchange and the previous one, and the project's model for the
 	 *  reads it makes through ABI as the person (filter values, members, code labels); null when nothing is flagged. */
 	function ground(answer: string): Promise<Grounded | null> {
 		const all = (k: keyof Sources) => state.ex.flatMap((e) => e[k]);
-		const req = { answer, results: all("results"), notes: all("notes"), pending: all("pending"), asked: state.asked,
+		const req = { answer, results: all("results"), notes: all("notes"), pending: all("pending"), asked: state.asked, wrote: state.wrote,
 			vocab: [...AREAS.core, ...Object.values(AREAS.areas).flatMap((a) => a.tools), "ABI", "Pi", "GPT", ...APP],
 			today: new Date().toISOString().slice(0, 10), project: state.model?.project, model: state.model?.sm };
 		return new Promise((resolve) => {
@@ -719,14 +729,14 @@ export default async function abi(pi: ExtensionAPI) {
 			let out = "", err = "";
 			p.stdout.on("data", (d: Buffer) => (out += d));
 			p.stderr.on("data", (d: Buffer) => (err += d));
-			p.on("error", (e) => { log({ event: "grounding_error", error: String(e).slice(0, 200) }); resolve(null); });
+			p.on("error", (e) => { log({ event: "grounding_error", error: String(e).slice(0, 200) }); resolve(FAILED); });
 			p.on("close", () => {
 				try {
 					const r = JSON.parse(out);
 					resolve(r.numbers.length || r.names.length ? r : null);
 				} catch (e) {
 					log({ event: "grounding_error", error: (err.trim() || String(e)).slice(-200) });
-					resolve(null);
+					resolve(FAILED);
 				}
 			});
 			p.stdin.end(JSON.stringify(req));
@@ -755,7 +765,10 @@ export default async function abi(pi: ExtensionAPI) {
 			const t = (m?.content ?? []).map((c: any) => (c.type === "text" ? c.text : "")).join("");
 			if (m?.role === "user") { exchange(); state.asked += "\n" + t; }
 			else if (m?.role === "assistant") {
-				for (const c of m.content ?? []) if (c.type === "toolCall" && typeof c.arguments?.project === "string") state.project = c.arguments.project;
+				for (const c of m.content ?? []) if (c.type === "toolCall") {
+					state.wrote.push(c.arguments);
+					if (typeof c.arguments?.project === "string") state.project = c.arguments.project;
+				}
 			} else if (m?.role === "toolResult") ingest(m.toolName, t, !!m.isError);
 		}
 		if (allowed) pi.setActiveTools(pi.getActiveTools().filter((t) => allowed.has(t) || t === "abi_tools"));

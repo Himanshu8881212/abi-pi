@@ -60,7 +60,7 @@ WRITES = {"set_rls_rule", "set_measure", "delete_measure", "set_glossary_term", 
 READS = {"changes", "check_condition", "data_quality", "dataset_data", "docs", "edit_history", "edit_proposals", "export_visual",
          "flow_runs", "history", "how_calculated", "list_agents", "list_flows", "list_reports", "list_tools", "load_runs",
          "ml_models", "preview_steps", "readiness", "report_snapshot", "rls_rules", "run_tool", "semantic_model",
-         "semantic_query", "test_agent", "test_tool", "visual_data"}
+         "semantic_query", "test_agent", "test_tool", "visual_data", "ontology", "get_object", "list_objects"}  # 1.2.6 M6: object reads
 ALLOWED = READS | WRITES | READS_ONLY  # the page's actions; every other one is ABI's app's
 
 CSS = """
@@ -1323,9 +1323,11 @@ function glossary(box){const list=h('div','cards rows');box.append(list);
  const edit=(t,isNew)=>{const c=card(isNew?'New term':(t.term||t.id)),term=h('input','f'),def=h('textarea','f'),ms=h('input','f');[term,def,ms].forEach(e=>e.classList.add('ed'));term.value=t.term||'';def.value=t.definition||'';ms.value=(t.measures||[]).join(', ');
   term.placeholder='business term';def.placeholder='what it means';ms.placeholder=isNew?'e.g. revenue, units':'no measure: a word for a column';
   if(t.term===MASK){term.value=colName(t.id||'term');def.value='';def.placeholder='Not shown with your access: it may quote data.';c.classList.add('masked-row')}
+  // 1.2.6 M6: an object type's, property's or link's description, listed as a term; it changes with the ontology, not here
+  if(/^(object|property|link):/.test(t.id||'')){[term,def,ms].forEach(e=>e.readOnly=true);ms.value='ontology · '+t.id;rowcard(c,fld('Term',term),fld('Definition',def),fld('Defined by',ms));return c}
   if(isNew)c.append(h('label','l','Term'),term,h('label','l','Definition'),def,h('label','l','Implemented by (measure IDs)'),ms);
   else{def.rows=1;rowcard(c,fld('Term',term),fld('Definition',def),fld('Implemented by',ms))}
-  act(c,isNew?'Create':'Save',async()=>{await api('set_glossary_term',{term:term.value,definition:def.value,measures:ms.value.split(',').map(x=>x.trim()).filter(Boolean),columns:t.columns||[]});
+  act(c,isNew?'Create':'Save',async()=>{await api('set_glossary_term',{term:term.value,definition:def.value,measures:ms.value.split(',').map(x=>x.trim()).filter(Boolean),columns:(t.columns||[]).map(x=>x.table?x.table+'.'+x.column:x),objects:t.objects||[],links:t.links||[]});
    Object.assign(t,{term:term.value,definition:def.value});if(isNew)D.glossary.push(t);return 'Saved through ABI.'},1);
   if(!isNew)act(c,'Delete',async()=>{await api('delete_glossary_term',{id:t.id});D.glossary=D.glossary.filter(x=>x!==t);show('glossary')});return c};
  const bar=h('div','row bar top');bar.append(btn('New term',()=>list.firstChild.after(edit({},true)),1));box.insertBefore(bar,list);
@@ -1632,8 +1634,9 @@ function toolForm(c){const nm=inpt('e.g. Store KPIs for a month'),de=inpt('what 
    inputs:{type:'object',additionalProperties:false,properties:Object.fromEntries(I.map(i=>[i.name,i.spec])),required:I.map(i=>i.name)},
    query:{measures:m,dimensions:[...by.selectedOptions].map(o=>o.value),filters:I.map(i=>({column:i.col,op:'=',value:{$input:i.name}})),...(lim.value?{limit:+lim.value}:{})},
    outputs:{type:'array',items:{type:'object'}},permissions:{role:'viewer'},tests:[]}}}
-// what a custom agent may call (ABI: its project's tools, two reads, four actions, other published agents)
+// what a custom agent may call (ABI: its project's tools, four reads, four actions, other published agents)
 const AGENT_TOOLS=[['semantic_query','Query the measures in its scope (read)'],['report_snapshot','Render a report as PDF or PNG (read)'],
+ ['get_object','Read one object of the ontology, with its links, within its scope (read)'],['list_objects','List and filter objects of the ontology within its scope (read)'],
  ['send_email','Send an email (sends)'],['post_message','Post a message: app inbox, Slack or Teams (sends)'],['refresh','Reload a table from its source (changes data)'],
  ['propose_edit','Propose a change to an edit table; a person approves it (changes data)']];
 const lmulti=(opts,on)=>{const m=h('select','f');m.multiple=true;m.size=Math.min(8,Math.max(3,opts.length));opts.forEach(([v,l])=>{const o=new Option(l,v);o.selected=(on||[]).includes(v);m.append(o)});return m};

@@ -3,8 +3,8 @@
 An agent is `agents/<id>.json` (schemas/v1/agent.json) with its evaluation set `agents/<id>.eval.json`
 (schemas/v1/eval.json). `save_agent` always saves a draft owned by the caller; creating one needs a Ready model
 (`require_ready`, also the gate of test, publish and run). Imports accept agents on an unready model: they stay
-inert until it is Ready. An agent may hold only custom tools, `semantic_query`, `report_snapshot` and D-3's
-action tools.
+inert until it is Ready. An agent may hold only custom tools, `semantic_query`, `report_snapshot`, D-3's
+action tools and (1.2.6 M6) the object reads `get_object` and `list_objects`.
 """
 
 
@@ -18,7 +18,8 @@ from abi.security import Role, User
 from abi.semantic import lineage, mel, model, planner
 from abi.tools import AGENT_ACTION_TOOLS, saved
 
-BUILTIN = ("semantic_query", "report_snapshot", *AGENT_ACTION_TOOLS)  # every tool an agent may hold besides custom tools
+OBJECTS = ("get_object", "list_objects")  # 1.2.6 M6: reads of objects, within the agent's scope (`walked`)
+BUILTIN = ("semantic_query", "report_snapshot", *AGENT_ACTION_TOOLS, *OBJECTS)  # every tool an agent may hold besides custom tools
 ASK = "ask_agent"  # AGENT-AS-TOOL: the tool offered for the agent's `agents`
 
 
@@ -78,6 +79,29 @@ def outside(q: dict, measures: set[str], tables: set[str], g: dict, files: dict 
     ms = set(q.get("measures", []))
     ms |= {n[8:] for n in lineage.reach(g, {f"measure:{m}" for m in ms}, "upstream") if n.startswith("measure:")}
     return sorted(ms - measures) + sorted((_tables(q) | (_bridged(q, files) if files else set())) - tables)
+
+
+def walked(name: str, payload: dict, files: dict) -> dict:
+    """1.2.6 M6: what a get_object or list_objects call reads, as a query for `outside`: the type's table, every table
+    on the links it walks (the relationships of each `via`, and the type reached) and, for get_object, the tables of
+    the type's one-to-one properties and its measures. {} for a call the action refuses anyway (no such type)."""
+    o, m = files.get("model/ontology.json") or {}, files.get("model/model.json") or {}
+    objs, links = {x["id"]: x for x in o.get("objects", [])}, {ln["id"]: ln for ln in o.get("links", [])}
+    rels = {r["id"]: r for r in m.get("relationships", [])}
+    if (x := objs.get(payload.get("type"))) is None:
+        return {}
+    get = name == "get_object"
+    tables = {x["table"]} | ({p["column"].split(".", 1)[0] for p in x.get("properties", []) if "." in p["column"]} if get else set())
+    chains = [[i] for i in payload.get("links") or []] if get else [f["link"].split(".") for f in payload.get("filters") or [] if f.get("link")]
+    for ids in chains:
+        at = x
+        for ln in map(links.get, ids):
+            if ln is None or at is None:
+                break  # the action refuses an unknown link
+            tables |= {rels[r][s]["table"] for r in ln["via"] if r in rels for s in ("from", "to")}
+            at = objs.get(ln["to"] if ln["from"] == at["id"] else ln["from"])
+            tables |= {at["table"]} if at else set()
+    return {"measures": x.get("measures", []) if get else [], "dimensions": [f"{t}.*" for t in sorted(tables)]}
 
 
 def tools_outside(a: dict, files: dict) -> dict[str, list[str]]:

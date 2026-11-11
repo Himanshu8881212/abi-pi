@@ -167,7 +167,7 @@ def tools(project: str | None = None) -> list[dict]:
 # ponytail: keyword routing; Responses `tool_search` + `defer_loading` if only gpt-5.4+ Responses providers remain.
 CORE = {"list_projects", "semantic_model", "semantic_query", "explain_change", "how_calculated", "lineage", "docs", "readiness",
         "detect_model", "data_quality", "list_reports", "list_tools", "list_agents", "list_flows", "ml_models",
-        "remember", "changes"}
+        "remember", "changes", "ontology", "get_object", "list_objects"}  # 1.2.6 M6: questions about one thing
 AREAS = {  # area: (what it holds, action module or module.action prefixes (longest wins), question keyword stems)
     "data": ("load, connect, transform, refresh and delete sources and tables",
              ("abi.ingest", "abi.storage", "abi.semantic.detect", "abi.semantic.preview_steps", "abi.tools.builtin.refresh"),

@@ -251,6 +251,7 @@ PRODUCTION_READS = frozenset({
     "how_calculated", "inbound_approvals", "inbox", "lineage", "list_agents", "list_embed_keys", "list_flows",
     "list_reports", "list_secrets", "list_snapshots", "list_share_links", "list_subscriptions", "list_tools", "load_runs", "ml_history", "ml_models", "ml_trials",
     "ontology", "export_ontology", "object_history",  # 1.2.6: definitions only; an object's history
+    "get_object", "list_objects", "propose_ontology",  # 1.2.6 M6: objects as the caller sees them; a draft that saves nothing
     "project_locale", "readiness", "remote_branches", "remote_settings", "report_snapshot", "rls_rules", "run_agent",
     "run_tool", "semantic_model", "semantic_query", "sql_query", "visual_data",
 })

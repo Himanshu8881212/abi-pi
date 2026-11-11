@@ -16,7 +16,10 @@
     "list_flows",
     "ml_models",
     "remember",
-    "changes"
+    "changes",
+    "ontology",
+    "get_object",
+    "list_objects"
   ],
   "unclassified": [],
   "areas": {
@@ -49,10 +52,7 @@
         "delete_ontology_item",
         "delete_rls_rule",
         "export_ontology",
-        "get_object",
-        "list_objects",
         "object_history",
-        "ontology",
         "propose_ontology",
         "remove_relationship",
         "rls_rules",

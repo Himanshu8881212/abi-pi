@@ -568,7 +568,7 @@ def follow_links(files: dict) -> dict:
 
 def grants(files: dict) -> dict[str, dict]:
     """1.2.6 M4 (#16, owner answer 3): {action type ID: {action, follow}} of each action type that widens access: one
-    Viewers may run (role viewer), one that starts a flow (its steps run as the flow's owner, FL-6), or one that writes
+    Viewers may run (role viewer), one that starts a flow (its steps run as the person who clicks), or one that writes
     to a table an `rls: follow` link walks (`follow`: data there decides who sees which rows, rls.resolve). Saving one,
     or changing it, is the Owner's, with a confirmation saying what it lets people do."""
     o, mj = files.get(ontology.FILE) or {}, files.get("model/model.json") or {}
@@ -639,12 +639,16 @@ def granting(project: str, files: dict, g: dict) -> str:
     the table written."""
     ruled = {r["table"] for r in (files.get(RLS) or {}).get("rules", [])}
     names = {x["id"]: x["plural"] for x in (files.get(ontology.FILE) or {}).get("objects", [])}
+    fired = lambda t: sorted(f["id"] for r, f in files.items() if r.startswith("flows/") and isinstance(f, dict)  # noqa: E731
+                             and (f.get("trigger") or {}).get("type") == "writeback" and t in f["trigger"].get("tables", []))
     out = []
     for i, x in sorted(g.items()):
         a, w = x["action"], x["action"].get("writes")
-        does = ([f"write {', '.join(w['set'])} of table {w['table']}"] if w else []) + (
-            [f"start flow '{a['flow']}' (its steps run as the flow's owner; the typed inputs reach what it sends,"
-             " posts or remembers as that owner)"] if a.get("flow") else [])
+        # M4 LOW-5: the write is an edit batch, so the flows edits of that table trigger run too (writeback._fire)
+        does = ([f"write {', '.join(w['set'])} of table {w['table']} (each write also starts the flows that edits of"
+                 f" {w['table']} trigger, as their owners" + (f": now {', '.join(fs)}" if (fs := fired(w["table"])) else "") + ")"] if w else []) + (
+            [f"start flow '{a['flow']}' (its steps run as the person who clicks, with their permissions; the typed inputs"
+             " reach what it sends, posts or remembers as them)"] if a.get("flow") else [])
         say = (f"Action type '{i}' lets {a.get('role', 'editor').capitalize()}s of project '{project}' {' and '.join(does)} on"
                f" {names.get(a['object'], a['object'])}" + ", each run confirmed" * bool(a.get("confirm"))
                + ", as a proposal an Editor approves" * bool(a.get("approval")) + ".")

@@ -25,7 +25,10 @@
         "list_flows": "direct",
         "ml_models": "direct",
         "remember": "direct",
-        "changes": "direct"
+        "changes": "direct",
+        "ontology": "direct",
+        "get_object": "direct",
+        "list_objects": "direct"
       }
     },
     "blender": {

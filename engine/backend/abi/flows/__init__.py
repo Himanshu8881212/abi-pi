@@ -5,7 +5,8 @@ after the steps its `after` names (FLOW-DAG: branches, joins; `when` skips a ste
 parallel, `on_failure` decides what a failure does to the other branches). Every step is an action (principle 1):
 `STEPS` maps a step type to its action, an `action` step names its own. A run is a Postgres `flow_runs` row whose ID
 `<project>/<flow>/<trigger key>` is the PRIMARY KEY (FL-4: a trigger can't start the same run twice); the worker task
-`abi.worker.run_flow` runs the steps in order as the flow's owner (FL-6) and traces each one in `flow_steps` (FL-5);
+`abi.worker.run_flow` runs the steps in order as the flow's owner (FL-6; a run an object action or an inbound message
+started: as the person who clicked or sent it) and traces each one in `flow_steps` (FL-5);
 a retry resumes the run after its `ok` steps (FL-4). Triggers (FL-2): `tick` (every minute) starts scheduled flows,
 keyed by the fire time, and data-condition flows on false→true (`flow_conditions`); `after_refresh` (every table
 load, or every edit batch for write-back triggers) starts flows on that table, keyed by the snapshot; `webhook`
@@ -328,7 +329,7 @@ def _input_errors(act, inp: dict) -> list[dict]:
 
 
 def _step(run_id: str, pos: int, step: dict, project: str, owner: User, data: dict) -> tuple[str | None, bool]:
-    """Run one step as the owner and trace it (committed on its own, so a crash keeps the steps so far). Returns the
+    """Run one step as `owner` (the flow's owner, or the run's runner or sender: `execute`) and trace it (committed on its own, so a crash keeps the steps so far). Returns the
     error and whether a retry may fix it: not a 4xx (permission, invalid input, confirmation)."""
     name = step["action"] if step["type"] == "action" else STEPS.get(step["type"])
     inp, out, error, retry = None, None, None, True
@@ -405,15 +406,18 @@ def sending():
 
 def _changed(run_id: str, agent_step: str, data: dict) -> dict:
     """AT-2 "answer changed" (D-31): the sha256 of the agent run's tool and query result outputs differs from the same
-    step's in the flow's previous non-test run (none = changed). Code over traces, never the LLM's wording."""
+    step's in the flow's previous non-test run (none = changed). Code over traces, never the LLM's wording.
+    M4 LOW-3: in a run an object action started (it reads as its runner), the previous such run of the same person
+    only: against anyone else's, the outcome would say whether their rows are the runner's (one bit of hidden data)."""
     project, flow, _ = run_id.split("/")
     fp = lambda trace: fingerprint([t["output"] for t in trace])
+    mine = " AND r.trigger ? 'action' AND r.started_by = (SELECT started_by FROM flow_runs WHERE id = %s)" if ACTED.get() else ""
     with db.connect() as conn:
         now = conn.execute("SELECT trace FROM agent_runs WHERE id::text = %s", [data[agent_step]["run"]]).fetchone()
         before = conn.execute("SELECT a.trace FROM flow_runs r JOIN flow_steps s ON s.run_id = r.id JOIN agent_runs a"
                               " ON a.id::text = s.output->>'run' WHERE r.project = %s AND r.flow = %s AND s.step = %s"
-                              " AND s.status = 'ok' AND r.id <> %s AND NOT starts_with(r.id, %s) ORDER BY r.created DESC LIMIT 1",
-                              [project, flow, agent_step, run_id, f"{project}/{flow}/test-"]).fetchone()
+                              f" AND s.status = 'ok' AND r.id <> %s AND NOT starts_with(r.id, %s){mine} ORDER BY r.created DESC LIMIT 1",
+                              [project, flow, agent_step, run_id, f"{project}/{flow}/test-", *([run_id] if mine else [])]).fetchone()
     return {"holds": before is None or fp(before["trace"]) != fp(now["trace"])}
 
 
@@ -502,7 +506,8 @@ def _graph(run_id: str, f: dict, project: str, owner: User, data: dict, done: di
 
 
 def execute(run_id: str, last: bool = True) -> None:
-    """The worker's run: steps in order as the owner, each traced (FL-5); a failure stops the run and goes to the feed.
+    """The worker's run: steps in order as the flow's owner (a run an object action started: as the person who clicked;
+    a message's: as its sender), each traced (FL-5); a failure stops the run and goes to the feed.
     A retry (FL-4) reuses the outputs of steps already `ok`, so a send that went out is never repeated. Raises on a
     failure a retry may fix; a 4xx (permission, invalid input, confirmation) returns: retrying can't fix it.
     `last`: no retry follows this attempt. Until then a retryable failure leaves the run `queued` (error kept), so
@@ -524,7 +529,8 @@ def execute(run_id: str, last: bool = True) -> None:
         # after an approval too, sees and does only what the person who clicked may (row-level security, roles, sends)
         acting = "action" in (run["trigger"] or {})
         if acting and (bad := [s["id"] for s in f["steps"] if not ontology.step_ok(s)]):  # the save-time allowlist, again
-            raise ValueError(f"step(s) {', '.join(bad)} aren't ones an action type's flow may run.")
+            # M4 LOW-4: a 4xx, so the run fails now: the flow file is the same on every retry
+            raise ActionFailed(409, f"step(s) {', '.join(bad)} aren't ones an action type's flow may run.")
         with db.connect() as conn:
             owner = security.user(conn, run["started_by"] if message or acting else int(f["owner"]))
         if owner is None:
@@ -837,7 +843,7 @@ class RunFlow(FlowRef):
 
 @action(Role.editor)
 def run_flow(conn, user: User, args: RunFlow) -> dict:
-    """Runs a flow now (manual trigger). Its steps run in the worker with the flow owner's permissions; follow it with flow_runs {run}. With `key` (e.g. an orchestrator's task run ID), a retried call starts no second run: `started` is false and `run` is the first call's run."""
+    """Runs a flow now (manual trigger). Its steps run in the worker with the flow owner's permissions (a flow an object action starts runs as the person who clicked instead: run_object_action); follow it with flow_runs {run}. With `key` (e.g. an orchestrator's task run ID), a retried call starts no second run: `started` is false and `run` is the first call's run."""
     _load(args.project, args.flow)
     if args.key is None:
         return _started(start(args.project, args.flow, f"manual-{uuid.uuid4().hex}")) | {"started": True}
@@ -900,7 +906,7 @@ def _waiting(conn, user: User, project: str, run_id: str, step: str | None, appr
 
 @action(Role.editor)
 def approve_flow_run(conn, user: User, args: RunRef) -> dict:
-    """Approves a flow run waiting at an approval step: it resumes and runs its remaining steps as the flow owner. Always asks the user to confirm, showing the flow, the message and the remaining steps."""
+    """Approves a flow run waiting at an approval step: it resumes and runs its remaining steps as before the wait: as the flow's owner, or, for a run an object action started, as the person who ran that action (never as you). Always asks the user to confirm, showing the flow, the message and the remaining steps."""
     r, s, f = _waiting(conn, user, args.project, args.run, args.step, approve=True)
     msg = s["input"]["message"]
     finished = {x["step"] for x in conn.execute("SELECT step FROM flow_steps WHERE run_id = %s AND status IN ('ok', 'skipped')", [args.run])}
