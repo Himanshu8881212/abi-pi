@@ -474,14 +474,15 @@ print(json.dumps({"outside": sorted(mcp.OUTSIDE), "production": sorted(actions.P
 
 def test_viewer_mode_allows_object_reads(saved):
     """The harness's Viewer mode (index.ts READS), the app's page (scripts/app.py READS) and a production environment
-    let the object reads through, and never the object action; the core has them, so every specialist does; and a
+    let the object reads through, and never the object action as a read (on the app's page it is a write, so Developer
+    only: M7's forms); the core has them, so every specialist does; and a
     project Viewer reads objects as they see them."""
     ts = (ROOT / ".pi/extensions/abi/index.ts").read_text()
     reads = set(re.findall(r'"(\w+)"', re.search(r"const READS = new Set\(\[(.*?)\]\);", ts, re.S)[1]))
     new = {"ontology", "get_object", "list_objects"}
     assert new <= reads and not {"run_object_action", "save_ontology", "delete_ontology_item"} & reads
     import app
-    assert new <= app.READS and not new & (app.WRITES | app.READS_ONLY) and "run_object_action" not in app.ALLOWED
+    assert new <= app.READS and not new & (app.WRITES | app.READS_ONLY) and "run_object_action" in app.WRITES and "run_object_action" not in app.READS | app.READS_ONLY  # M7: a Developer-only write on the page, never a read
     areas = json.loads((ROOT / "harness/areas.json").read_text())
     assert new <= set(areas["core"]) and not new & {t for a in areas["areas"].values() for t in a["tools"]}
     for f in (ROOT / ".pi/agents").glob("*.md"):  # regenerated from areas.json (scripts/gen_agents.py)
