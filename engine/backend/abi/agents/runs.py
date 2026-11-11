@@ -71,8 +71,18 @@ def _refused(name: str, payload: dict, allowed: list[str], files: dict, g: dict,
         return f"'{name}' is not one of your tools ({', '.join(allowed)})."
     if name == studio.ASK:
         return None if payload.get("agent") in agents else f"'{payload.get('agent')}' is not one of the agents you may ask ({', '.join(agents)})."
+    if name == "send_email" and payload.get("docs"):  # the whole project's documentation: every table and measure
+        return "The project's documentation covers more than your scope: send without `docs`."
     q = payload if name == "semantic_query" else payload.get("data")  # send_email/post_message attach a query or tool
-    cond = None  # a condition attached as `data` ({query, measure, op, value, period?}): its query, grouped by its period column
+    # An attached `data` dict may read as a tool call, a query or a condition, and the action takes the one that fits
+    # best (a tool call beside in-scope `measures` runs the tool): every reading it could take is checked, each in
+    # addition to the others, never instead
+    tool = None
+    if name != "semantic_query" and isinstance(q, dict) and isinstance(q.get("tool"), str):
+        if q["tool"] not in allowed:
+            return f"Tool '{q['tool']}' is not one of your tools."
+        tool = (files.get(f"tools/{q['tool']}.json") or {}).get("query")  # schema-checked: placeholders only in values
+    cond = None  # a condition ({query, measure, op, value, period?}): its query, grouped by its period column
     if isinstance(q, dict) and isinstance(q.get("query"), dict):
         try:
             c = Check.model_validate(q).model_dump(mode="json")
@@ -87,10 +97,6 @@ def _refused(name: str, payload: dict, allowed: list[str], files: dict, g: dict,
     if name == "semantic_query" and isinstance(q, dict) and isinstance(payload.get("expressions"), list):
         ms, cols = uses(payload["expressions"])  # M2.1: what its inline expressions read is in the query too
         q = q | {"measures": q["measures"] + ms, "dimensions": q["dimensions"] + cols, "expressions": payload["expressions"]}
-    if isinstance(q, dict) and isinstance(q.get("tool"), str):
-        if q["tool"] not in allowed:
-            return f"Tool '{q['tool']}' is not one of your tools."
-        q = (files.get(f"tools/{q['tool']}.json") or {}).get("query")  # schema-checked: placeholders only in values
     if name not in studio.BUILTIN:  # a custom tool reads its own query
         q = (files.get(f"tools/{name}.json") or {}).get("query")
     if name in studio.OBJECTS:  # 1.2.6 M6: every table the call reads or walks, and the type's measures
@@ -100,7 +106,7 @@ def _refused(name: str, payload: dict, allowed: list[str], files: dict, g: dict,
             q = None  # actions.run refuses it with the details
     # the request's page/visual; render_snapshot checks what is drawn again (`_call` sets builtin.SCOPE)
     snap = _snapshot(files, payload if name == "report_snapshot" else payload.get("report"))
-    if out := list(dict.fromkeys(x for r in [q if isinstance(q, dict) else {}, *([cond] if cond else []), *snap] for x in studio.outside(r, measures, tables, g, files))):
+    if out := list(dict.fromkeys(x for r in [q, tool, cond, *snap] if isinstance(r, dict) for x in studio.outside(r, measures, tables, g, files))):
         return f"Outside your scope: {', '.join(out)}."
     if name in ("refresh", "propose_edit") and payload.get("table") not in tables:
         return f"Table '{payload.get('table')}' is outside your scope."

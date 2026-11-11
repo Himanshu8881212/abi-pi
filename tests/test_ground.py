@@ -884,3 +884,24 @@ def test_own_prose_inside_a_longer_result_text_grounds_no_figure():
     assert TS.count('if (!sub) share("asked.txt"') == 2 and 'asked: sub ? shared("asked.txt") : state.asked' in TS
     # and a crash before the check reads its input withholds the answer as well
     assert "await ground(answer).catch(() => FAILED)" in TS and 'p.stdin.on("error", () => {})' in TS
+
+
+def test_short_own_prose_a_bare_number_and_a_chain_steps_previous_answer():
+    """Round 3: own prose of any length is the agent's own ("Up 37%" as a visual's title, seen again in a diff), but a
+    bare number or date it sent is not prose (a limit of 10 must not mask a person's "Top 10 cafés by revenue"). In a
+    chain, the previous specialist's answer, which the harness puts into the next task for {previous}, grounds there
+    as a row: it passed its own check. A Lead never inherits a shared folder, and without one nothing is shared."""
+    patch = {"files": [{"path": "reports/sales.json", "patch": '+  "title": "Up 37%"\n+  "title": "Top 10 cafés by revenue"'}]}
+    check = ground.check
+    assert check("Sales are up 37% in the top 10.", [ROW, patch])["numbers"] == []
+    assert check("Sales are up 37% in the top 10.", [ROW, patch], wrote=["Up 37%"])["numbers"] == ["37%"], "two words are prose too"
+    assert check("Sales are up 37% in the top 10.", [ROW, patch], wrote=[{"limit": 10}, "10", "2025-10-10", "Up 37%"])["numbers"] == ["37%"]
+    assert check("Sales are up 37% in the top 10.", [ROW, patch], wrote=[{"limit": 37}, "37", "37%"])["numbers"] == [], "a bare number is no prose"
+    previous = {"rows": [["North took 76.00 and South 12.50, the analyst found."]]}
+    assert check("As found before, South took 12.50.", [previous])["numbers"] == [] and check("South took 13.50.", [previous])["numbers"] == ["13.50"]
+    sub = (ROOT / ".pi/extensions/subagent/index.ts").read_text()
+    assert 'step.task.includes("{previous}") ? previousOutput : undefined' in sub and "ABI_PI_PREVIOUS: handPrevious(previous, step)" in sub
+    assert 'all("results").concat(prev ? [{ rows: [[prev]] }] : [])' in TS and 'path.dirname(process.env.ABI_PI_PREVIOUS ?? "") === SHARED' in TS
+    lead = TS[TS.index('let SHARED = "";'):TS.index("const share = ")]
+    assert lead.index("if (!process.env.ABI_PI_AGENT) {") < lead.index("delete process.env.ABI_PI_SHARED;") < lead.index("fs.mkdtempSync(") < lead.index("} catch {}")
+    assert "if (SHARED) fs.appendFileSync" in TS and 'SHARED ? fs.readFileSync' in TS and "/\\p{L}/u.test(x)" in TS

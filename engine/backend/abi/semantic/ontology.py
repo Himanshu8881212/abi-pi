@@ -524,10 +524,13 @@ class ItemRef(storage.ProjectRef):
 
 @action(Role.editor, definition=True, confirms=True)
 def delete_ontology_item(conn, user: User, args: ItemRef) -> dict:
-    """Deletes one object type, link or action type from the ontology after the person confirms. Refused while another item uses it (a link or action type on an object type)."""
+    """Deletes one object type, link or action type from the ontology after the person confirms. Refused while another item uses it (a link or action type on an object type) or a glossary term names it."""
     o, key = read(args.project), KINDS[args.kind]
     if all(x["id"] != args.id for x in o.get(key, [])):
         raise ActionFailed(404, f"No {args.kind} '{args.id}' in the ontology of project '{args.project}'.")
+    if named := [t["id"] for t in model._read(args.project, "glossary.json").get("terms", []) if args.id in t.get(key, [])]:
+        raise ActionFailed(409, " ".join(f"Term '{t}' names {'object type' if args.kind == 'object' else args.kind} '{args.id}'." for t in named)
+                           + " Remove it from the term first (set_glossary_term).")
     try:
         return _change(conn, user, args.project, {**o, key: [x for x in o[key] if x["id"] != args.id]})
     except ActionFailed as e:  # the import check words a use as a dangling reference; say it as a use

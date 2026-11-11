@@ -58,17 +58,27 @@ const LOG = path.join(ROOT, "logs", `harness-${new Date().toISOString().slice(0,
 const WITHHELD = "I couldn't back the numbers and names in my answer with a tool result, so I won't state it.";
 const UNCHECKED = "I couldn't check my answer against the tool results (the grounding check failed to run), so I won't state it. Please ask again.";
 
-// 1.2.6 M6 round 2: what the agents of one session share for grounding. The Lead makes the folder (its own, removed
-// when it exits) and its specialists inherit the path: wrote.jsonl holds the prose (three words or more) any of them
-// sent as a tool input, so a title a specialist saved grounds no figure for the Lead either; asked.txt holds the
-// person's own messages, which are a specialist's `asked` (never the Lead's task text: a figure the Lead made up
-// would ground in the specialist and come back to the Lead as a row)
-const SHARED = (process.env.ABI_PI_SHARED ??= fs.mkdtempSync(path.join(os.tmpdir(), "abi-pi-")));
-if (!process.env.ABI_PI_AGENT) process.on("exit", () => { try { fs.rmSync(SHARED, { recursive: true, force: true }); } catch {} });
-const share = (file: string, s: string) => { try { fs.appendFileSync(path.join(SHARED, file), s, { mode: 0o600 }); } catch {} };
-const shared = (file: string) => { try { return fs.readFileSync(path.join(SHARED, file), "utf8"); } catch { return ""; } };
+// 1.2.6 M6 round 2: what the agents of one Lead process share for grounding. The Lead makes the folder (always its
+// own, never one inherited from a parent process; removed when it exits) and only its specialists inherit the path:
+// wrote.jsonl holds the text any of them sent as a tool input (a bare number or date aside), so a title a specialist
+// saved grounds no figure for the Lead either; asked.txt holds the person's own messages, which are a specialist's
+// `asked` (never the Lead's task text: a figure the Lead made up would ground in the specialist and come back to the
+// Lead as a row). No folder (it couldn't be made): nothing is shared, and a specialist's `asked` is empty (closed).
+// ponytail: the folder lasts one Lead process. A resumed session replays the Lead's own tool inputs only, so prose
+// its specialists saved before the resume grounds again; authorship per definition from the engine closes that (1.3).
+let SHARED = "";
+try {
+	if (!process.env.ABI_PI_AGENT) {
+		delete process.env.ABI_PI_SHARED;
+		process.env.ABI_PI_SHARED ??= fs.mkdtempSync(path.join(os.tmpdir(), "abi-pi-"));
+	}
+	SHARED = process.env.ABI_PI_SHARED ?? "";
+} catch {}
+if (SHARED && !process.env.ABI_PI_AGENT) process.on("exit", () => { try { fs.rmSync(SHARED, { recursive: true, force: true }); } catch {} });
+const share = (file: string, s: string) => { try { if (SHARED) fs.appendFileSync(path.join(SHARED, file), s, { mode: 0o600 }); } catch {} };
+const shared = (file: string) => { try { return SHARED ? fs.readFileSync(path.join(SHARED, file), "utf8") : ""; } catch { return ""; } };
 function prose(x: unknown, out: string[] = []): string[] {
-	if (typeof x === "string") { if (x.trim().split(/\s+/).length >= 3) out.push(x); }
+	if (typeof x === "string") { if (/\p{L}/u.test(x)) out.push(x); }
 	else if (x && typeof x === "object") Object.values(x).forEach((v) => prose(v, out));
 	return out;
 }
@@ -741,7 +751,10 @@ export default async function abi(pi: ExtensionAPI) {
 		const all = (k: keyof Sources) => state.ex.flatMap((e) => e[k]);
 		// every agent of the session's own prose (wrote.jsonl; this process's inputs whole too); a specialist's `asked` is the person's
 		const theirs = shared("wrote.jsonl").split("\n").filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return ""; } });
-		const req = { answer, results: all("results"), notes: all("notes"), pending: all("pending"), asked: sub ? shared("asked.txt") : state.asked, wrote: state.wrote.concat(theirs),
+		// a chain step: the prior specialist's answer the harness put into this task for {previous} passed its own check, so
+		// its figures ground here as a row (only that file of the shared folder, never the Lead's own task text)
+		const prev = sub && SHARED && path.dirname(process.env.ABI_PI_PREVIOUS ?? "") === SHARED ? shared(path.basename(process.env.ABI_PI_PREVIOUS!)) : "";
+		const req = { answer, results: all("results").concat(prev ? [{ rows: [[prev]] }] : []), notes: all("notes"), pending: all("pending"), asked: sub ? shared("asked.txt") : state.asked, wrote: state.wrote.concat(theirs),
 			vocab: [...AREAS.core, ...Object.values(AREAS.areas).flatMap((a) => a.tools), "ABI", "Pi", "GPT", ...APP],
 			today: new Date().toISOString().slice(0, 10), project: state.model?.project, model: state.model?.sm };
 		return new Promise((resolve) => {

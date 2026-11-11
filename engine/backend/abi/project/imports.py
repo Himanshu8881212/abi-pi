@@ -261,7 +261,7 @@ def _references(conn, project: str, files: dict) -> list[dict]:
     for k, what in (("objects", "object type"), ("links", "link")):  # 1.2.6 M6: a term names only what the ontology has
         known = {x["id"] for x in (files.get(ontology.FILE) or {}).get(k, [])}
         errs += [_err("model/glossary.json", f"$.terms[{i}].{k}[{j}]", f"Unknown {what} '{x}'.",
-                      f"Add it to {ontology.FILE} or remove it from the term.")
+                      f"Term '{term.get('id')}' names it: add it to {ontology.FILE}, or remove it from the term first (set_glossary_term).")
                  for i, term in enumerate((files.get("model/glossary.json") or {}).get("terms", []))
                  for j, x in enumerate(term.get(k, [])) if x not in known]
     errs += [_err("model/datasets.json", f"$.datasets[{i}].query.measures[{j}]", f"Unknown measure '{m}'.",

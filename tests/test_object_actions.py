@@ -1036,8 +1036,9 @@ try:
     # before M6 the Viewer's first run was compared with the owner's action-1: unchanged (not holds) = "you see it all"
     out |= {"first_as_runner": mine(True), "first_as_before": not same("action-1", "action-2")}
     out["same_again"] = holds("action-3", viewer, [[100]])(True)
-    out["moved"] = holds("action-4", viewer, [[60]])(True)
-    out["owners_own_run"] = holds("manual-5", owner, [[60]], acted=False)(False)  # with manual-0, its own kind's last run
+    out["moved"] = holds("action-4", viewer, [[70]])(True)
+    # with manual-0 (60), its own kind's last run: unchanged. Against the latest run of anyone (action-4: 70) it would hold
+    out["owners_own_run"] = holds("manual-5", owner, [[60]], acted=False)(False)
 finally:
     with db.connect() as c:
         c.execute("DELETE FROM flow_steps WHERE run_id LIKE %s", [P + "/%"])
@@ -1090,10 +1091,10 @@ try:
     out["owner_after_action"] = holds("manual-2", owner, [[100]])  # with schedule-1 (same rows), never the Viewer's action-1
     out["owner_like_action"] = holds("schedule-3", None, [[60]])  # moved from manual-2; equal to the Viewer's action-1 says nothing
     out["viewer_action_after_owner"] = holds("action-2", v, [[100]], ACT, True)  # with their own action-1, never the owner's runs
-    out["sender_first"] = holds("message-1", v, [[60]], MSG)  # a message's run reads as its sender: their first
-    out["other_sender"] = holds("message-2", w, [[60]], MSG)  # another sender with the same rows: their first too, no bit about v
-    out["sender_again"] = holds("message-3", v, [[60]], MSG)
-    out["owner_after_messages"] = holds("schedule-4", None, [[60]])  # with schedule-3
+    out["sender_first"] = holds("message-1", v, [[80]], MSG)  # a message's run reads as its sender: their first
+    out["other_sender"] = holds("message-2", w, [[80]], MSG)  # another sender with the same rows: their first too, no bit about v
+    out["sender_again"] = holds("message-3", v, [[80]], MSG)
+    out["owner_after_messages"] = holds("schedule-4", None, [[60]])  # with schedule-3 (60): unchanged; against message-3 (80) it would hold
 finally:
     with db.connect() as c:
         c.execute("DELETE FROM flow_steps WHERE run_id LIKE %s", [P + "/%"])

@@ -522,11 +522,15 @@ from abi import actions
 from abi.agents import runs, studio
 from abi.project import bundle, git
 from abi.semantic import lineage
+from abi.tools import builtin
 a = json.loads(sys.stdin.read())
+# which reading the action itself takes of a `data` dict that is a tool call and a query at once
+both = {"project": "p", "to": ["a@example.com"], "subject": "s", "body": "b", "data": {"tool": "pi_t", "inputs": {}, "measures": ["revenue"]}}
+picks = type(builtin.SendEmail.model_validate(both).data).__name__
 files = bundle.bundle(git.path(a["project"])) | a.get("files", {})
 files["model/measures.json"] = {**files["model/measures.json"], "measures": files["model/measures.json"]["measures"] + a.get("measures", [])}
 g = lineage.graph(files)
-print(json.dumps({"builtin": list(studio.BUILTIN), "save_agent": actions.ACTIONS["save_agent"].input.model_json_schema()["properties"]["agent"]["description"], "cases": {
+print(json.dumps({"builtin": list(studio.BUILTIN), "picks": picks, "save_agent": actions.ACTIONS["save_agent"].input.model_json_schema()["properties"]["agent"]["description"], "cases": {
     k: runs._refused(c["name"], c["payload"], c.get("allowed", ["get_object", "list_objects", "report_snapshot"]), files, g,
                      set(c.get("measures", ["revenue", "orders_rows"])), set(c["tables"]), []) for k, c in a["cases"].items()}}))
 """
@@ -764,13 +768,15 @@ with db.connect() as c:
     owner = security.user(c, c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"])
 b = bundle.bundle(git.path(P))
 term = {"id": "pi_shop", "term": "Shop", "definition": "A place we sell coffee."}
+fixes = []
 def dry(**refs):
     g = {"$schema": "https://schema.abi.invalid/v1/glossary.json", "terms": [term | refs]}
     try:
         return actions.run("import_project", {"project": P, "bundle": {**b, "model/glossary.json": g}, "dry_run": True}, owner, "rest")["changes"] != []
     except actions.ActionFailed as e:
+        fixes.extend(x["fix"] for x in e.body["errors"])
         return [e.status, [[x["path"], x["error"]] for x in e.body["errors"]]]
-print(json.dumps({"bad": dry(objects=["cafe", "nope"], links=["gone"]), "good": dry(objects=["cafe"], links=["visited"]), "same": bundle.bundle(git.path(P)) == b}))
+print(json.dumps({"fixes": fixes, "bad": dry(objects=["cafe", "nope"], links=["gone"]), "good": dry(objects=["cafe"], links=["visited"]), "same": bundle.bundle(git.path(P)) == b}))
 """
 
 
@@ -782,3 +788,60 @@ def test_import_checks_a_terms_object_and_link_references(saved):
     out = json.loads(r.stdout.splitlines()[-1])
     assert out["bad"] == [422, [["$.terms[0].objects[1]", "Unknown object type 'nope'."], ["$.terms[0].links[0]", "Unknown link 'gone'."]]], out
     assert out["good"] is True and out["same"], out
+    assert out["fixes"] == ["Term 'pi_shop' names it: add it to model/ontology.json, or remove it from the term first (set_glossary_term)."] * 2, out
+
+
+# ---------- 1.2.6 M6 round 3 ----------
+
+def test_every_reading_of_attached_data_is_checked(saved):
+    """Round 3: a `data` dict that is a tool call and a query at once ({tool, inputs, measures}) is run by the action as
+    the TOOL CALL (pydantic takes the shape with most fields set), so an agent could run a tool it doesn't hold beside
+    in-scope measures. Every reading the dict could take (tool, query, condition) is checked, each in addition to the
+    others. And a custom agent never attaches the whole project's documentation (`docs`), whatever its scope."""
+    tool = {"id": "pi_t", "query": {"measures": ["revenue"], "dimensions": ["products.category"]}}
+    send = lambda data, **more: {"name": "send_email", "payload": {"to": ["a@example.com"], "subject": "s", "body": "b", "data": data},  # noqa: E731
+                                 "allowed": ["send_email", "pi_t"], "measures": ["revenue"], "tables": ["products"], **more}
+    both = {"tool": "pi_t", "inputs": {}, "measures": ["revenue"]}
+    out = refusals({
+        "tool_not_held": send(both, allowed=["send_email"]),
+        "tool_held_in_scope": send(both),
+        "tool_query_out": send(both, tables=[]),
+        "query_out": send({**both, "measures": ["orders_rows"]}),
+        "all_three": send({**both, "query": {"measures": ["revenue"], "dimensions": ["cafes.region"]}, "measure": "revenue", "op": ">", "value": 0}),
+        "plain_tool_as_before": send({"tool": "pi_t", "inputs": {}}, tables=[]),
+        "post": {"name": "post_message", "payload": {"channel": "inbox", "text": "t", "data": both}, "allowed": ["post_message"],
+                 "measures": ["revenue"], "tables": ["products"]},
+        "docs": {"name": "send_email", "payload": {"to": ["a@example.com"], "subject": "s", "body": "b", "docs": True},
+                 "allowed": ["send_email"], "measures": ["revenue", "orders_rows"], "tables": ["cafes", "customers", "orders", "products"]},
+        "no_docs": {"name": "send_email", "payload": {"to": ["a@example.com"], "subject": "s", "body": "b", "docs": False},
+                    "allowed": ["send_email"], "tables": []},
+    }, files={"tools/pi_t.json": tool})
+    assert out["picks"] == "ToolCall", "the action runs the tool, whatever else the dict holds"
+    c = out["cases"]
+    assert c["tool_not_held"] == "Tool 'pi_t' is not one of your tools." == c["post"], c
+    assert c["tool_held_in_scope"] is None and c["no_docs"] is None, c
+    assert c["tool_query_out"] == "Outside your scope: products." == c["plain_tool_as_before"], c
+    assert c["query_out"] == "Outside your scope: orders_rows." and c["all_three"] == "Outside your scope: cafes.", c
+    assert c["docs"] == "The project's documentation covers more than your scope: send without `docs`.", c
+
+
+def test_delete_of_an_item_a_term_names_says_the_term(saved):
+    """Round 3: an object type or link a glossary term names isn't deleted from under it: the refusal names the term
+    and the way out, before any preview; once the term lets go, the delete asks as usual."""
+    abi.call("set_glossary_term", project=P, term="Pi bought", definition="What a customer bought.", links=["bought"], objects=["product"])
+    try:
+        for kind, i, what in (("link", "bought", "link"), ("object", "product", "object type")):
+            with pytest.raises(abi.ActionError) as e:
+                abi.call("delete_ontology_item", project=P, kind=kind, id=i)
+            assert e.value.status == 409 and "confirm_token" not in e.value.body, e.value.body
+            assert e.value.body["message"] == f"Term 'pi-bought' names {what} '{i}'. Remove it from the term first (set_glossary_term).", e.value.body
+        assert "bought" in {ln["id"] for ln in abi.call("ontology", project=P)["links"]}
+        sure("delete_glossary_term", project=P, id="pi-bought")
+        with pytest.raises(abi.ActionError) as e:
+            abi.call("delete_ontology_item", project=P, kind="link", id="bought")
+        assert e.value.status == 409 and e.value.body.get("confirm_token"), "now it only asks the person"
+    finally:
+        try:
+            sure("delete_glossary_term", project=P, id="pi-bought")
+        except abi.ActionError:
+            pass

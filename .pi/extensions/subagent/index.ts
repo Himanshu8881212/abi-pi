@@ -148,6 +148,15 @@ interface DispatchDefaults {
 	thinkingLevel?: ThinkingLevel;
 }
 
+function handPrevious(previous: string | undefined, step: number | undefined): string {
+	if (!previous || !process.env.ABI_PI_SHARED) return "";
+	try {
+		const f = path.join(process.env.ABI_PI_SHARED, `previous-${step ?? 0}-${Date.now()}.txt`);
+		fs.writeFileSync(f, previous, { mode: 0o600 });
+		return f;
+	} catch { return ""; }
+}
+
 async function runSingleAgent(
 	defaultCwd: string,
 	dispatchDefaults: DispatchDefaults,
@@ -159,6 +168,7 @@ async function runSingleAgent(
 	signal: AbortSignal | undefined,
 	onUpdate: OnUpdateCallback | undefined,
 	makeDetails: (results: SingleResult[]) => SubagentDetails,
+	previous?: string,
 ): Promise<SingleResult> {
 	const agent = agents.find((a) => a.name === agentName);
 
@@ -229,7 +239,9 @@ async function runSingleAgent(
 				cwd: cwd ?? defaultCwd,
 				shell: false,
 				// abi-pi: the child may only activate the tools its agent file lists (the ABI extension enforces it)
-				env: { ...process.env, ABI_PI_ALLOWED: (agent.tools ?? []).join(","), ABI_PI_AGENT: agent.name },
+				// abi-pi (1.2.6 M6): a chain step's {previous} is the prior specialist's answer, which passed its own grounding
+				// check: handed over as a file of the session's shared folder, so this one may quote its figures
+				env: { ...process.env, ABI_PI_ALLOWED: (agent.tools ?? []).join(","), ABI_PI_AGENT: agent.name, ABI_PI_PREVIOUS: handPrevious(previous, step) },
 				stdio: ["ignore", "pipe", "pipe"],
 			});
 			let buffer = "";
@@ -468,6 +480,7 @@ export default function (pi: ExtensionAPI) {
 						signal,
 						chainUpdate,
 						makeDetails("chain"),
+						step.task.includes("{previous}") ? previousOutput : undefined,
 					);
 					results.push(result);
 

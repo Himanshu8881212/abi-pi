@@ -508,13 +508,16 @@ def check(answer: str, results: list, vocab: set[str] = frozenset(), members: se
     # and its specialists': the harness sees each): a figure in prose one of them sent (a title, a description) grounds
     # from no result prose, wherever it comes back (as the title, or inside a diff or the docs). The person's own
     # words (`asked`) and the rows ground as ever.
-    # ponytail: told apart by this session's calls only (a result names no author), so text an agent saved in an
-    # earlier session still grounds, and a person's prose holding a figure an agent also wrote doesn't (fails closed):
-    # per-definition authorship from the engine closes both.
+    # Own prose of any length counts ("Up 37%", seen again in a diff), but never a bare number or date an agent sent
+    # (a limit of 10 must not mask a person's "Top 10").
+    # ponytail: told apart by the calls one Lead process and its specialists made (a result names no author). The
+    # ceiling is a resumed or later session: there the Lead's own earlier calls still count (replayed from the session),
+    # its specialists' and any other session's don't, so text they saved grounds; and a person's prose holding a
+    # figure an agent also wrote doesn't ground (fails closed). Authorship per definition from the engine closes both (1.3).
     if HARNESS:
         rows, own = set(cells), []
         _walk(list(wrote), [], own)
-        mine = {v for o in own if len(o.split()) >= 3 for _, v, _, _, _ in numbers(o)}
+        mine = {v for o in own if any(ch.isalpha() for ch in o) for _, v, _, _, _ in numbers(o)}
         typed |= {v for t in texts if t not in rows and len(t.split()) >= 3 for _, v, _, _, _ in numbers(t)} - mine
     if today:
         typed.add(float(today.year))
