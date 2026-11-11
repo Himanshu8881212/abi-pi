@@ -22,7 +22,8 @@ from psycopg_pool import ConnectionPool, PoolTimeout  # procrastinate's psycopg[
 VERSION = tomllib.loads((Path(__file__).parent.parent / "pyproject.toml").read_text())["project"]["version"]
 # H-03.2: bump with every change to SCHEMA (test_H03_schema_number_bumped pins SCHEMA's sha256 to it), so older code
 # refuses a database newer code has upgraded instead of running on it.
-SCHEMA_NUMBER = 6  # 3: ABI-PI 1.2 (flow_conditions.since); 4: load_runs (M3.2); 5: personal_tokens (M4.5); 6: 1.2.6 C1 (folded ALTERs, no sources.spec)
+# 7: 1.2.6 M8 (flow_conditions.object)
+SCHEMA_NUMBER = 7  # 3: ABI-PI 1.2 (flow_conditions.since); 4: load_runs (M3.2); 5: personal_tokens (M4.5); 6: 1.2.6 C1 (folded ALTERs, no sources.spec)
 QUEUE = importlib.metadata.version("procrastinate")
 # The Procrastinate of ABI-PI 1.0 (schema 2), the oldest release we upgrade from (D-133); before H-03.2 none was recorded.
 QUEUE_BASELINE = "3.10.0"
@@ -292,6 +293,16 @@ CREATE TABLE IF NOT EXISTS flow_conditions (
 );
 -- ABI-PI 1.2: a new trigger under the flow's ID (edited, or the flow deleted and saved again) starts over at `since`
 ALTER TABLE flow_conditions ADD COLUMN IF NOT EXISTS since timestamptz;
+-- 1.2.6 M8 (schema 7): a per-object condition keeps one row per (flow, object that holds now): the object's key as JSON
+-- text. '' is the flow's own row: all of a condition without `per` (an existing install's rows, as they are), a
+-- per-object one's lock and `since`.
+ALTER TABLE flow_conditions ADD COLUMN IF NOT EXISTS object text NOT NULL DEFAULT '';
+DO $$ BEGIN  -- once: the key gains the object
+  IF NOT EXISTS (SELECT 1 FROM information_schema.key_column_usage WHERE table_schema = current_schema()
+                 AND table_name = 'flow_conditions' AND column_name = 'object') THEN
+    ALTER TABLE flow_conditions DROP CONSTRAINT flow_conditions_pkey, ADD PRIMARY KEY (project, flow, object);
+  END IF;
+END $$;
 -- SE-8 (D-03.1): a user's semantic query re-checked every minute; fingerprint = sha256 of the last result, NULL = no baseline yet.
 CREATE TABLE IF NOT EXISTS subscriptions (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

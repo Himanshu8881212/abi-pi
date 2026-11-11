@@ -1186,18 +1186,28 @@ const OPS=[['<','is below'],['<=','is at most'],['>','is above'],['>=','is at le
 // a measure check compares the measure with a value, with another measure (a target), or with its previous period (% change);
 // optionally filtered, and optionally for each member of a dimension (alerts when any member matches). ABI evaluates it
 // (check_condition, the condition its flow checks every minute on the server): the verdict and every figure are its rows
+// 1.2.6 M8: a check for each object of a type (its `by` is the type's key) alerts once per object, only to people who may see
+// that object: everyone who can, or the people the object names (a property with the meaning email or person, its own
+// or of the objects it links to). In words, never ids
+const perType=by=>by&&OT().find(T=>T.key.length===1&&by===`${T.table}.${T.key[0]}`),ppl=T=>(T?.properties||[]).filter(p=>['email','person'].includes(p.meaning)),
+ toKey=t=>t?JSON.stringify(t.link?{link:t.link,property:t.property}:{property:t.property}):'';
+function sendTo(T){const nm=p=>(p.name||colName(p.column)).toLowerCase(),o=[['',`everyone who can see the ${low(T)}`]];
+ ppl(T).forEach(p=>o.push([toKey({property:p.column}),`the ${low(T)}'s ${nm(p)}`]));
+ (T.links||[]).forEach(l=>ppl(otype(l.to)).filter(p=>!p.column.includes('.')).forEach(p=>o.push([toKey({link:l.link,property:p.column}),`the ${low(T)}'s ${l.name} (${nm(p)})`])));return o}
+const toWords=(T,to)=>(sendTo(T).find(o=>o[0]===toKey(to))||[0,'the people it names'])[1];
 // a draft check as the condition ABI evaluates (as the server's monitor_condition builds it)
 function monCond(c){if(c.kind!=='measure'||!c.measure)return null;const ag=c.against||'value',other=ag==='measure'?c.other:null;
  return {query:{measures:[c.measure,...(other?[other]:[])],filters:c.filters||[],dimensions:c.by&&ag!=='prev'?[c.by]:[]},measure:c.measure,op:c.op,value:other?0:Number(c.value),
   ...(other?{other}:{}),...(ag==='prev'?{change:true}:{}),...(c.period?{period:c.period,skip_latest:!!c.skip_latest}:{})}}
 async function monEval(c){if(c.kind==='measure'){const k=c.condition;if(!k)return {ok:false,text:`${c.name}: this check is incomplete; edit it`};
-  const r=await api('check_condition',k),rs=r.rows||[],ix=x=>r.columns.indexOf(x),nk=k.period?ix(k.period)+1:0,per=(k.period||'').split('.').pop();
+  const T=perType(c.by),td=T&&`${T.table}.${T.title}`;  // an object is named by its title, read beside its key
+  const r=await api('check_condition',T&&td!==c.by?{...k,query:{...k.query,dimensions:[c.by,td]}}:k),rs=r.rows||[],ix=x=>r.columns.indexOf(x),nk=k.period?ix(k.period)+1:0,per=(k.period||'').split('.').pop();
   const lbl=v=>v.length>1?(per==='month'?`${MON[v[1]-1]||v[1]} ${v[0]}`:per==='quarter'?`Q${v[1]} ${v[0]}`:`${per} ${v[1]} of ${v[0]}`):cell(v[0]),f=c.filters||[],where=f.length?` (${f.map(x=>`${x.column} = ${x.value}`).join(', ')})`:'',i=ix(c.measure);
   if(k.change){const x=rs[0];if(!x)return {ok:true,text:`${mname(c.measure)}: not enough ${per}s to compare yet${where}`};const p=x[ix('change_pct')];  // the latest (completed) period and the one before
    return {ok:!r.holds,text:`${mname(c.measure)}: ${fmt(x[i])} in ${lbl(x.slice(0,nk))}, ${p>=0?'+':''}${fmt(p)}% on ${lbl(x.slice(i+1,i+1+nk))} (${fmt(x[ix('previous_'+c.measure)])})${where} · alerts when the change ${opw(c.op)} ${fmt(k.value)}%`}}
   const j=k.other?ix(k.other):-1,what=k.other?mname(k.other):fmt(k.value),at=nk&&rs[0]?` in ${lbl(rs[0].slice(0,nk))}`:'';
-  if(c.by){const b=ix(c.by),bad=rs.filter(x=>typeof x[i]==='number'&&CMP[c.op](x[i],j>=0?x[j]:k.value));
-   return {ok:!r.holds,text:bad.length?`${bad.length} of ${rs.length} ${c.by.split('.').pop()} ${opw(c.op)} ${what}: ${bad.slice(0,5).map(x=>x[b]).join(', ')}${bad.length>5?'…':''}${where}${at}`:`No ${c.by.split('.').pop()} ${opw(c.op)} ${what}${where}${at}`}}
+  if(c.by){const b=ix(T?td:c.by),bad=rs.filter(x=>typeof x[i]==='number'&&CMP[c.op](x[i],j>=0?x[j]:k.value)),who=T?`${T.plural.toLowerCase()}: ${mname(c.measure)}`:c.by.split('.').pop();
+   return {ok:!r.holds,text:bad.length?`${bad.length} of ${rs.length} ${who} ${opw(c.op)} ${what}: ${bad.slice(0,5).map(x=>x[b]).join(', ')}${bad.length>5?'…':''}${where}${at}`:`No ${T?`${low(T)} where ${mname(c.measure)}`:who} ${opw(c.op)} ${what}${where}${at}`}}
   const x=rs[0]||[];return {ok:!r.holds,text:`${mname(c.measure)}: ${fmt(x[i])}${j>=0?` vs ${what} ${fmt(x[j])}`:''}${where}${at} · alerts when it ${opw(c.op)} ${what}`}}
  if(c.kind==='fresh'){const q=D.quality||{},ix=k=>(q.columns||[]).indexOf(k),row=(q.rows||[]).find(x=>x[0]===c.table),t=row&&row[ix('last_load')];
   const hrs=t?(Date.now()-Date.parse(t))/3600e3:Infinity;return {ok:hrs<=c.hours,text:`${c.table}: last load ${t?Math.round(hrs)+' h ago':'never'} · alerts after ${c.hours} h`}}
@@ -1207,21 +1217,24 @@ function newMonitor(box,ck){box.querySelector('.monform')?.remove();ck=ck||{};co
  const s=(x,v)=>{const e=h('select','f');x.forEach(([v,l])=>e.append(new Option(l,v)));if(v!==undefined)e.value=v;return e},L=t=>h('label','l',t);
  const draw=()=>{f.innerHTML='';
   if(kind.value==='measure'){const ms=D.measures.map(x=>[x.id,x.name||x.id]),m=s(ms,ck.measure),vs=s([['value','a value'],['measure','another measure (e.g. a target)'],['prev','its previous period (% change)']],ck.against||'value'),
-    op=s(OPS,ck.op),v=h('input','f'),other=s(ms,ck.other),per=s(D.dims.filter(d=>d.startsWith('calendar.')).map(d=>[d,d]),ck.period),by=s([['','the total'],...D.dims.map(d=>[d,'each '+colName(d).toLowerCase()+' ('+d.split('.')[0]+')'])],ck.by||''),
+    op=s(OPS,ck.op),v=h('input','f'),other=s(ms,ck.other),per=s(D.dims.filter(d=>d.startsWith('calendar.')).map(d=>[d,d]),ck.period),by=s([['','the total'],...OT().filter(T=>T.key.length===1).map(T=>[`${T.table}.${T.key[0]}`,`each ${low(T)}, with an alert of its own`]),...D.dims.filter(d=>!perType(d)).map(d=>[d,'each '+colName(d).toLowerCase()+' ('+d.split('.')[0]+')'])],ck.by||''),to=h('select','f'),
     fc=s([['','no filter'],...D.dims.map(d=>[d,`${colName(d)} · ${d.split('.')[0]}`])],ck.filters?.[0]?.column||''),fv=h('input','f');v.type='number';v.placeholder='value';v.value=ck.value??'';fv.placeholder='equals…';fv.value=ck.filters?.[0]?.value??'';
    // completed periods only, unless they untick it: with daily loads the latest period is still filling, so its change on a whole period would alert at every period's start
    const dn=h('label','chk'),dc=h('input');dc.type='checkbox';dc.checked=ck.id?!!ck.skip_latest:true;dn.append(dc,h('span','','Completed periods only (the latest may still be filling)'));
-   const lv=L('Value'),lo=L('Other measure'),lp=L('Period'),lb=L('Check');const vis=()=>{const a=vs.value;lv.hidden=v.hidden=a==='measure';lv.textContent=a==='prev'?'Change in %':'Value';lo.hidden=other.hidden=a!=='measure';lp.hidden=per.hidden=dn.hidden=a!=='prev';lb.hidden=by.hidden=a==='prev'};vs.onchange=vis;
-   f.append(L('Measure'),m,L('Compare with'),vs,L('Alert when it'),op,lv,v,lo,other,lp,per,dn,lb,by,L('Only where (optional)'),fc,fv);vis();
+   const lv=L('Value'),lo=L('Other measure'),lp=L('Period'),lb=L('Check'),lt=L('Send to');const vis=()=>{const a=vs.value,T=a!=='prev'&&perType(by.value);lv.hidden=v.hidden=a==='measure';lv.textContent=a==='prev'?'Change in %':'Value';lo.hidden=other.hidden=a!=='measure';lp.hidden=per.hidden=dn.hidden=a!=='prev';lb.hidden=by.hidden=a==='prev';
+     lt.hidden=to.hidden=!T;if(T&&to.dataset.t!==T.id){to.innerHTML='';sendTo(T).forEach(([x,l])=>to.append(new Option(l,x)));to.dataset.t=T.id;to.value=ck.by===by.value?toKey(ck.to):'';if(to.selectedIndex<0)to.value=''}};vs.onchange=by.onchange=vis;
+   f.append(L('Measure'),m,L('Compare with'),vs,L('Alert when it'),op,lv,v,lo,other,lp,per,dn,lb,by,lt,to,L('Only where (optional)'),fc,fv);vis();
    f.get=()=>{const a=vs.value;if(a!=='measure'&&v.value==='')throw new Error('Give the value to compare with.');if(a==='prev'&&!per.value)throw new Error('The model has no calendar to compare periods.');
-    return {measure:m.value,against:a,op:op.value,...(a==='measure'?{other:other.value}:{value:Number(v.value)}),...(a==='prev'?{period:per.value,skip_latest:dc.checked}:by.value?{by:by.value}:{}),...(fc.value?{filters:[{column:fc.value,op:'=',value:fv.value}]}:{})}}}
+    return {measure:m.value,against:a,op:op.value,...(a==='measure'?{other:other.value}:{value:Number(v.value)}),...(a==='prev'?{period:per.value,skip_latest:dc.checked}:by.value?{by:by.value,...(perType(by.value)&&to.value?{to:JSON.parse(to.value)}:{})}:{}),...(fc.value?{filters:[{column:fc.value,op:'=',value:fv.value}]}:{})}}}
   else if(kind.value==='fresh'){const t=s((D.tables||[]).map(x=>[x,x]),ck.table),hr=h('input','f');hr.type='number';hr.value=ck.hours??36;f.append(L('Table'),t,L('Alert after (hours without a load)'),hr);f.get=()=>({table:t.value,hours:Number(hr.value)})}
   else{const fl=s((D.flows||[]).map(x=>[x.id,x.name||x.id]),ck.flow);f.append(L('Flow'),fl);f.get=()=>({flow:fl.value})}};kind.onchange=draw;draw();
  const em=h('input','f');em.type='email';em.placeholder='name@company.com (optional)';em.value=ck.id?monMail(ck)||'':/@/.test(window.ME?.name||'')?ME.name:'';
  c.append(L('Name'),nm,L('Watch'),kind,f,L('Also email the alert to'),em,h('p','file','A measure check becomes a flow in ABI: it checks it every minute, also with this page closed, and posts to the Inbox when it starts to hold.'));
  // the check said back in one sentence as it is filled in
  const sum=h('p','sum'),upd=()=>{try{const g=f.get(),nmOf=id=>D.measures.find(x=>x.id===id)?.name||id;
-   sum.textContent=kind.value==='measure'?`Alerts when ${nmOf(g.measure)} ${(OPS.find(o=>o[0]===g.op)||[0,g.op])[1]} ${g.against==='measure'?nmOf(g.other):g.against==='prev'?`${g.value}% against its previous period`:fmt(g.value)}${g.by?`, for any ${colName(g.by).toLowerCase()}`:''}. It posts to the Inbox${em.value.trim()?' and emails '+em.value.trim():''}.`
+   const T=perType(g.by),rule=`${nmOf(g.measure)} ${(OPS.find(o=>o[0]===g.op)||[0,g.op])[1]} ${g.against==='measure'?nmOf(g.other):g.against==='prev'?`${g.value}% against its previous period`:fmt(g.value)}`;
+   sum.textContent=kind.value==='measure'&&T?`For each ${low(T)}: alerts when ${rule}. Send to: ${toWords(T,g.to)}, in the Inbox${em.value.trim()?`. ${em.value.trim()} is emailed too, for the ${T.plural.toLowerCase()} that person can see, if they are in this project`:''}.`
+    :kind.value==='measure'?`Alerts when ${rule}${g.by?`, for any ${colName(g.by).toLowerCase()}`:''}. It posts to the Inbox${em.value.trim()?' and emails '+em.value.trim():''}.`
     :kind.value==='fresh'?`Alerts when ${g.table} has gone ${g.hours} hours without a load.`:'Alerts when the flow\'s last run failed.'}catch(e){sum.textContent='Fill in the value to see what it alerts on.'}};
  c.insertBefore(sum,f);c.addEventListener('input',upd);c.addEventListener('change',upd);upd();
  act(c,'Check it now',async m=>{say(m,'Checking with ABI…');const d={id:'preview',name:nm.value||'preview',kind:kind.value,...f.get()};d.condition=monCond(d);const x=await monEval(d);m.className='msg';toast(x.ok?'Checked: quiet right now.':'Checked: it would alert now.');return (x.ok?'Quiet right now: ':'It would alert now: ')+x.text});
@@ -1235,7 +1248,7 @@ function monitorPage(box){const bar=h('div','row bar top');bar.append(btn('New m
  const mine=h('div','cards');box.append(mine);(D.app?.monitor?.checks||[]).forEach(ck=>{const c=card(ck.name);c.querySelector('h3').append(pinBtn({kind:'monitor',ref:ck.id,title:ck.name}));const st=h('p','file','checking…');c.append(st);mine.append(c);
   const bd=h('span','state','Checking');c.querySelector('h3').append(bd);
   monEval(ck).then(x=>{bd.className='state '+(x.ok?'':'hold');bd.textContent=x.ok?'Quiet':'Holds now';st.className='mtext';st.textContent=x.text}).catch(e=>{bd.className='state bad';bd.textContent='Error';st.className='bad';st.textContent=e.message});
-  const fl=monFlow(ck);if(MODE==='developer'&&ck.condition)c.append(h('p','file',fl?(fl.enabled?`ABI checks it every minute, also with this page closed; when it starts to hold it posts to the Inbox${monMail(ck)?' and emails '+monMail(ck):''}.`:'Background checks are off: checked only while this page is open.'):'Checked only while this page is open.'));
+  const fl=monFlow(ck),PT=fl?.trigger?.per&&perType(ck.by);if(MODE==='developer'&&ck.condition)c.append(h('p','file',fl?(fl.enabled?(PT?`For each ${low(PT)}: ABI checks it every minute, also with this page closed. Send to: ${toWords(PT,fl.trigger.recipients)}, in the Inbox${monMail(ck)?'; '+monMail(ck)+' is emailed too':''}.`:`ABI checks it every minute, also with this page closed; when it starts to hold it posts to the Inbox${monMail(ck)?' and emails '+monMail(ck):''}.`):'Background checks are off: checked only while this page is open.'):'Checked only while this page is open.'));
   if(MODE==='developer'&&ck.condition&&!fl)act(c,'Alert with the page closed',async()=>{if(await monPost({action:'save',check:ck,email:''}))show('monitor')});
   if(MODE==='developer')act(c,'Edit',()=>newMonitor(box,ck));if(MODE==='developer')act(c,'Delete',async()=>{if(await monPost({action:'delete',id:ck.id}))show('monitor')})});
  const g=h('div','cards top');box.append(g);const q=D.quality||{},ix=c=>(q.columns||[]).indexOf(c),rs=q.rows||[],when=t=>t?when2(t):'—';
@@ -1267,12 +1280,13 @@ async function inboxPage(box){const r=await ipost();if(r.error){box.append(h('p'
  const mc=card('Messages','posted by flows and Monitor, your subscriptions and your test runs');mc.classList.add('wide');
  if(!M.length)mc.append(h('p','empty','No messages yet. A Monitor check posts here when it starts to hold; flows can post here too.'));
  let lastM=null,foldM=null;M.forEach(m=>{const d=h('div','item'+(m.id>s?' new':'')),fl=h('div','file');fl.append(ic(/^Monitor/.test(m.text)?'monitor':/^Flow/.test(m.text)?'flows':'inbox'),`${cell(m.at)} · ${m.sender}`);d.append(fl,txt(m.text));
-  if(m.data?.columns){const t=h('div','mdata'),y=m.data.columns.filter(c=>/(^|[._])year$/.test(c));  // a year reads 2026, not 2,026
+  const O=m.data?.object&&otype(m.data.object.type)?m.data.object:null;  // 1.2.6 M8: an alert about one object opens that object's page
+  if(m.data?.columns?.length){const t=h('div','mdata'),y=m.data.columns.filter(c=>/(^|[._])year$/.test(c));  // a year reads 2026, not 2,026
    if((m.data.rows||[]).length===1&&m.data.columns.length<=4){const r=m.data.rows[0],f=h('div','figs');m.data.columns.forEach(c=>{const v=Array.isArray(r)?r[m.data.columns.indexOf(c)]:r[c],x=h('span','fig');x.append(h('b','',m.data.measures?.[c]||colName(c)),h('span','',typeof v==='number'&&!y.includes(c)?fmt(v,m.data.format?.[c]):String(v??'—')));f.append(x)});d.append(f)}
    else{rows(t,{...m.data,rows:m.data.rows.map(r=>({...r,...Object.fromEntries(y.map(c=>[c,r[c]==null?r[c]:String(r[c])]))}))});d.append(t)}
    // 1.2.6 M7: rows grouped by an object type's title or key are objects: a row (or Open beside one figure) shows its page
-   {const cs=m.data.columns,rs=(m.data.rows||[]).map(r=>Array.isArray(r)?r:cs.map(c=>r[c])),T=objCol(cs[0]);if(T&&d.contains(t))objClicks(t,cs[0],{rows:rs});
-    else if(T&&rs[0]?.[0]!=null){const o=h('button','flink oopen',`Open ${rs[0][0]}`);o.onclick=()=>objOpen(T,cs[0],rs[0][0]);d.append(o)}}}if(m.snapshot){const a=h('a','',`Open the ${m.snapshot.split('.').pop().toUpperCase()}`);a.href=m.snapshot;a.target='_blank';d.append(a)}
+   {const cs=m.data.columns,rs=(m.data.rows||[]).map(r=>Array.isArray(r)?r:cs.map(c=>r[c])),T=!O&&objCol(cs[0]);if(T&&d.contains(t))objClicks(t,cs[0],{rows:rs});
+    else if(T&&rs[0]?.[0]!=null){const o=h('button','flink oopen',`Open ${rs[0][0]}`);o.onclick=()=>objOpen(T,cs[0],rs[0][0]);d.append(o)}}}if(O){const o=h('button','flink oopen',`Open ${O.title??'it'}`);o.title=`Open this ${low(otype(O.type))}'s page`;o.onclick=()=>openObj(O.type,O.key);d.append(o)}if(m.snapshot){const a=h('a','',`Open the ${m.snapshot.split('.').pop().toUpperCase()}`);a.href=m.snapshot;a.target='_blank';d.append(a)}
   if(lastM&&lastM.text===m.text){if(!foldM){foldM=h('details','more');foldM.append(h('summary',''));mc.append(foldM)}foldM.append(d);foldM.querySelector('summary').textContent=`${foldM.children.length-1} earlier like it`}else{mc.append(d);foldM=null}lastM=m});
  const ac=card('Alerts','failed flows and data problems, as ABI reported them'),un=A.filter(a=>!a.read);if(!A.length)ac.append(h('p','empty','No alerts. ABI posts here when the model or the data needs a look.'));
  ac.classList.add('wide');
@@ -1956,7 +1970,7 @@ function flowPage(box,f){const bar=h('div','row bar lead');bar.append(btn('← F
    lr.textContent=one.status?`Last run: ${{ok:'finished',failed:'failed',running:'running'}[one.status]||one.status}${one.started?' · '+cell(one.started):''}`:'Not run yet';els[T0]?.append(h('div','ns',lr.textContent));
    // 1.2.6 M7: a run an action on an object started says which one (ABI tells its runner, Editors and Owners)
    {const T=one.object&&otype(one.object.type);if(T){const o=h('button','flink oopen',`for this ${low(T)}`);o.onclick=()=>openObj(T.id,one.object.key);lr.append(' ',o)}}};
-  tb.append(st,lr,btn('Run now',async()=>{const r=await api('run_flow',{flow:f.id});lr.textContent='Running…';for(let i=0;i<150;i++){await wait(2000);const x=await api('flow_runs',{flow:f.id,run:r.run}),one=x.runs?.[0]||x;mark(one);
+  tb.append(st,lr,t.per?h('span','file',`Runs by itself, once for each ${low(otype(t.per)||{name:'object'})} that starts to meet its condition.`):btn('Run now',async()=>{const r=await api('run_flow',{flow:f.id});lr.textContent='Running…';for(let i=0;i<150;i++){await wait(2000);const x=await api('flow_runs',{flow:f.id,run:r.run}),one=x.runs?.[0]||x;mark(one);
     if(['ok','failed','stopped','rejected','waiting'].includes(one.status)){toast(`${f.name||f.id}: run ${one.status==='ok'?'finished':one.status}.`,one.status==='failed');return}}toast('Still running: this page follows it.')},1),
    btn(f.enabled?'Disable':'Enable',async()=>{await api('enable_flow',{flow:f.id,enabled:!f.enabled});f.enabled=!f.enabled;toast(f.enabled?'Switched on: it runs on its trigger.':'Switched off.');show('flw:'+f.id)}));box.append(tb);flowMark=mark}
  {const p=h('p','fsum');p.append(`${trigWords(t)}, then ${steps.map(x=>stepWords(x)[0].toLowerCase()).join(', then ')||'no steps yet'}.${f.description?' '+f.description:''}`);box.append(p)}
@@ -1978,8 +1992,9 @@ var flowMark=()=>{};
 function stepWords(x){const a=x.action||x.type;return ({refresh:['Refresh a table','refresh'],snapshot:['Export a report','documents'],post_message:['Post to the Inbox','inbox'],send_email:['Send an email','mail'],
   train:['Train an ML model','ml'],score:['Score an ML model','ml'],tool:['Run a tool','tools'],agent:['Ask an agent','agents'],approval:['Wait for approval','user'],condition:['Check a condition','monitor']})[a]||[String(a||'Step').replace(/_/g,' ').replace(/^./,c=>c.toUpperCase()),'flows']}
 const cutw=(s,n)=>s.length>n?s.slice(0,n).replace(/\s+\S*$/,'')+'…':s;  // whole words, then an ellipsis
+const plainT=s=>String(s).replace(/\{\{\s*data\.trigger\.title\s*\}\}/g,'(its name)').replace(/\{\{\s*data\.trigger\.recipients\s*\}\}/g,'the people it is for');  // a per-object alert's placeholders, in words
 function stepWhat(x){const nm=(l,id)=>(l||[]).find(o=>o.id===id)?.name||id;return x.table||(x.report&&nm(D.reports,x.report))||(x.model&&nm(D.ml,x.model))||(x.tool&&nm(D.tools,x.tool))||(x.agent&&nm(D.agents,x.agent))
-  ||(x.input?.text?'“'+cutw(String(x.input.text),110)+'”':'')||(x.input?.to?'to '+[].concat(x.input.to).join(', '):'')||cutw(x.message||'',110)||(x.measure?`${mname(x.measure)} ${x.op} ${x.value}`:'')}
+  ||(x.input?.text?'“'+cutw(plainT(x.input.text),110)+'”':'')||(x.input?.to?'to '+plainT([].concat(x.input.to).join(', ')):'')||cutw(x.message||'',110)||(x.measure?`${mname(x.measure)} ${x.op} ${x.value}`:'')}
 // a flow's trigger in words: "Mondays at 07:00", "when Revenue < -20", not cron and action names
 const DOW=['Sundays','Mondays','Tuesdays','Wednesdays','Thursdays','Fridays','Saturdays'];
 function cronWords(c){const [mi,hr,dm,mo,dw]=String(c||'').split(' ');if(!/^\d+$/.test(mi||'')||!/^\d+$/.test(hr||''))return c;const at=`${hr.padStart(2,'0')}:${mi.padStart(2,'0')}`;
@@ -1987,6 +2002,7 @@ function cronWords(c){const [mi,hr,dm,mo,dw]=String(c||'').split(' ');if(!/^\d+$
  if(dm==='*'&&mo==='*'&&dw==='1-5')return `Weekdays at ${at}`;if(/^\d+$/.test(dm)&&mo==='*'&&dw==='*')return `Day ${dm} of each month at ${at}`;return c}
 function trigWords(t){const m=t.measure&&(D.measures.find(x=>x.id===t.measure)?.name||t.measure);
  const per=String(t.period||'calendar.month').split('.').pop();
+ if(t.per){const T=otype(t.per)||{name:'object',plural:'objects'},w=trigWords({...t,per:null});return `For each ${low(T)}: ${w.charAt(0).toLowerCase()+w.slice(1)} · Send to: ${toWords(T,t.recipients)}`}
  return t.type==='schedule'?cronWords(t.cron)+(t.timezone?` (${t.timezone})`:''):t.type==='data_condition'&&t.change?(Number(t.value)<0&&/</.test(t.op)?`When ${m} falls ${-Number(t.value)}% or more on the ${per} before`:Number(t.value)>0&&/>/.test(t.op)?`When ${m} rises ${t.value}% or more on the ${per} before`:`When ${m}'s change ${opw(t.op)} ${t.value}%`)
   :t.type==='data_condition'?`When ${m} ${opw(t.op)} ${fmt(Number(t.value))}`:t.type==='after_refresh'?`After ${t.table||'a table'} refreshes`:
   t.type==='data_quality'?'When data quality finds a problem':t.type?t.type.replace(/_/g,' '):'Run by hand'}
@@ -3243,8 +3259,8 @@ OPS = ("<", "<=", ">", ">=", "=", "!=")
 
 def monitor_check(c: dict) -> dict:
     """One of Monitor's checks as monitor.json keeps it (its id, else one from its name), or ValueError.
-    measure: {measure, op, against: value|measure|prev, value | other | period (calendar column), by?, filters?};
-    fresh: {table, hours}; flow: {flow}."""
+    measure: {measure, op, against: value|measure|prev, value | other | period (calendar column), by?, filters?,
+    to? ({property, link?}: who an alert per object is for, when `by` is an object type's key)}; fresh: {table, hours}; flow: {flow}."""
     cid = str(c.get("id") or "")
     if not re.fullmatch(r"[a-z0-9_]{1,60}", cid):
         cid = re.sub(r"[^a-z0-9]+", "_", str(c.get("name") or cid).lower()).strip("_")[:60]
@@ -3256,7 +3272,7 @@ def monitor_check(c: dict) -> dict:
     if need is None or any(c.get(k) in (None, "") for k in need) or (kind == "measure" and c["op"] not in OPS):
         raise ValueError(f"A {kind or '?'} check needs {', '.join(need or ['kind: measure, fresh or flow'])}"
                          + (f"; op is one of {' '.join(OPS)}" if kind == "measure" else "") + ".")
-    keep = ("measure", "op", "against", "value", "other", "period", "skip_latest", "by", "filters", "table", "hours", "flow")
+    keep = ("measure", "op", "against", "value", "other", "period", "skip_latest", "by", "filters", "to", "table", "hours", "flow")
     return {"id": cid, "name": str(c.get("name") or cid)[:120], "kind": kind} | {k: c[k] for k in keep if c.get(k) not in (None, "")}
 
 
@@ -3297,27 +3313,36 @@ def monitor_condition(c: dict) -> dict | None:
         return None
 
 
-def monitor_flow(c: dict, names: dict, email: str | None = None) -> dict | None:
+def monitor_flow(c: dict, names: dict, email: str | None = None, types: list | None = None) -> dict | None:
     """A measure check's flow: when its condition starts to hold (the engine checks it every minute, no browser open),
     a message in the project's inbox and, if asked, an email, both carrying the check's rows; the text is the check's
-    own words (its name and rule). `names`: measure ID -> display name."""
+    own words (its name and rule). `names`: measure ID -> display name. 1.2.6 M8, `types` (the ontology's object types):
+    a check whose `by` is a type's key alerts once for each object (the trigger's `per`), to the people `to` finds
+    through it; ABI sends only to project members who see that object, each with its rows."""
     if not (cond := monitor_condition(c)):
         return None
     n = lambda m: names.get(m) or m  # noqa: E731
     per = (c.get("period") or "").split(".")[-1]
+    # ponytail: a type keyed by one column only (a check has one `by`); a flow file takes any key
+    obj = next((t for t in types or [] if t.get("key") and cond["query"]["dimensions"] == [f"{t['table']}.{k}" for k in t["key"]]), None)
     rule = (f"the change of {n(c['measure'])} from one {per} to the next {OPW[c['op']]} {cond['value']:g}%" if cond.get("change")
-            else f"{n(c['measure'])}{' for any ' + c['by'].split('.')[-1] if c.get('by') else ''} {OPW[c['op']]} "
+            else f"{n(c['measure'])}{' for any ' + c['by'].split('.')[-1] if c.get('by') and not obj else ''} {OPW[c['op']]} "
             + (n(cond["other"]) if cond.get("other") else f"{cond['value']:g}") + (f" in the latest {per}" if per else ""))
     rule += (" (completed periods)" if c.get("skip_latest") and per else "") + "".join(
         f", where {f['column']} = {f['value']}" for f in cond["query"]["filters"])
-    text = f"Monitor: {c['name']}. It alerts when {rule}."
-    steps = [{"id": "inbox", "type": "action", "action": "post_message", "input": {"channel": "inbox", "text": text, "data": cond}}]
+    text, subject, data, more = f"Monitor: {c['name']}. It alerts when {rule}.", f"Monitor: {c['name']}", cond, {}
+    if obj:  # the alert names its object and carries that object's row, by its title
+        text = f"Monitor: {c['name']}: {{{{ data.trigger.title }}}}. It alerts for each {obj['name'].lower()} when {rule}."
+        subject += ": {{ data.trigger.title }}"
+        data = cond | {"query": cond["query"] | {"dimensions": [f"{obj['table']}.{obj['title']}"]}}
+        more = {"per": obj["id"]} | ({"recipients": c["to"]} if c.get("to") else {})
+    steps = [{"id": "inbox", "type": "action", "action": "post_message", "input": {"channel": "inbox", "text": text, "data": data}}]
     if email:
         steps.append({"id": "email", "type": "action", "action": "send_email", "input": {
-            "to": [email], "subject": f"Monitor: {c['name']}"[:300], "body": text + " Its figures are below and attached.", "data": cond}})
+            "to": [email], "subject": subject[:300], "body": text + " Its figures are below and attached.", "data": data}})
     return {"$schema": FLOW_SCHEMA, "id": ("monitor_" + c["id"])[:63], "name": f"Monitor: {c['name']}", "enabled": True,
             "description": "Made by Monitor: ABI checks it every minute and posts to the inbox when it starts to hold.",
-            "trigger": {"type": "data_condition", **cond}, "steps": steps}
+            "trigger": {"type": "data_condition", **cond, **more}, "steps": steps}
 
 
 def report_mail_flow(rep: dict, to: list, days: list, at: str, tz: str) -> dict:
@@ -3985,7 +4010,8 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                     out = agent_monitor(project, {"action": "save", "check": c} if c else {"action": "delete", "id": cid}, hub.user)
                     return [x | {"condition": monitor_condition(x)} for x in out]
                 names = {m["id"]: m.get("name") for m in (read("semantic_model", project) or {}).get("measures") or [] if isinstance(m, dict)}
-                if c and (f := monitor_flow(c, names, str(body.get("email") or "").strip() or None)):  # with its flow, after ABI's yes
+                types = (read("ontology", project) or {}).get("objects") or []  # 1.2.6 M8: a check for each object of a type
+                if c and (f := monitor_flow(c, names, str(body.get("email") or "").strip() or None, types)):  # with its flow, after ABI's yes
                     return self.reply(200, json.dumps(run("save_flow", {"project": project, "flow": f}, None, save), default=str).encode())
                 if any(x.get("id") == ("monitor_" + cid)[:63] for x in (read("list_flows", project) or {}).get("flows") or []):
                     return self.reply(200, json.dumps(run("delete_flow", {"project": project, "flow": ("monitor_" + cid)[:63]}, None, save), default=str).encode())

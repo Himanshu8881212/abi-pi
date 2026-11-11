@@ -7,6 +7,8 @@ print view of a report page or visual in one headless Chromium per call (Playwri
 Every `${secret:NAME}` they use is checked against its allowed hosts before any connection (D-2). Channel `inbox` is
 the project's in-app inbox (AT-1, IB-1), stored in Postgres. AT-4: inside a task test run (`flows.TEST_RUN`) both send
 actions send nothing out and write one private inbox message to the task owner naming the original targets.
+1.2.6 M8: inside a per-object run (`flows.OBJECT`) both send only to project members who see the run's object themselves,
+each with their own rows of the attached request, filtered to that object (`_only`, `_seeing`).
 FL-6: the first send to an email domain or channel not yet confirmed in the project needs a confirmation (D-1 style
 409 + token, from any caller); confirmed targets are stored per project. Principle 7: when the agent sends, every
 number in its text must be a value of the attached tool or query result (`data`), which goes with the message.
@@ -63,7 +65,7 @@ from abi.actions import ActionFailed, action, current_user, require_confirmation
 from abi.agents import grounding
 from abi.project import bundle, git, imports, sharing
 from abi.security import Role, User, credentials, tenants, usage
-from abi.semantic import Filter, SemanticQuery, rls
+from abi.semantic import Filter, SemanticQuery, model, ontology, rls
 from abi.semantic.subscriptions import Check, evaluate
 from abi.storage import ProjectRef
 
@@ -513,6 +515,54 @@ def _first_send(conn, project: str, targets: set[str], preview: dict | None = No
             conn.execute("INSERT INTO send_targets VALUES (%s, %s) ON CONFLICT DO NOTHING", [project, t])
 
 
+def _only(project: str, ob: dict, args) -> SemanticQuery | Check | None:
+    """1.2.6 M8: what a per-object run attaches, filtered to its object: a semantic query or a condition, with the
+    object's key as filters. Refused: a published tool's result, a report, the docs (they can't be filtered to it)."""
+    if isinstance(args.data, ToolCall) or args.report or getattr(args, "docs", False):
+        raise ActionFailed(400, "An alert for one object attaches only a semantic query or a condition, which is filtered to that"
+                                " object for each recipient: leave out the tool result, the report and the docs.")
+    got = ontology.keyed(ontology.read(project), model._read(project, "model.json"), ob["type"])
+    if got is None:
+        raise ActionFailed(409, f"Object type '{ob['type']}' is gone, so this alert can't be filtered to its object: save the flow again.")
+    if args.data is None:
+        return None
+    q = args.data.query if isinstance(args.data, Check) else args.data
+    q = q.model_copy(update={"filters": [*q.filters, *(Filter(column=c, op="=", value=v) for c, v in zip(got[1], ob["key"]))]})
+    return args.data.model_copy(update={"query": q}) if isinstance(args.data, Check) else q
+
+
+def _seeing(conn, project: str, ob: dict, where: str, values: list, request: SemanticQuery | Check | None, filled: dict) -> list[tuple]:
+    """1.2.6 M8 (owner, 6 Nov 2026): the project members matching `where` who see a per-object run's object themselves
+    (get_object as each; anyone else gets nothing and learns nothing), each with what is theirs: (the account; the texts:
+    an unrestricted member's as the run filled them, a restricted Viewer's the authored text with {{ data.trigger.title }}
+    and {{ data.trigger.object.* }} from the object as they see it and every other value masked, D-47; the attached
+    request's rows read as them, or None; the object as they see it: type, key, title)."""
+    raw, out = flows.RAW.get() or {}, []
+    for u in conn.execute(f"SELECT id, name, workspace_owner, email FROM users WHERE {where} AND (workspace_owner OR id IN"
+                          " (SELECT user_id FROM project_roles WHERE project = %s)) ORDER BY id", [*values, project]).fetchall():
+        me = User(u["id"], u["name"], u["workspace_owner"])
+        try:
+            got = ontology.get_object(conn, me, ontology.Get(project=project, type=ob["type"], key=ob["key"]))
+        except ActionFailed:
+            continue
+        try:
+            own = _data(conn, me, project, request)
+        except ActionFailed:
+            own = None
+        view = {"trigger": {"title": got["title"], "object": dict(zip(got["columns"], got["rows"][0]))}}
+
+        def mine(m: re.Match, view=view) -> str:
+            try:
+                v = flows._value(m, view) if m[1] == "trigger" and m[2].split(".")[1:2] in (["title"], ["object"]) else None
+            except ValueError:
+                v = None
+            return rls.MARK if v is None or isinstance(v, dict) else str(v)
+        texts = filled if not rls.restricted(project, me.id) else {
+            k: flows.DATA.sub(mine, raw[k]) if isinstance(raw.get(k), str) else rls.MARK for k in filled}
+        out.append((u, texts, own, {"type": ob["type"], "key": ob["key"], "title": ontology._json(got["title"])}))
+    return out
+
+
 class SendEmail(storage.ProjectRef):
     to: list[Annotated[str, Field(pattern=EMAIL, max_length=254)]] = Field(min_length=1, max_length=50)
     subject: str = Field(min_length=1, max_length=300, pattern=r"^[^\r\n]*$")
@@ -524,8 +574,10 @@ class SendEmail(storage.ProjectRef):
 
 @action(Role.editor)
 def send_email(conn, user: User, args: SendEmail) -> dict:
-    """Sends an email, optionally with a tool or query result, a report snapshot and the project's documentation attached. The first send to a domain not yet used in this project asks the user to confirm (FL-6). Every number in subject and body must come from the attached `data`."""
-    data = _data(conn, user, args.project, args.data)
+    """Sends an email, optionally with a tool or query result, a report snapshot and the project's documentation attached. The first send to a domain not yet used in this project asks the user to confirm (FL-6). Every number in subject and body must come from the attached `data`. In a per-object alert's run it reaches only the addresses of project members who see that object, each with their own rows of `data`, filtered to it."""
+    ob = flows.OBJECT.get()
+    req = _only(args.project, ob, args) if ob else args.data
+    data = _data(conn, user, args.project, req)
     _grounded([args.subject, args.body], data, args.project, user)
     if (test := flows.TEST_RUN.get()) is None:
         _first_send(conn, args.project, {"email:" + a.rsplit("@", 1)[1].lower() for a in args.to})  # before any render
@@ -535,6 +587,14 @@ def send_email(conn, user: User, args: SendEmail) -> dict:
     # SE-6: the recipients' rules are unknown (addresses, not users), so under rules the docs carry no data values
     extra = {"docs": docs.package(user, [args.project], False, values=not rls.rules(args.project))["files"]} if args.docs else {}
     with flows.sending():  # FL-4: a run resumed after a crash never sends this twice
+        if ob and test is None:  # 1.2.6 M8: one mail each, to the account's own address; an address that names no such member gets none
+            # ponytail: a mail server failing part-way fails the step, and its retry sends to the first ones again
+            to = [a.lower() for a in args.to]
+            got = _seeing(conn, args.project, ob, "email = ANY(%s::text[])", [to], req, {"subject": args.subject, "body": args.body})
+            for u, t, own, _ in got:
+                deliver_email(conn, args.project, [u["email"]], t["subject"], t["body"], own, None)
+            sent = [u["email"] for u, *_ in got]
+            return {"sent": True, "to": sent, "skipped": [a for a in to if a not in sent]}
         if test is None:
             deliver_email(conn, args.project, args.to, args.subject, args.body, data, snap, **extra)
         else:
@@ -551,8 +611,13 @@ class PostMessage(storage.ProjectRef):
 
 @action(Role.editor)
 def post_message(conn, user: User, args: PostMessage) -> dict:
-    """Posts a message to a channel, optionally with a tool or query result. The first post to a channel not yet used in this project asks the user to confirm (FL-6). Every number in the text must come from the attached `data`."""
-    data = _data(conn, user, args.project, args.data)
+    """Posts a message to a channel, optionally with a tool or query result. The first post to a channel not yet used in this project asks the user to confirm (FL-6). Every number in the text must come from the attached `data`. In a per-object alert's run only channel inbox works: the post reaches the project members who see that object (the trigger's recipients, if it names any), each with their own rows of `data`, filtered to it."""
+    ob = flows.OBJECT.get()
+    if ob and args.channel != INBOX:
+        raise ActionFailed(400, f"An alert for one object reaches only project members who see it: channel '{args.channel}' has readers"
+                                " that can't be checked. Post to channel inbox, or use send_email.")
+    req = _only(args.project, ob, args) if ob else args.data
+    data = _data(conn, user, args.project, req)
     _grounded([args.text], data, args.project, user)
     test = flows.TEST_RUN.get()
     if args.channel != INBOX and test is None:  # the inbox is internal: no FL-6 confirmation
@@ -561,6 +626,16 @@ def post_message(conn, user: User, args: PostMessage) -> dict:
     with flows.sending():  # FL-4: a run resumed after a crash never sends this twice
         if test is not None:
             _inbox(conn, args.project, user, f"Test run: message to channel {args.channel}\n\n{args.text}", data, snap, test)
+        elif ob:  # 1.2.6 M8: the object goes with the post, so its title opens the object's page
+            none = {"columns": [], "rows": []}
+            if "members" in ob:  # the people its recipients name
+                got = _seeing(conn, args.project, ob, "id = ANY(%s::bigint[])", [ob["members"]], req, {"text": args.text})
+            else:  # everyone who sees it: unrestricted members see every object (one post), restricted Viewers a copy each
+                _inbox(conn, args.project, user, args.text, (data or none) | {"object": {k: ob[k] for k in ("type", "key", "title")}}, None)
+                got = _seeing(conn, args.project, ob, "NOT workspace_owner AND id IN (SELECT user_id FROM project_roles WHERE project = %s"
+                              " AND role = 'viewer')", [args.project], req, {"text": args.text}) if rls.rules(args.project) else []
+            for u, t, own, o in got:
+                _inbox(conn, args.project, user, t["text"], (own or none) | {"object": o}, None, u["id"])
         elif args.channel == INBOX:
             _inbox(conn, args.project, user, args.text, data, snap)
             _restricted_copies(conn, args.project, user, _authored(args.text), args.data)

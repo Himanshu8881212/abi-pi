@@ -42,7 +42,12 @@
           "period": {"type": "string", "pattern": "^[^.\\s][^.]*\\.[^.]+$", "description": "A date-table column (day, week, month, quarter, year): only the latest period with data counts"},
           "skip_latest": {"type": "boolean", "description": "With period: the period before the latest one, which may still be filling"},
           "change": {"type": "boolean", "description": "With period: op value compares the % change of measure from the period before (the total of one measure: no other, no query dimensions)"},
-          "cooldown_minutes": {"type": "integer", "minimum": 60, "default": 1440, "description": "Minutes after a run before the next false→true starts one (default 1 day)"}}},
+          "cooldown_minutes": {"type": "integer", "minimum": 60, "default": 1440, "description": "Minutes after a run before the next false→true starts one (default 1 day)"},
+          "per": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$", "description": "An object type ID (model/ontology.json): the query is grouped by the type's key and each object whose row starts to hold gets its own run, with {{ data.trigger.title }}, {{ data.trigger.key }} and {{ data.trigger.object.<column> }}; its sends reach only project members who see that object"},
+          "recipients": {"type": "object", "required": ["property"], "additionalProperties": false, "description": "With per: the people each object's alert is for; only project members who see the object are ever sent to",
+            "properties": {
+              "property": {"type": "string", "minLength": 1, "description": "A property of the object type with the meaning email or person; its value names a project member by their account's email or name"},
+              "link": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$", "description": "A link ID of the object type: read `property` from the objects it reaches instead"}}}}},
         {"type": "object", "required": ["type", "tables"], "additionalProperties": false,
          "description": "Write-back event (FL-2): runs once per applied, approved or undone edit batch on any of these tables. Edits made by a flow start nothing.",
          "properties": {

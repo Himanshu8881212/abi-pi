@@ -89,6 +89,22 @@ def one_to_one(m: dict, t: str, of: str) -> bool:
     return t == of or any(r["from"]["table"] == t and r["to"]["table"] == of and _one(m, r) for r in m.get("relationships", []))
 
 
+def keyed(o: dict, m: dict, name: str) -> tuple[dict, list[str]] | None:
+    """(Object type `name`, its key as table.column) in ontology `o` over model.json `m`; None without the type or a key."""
+    x = next((x for x in o.get("objects", []) if x["id"] == name), None)
+    k = x and _keys(m).get(x["table"])
+    return (x, [f"{x['table']}.{c}" for c in k]) if k else None
+
+
+def people(o: dict, x: dict, link: str | None = None) -> list[str] | None:
+    """1.2.6 M8: the properties a per-object alert may find its recipients in: those of type `x` a person gave the meaning
+    email or person, or (with `link`) those columns of the type the link reaches from `x`; None: no such link on `x`."""
+    if link:
+        ln = next((ln for ln in o.get("links", []) if ln["id"] == link and x["id"] in (ln["from"], ln["to"])), None)
+        x = ln and next((y for y in o.get("objects", []) if y["id"] == ln["to" if ln["from"] == x["id"] else "from"]), None)
+    return x and [p["column"] for p in x.get("properties", []) if p.get("meaning") in ("email", "person") and not (link and "." in p["column"])]
+
+
 # ---------- references: the import check, readiness and the guards on model changes ----------
 
 def references(files: dict, cols: dict | None = None) -> list[dict]:
@@ -753,6 +769,46 @@ def get_object(conn, user: User, args: Get) -> dict:
                      asked | {"link": i}, user.id)
         out["links"].append({"link": i, "to": y["id"], "columns": show, "rows": rows[:args.limit], "more": len(rows) > args.limit})
     return out
+
+
+RECIPIENTS = 50  # send_email takes as many addresses
+
+
+def recipients(conn, project: str, got: dict, rc: dict, user: User) -> dict:
+    """1.2.6 M8 (owner, 6 Nov 2026): who a per-object alert is for. The values of the email or person property
+    `rc.property` of object `got` (get_object's answer), or of the objects `rc.link` reaches from it, read as `user` (the
+    flow's owner). A value only ever names a project member, by their account's email or name, and never becomes an
+    address itself; a member is kept only when they see the object themself (get_object as them).
+    {to: their account emails, members: their ids, skipped: [{value, why}]} (the run's trace)."""
+    p, key, skipped = project, got["key"], []
+    if link := rc.get("link"):
+        o, m, x, cols, hid = _obj(p, got["type"], user.id)
+        hops, y = _follow(p, m, o, x, [link], cols, hid)
+        _live(p, [r[s]["table"] for r, _ in hops for s in ("from", "to")])
+        c, t = storage._q(_col(cols, hid, y["table"], rc["property"])), x["table"]
+        where = " AND ".join(f"{storage._q(k)} = {rls.cast_lit(v, cols[t][k])}" for k, v in zip(_keys(m)[t], key))
+        vals = [r[0] for r in _read(p, f"SELECT DISTINCT {c} FROM {storage._q(y['table'])} WHERE {_semi(hops, t, where)} AND {c} IS NOT NULL"
+                                       f" ORDER BY 1 LIMIT {RECIPIENTS + 1}", {"recipients": x["id"], "key": _json(key), "link": link}, user.id)]
+    else:
+        vals = [v for v in [dict(zip(got["columns"], got["rows"][0])).get(rc["property"])] if v is not None]
+    if len(vals) > RECIPIENTS:
+        vals, skipped = vals[:RECIPIENTS], [{"value": None, "why": f"more than {RECIPIENTS} recipients: only the first {RECIPIENTS} are used"}]
+    vals = list(dict.fromkeys(str(v).strip() for v in vals))
+    users = conn.execute("SELECT id, name, workspace_owner, email FROM users WHERE (email = ANY(%s::text[]) OR name = ANY(%s::text[])) AND (workspace_owner"
+                         " OR id IN (SELECT user_id FROM project_roles WHERE project = %s))", [[v.lower() for v in vals], vals, p]).fetchall()
+    kept = {}
+    for v in vals:
+        u = next((u for u in users if v.lower() == u["email"] or v == u["name"]), None)
+        if u is None:
+            skipped.append({"value": v, "why": "not a member of this project"})
+            continue
+        try:  # ponytail: a full object read per recipient (its measures too); a key-only read when alerts get many recipients
+            get_object(conn, User(u["id"], u["name"], u["workspace_owner"]), Get(project=p, type=got["type"], key=_json(key)))
+        except ActionFailed:
+            skipped.append({"value": v, "why": f"can't see this {got['name']}"})
+            continue
+        kept[u["id"]] = u["email"]
+    return {"to": [e for e in kept.values() if e], "members": list(kept), "skipped": skipped}
 
 
 class Where(BaseModel):

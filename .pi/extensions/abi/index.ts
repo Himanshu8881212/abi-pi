@@ -401,6 +401,8 @@ export default async function abi(pi: ExtensionAPI) {
 				const out: unknown[] = [];
 				for (const it of list) {
 					const r: any = await confirmBridge(String(it.action), { project: p.project, ...(it.args || {}) }, ctx);
+					// the app is in Viewer mode: nothing ran, so the step stays waiting and the rest isn't asked
+					if (String(r.status ?? "").startsWith("Viewer mode")) { out.push({ id: it.id, action: it.action, outcome: "waiting", detail: r }); break; }
 					const outcome = "result" in r ? "ok" : String(r.status ?? "").includes("declined") ? "declined" : "failed";
 					await runTeam(["pending", p.project, "done", it.id, outcome]);
 					out.push({ id: it.id, action: it.action, outcome, detail: "result" in r ? undefined : r });

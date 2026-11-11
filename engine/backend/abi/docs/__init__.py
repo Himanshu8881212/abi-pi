@@ -555,7 +555,8 @@ def _flows(c):
                          "after_refresh": f"after a refresh of {_names(t.get('tables', []))}",
                          "data_condition": f"when {t.get('measure')} {t.get('op')} {t.get('value')} starts to hold in"
                                            f" {json.dumps(t.get('query'))} (checked every minute, at most once per"
-                                           f" {t.get('cooldown_minutes', 1440)} minutes)",
+                                           f" {t.get('cooldown_minutes', 1440)} minutes)"
+                                           + (f", once for each object of type {t['per']}" if t.get("per") else ""),
                          "writeback": f"after an applied, approved or undone edit of {_names(t.get('tables', []))}",
                          "webhook": "per signed call to its webhook (FL-2, SC-8)",
                          "data_quality": f"once per new data-quality problem (IN-8) of {_names(t['tables']) if t.get('tables') else 'any table'}",
@@ -821,12 +822,14 @@ def _context(project: str, user: User, values: bool = True) -> SimpleNamespace:
         c.others = {}  # D-106: users named here who aren't members, by letter in the order the docs name them
         c.tool_state = {r["tool"]: r["error"] for r in conn.execute("SELECT tool, error FROM tool_state WHERE project = %s", [project])}
         c.agent_state = {r["agent"]: r["error"] for r in conn.execute("SELECT agent, error FROM agent_state WHERE project = %s", [project])}
+        # 1.2.6 M8: a per-object alert's run says that an object met the condition: not to a reader who may not see it
+        seen = " AND (trigger ? 'action' OR NOT coalesce(trigger ? 'object', false))" if c.hide else ""
         c.failed = {r["flow"]: r["n"] for r in conn.execute(
-            "SELECT flow, count(*) AS n FROM flow_runs WHERE project = %s AND status = 'failed' GROUP BY flow", [project])}
+            f"SELECT flow, count(*) AS n FROM flow_runs WHERE project = %s AND status = 'failed'{seen} GROUP BY flow", [project])}
         c.runs, c.failures = ({}, {})
         for into, where in ((c.runs, ""), (c.failures, " AND status = 'failed'")):  # the latest 5 per flow, newest first
             for r in conn.execute("SELECT * FROM (SELECT id, flow, status, error, created, finished, row_number() OVER"
-                                  f" (PARTITION BY flow ORDER BY created DESC, id) AS n FROM flow_runs WHERE project = %s{where})"
+                                  f" (PARTITION BY flow ORDER BY created DESC, id) AS n FROM flow_runs WHERE project = %s{where}{seen})"
                                   " x WHERE n <= 5 ORDER BY n", [project]):
                 into.setdefault(r["flow"], []).append(r | {"error": r["error"] and HIDDEN} if c.hide else r)
     return c

@@ -86,6 +86,53 @@ Either way ABI checks the files first and names the file and the field of anythi
   A click on a café in the table filters the report by it, as every click does; **Open**, beside the filter, shows
   that café's page, and Back returns to the report.
 
+## An alert per object
+
+A flow can check a condition for each object and alert the people linked to it: one alert per café, sent to that
+café's manager. Say each café's manager is kept in an input table `cafe_contacts` (keyed by `cafe_id`, with a
+relationship onto `cafes`) and the café type lists it as a property with a meaning:
+`{"column": "cafe_contacts.manager", "name": "Manager", "meaning": "email"}`. The flow is `flows/cafe_revenue_low.json`:
+
+```jsonc
+{
+  "$schema": "https://schema.abi.invalid/v1/flow.json",
+  "id": "cafe_revenue_low", "name": "Café revenue is low", "enabled": true,
+  "trigger": {"type": "data_condition",
+              "query": {"measures": ["revenue"]}, "measure": "revenue", "op": "<", "value": 5000,
+              "period": "calendar.month", "skip_latest": true,
+              "per": "cafe", "recipients": {"property": "cafe_contacts.manager"}},
+  "steps": [
+    {"id": "inbox", "type": "action", "action": "post_message",
+     "input": {"channel": "inbox", "text": "Revenue at {{ data.trigger.title }} was low last month.",
+               "data": {"measures": ["revenue"], "dimensions": ["cafes.cafe_name"]}}},
+    {"id": "email", "type": "action", "action": "send_email",
+     "when": {"value": "{{ data.trigger.recipients }}", "op": "!=", "to": []},
+     "input": {"to": "{{ data.trigger.recipients }}", "subject": "Revenue at {{ data.trigger.title }} was low",
+               "body": "Last month's figure is below and attached.",
+               "data": {"measures": ["revenue"], "dimensions": ["cafes.cafe_name"]}}}
+  ]
+}
+```
+
+- `per` is the object type's `id`. ABI checks the condition for each café and starts one run for each café whose row
+  **starts** to hold; a café that keeps holding gets no second alert until it stops and starts again (and
+  `cooldown_minutes` has passed, a day by default). At most 50 cafés start in one check; if more start at once, the
+  flow's owner gets one Inbox message listing the others.
+- A run reads its café as `{{ data.trigger.title }}`, `{{ data.trigger.key }}` and `{{ data.trigger.object.<column> }}`.
+- `recipients.property` is a property with the meaning `email` or `person`. Its value names a **project member**, by
+  their account's email or name. With `"link": "<link id>"` it is read from the objects that link reaches instead
+  (a café's employees). Leave `recipients` out and the Inbox post goes to everyone in the project who can see the café.
+- Only project members are ever sent to, and each only when they can see that café themselves. They get their own
+  rows of `data`, filtered to the café. Anyone else is skipped, and the run's trace (`flow_runs`) says who and why.
+  An address in the data never becomes a recipient by itself.
+- `{{ data.trigger.recipients }}` is those members' account emails. The first email to a domain the project hasn't
+  mailed before still waits for a person: until someone has sent one email there and confirmed it, the email step
+  fails with "needs confirmation".
+- A per-object alert posts to the Inbox or sends email. It can't post to a Slack or Teams channel, attach a report or
+  a published tool's result, or be run by hand.
+- In the app, **Monitor › New monitor** makes the same flow: choose "each café" under Check and who it is for under
+  Send to.
+
 ## Who can use a form
 
 In 1.2.6 the app's action buttons and form cards are for **Editors and Owners, in Developer mode**. Viewer mode and

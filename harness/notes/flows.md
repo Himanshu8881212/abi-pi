@@ -6,4 +6,8 @@
 - `send_email` input: to, subject, body, data, optional report {report, page}. The project needs delivery settings
   (`delivery_settings`, `set_delivery`); without them post to the inbox (`post_message channel: inbox`).
 - Enabling a trigger, the first send to new recipients and approvals ask the person's confirmation.
+- An alert per object (one per café): add `"per": <object type id>` to a data_condition trigger. Each object whose row
+  starts to hold gets its own run with `{{ data.trigger.title }}` and `{{ data.trigger.object.<column> }}`; its inbox
+  post and emails reach only project members who can see that object. `"recipients": {"property": <an email or person
+  property>, "link"?: <link id>}` sends to the people the object names; use `"to": "{{ data.trigger.recipients }}"`.
 - `run_flow` runs now; `flow_runs` shows status. `subscribe` sets a person's own alert.

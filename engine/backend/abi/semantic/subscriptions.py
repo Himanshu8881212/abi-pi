@@ -81,10 +81,14 @@ def evaluate(project: str, c: dict, user_id: int | None) -> dict:
             rows, m = ([[*now, a, *before, b, pct]] if before else []), "change_pct"
         else:
             rows = [row for row in rows if tuple(row[:n]) == now]
-    i, j = cols.index(m), cols.index(c["other"]) if c.get("other") else None
+    return {"holds": bool(held(c, cols, rows)), "columns": cols, "rows": rows, "measures": r["measures"], "filters": r["filters"]}
+
+
+def held(c: dict, cols: list, rows: list) -> list:
+    """The rows of a condition's result (`evaluate`'s columns and rows) that hold."""
+    i, j = cols.index("change_pct" if c.get("change") else c["measure"]), cols.index(c["other"]) if c.get("other") else None
     to = lambda row: (0 if j is None else float(row[j])) + c["value"]  # noqa: E731
-    return {"holds": any(row[i] is not None and (j is None or row[j] is not None) and OPS[c["op"]](float(row[i]), to(row)) for row in rows),
-            "columns": cols, "rows": rows, "measures": r["measures"], "filters": r["filters"]}
+    return [row for row in rows if row[i] is not None and (j is None or row[j] is not None) and OPS[c["op"]](float(row[i]), to(row))]
 
 
 @action(Role.viewer)
