@@ -347,7 +347,8 @@ def _glossary(c):
         ("Columns", _names(f"{x['table']}.{x['column']}" for x in t.get("columns", []))),
         ("Object types", _names(t.get("objects", []))), ("Links", _names(t.get("links", []))),
     ]) for t in model.masked(c.project, (c.files.get("model/glossary.json") or {}).get("terms", []), c.hide)
-        + ontology.terms(c.files.get(ontology.FILE) or {}, c.hide)]  # 1.2.6 M6: the ontology's descriptions are definitions too
+        # 1.2.6 M6: the ontology's descriptions are definitions too, as the reader sees it (no column hidden from them)
+        + (ontology.terms(ontology.describe(c.project, c.user.id), c.hide) if ontology.FILE in c.files else [])]
 
 
 def _reports(c):

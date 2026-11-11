@@ -36,6 +36,7 @@ from abi.project import ID, git, imports
 from abi.project.bundle import bundle, dumps
 from abi.security import MEMBERS, Role, User, role_in
 from abi.semantic import SemanticQuery, lineage, uses
+from abi.semantic.subscriptions import Check
 from abi.tools import builtin
 
 MAX_DEPTH = 2  # AGENT-AS-TOOL: an agent may ask agents that ask agents, no further
@@ -71,6 +72,13 @@ def _refused(name: str, payload: dict, allowed: list[str], files: dict, g: dict,
     if name == studio.ASK:
         return None if payload.get("agent") in agents else f"'{payload.get('agent')}' is not one of the agents you may ask ({', '.join(agents)})."
     q = payload if name == "semantic_query" else payload.get("data")  # send_email/post_message attach a query or tool
+    cond = None  # a condition attached as `data` ({query, measure, op, value, period?}): its query, grouped by its period column
+    if isinstance(q, dict) and isinstance(q.get("query"), dict):
+        try:
+            c = Check.model_validate(q).model_dump(mode="json")
+            cond = c["query"] | {"dimensions": list(dict.fromkeys([*c["query"]["dimensions"], *([c["period"]] if c["period"] else [])]))}
+        except ValidationError:
+            pass  # no condition: read as before (actions.run refuses what is neither)
     if isinstance(q, dict) and "measures" in q:
         try:
             q = SemanticQuery.model_validate(q).model_dump(mode="json")
@@ -92,7 +100,7 @@ def _refused(name: str, payload: dict, allowed: list[str], files: dict, g: dict,
             q = None  # actions.run refuses it with the details
     # the request's page/visual; render_snapshot checks what is drawn again (`_call` sets builtin.SCOPE)
     snap = _snapshot(files, payload if name == "report_snapshot" else payload.get("report"))
-    if out := list(dict.fromkeys(x for r in [q if isinstance(q, dict) else {}, *snap] for x in studio.outside(r, measures, tables, g, files))):
+    if out := list(dict.fromkeys(x for r in [q if isinstance(q, dict) else {}, *([cond] if cond else []), *snap] for x in studio.outside(r, measures, tables, g, files))):
         return f"Outside your scope: {', '.join(out)}."
     if name in ("refresh", "propose_edit") and payload.get("table") not in tables:
         return f"Table '{payload.get('table')}' is outside your scope."

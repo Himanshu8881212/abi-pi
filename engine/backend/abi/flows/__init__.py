@@ -407,17 +407,25 @@ def sending():
 def _changed(run_id: str, agent_step: str, data: dict) -> dict:
     """AT-2 "answer changed" (D-31): the sha256 of the agent run's tool and query result outputs differs from the same
     step's in the flow's previous non-test run (none = changed). Code over traces, never the LLM's wording.
-    M4 LOW-3: in a run an object action started (it reads as its runner), the previous such run of the same person
-    only: against anyone else's, the outcome would say whether their rows are the runner's (one bit of hidden data)."""
+    M4 LOW-3: against the previous run of the same identity only (an action run's runner, a message run's sender, else
+    the flow's owner): against another's, the outcome would say whether their rows are the runner's (one bit of hidden data)."""
     project, flow, _ = run_id.split("/")
     fp = lambda trace: fingerprint([t["output"] for t in trace])
-    mine = " AND r.trigger ? 'action' AND r.started_by = (SELECT started_by FROM flow_runs WHERE id = %s)" if ACTED.get() else ""
+    # round 2: every run compares within its own identity. An action run: the same runner's action runs; a message run
+    # (it runs as its sender): the same sender's; any other (it runs as the flow's owner): the runs that are neither
+    msg, me = f"{project}/{flow}/message-", "r.started_by = (SELECT started_by FROM flow_runs WHERE id = %s)"
+    if ACTED.get():
+        mine, more = f" AND r.trigger ? 'action' AND {me}", [run_id]
+    elif run_id.startswith(msg):
+        mine, more = f" AND starts_with(r.id, %s) AND {me}", [msg, run_id]
+    else:
+        mine, more = " AND (r.trigger ? 'action') IS NOT TRUE AND NOT starts_with(r.id, %s)", [msg]
     with db.connect() as conn:
         now = conn.execute("SELECT trace FROM agent_runs WHERE id::text = %s", [data[agent_step]["run"]]).fetchone()
         before = conn.execute("SELECT a.trace FROM flow_runs r JOIN flow_steps s ON s.run_id = r.id JOIN agent_runs a"
                               " ON a.id::text = s.output->>'run' WHERE r.project = %s AND r.flow = %s AND s.step = %s"
                               f" AND s.status = 'ok' AND r.id <> %s AND NOT starts_with(r.id, %s){mine} ORDER BY r.created DESC LIMIT 1",
-                              [project, flow, agent_step, run_id, f"{project}/{flow}/test-", *([run_id] if mine else [])]).fetchone()
+                              [project, flow, agent_step, run_id, f"{project}/{flow}/test-", *more]).fetchone()
     return {"holds": before is None or fp(before["trace"]) != fp(now["trace"])}
 
 

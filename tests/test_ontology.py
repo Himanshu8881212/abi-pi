@@ -518,6 +518,7 @@ def test_mcp_outside_object_reads(saved):
 SCOPED = r"""
 import json, sys
 import abi.app  # noqa: F401
+from abi import actions
 from abi.agents import runs, studio
 from abi.project import bundle, git
 from abi.semantic import lineage
@@ -525,13 +526,14 @@ a = json.loads(sys.stdin.read())
 files = bundle.bundle(git.path(a["project"])) | a.get("files", {})
 files["model/measures.json"] = {**files["model/measures.json"], "measures": files["model/measures.json"]["measures"] + a.get("measures", [])}
 g = lineage.graph(files)
-print(json.dumps({"builtin": list(studio.BUILTIN), "cases": {
+print(json.dumps({"builtin": list(studio.BUILTIN), "save_agent": actions.ACTIONS["save_agent"].input.model_json_schema()["properties"]["agent"]["description"], "cases": {
     k: runs._refused(c["name"], c["payload"], c.get("allowed", ["get_object", "list_objects", "report_snapshot"]), files, g,
                      set(c.get("measures", ["revenue", "orders_rows"])), set(c["tables"]), []) for k, c in a["cases"].items()}}))
 """
 
 
 def refusals(cases: dict, **more) -> dict:
+    """runs._refused for each case {name, payload, tables, measures?, allowed?}, on the project's files (+ files, measures)."""
     r = engine(SCOPED, timeout=300, stdin=json.dumps({"project": P, "cases": cases, **more}))
     assert r.returncode == 0, r.stderr[-2000:]
     return json.loads(r.stdout.splitlines()[-1])
@@ -650,6 +652,7 @@ def test_glossary_lists_object_definitions(saved):
     o = copy.deepcopy(ONTO)
     o["objects"][0]["properties"][1]["description"] = "The sales region a café reports to."  # region
     o["objects"][0]["properties"][5]["description"] = "Who runs the café day to day."  # cafe_contacts.manager, named Manager
+    o["objects"][1]["properties"][1]["description"] = "Where a customer lives."  # customers.home_country: hidden from the Viewer
     next(ln for ln in o["links"] if ln["id"] == "visited")["description"] = "A customer visited a café when they ordered there."
     schema = json.loads((ROOT / "engine/schemas/v1/glossary.json").read_text())
     term = {"id": "shop", "term": "Shop", "definition": "A place we sell coffee.", "objects": ["cafe"], "links": ["visited"]}
@@ -678,6 +681,12 @@ def test_glossary_lists_object_definitions(saved):
         assert mine["object:cafe"]["definition"] == MARK == mine["link:visited"]["definition"] and mine["shop"]["definition"] == "A place we sell coffee."
         docs = json.dumps(abi.call("docs", project=P, all=True), ensure_ascii=False)
         assert all(x in docs for x in ('"term:object:cafe"', '"term:link:visited"', '"term:shop"', "The sales region a café reports to."))
+        # round 2: a property on a column hidden from the reader is no term of theirs, in semantic_model and in the docs
+        hidden = "property:customer.home_country"
+        assert g[hidden]["definition"] == "Where a customer lives." and hidden not in mine and f'"term:{hidden}"' in docs
+        theirs = json.dumps(viewer(saved, "docs", all=True), ensure_ascii=False)
+        assert '"term:object:cafe"' in theirs and hidden not in theirs and "Where a customer lives." not in theirs, "the docs, as the reader sees the ontology"
+        assert "The sales region a café reports to." not in theirs, "and its definitions masked for a restricted reader"
         attach = abi.call("propose_ontology", project=P)
         assert attach["glossary"] == [{"term": "format", "objects": ["cafe"]}] and "set_glossary_term" in attach["note"], attach.get("glossary")
     finally:
@@ -711,3 +720,65 @@ def test_memory_term_links_unchanged(saved):
             sure("delete_glossary_term", project=P, id="loyalty")
         except abi.ActionError:
             pass
+
+
+# ---------- 1.2.6 M6 round 2 ----------
+
+def test_condition_attached_to_a_send_is_scope_checked(saved):
+    """Round 2: send_email and post_message take a condition as `data` ({query, measure, op, value, period?}); its
+    rows go out with the message, so a custom agent's scope covers the condition's query and its period column like
+    any query it attaches (it used to pass unchecked: no top-level measures). save_agent's own description lists the
+    object reads among the tools an agent may hold."""
+    cond = {"query": {"measures": ["revenue"], "dimensions": ["cafes.region"], "filters": [{"column": "customers.segment", "op": "=", "value": "x"}]},
+            "measure": "revenue", "op": ">", "value": 0}
+    send = lambda data, **more: {"name": "send_email", "payload": {"to": ["a@example.com"], "subject": "s", "body": "b", "data": data},  # noqa: E731
+                                 "allowed": ["send_email", "post_message"], "measures": ["revenue"], **more}
+    out = refusals({
+        "in": send(cond, tables=["cafes", "customers"]),
+        "dimension_out": send(cond, tables=["customers"]),
+        "filter_out": send(cond, tables=["cafes"]),
+        "measure_out": send(cond, tables=["cafes", "customers"], measures=[]),
+        "period_out": send({**cond, "period": "calendar.month"}, tables=["cafes", "customers"]),
+        "period_in": send({**cond, "period": "calendar.month"}, tables=["cafes", "customers", "calendar"]),
+        # a top-level query in scope beside a condition out of it: both are read, whichever the action takes
+        "both": send({**cond, "measures": ["revenue"]}, tables=["customers"]),
+        "post": {"name": "post_message", "payload": {"channel": "inbox", "text": "t", "data": cond}, "allowed": ["post_message"],
+                 "measures": ["revenue"], "tables": ["customers"]},
+        "query_as_before": send({"measures": ["revenue"], "dimensions": ["cafes.region"]}, tables=[]),
+    })
+    c = out["cases"]
+    assert c["in"] is None and c["period_in"] is None, c
+    assert c["dimension_out"] == "Outside your scope: cafes." == c["both"] == c["post"] == c["query_as_before"], c
+    assert c["filter_out"] == "Outside your scope: customers." and c["measure_out"] == "Outside your scope: revenue.", c
+    assert c["period_out"] == "Outside your scope: calendar.", c
+    assert "get_object, list_objects" in out["save_agent"], out["save_agent"]
+
+
+BAD_TERM = r"""
+import json, sys
+import abi.app  # noqa: F401
+from abi import actions, db, security
+from abi.project import bundle, git
+P = json.loads(sys.stdin.read())["project"]
+with db.connect() as c:
+    owner = security.user(c, c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"])
+b = bundle.bundle(git.path(P))
+term = {"id": "pi_shop", "term": "Shop", "definition": "A place we sell coffee."}
+def dry(**refs):
+    g = {"$schema": "https://schema.abi.invalid/v1/glossary.json", "terms": [term | refs]}
+    try:
+        return actions.run("import_project", {"project": P, "bundle": {**b, "model/glossary.json": g}, "dry_run": True}, owner, "rest")["changes"] != []
+    except actions.ActionFailed as e:
+        return [e.status, [[x["path"], x["error"]] for x in e.body["errors"]]]
+print(json.dumps({"bad": dry(objects=["cafe", "nope"], links=["gone"]), "good": dry(objects=["cafe"], links=["visited"]), "same": bundle.bundle(git.path(P)) == b}))
+"""
+
+
+def test_import_checks_a_terms_object_and_link_references(saved):
+    """Round 2: a glossary term's `objects` and `links` are checked at import like its measures: an unknown one is
+    refused with the file, JSON path and fix; known ones pass."""
+    r = engine(BAD_TERM, timeout=300, stdin=json.dumps({"project": P}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    out = json.loads(r.stdout.splitlines()[-1])
+    assert out["bad"] == [422, [["$.terms[0].objects[1]", "Unknown object type 'nope'."], ["$.terms[0].links[0]", "Unknown link 'gone'."]]], out
+    assert out["good"] is True and out["same"], out

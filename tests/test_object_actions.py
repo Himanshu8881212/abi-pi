@@ -906,7 +906,8 @@ obj = {"id": "cafe", "table": "cafes", "name": "Café", "plural": "Cafés", "tit
 act = {"id": "flag", "object": "cafe", "name": "Flag", "role": "viewer", "flow": "visit", "writes": {"table": "cafe_contacts", "set": {"visit_reason": "x"}}}
 files = {"model/ontology.json": {"objects": [obj], "actions": [act, {**act, "id": "plain", "flow": None, "writes": {"table": "cafes", "set": {"seats": 1}}}]},
          "flows/visit.json": {"id": "visit", "name": "Visit", "enabled": False, "trigger": {"type": "manual"}, "steps": []},
-         "flows/on_edit.json": {"id": "on_edit", "name": "On edit", "enabled": True, "trigger": {"type": "writeback", "tables": ["cafe_contacts"]}, "steps": []}}
+         "flows/on_edit.json": {"id": "on_edit", "name": "On edit", "enabled": True, "trigger": {"type": "writeback", "tables": ["cafe_contacts"]}, "steps": []},
+         "flows/off_edit.json": {"id": "off_edit", "name": "Off", "enabled": False, "trigger": {"type": "writeback", "tables": ["cafe_contacts", "cafes"]}, "steps": []}}
 docs = {n: actions.ACTIONS[n].fn.__doc__ for n in ("approve_flow_run", "run_flow", "run_object_action")}
 print(json.dumps({"text": imports.granting("p", files, imports.grants(files)), "docs": docs}))
 """
@@ -924,6 +925,7 @@ def test_grant_says_the_flow_runs_as_the_person_who_clicks():
     assert "flow's owner" not in text and "that owner" not in text, text
     assert "write visit_reason of table cafe_contacts (each write also starts the flows that edits of cafe_contacts trigger, as their owners: now on_edit)" in text
     assert "write seats of table cafes (each write also starts the flows that edits of cafes trigger, as their owners)" in text, text
+    assert "off_edit" not in text, "only the flows that are switched on are named"
     assert "as the flow owner" not in out["docs"]["approve_flow_run"] and "as the person who ran that action" in out["docs"]["approve_flow_run"]
     assert "as the person who clicked" in out["docs"]["run_flow"] and "runs as you" in out["docs"]["run_object_action"]
 
@@ -1001,6 +1003,12 @@ import abi.app  # noqa: F401
 from abi import db, flows
 P, F = "pi_m6_changed", "f"
 viewer = json.loads(sys.stdin.read())["viewer"]
+def same(a, b):
+    # what the rule before M6 compared: any two runs' agent step results
+    with db.connect() as c:
+        t = [c.execute("SELECT a.trace FROM flow_steps s JOIN agent_runs a ON a.id::text = s.output->>'run' WHERE s.run_id = %s",
+                       [f"{P}/{F}/{k}"]).fetchone()["trace"] for k in (a, b)]
+    return flows.fingerprint([x["output"] for x in t[0]]) == flows.fingerprint([x["output"] for x in t[1]])
 def holds(key, who, rows, acted=True):
     # one more finished run of flow F whose agent step `ask` answered from `rows`: does `condition {changed: ask}` hold in it?
     run, ask = f"{P}/{F}/{key}", str(uuid.uuid4())
@@ -1022,12 +1030,14 @@ out = {}
 try:
     with db.connect() as c:
         owner = c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"]
+    holds("manual-0", owner, [[60]], acted=False)  # the flow's own run (as its owner), before any action run
     holds("action-1", owner, [[100]])  # the owner sees every row
     mine = holds("action-2", viewer, [[100]])  # the Viewer's rows answer the same: so they see what the owner sees?
-    out |= {"first_as_runner": mine(True), "first_as_before": mine(False)}
+    # before M6 the Viewer's first run was compared with the owner's action-1: unchanged (not holds) = "you see it all"
+    out |= {"first_as_runner": mine(True), "first_as_before": not same("action-1", "action-2")}
     out["same_again"] = holds("action-3", viewer, [[100]])(True)
     out["moved"] = holds("action-4", viewer, [[60]])(True)
-    out["owners_own_run"] = holds("manual-5", owner, [[60]], acted=False)(False)
+    out["owners_own_run"] = holds("manual-5", owner, [[60]], acted=False)(False)  # with manual-0, its own kind's last run
 finally:
     with db.connect() as c:
         c.execute("DELETE FROM flow_steps WHERE run_id LIKE %s", [P + "/%"])
@@ -1040,10 +1050,67 @@ print(json.dumps(out))
 def test_changed_condition_compares_only_the_runners_own_runs(acts):
     """LOW-3: `condition {changed}` in a run an object action started compares the agent step's result with the same
     person's previous such run, never with someone else's: against the owner's it said, in one bit, whether the rows
-    hidden from a Viewer matter ("unchanged" = you see what the owner sees). A first run counts as changed; other
-    runs compare as before (the owner's own run with the latest run before it, whoever started that)."""
+    hidden from a Viewer matter ("unchanged" = you see what the owner sees). A first run counts as changed; the flow's
+    own runs (as its owner) compare with each other (round 2: test_changed_condition_compares_within_one_identity)."""
     r = engine(CHANGED, stdin=json.dumps({"viewer": acts["uid"]["viewer"]}))
     assert r.returncode == 0, r.stderr[-2000:]
     out = json.loads(r.stdout.splitlines()[-1])
     assert out["first_as_before"] is False, "the oracle, as it was: the Viewer's first run compared with the owner's"
     assert out == {"first_as_runner": True, "first_as_before": False, "same_again": False, "moved": True, "owners_own_run": False}, out
+
+
+IDENTITY = r"""
+import json, sys, uuid
+import abi.app  # noqa: F401
+from abi import db, flows
+P, F = "pi_m6_identity", "f"
+a = json.loads(sys.stdin.read())
+def holds(key, who, rows, trigger=None, acting=False):
+    # one more finished run of flow F whose agent step `ask` answered from `rows`: does `condition {changed: ask}` hold in it?
+    run, ask = f"{P}/{F}/{key}", str(uuid.uuid4())
+    with db.connect() as c:
+        c.execute("INSERT INTO flow_runs (id, project, flow, started_by, trigger) VALUES (%s, %s, %s, %s, %s)", [run, P, F, who, trigger and json.dumps(trigger)])
+        c.execute("INSERT INTO agent_runs (id, project, agent, version, user_id, via, question, trace, answer, grounded, retried, template,"
+                  " prompt_tokens, completion_tokens, flow_run) VALUES (%s, %s, 'a', 0, %s, 'flow', 'q', %s, 'x', NULL, false, false, 0, 0, %s)",
+                  [ask, P, who, json.dumps([{"tool": "semantic_query", "input": {}, "output": {"result": {"rows": rows}}}]), run])
+        c.execute("INSERT INTO flow_steps (run_id, pos, step, status, output, started) VALUES (%s, 0, 'ask', 'ok', %s, now())", [run, json.dumps({"run": ask})])
+    t = flows.ACTED.set(acting)
+    try:
+        return flows._changed(run, "ask", {"ask": {"run": ask}})["holds"]
+    finally:
+        flows.ACTED.reset(t)
+ACT, MSG = {"action": "x"}, {"text": "hi"}
+out = {}
+try:
+    with db.connect() as c:
+        owner = c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"]
+    v, w = a["viewer"], a["viewer2"]
+    out["owner_first"] = holds("schedule-1", None, [[100]])  # the flow's own run, as its owner: nothing before it
+    out["viewer_action"] = holds("action-1", v, [[60]], ACT, True)
+    out["owner_after_action"] = holds("manual-2", owner, [[100]])  # with schedule-1 (same rows), never the Viewer's action-1
+    out["owner_like_action"] = holds("schedule-3", None, [[60]])  # moved from manual-2; equal to the Viewer's action-1 says nothing
+    out["viewer_action_after_owner"] = holds("action-2", v, [[100]], ACT, True)  # with their own action-1, never the owner's runs
+    out["sender_first"] = holds("message-1", v, [[60]], MSG)  # a message's run reads as its sender: their first
+    out["other_sender"] = holds("message-2", w, [[60]], MSG)  # another sender with the same rows: their first too, no bit about v
+    out["sender_again"] = holds("message-3", v, [[60]], MSG)
+    out["owner_after_messages"] = holds("schedule-4", None, [[60]])  # with schedule-3
+finally:
+    with db.connect() as c:
+        c.execute("DELETE FROM flow_steps WHERE run_id LIKE %s", [P + "/%"])
+        c.execute("DELETE FROM agent_runs WHERE project = %s", [P])
+        c.execute("DELETE FROM flow_runs WHERE project = %s", [P])
+print(json.dumps(out))
+"""
+
+
+def test_changed_condition_compares_within_one_identity(acts):
+    """Round 2 (LOW-3, both directions): `condition {changed}` compares a run only with the last run that read as the
+    same identity. The flow's own runs (as its owner) never compare with an action run or a message's run; an action
+    run compares with its runner's action runs; a message's run with its sender's. So no outcome says whether another
+    person's rows equal one's own."""
+    r = engine(IDENTITY, stdin=json.dumps({"viewer": acts["uid"]["viewer"], "viewer2": acts["uid"]["viewer2"]}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    out = json.loads(r.stdout.splitlines()[-1])
+    assert out == {"owner_first": True, "viewer_action": True, "owner_after_action": False, "owner_like_action": True,
+                   "viewer_action_after_owner": True, "sender_first": True, "other_sender": True, "sender_again": False,
+                   "owner_after_messages": False}, out

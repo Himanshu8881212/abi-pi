@@ -156,7 +156,8 @@ class SaveAgent(storage.ProjectRef):
     agent: dict = Field(description=(
         "The agent (schemas/v1/agent.json): {id, name, purpose, instructions, scope: {tables?, measures?, datasets?, glossary?}"
         " (IDs from semantic_model and the glossary), tools: [custom tool IDs, semantic_query, report_snapshot, send_email,"
-        " post_message, refresh, propose_edit], agents?: [other published agent IDs it may ask, as you], mode: tools_only (default) | exploratory, model: auto (default) or a"
+        " post_message, refresh, propose_edit, get_object, list_objects (the object reads: only what its scope's tables and"
+        " measures cover)], agents?: [other published agent IDs it may ask, as you], mode: tools_only (default) | exploratory, model: auto (default) or a"
         " provider alias from list_llm_providers (small, large, …), effort? (reasoning effort: none, minimal, low, medium,"
         " high, xhigh, max; sent only where the model lists it), grounding (default true; required"
         " for channels other than in_app), channels: [{type: in_app|email|slack|teams|api|mcp, address?, channel?, reply? (teams only, required: the"

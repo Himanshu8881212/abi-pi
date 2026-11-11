@@ -58,6 +58,22 @@ const LOG = path.join(ROOT, "logs", `harness-${new Date().toISOString().slice(0,
 const WITHHELD = "I couldn't back the numbers and names in my answer with a tool result, so I won't state it.";
 const UNCHECKED = "I couldn't check my answer against the tool results (the grounding check failed to run), so I won't state it. Please ask again.";
 
+// 1.2.6 M6 round 2: what the agents of one session share for grounding. The Lead makes the folder (its own, removed
+// when it exits) and its specialists inherit the path: wrote.jsonl holds the prose (three words or more) any of them
+// sent as a tool input, so a title a specialist saved grounds no figure for the Lead either; asked.txt holds the
+// person's own messages, which are a specialist's `asked` (never the Lead's task text: a figure the Lead made up
+// would ground in the specialist and come back to the Lead as a row)
+const SHARED = (process.env.ABI_PI_SHARED ??= fs.mkdtempSync(path.join(os.tmpdir(), "abi-pi-")));
+if (!process.env.ABI_PI_AGENT) process.on("exit", () => { try { fs.rmSync(SHARED, { recursive: true, force: true }); } catch {} });
+const share = (file: string, s: string) => { try { fs.appendFileSync(path.join(SHARED, file), s, { mode: 0o600 }); } catch {} };
+const shared = (file: string) => { try { return fs.readFileSync(path.join(SHARED, file), "utf8"); } catch { return ""; } };
+function prose(x: unknown, out: string[] = []): string[] {
+	if (typeof x === "string") { if (x.trim().split(/\s+/).length >= 3) out.push(x); }
+	else if (x && typeof x === "object") Object.values(x).forEach((v) => prose(v, out));
+	return out;
+}
+const wroteIt = (input: unknown) => prose(input).forEach((s) => share("wrote.jsonl", JSON.stringify(s) + "\n"));
+
 function log(entry: Record<string, unknown>) {
 	try {
 		fs.mkdirSync(path.dirname(LOG), { recursive: true });
@@ -440,6 +456,7 @@ export default async function abi(pi: ExtensionAPI) {
 	pi.on("tool_call", async (event, ctx) => {
 		state.started.set(event.toolCallId, Date.now());
 		state.wrote.push(event.input);
+		wroteIt(event.input);
 		const name = event.toolName;
 		if (name === "subagent" && !sub) {
 			const inp: any = event.input ?? {};
@@ -602,6 +619,7 @@ export default async function abi(pi: ExtensionAPI) {
 		if (event.messageType === "user") {
 			exchange();
 			state.asked += "\n" + event.prompt;
+			if (!sub) share("asked.txt", "\n" + event.prompt);
 			state.retried = false;
 			state.needRetry = false;
 			// D-71 in the harness: the person's words pick the tool groups up front (saves the abi_tools turn)
@@ -681,7 +699,7 @@ export default async function abi(pi: ExtensionAPI) {
 		if (m.role !== "assistant" || m.content.some((c: any) => c.type === "toolCall")) return;
 		const answer = m.content.filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n");
 		if (!answer.trim()) return;
-		const bad = await ground(answer);
+		const bad = await ground(answer).catch(() => FAILED);  // a crash before the check answers withholds too
 		if (!bad) return;
 		state.flags++;
 		log({ event: "grounding", numbers: bad.numbers.length, names: bad.names.length, retry: !state.retried && !bad.error,
@@ -721,7 +739,9 @@ export default async function abi(pi: ExtensionAPI) {
 	 *  reads it makes through ABI as the person (filter values, members, code labels); null when nothing is flagged. */
 	function ground(answer: string): Promise<Grounded | null> {
 		const all = (k: keyof Sources) => state.ex.flatMap((e) => e[k]);
-		const req = { answer, results: all("results"), notes: all("notes"), pending: all("pending"), asked: state.asked, wrote: state.wrote,
+		// every agent of the session's own prose (wrote.jsonl; this process's inputs whole too); a specialist's `asked` is the person's
+		const theirs = shared("wrote.jsonl").split("\n").filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return ""; } });
+		const req = { answer, results: all("results"), notes: all("notes"), pending: all("pending"), asked: sub ? shared("asked.txt") : state.asked, wrote: state.wrote.concat(theirs),
 			vocab: [...AREAS.core, ...Object.values(AREAS.areas).flatMap((a) => a.tools), "ABI", "Pi", "GPT", ...APP],
 			today: new Date().toISOString().slice(0, 10), project: state.model?.project, model: state.model?.sm };
 		return new Promise((resolve) => {
@@ -739,6 +759,7 @@ export default async function abi(pi: ExtensionAPI) {
 					resolve(FAILED);
 				}
 			});
+			p.stdin.on("error", () => {});  // ground.py died before it read its input: `close` withholds the answer
 			p.stdin.end(JSON.stringify(req));
 		});
 	}
@@ -763,10 +784,11 @@ export default async function abi(pi: ExtensionAPI) {
 		for (const e of ctx.sessionManager.getBranch() as any[]) {
 			const m = e.type === "message" ? e.message : undefined;
 			const t = (m?.content ?? []).map((c: any) => (c.type === "text" ? c.text : "")).join("");
-			if (m?.role === "user") { exchange(); state.asked += "\n" + t; }
+			if (m?.role === "user") { exchange(); state.asked += "\n" + t; if (!sub) share("asked.txt", "\n" + t); }
 			else if (m?.role === "assistant") {
 				for (const c of m.content ?? []) if (c.type === "toolCall") {
 					state.wrote.push(c.arguments);
+					wroteIt(c.arguments);
 					if (typeof c.arguments?.project === "string") state.project = c.arguments.project;
 				}
 			} else if (m?.role === "toolResult") ingest(m.toolName, t, !!m.isError);

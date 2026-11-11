@@ -862,3 +862,25 @@ def test_the_digest_lists_objects_and_their_names_ground():
     assert ground.check("North has 12 Roasteries.", [ROW], notes=[sm | {"count": 12}])["numbers"] == ["12"], "a note grounds no figure"
     digest = TS[TS.index("async function digest("):TS.index("async function today(")]
     assert "sm.objects" in digest and re.search(r"objects: \$\{objs", digest) and "l.link" in digest and "now().notes.push(sm)" in digest
+
+
+def test_own_prose_inside_a_longer_result_text_grounds_no_figure():
+    """Round 2: a title the agent saved comes back inside longer texts too (a diff's patch, the docs): the figures of
+    its own prose are taken out of what result prose grounds, wherever they stand; the person's words and the rows
+    still ground them. The agents of one session share their prose (a specialist saves, the Lead reads) and a
+    specialist's `asked` is the person's own messages, never the Lead's task text."""
+    wrote = ["Revenue rose 37 percent", {"project": "brew", "measures": ["revenue"]}]
+    patch = {"files": [{"path": "reports/sales.json", "patch": '@@ -3,1 +3,1 @@\n-  "title": "Overview"\n+  "title": "Revenue rose 37 percent"\n over 28 days'}]}
+    check = ground.check
+    assert check("Revenue rose 37% over 28 days.", [ROW, patch])["numbers"] == [], "nobody here wrote it: as since 1.1"
+    assert check("Revenue rose 37% over 28 days.", [ROW, patch], wrote=wrote)["numbers"] == ["37%"], "its own 37; the 28 isn't its"
+    assert check("Revenue rose 37%.", [ROW, patch], asked="we agreed on 37%", wrote=wrote)["numbers"] == [], "the person's own words"
+    row = {"columns": ["growth_pct"], "rows": [[37]]}
+    assert check("Growth was 37.", [row, patch], wrote=wrote)["numbers"] == [], "a row's value"
+    assert ground.run({"answer": "Revenue rose 37%.", "results": [ROW, patch], "wrote": wrote})["numbers"] == ["37%"]
+    # index.ts: one folder per session (the Lead's, inherited by its specialists) holds every agent's prose and the person's words
+    assert 'process.env.ABI_PI_SHARED ??= fs.mkdtempSync' in TS and "...process.env" in (ROOT / ".pi/extensions/subagent/index.ts").read_text()
+    assert TS.count("wroteIt(") == 2 and 'share("wrote.jsonl"' in TS and 'wrote: state.wrote.concat(theirs)' in TS
+    assert TS.count('if (!sub) share("asked.txt"') == 2 and 'asked: sub ? shared("asked.txt") : state.asked' in TS
+    # and a crash before the check reads its input withholds the answer as well
+    assert "await ground(answer).catch(() => FAILED)" in TS and 'p.stdin.on("error", () => {})' in TS

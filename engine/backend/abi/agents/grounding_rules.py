@@ -504,16 +504,18 @@ def check(answer: str, results: list, vocab: set[str] = frozenset(), members: se
     # 1.1: a figure written in a definition's prose (a report, page or visual title, a description: three words or more
     # in one text, never an ID or a row cell) grounds that same figure exactly, like the person's own words: "the
     # 28-day trend" from a title; never rounded, a ratio or a figure of the data
-    # 1.2.6 M6: only prose a person wrote. `wrote` = the inputs of the agent's own tool calls (the harness sees each):
-    # a title or description the agent saved itself comes back in a result as its own words, and grounds no figure.
-    # ponytail: told apart by this session's calls only (a result names no author); text an agent saved in another
-    # session, or a specialist did, still grounds: per-definition authorship from the engine closes that.
+    # 1.2.6 M6: only prose a person wrote. `wrote` = the inputs of the tool calls of this session's agents (the Lead's
+    # and its specialists': the harness sees each): a figure in prose one of them sent (a title, a description) grounds
+    # from no result prose, wherever it comes back (as the title, or inside a diff or the docs). The person's own
+    # words (`asked`) and the rows ground as ever.
+    # ponytail: told apart by this session's calls only (a result names no author), so text an agent saved in an
+    # earlier session still grounds, and a person's prose holding a figure an agent also wrote doesn't (fails closed):
+    # per-definition authorship from the engine closes both.
     if HARNESS:
         rows, own = set(cells), []
         _walk(list(wrote), [], own)
-        own = {" ".join(t.split()).lower() for t in own}
-        typed |= {v for t in texts if t not in rows and len(t.split()) >= 3 and " ".join(t.split()).lower() not in own
-                  for _, v, _, _, _ in numbers(t)}
+        mine = {v for o in own if len(o.split()) >= 3 for _, v, _, _, _ in numbers(o)}
+        typed |= {v for t in texts if t not in rows and len(t.split()) >= 3 for _, v, _, _, _ in numbers(t)} - mine
     if today:
         typed.add(float(today.year))
         found += "\n" + "\n".join(_day(str(today.year), f"{today.month:02}", f"{today.day:02}"))
