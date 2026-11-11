@@ -2605,16 +2605,10 @@ def read_only(bundle: dict) -> None:
     Developer, on the project itself."""
     if isinstance(o := bundle.get("model/ontology.json"), dict):
         o.pop("actions", None)
-    at = lambda v: v.get("layout") or {}  # noqa: E731
     for rel, r in bundle.items():
         if rel.startswith("reports/") and isinstance(r, dict):
             for p in r.get("pages") or []:
-                vs = p.get("visuals") or []
-                p["visuals"] = keep = [v for v in vs if v.get("type") != "form"]
-                for g in (v for v in vs if v.get("type") == "form" and "w" in at(v)):  # the card left of it in its row takes its width: no empty half
-                    if row := [v for v in keep if "w" in at(v) and at(v).get("y") == at(g).get("y") and at(v)["x"] < at(g)["x"]]:
-                        last = max(row, key=lambda v: at(v)["x"])
-                        last["layout"] = at(last) | {"w": min(12, at(last)["w"] + at(g)["w"])}
+                p["visuals"] = [v for v in p.get("visuals") or [] if v.get("type") != "form"]
 
 
 def publish_bundle(project: str) -> tuple[str, dict, str]:

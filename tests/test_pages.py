@@ -1041,11 +1041,9 @@ def test_the_published_copy_shows_objects_and_runs_nothing(objs, tmp_path):
         ["text", "h1", "main .pghead h1"], ["text", "history", "main .cards > .card:last-child"], ["text", "kv", "main .kv"], ["text", "pill", "main .pubnote"],
         ["get", "acts", "document.querySelectorAll('main .pghead .bar.top .btn, main .aform').length"],
         ["show", "rep:cafes"], ["wait", "main .grid [data-lk=by_region]"], ["get", "cards", "[...document.querySelectorAll('main .grid > .card')].map(c => c.dataset.lk)"],
-        ["get", "last", "(g => Math.round(g.getBoundingClientRect().width - g.querySelector('[data-lk=by_region]').getBoundingClientRect().width))(document.querySelector('main .grid'))"],
         ["get", "hole", "(g => Math.round(g.getBoundingClientRect().bottom - Math.max(...[...g.children].map(c => c.getBoundingClientRect().bottom))))(document.querySelector('main .grid'))"],
         ["get", "rowgaps", "(cs => cs.map(c => c.getBoundingClientRect()).sort((a, b) => a.top - b.top).map((r, i, a) => i ? Math.round(r.top - Math.max(...a.slice(0, i).map(x => x.bottom))) : 0))([...document.querySelectorAll('main .grid > .card')])"]])
     assert out["names"] and set(out["names"]) <= north and out["h1"] in north and "Seats" not in out["kv"], out
     assert "kept in the working project" in out["history"] and "Nothing has happened" not in out["history"] and out["acts"] == 0, out["history"]
     assert out["cards"] == ["flagged", "by_name", "by_key", "by_region"] and out["hole"] <= 1 and max(out["rowgaps"]) <= 24, f"no form card and no hole where it was: {out}"
-    assert out["last"] <= 1, "the card that shared the form card's row takes the row's width"
     assert out["pill"].startswith("Published version") and "can read “—” here" in out["history"], "the copy says it is the published version and what it doesn't hold"
