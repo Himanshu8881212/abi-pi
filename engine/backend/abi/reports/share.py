@@ -138,7 +138,8 @@ def layout(project: str, report: str, page: str | None, visual: str | None, gone
         b = tenants.branding(conn, project=project)
     return {"id": r["id"], "name": r["name"], "pages": [
         {"id": p["id"], "name": p["name"],
-         "visuals": [{k: v[k] for k in LAYOUT if k in v} for v in p["visuals"] if visual in (None, v["id"])]}
+         "visuals": [{k: v[k] for k in LAYOUT if k in v} for v in p["visuals"]
+                     if visual in (None, v["id"]) and v.get("type") != "form"]}  # 1.2.6 M7: a form card is the app's, never a share's or an export's
         for p in r["pages"] if page in (None, p["id"])],
         "branding": b and {"name": b["name"], "color": b["color"], "text_color": b["text_color"], "logo": b["logo"]
                            and f"data:{b['logo_type']};base64,{base64.b64encode(b['logo']).decode()}"}}

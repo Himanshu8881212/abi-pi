@@ -275,7 +275,9 @@ def _references(conn, project: str, files: dict) -> list[dict]:
              for j, m in enumerate(ds["query"]["measures"]) if m not in measures]
     model = files.get("model/model.json")
     tables = model and {t["table"] for t in model.get("tables", [])}  # None: no model to check against
-    acts = sorted(a["id"] for a in (files.get(ontology.FILE) or {}).get("actions", []))
+    onto = files.get(ontology.FILE) or {}  # 1.2.6 M7: {action type: (its object type's name, how many values its key has)}
+    typ = {x["id"]: (x["name"], len(ontology._keys(model or {}).get(x["table"]) or [])) for x in onto.get("objects", [])}
+    acts = {a["id"]: typ.get(a["object"], ("", 0)) for a in onto.get("actions", [])}
     errs += [e for rel, c in files.items() if _kind(rel) == "report" for e in _report(rel, c, measures, tables, acts)]
     # ABI-PI: named models (model/models.json) hold model tables and measures; a report names one that exists, and its
     # visuals stay inside it when the model lists its measures
@@ -351,9 +353,9 @@ def _input_table(rel: str, c: dict) -> list[dict]:
     return errs
 
 
-def _report(rel: str, r: dict, measures: set, tables: set | None, acts: list[str]) -> list[dict]:
+def _report(rel: str, r: dict, measures: set, tables: set | None, acts: dict) -> list[dict]:
     """RP-2: a report binds to the model by ID: known measure IDs and model tables, unique page and visual IDs; a form
-    card (1.2.6 M7) names an action type of the ontology."""
+    card (1.2.6 M7) names an action type of the ontology, and its `key` has as many values as that type's key."""
     errs = []
 
     def cols(path: str, names: list[str]) -> None:
@@ -378,7 +380,11 @@ def _report(rel: str, r: dict, measures: set, tables: set | None, acts: list[str
             errs += _query(rel, f"{at}.visuals[{vi}].query", v.get("query", {}), measures, tables)
             if "form" in v and v["form"]["action"] not in acts:
                 errs.append(_err(rel, f"{at}.visuals[{vi}].form.action", f"Unknown action type '{v['form']['action']}'.",
-                                 f"Use an action type of {ontology.FILE}: {', '.join(acts) or 'none yet (save_ontology adds one)'}."))
+                                 f"Use an action type of {ontology.FILE}: {', '.join(sorted(acts)) or 'none yet (save_ontology adds one)'}."))
+            elif "key" in v.get("form", {}) and (n := acts[v["form"]["action"]][1]) and len(v["form"]["key"]) != n:
+                errs.append(_err(rel, f"{at}.visuals[{vi}].form.key", f"The key has {len(v['form']['key'])} value(s); a"
+                                 f" {acts[v['form']['action']][0]} is identified by {n}.",
+                                 "Give the object's key value(s) in key column order, or leave `key` out so the person picks the object."))
     return errs
 
 

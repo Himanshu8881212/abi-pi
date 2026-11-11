@@ -38,11 +38,13 @@ What each part does:
   becomes a filter on the list.
 - `measures` are measure IDs: the list and the object page show them for each object.
 - `inputs` is a JSON Schema of type object. Each property is one field of the form: its `title` is the label, its
-  `description` the hint, its type the input (number, date, choice for an `enum`, checkbox for a boolean).
+  `description` the hint, its type the input (number, date, choice for an `enum`, checkbox for a boolean). The fields
+  show in the order `required` lists them, then the others.
 - `checks` are tested when the form is sent. A check that doesn't hold stops the action and its `message` shows in the form.
 - `writes` sets columns of the object's row (or of a keyed table one-to-one with it). It is one logged edit that can be
   undone under Data › Edits. `confirm` shows the old and new values first; the person confirms.
-- `role` is who may run it: `viewer`, `editor` (the default) or `owner`.
+- `role` is who may run it through the API or an agent: `viewer`, `editor` (the default) or `owner`. In the app,
+  actions run in Developer mode only, so by Editors and Owners (see "Who can use a form" below).
 
 ## 2. The form card: a visual of type `form` in `reports/cafe-visits.json`
 
@@ -81,6 +83,12 @@ Either way ABI checks the files first and names the file and the field of anythi
   page with its properties, its measures, what it connects to and its history. **Change the seats** is the button at
   the top.
 - **Café visits** (Reports) shows the form card beside the table. After the action ran, the page's numbers refresh.
-  A click on a café in the table opens its page.
-- Forms run in Developer mode. Viewer mode and the published version are read-only, so they show no action buttons and
-  no form cards.
+  A click on a café in the table filters the report by it, as every click does; **Open**, beside the filter, shows
+  that café's page, and Back returns to the report.
+
+## Who can use a form
+
+In 1.2.6 the app's action buttons and form cards are for **Editors and Owners, in Developer mode**. Viewer mode and
+the published version are read-only: they show objects and their pages, but no action buttons and no form cards, and
+Publish leaves action types and form cards out of the published copy. A `role: viewer` action can still be run by a
+Viewer through the API or an agent. Forms for Viewers in the published app are planned for 1.2.7.

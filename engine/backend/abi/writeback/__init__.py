@@ -230,7 +230,9 @@ def _table(project: str, t: str) -> tuple:
 
 
 def _src(cur, t: str) -> str:
-    return f"({sql})" if (sql := effective_sql(cur, t)) else f"lake.model.{_q(t)}"
+    """Table t's effective rows: its model table, under its active edits once it has an edit log (a table nothing has
+    edited yet has none: an object action's first write to it reads here before any log exists, 1.2.6 M7)."""
+    return f"({sql})" if t in _logs(cur) and (sql := effective_sql(cur, t)) else f"lake.model.{_q(t)}"
 
 
 def _row(cur, src: str, t: str, key: list, types: dict, vals: list) -> dict | None:

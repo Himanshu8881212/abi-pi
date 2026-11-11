@@ -326,13 +326,31 @@ def diagram(model: dict, kinds: dict) -> str:
     return "".join(out) + "</svg>"
 
 
-def objects(o: dict) -> str:
-    """1.2.6 M7: the object-type graph of an ontology (ABI's `ontology` answer) as `diagram` draws it: each type a box
-    by its name, each link a line with its name and cardinality; the types no link leads to stand on the left.
+def _cardinality(model: dict, start: str, via: list[str]) -> str:
+    """A link's cardinality as ABI derives it (ontology.cardinality) from the relationships it walks from table `start`:
+    a hop whose many side is its table's whole key doesn't count; the rest all along their many-to-one direction is
+    many-to-one, all against it one-to-many, mixed many-to-many. '' when the walk doesn't hold."""
+    rels, keys = {r["id"]: r for r in model.get("relationships", [])}, {e["table"]: e["key"] for e in model.get("entities", [])}
+    at, kinds = start, set()
+    for rid in via:
+        r = rels.get(rid)
+        if not r or at not in (r["from"]["table"], r["to"]["table"]):
+            return ""
+        along = r["from"]["table"] == at
+        at = r["to" if along else "from"]["table"]
+        if sorted(r["from"]["columns"]) != sorted(keys.get(r["from"]["table"]) or [None]):
+            kinds.add(along)
+    return {frozenset(): "one-to-one", frozenset({True}): "many-to-one", frozenset({False}): "one-to-many"}.get(frozenset(kinds), "many-to-many")
+
+
+def objects(o: dict, model: dict) -> str:
+    """1.2.6 M7: the object-type graph of model/ontology.json as `diagram` draws it: each type a box by its name, each
+    link a line with its name and cardinality; the types no link leads to stand on the left.
     ponytail: types are told apart by their display names; two types of one name would share a box."""
-    name = {x["id"]: x["name"] for x in o.get("objects", [])}
+    name, table = {x["id"]: x["name"] for x in o.get("objects", [])}, {x["id"]: x["table"] for x in o.get("objects", [])}
     rels = [{"from": {"table": name[ln["from"]], "columns": [ln["name"]]}, "to": {"table": name[ln["to"]], "columns": [ln.get("inverse") or ""]},
-             "name": ln["name"], "cardinality": ln.get("cardinality")} for ln in o.get("links", []) if ln["from"] in name and ln["to"] in name]
+             "name": ln["name"], "cardinality": _cardinality(model, table[ln["from"]], ln["via"])}
+            for ln in o.get("links", []) if ln["from"] in name and ln["to"] in name]
     led = {r["to"]["table"] for r in rels}
     return diagram({"relationships": rels, "objects": True}, {n: None if n in led else "fact" for n in name.values()})
 
@@ -396,6 +414,8 @@ def sections(dest: Path) -> dict[str, str]:
         sec["Tables"] = (sec["Tables"] if g("tables") else "") + "<div class=card>" + "".join(f"<span class=chip>{esc(t)} · {esc(kinds[t] or '')}</span>" for t in plain) + \
             "<div class=file>loaded as is (no transform steps); steps go to tables/&lt;id&gt;.json through set_steps</div></div>"
     sec["Tables"] = sec["Tables"] or "<p class=empty>None yet.</p>"
+    if (onto := j(dest / "model/ontology.json", {}) or {}).get("objects"):  # 1.2.6 M7: only a project with object types has the tab
+        sec["Objects"] = f"<div class=card>{objects(onto, model)}<div class=file>edit: model/ontology.json</div></div>"
     return sec
 
 

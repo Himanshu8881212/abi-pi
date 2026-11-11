@@ -451,7 +451,7 @@ def ontology(bad_format: str) -> dict:
     """Cafés (with a manager and a visit reason kept in an input table), customers and orders; three action types on
     cafés: one confirmed, with a check and a flow; one plain; one for Editors."""
     reason = {"type": "object", "required": ["reason"], "additionalProperties": False, "properties": {"reason": {
-        "type": "string", "minLength": 1, "maxLength": 100, "title": "Reason", "description": "Why this café needs a visit."}}}
+        "type": "string", "minLength": 1, "maxLength": 5000, "title": "Reason", "description": "Why this café needs a visit."}}}
     return {
         "objects": [
             {"id": "cafe", "table": "cafes", "name": "Café", "plural": "Cafés", "title": "cafe_name", "description": "One Brewline shop.",
@@ -476,8 +476,11 @@ def ontology(bad_format: str) -> dict:
              "checks": [{"value": "{{ data.object.format }}", "op": "!=", "to": bad_format, "message": "These cafés are visited by another team."}],
              "writes": {"table": "cafe_contacts", "set": {"visit_reason": "{{ data.inputs.reason }}"}}, "flow": "cafe_visit"},
             {"id": "note", "object": "cafe", "name": "Note the manager", "role": "viewer",
-             "inputs": {"type": "object", "required": ["who"], "properties": {"who": {"type": "string", "maxLength": 100}}},
+             "inputs": {"type": "object", "required": ["who", "kind"], "properties": {"who": {"type": "string", "maxLength": 100},
+                                                                                      "kind": {"enum": ["manager", "deputy"]}}},
              "writes": {"table": "cafe_contacts", "set": {"manager": "{{ data.inputs.who }}"}}},
+            {"id": "unflag", "object": "customer", "name": "Remove the visit flag", "confirm": True,
+             "writes": {"table": "customers", "set": {"segment": "Unflagged"}}},
             {"id": "close", "object": "cafe", "name": "Close the visit", "writes": {"table": "cafe_contacts", "set": {"visit_reason": "closed"}}}]}
 
 
@@ -490,7 +493,7 @@ def objs(tmp_path_factory):
         pytest.skip("no accounts file")
     from test_ontology_nobreak import brew  # not at top: it imports this module
     brew(PO, tmp_path_factory.mktemp("objs"))
-    stamp, made = time.strftime("%H%M%S"), {}
+    stamp, made, hubs = time.strftime("%H%M%S"), {}, set(app.HUBS)  # the app's hubs are per process: the ones made here go after
     s = app.serve(PO, 0, open_browser=False, signin=True)
     try:
         for who in ("viewer", "editor"):
@@ -517,9 +520,11 @@ def objs(tmp_path_factory):
                "editor_name": made["editor"][0], "good": good, "fresh": fresh, "other": other, "bad": bad, "south": south, "sql": sql}
     finally:
         s.shutdown()
+        for k in set(app.HUBS) - hubs:
+            app.HUBS.pop(k, None)
         for name, _ in made.values():
             sure("delete_user", name=name)
-        drop([PO])
+        drop([PO, f"{PO}_pub"] if abi.folder(f"{PO}_pub") else [PO])
 
 
 DRIVE = r"""
@@ -545,8 +550,9 @@ with sync_playwright() as p:
             elif op == "all": out[x[0]] = pg.locator(x[1]).all_inner_texts()
             elif op == "get": out[x[0]] = pg.evaluate(x[1])
             elif op == "shot": pg.screenshot(path=x[0], full_page=len(x) < 2)
+            elif op == "reload": pg.reload(); pg.wait_for_selector("aside button.it", state="attached")
         except Exception as e:  # which step, and what the page showed then
-            raise SystemExit(f"step {[op, *x]}: {str(e)[:400]}\nerrors {errors}\nmain: {pg.inner_text('main')[:1500]}")
+            raise SystemExit(f"step {[op, *x]}: {str(e)[:400]}\nerrors {errors}\nout {json.dumps(out)[-1500:]}\nmain: {pg.inner_text('main')[:1500]}")
     b.close()
 print(json.dumps({"errors": errors, **out}))
 """
@@ -565,10 +571,15 @@ def drive(who: Browser, tmp_path, steps: list, width: int = 1440) -> dict:
 
 def okey(type_: str, key: str) -> str:
     """An object page's key in the app, as its own okey() makes it."""
-    return f"obj:{type_}:" + urllib.parse.quote(json.dumps([key]), safe="")
+    return f"obj:{type_}:" + json.dumps([key], ensure_ascii=False, separators=(",", ":"))
 
 
 KV = "!!document.querySelector('main .kv')"
+CHAT_ASK = ("Run 'Flag for a visit' on Café \"Brew North\": cafe_contacts.visit_reason: null → \"why\"; starts flow 'cafe_visit'."
+            " The write is a proposal an Editor approves; no flow starts.\n\nPreview:\n" + json.dumps({
+                "action": "flag_visit", "object": {"type": "cafe", "key": ["CF1"], "title": "Brew North"}, "inputs": {"reason": "why"},
+                "writes": {"table": "cafe_contacts", "row": "added", "changes": [{"column": "visit_reason", "old": None, "new": "why"}]},
+                "flow": "cafe_visit"}, indent=1) + "\n\nProceed?")
 VISIT_REASON = "api('get_object',{type:'cafe',key:[%s]}).then(o=>o.rows[0][o.columns.indexOf('cafe_contacts.visit_reason')])"
 
 
@@ -585,24 +596,30 @@ def test_object_page_renders(objs, tmp_path):
         ["get", "nav", "[...document.querySelectorAll('aside button.it')].map(b => b.dataset.k)"],
         ["show", "obj:cafe"], ["wait", "main .pick tr[data-r]"], ["all", "heads", "main .pick th"],
         ["get", "tips", "[...document.querySelectorAll('main .pick th')].map(t => t.title).join('')"],
-        ["all", "chips", ".pghead .seg .chip"], ["all", "pager", "main .pager button"],
+        ["all", "chips", ".pghead .seg .chip"], ["all", "pager", "main .card > .pager button"], ["all", "pager_top", "main .obar .pager button"],
         ["until", "[...document.querySelectorAll('main .obar select')].every(s => s.options.length > 1)"],
         ["get", "facets", "[...document.querySelectorAll('main .obar select')].map(s => [s.getAttribute('aria-label'), [...s.options].map(o => o.text)])"],
         ["get", "rows", "document.querySelectorAll('main .pick tr[data-r]').length"],
+        ["get", "money", "[...document.querySelectorAll('main .pick tr[data-r]')].map(tr => tr.cells[6].textContent)"],
+        ["get", "days", "[...document.querySelectorAll('main .pick tr[data-r]')].map(tr => tr.cells[3].textContent)"],
+        ["get", "pager_seen", "(r => r.top >= 0 && r.bottom <= innerHeight)(document.querySelector('main .obar .pager').getBoundingClientRect())"],
         ["click", "main .pager button:last-child"], ["until", "document.querySelector('main .pager .file')?.textContent === '51 to 100'"],
         ["fill", "main .obar input", was["cafe_name"]], ["until", "document.querySelectorAll('main .pick tr[data-r]').length === 1"],
         ["text", "row", "main .pick tr[data-r]"], ["click", "main .pick tr[data-r]"], ["until", KV],
         ["until", "document.querySelectorAll('main .cards > .card.wide .pick table').length === 2"], ["wait", "main .cards > .card:last-child :is(table, p.empty)"],
         ["text", "h1", "main .pghead h1"], ["text", "eyebrow", "main .pghead .eyebrow"], ["get", "cur", "CUR"],
-        ["all", "cards", "main .cards > .card > h3"], ["text", "kv", "main .kv"], ["all", "kpis", "main .kpis .kpi"], ["text", "main", "main"],
-        ["get", "wide", "[...document.querySelectorAll('main .cards > .card.wide')].map(c => [c.querySelector('h3').innerText, c.querySelectorAll('tr[data-r]').length])"],
+        ["wait", "main .kpis .kpi"], ["all", "cards", "main .cards > .card > h3"], ["text", "kv", "main .kv"], ["all", "kpis", "main .kpis .kpi"], ["text", "main", "main"],
+        ["get", "wide", "[...document.querySelectorAll('main .cards > .card.wide:has(.pick)')].map(c => [c.querySelector('h3').innerText, c.querySelectorAll('tr[data-r]').length])"],
+        ["all", "nheads", "main .cards > .card.wide .pick th"], ["get", "gaps", "(g => [...g.children].map(c => Math.round(g.getBoundingClientRect().right - c.getBoundingClientRect().right)))(document.querySelector('main .cards'))"],
         ["click", "main .cards > .card.wide tr[data-r]"], ["until", KV + " && document.querySelector('main .pghead .eyebrow').textContent !== 'Café'"],
         ["text", "eyebrow2", "main .pghead .eyebrow"], ["text", "main2", "main"],
         ["get", "total", "plainErr(\"Measure 'revenue' follows the many-to-many link 'visited', and totals across it are refused: its members overlap, so they don't add up; ask without totals.\")"],
         ["get", "stale", "plainErr(\"No action type 'flag_visit' on object type 'cafe' in project 'pi_pages_objs': `ontology` lists them.\")"]])
     assert "objects" in out["nav"] and out["nav"].index("objects") == out["nav"].index("model") + 1, "Objects sits in Data Model"
     assert out["chips"] == ["Overview", "Cafés", "Customers", "Orders"] and out["rows"] == 50 and out["pager"] == ["Previous", "Next"], out
-    assert out["heads"] == ["Cafe name", "City", "Region", "Opened", "Seats", "Format", names["revenue"], names["orders_rows"]], out["heads"]
+    assert out["heads"] == ["Café", "City", "Region", "Opened", "Seats", "Format", names["revenue"], names["orders_rows"]], out["heads"]  # round 2 (B1): the title's header is the type's name
+    assert all(re.fullmatch(r"[\d,]+\.\d\d", x) for x in out["money"]), f"every figure with the measure's own decimals: {out['money'][:6]}"
+    assert all(re.fullmatch(r"\w{3} \d{1,2}, \d{4}", x) for x in out["days"]) and out["pager_seen"] and out["pager_top"] == ["Previous", "Next"], f"days as the app writes them; the pager in reach: {out['days'][:3]}"
     assert out["tips"] == "", "a header's tooltip never shows a column id"
     assert [f[0] for f in out["facets"]] == ["Region", "Format"] and {"North", "South"} < set(out["facets"][0][1]), out["facets"]
     assert out["row"].split("\t")[:3] == [was["cafe_name"], was["city"], was["region"]], out["row"]
@@ -612,6 +629,8 @@ def test_object_page_renders(objs, tmp_path):
         assert f"{label}\n{value}" in out["kv"], (label, out["kv"])
     assert [k.split("\n")[-1] for k in out["kpis"]] == [names["revenue"], names["orders_rows"]], out["kpis"]
     assert all(n > 0 for _, n in out["wide"][:2]), f"each connection lists its neighbours: {out['wide']}"
+    assert out["nheads"][0] == "Order" and "Customer" in out["nheads"], f"a neighbour list leads with the neighbour's title, under its type's name: {out['nheads']}"
+    assert f"ID\n{good}" in out["kv"] and " id" not in out["kv"].lower() and set(out["gaps"]) == {0}, "the key reads ID; every card uses the full width"
     assert out["eyebrow2"].lower() == "order", "a neighbour opens its own page"
     for text in (out["main"], out["main2"], out["total"], out["stale"]):
         assert not IDS.search(text), f"an id or a model word on an object page: {IDS.search(text)[0]}"
@@ -659,6 +678,16 @@ def test_viewer_sees_only_visible(objs, tmp_path):
     assert "Seats" not in out["heads"] and out["regions"] == ["North"] and out["rows"] == min(50, len(north)), out
     assert out["hidden"] == out["missing"] and "isn't available" in out["hidden"] and "Open cafés" in out["hidden"], out["hidden"]
     assert "Seats" not in out["kv"] and "Ada Example" in out["kv"] and out["acts"] == out["acts2"] == out["forms"] == 0, out
+    # round 2: a person from whom the title column is hidden still lists and opens the cafés; nothing offers a search by name
+    sure("set_column_rule", project=PO, id="name", table="cafes", columns=["cafe_name"])
+    try:
+        hid = drive(v, tmp_path, [
+            ["show", "obj:cafe"], ["wait", "main .pick tr[data-r]"], ["all", "heads", "main .pick th"],
+            ["get", "search", "document.querySelector('main .obar input').hidden"], ["click", "main .pick tr[data-r]"], ["until", KV],
+            ["text", "h1", "main .pghead h1"], ["get", "said", "plainErr(\"Table 'cafes' has no column 'cafe_name' you can read. Use one of: cafe_id, city, region.\")"]])
+    finally:
+        sure("delete_rls_rule", project=PO, id="name")
+    assert hid["heads"][0] == "City" and hid["search"] is True and hid["h1"] in north and not IDS.search(hid["said"]), hid
 
 
 def test_action_form_confirms(objs, tmp_path):
@@ -668,25 +697,53 @@ def test_action_form_confirms(objs, tmp_path):
     the page shows the new value and the run in the history. A check that doesn't hold shows its message in the form.
     The page never holds the confirm token."""
     e, fresh, bad = objs["editor"], objs["fresh"], objs["bad"]
+    cust = objs["sql"]("SELECT min(customer_id) FROM customers")[0][0]
     reason = VISIT_REASON % json.dumps(fresh)
     out = drive(e, tmp_path, [
         ["show", okey("cafe", fresh)], ["until", KV], ["all", "main_action", "main .pghead .bar.top > .btn"],
         ["get", "more", "[...document.querySelectorAll('main .pghead .bar.top .more .menu button')].map(b => b.textContent)"],
         ["click", "main .pghead .bar.top > .btn"], ["wait", "main .aform"], ["all", "labels", "main .aform .fld > label"],
         ["all", "hints", "main .aform .fld > .file"], ["get", "fields", "document.querySelectorAll('main .aform :is(input, select, textarea)').length"],
-        ["get", "primary", "document.querySelectorAll('main .btn.pri').length"],
+        ["get", "primary", "[...document.querySelectorAll('main .btn.pri')].filter(b => b.offsetParent).length"],
+        ["get", "top_hidden", "document.querySelector('main .pghead .bar.top').hidden"],
+        ["get", "named", "[...document.querySelectorAll('main .pghead, main .aform')].map(e => e.innerText).join(' ').split('Flag for a visit').length - 1"],
         ["click", "main .aform .acts .btn.pri"], ["wait", "main .aform .msg.bad"], ["text", "empty", "main .aform .msg"],
         ["get", "asked0", "document.querySelector('#confirm').open"],
-        ["fill", "main .aform .fld input", "needs a look"], ["click", "main .aform .acts .btn.pri"], ["wait", "#confirm[open]"],
+        ["fill", "main .aform .fld textarea", "needs a look"], ["click", "main .aform .acts .btn.pri"], ["wait", "#confirm[open]"],
         ["text", "title", "#confirm h3"], ["text", "lead", "#c-msg"], ["text", "preview", "#c-prev"], ["text", "yes", "#c-yes"],
         ["get", "raw", "document.querySelector('#c-abi').hidden"], ["get", "before", reason],
-        ["click", "#c-no"], ["wait", "main .aform .msg.bad"], ["text", "declined", "main .aform .msg"], ["get", "after_no", reason],
+        ["click", "#c-no"], ["until", "document.querySelector('main .aform .msg').textContent.includes('declined')"], ["text", "declined", "main .aform .msg"],
+        ["get", "declined_red", "document.querySelector('main .aform .msg').classList.contains('bad')"], ["get", "after_no", reason],
         ["click", "main .aform .acts .btn.pri"], ["wait", "#confirm[open]"], ["click", "#c-yes"], ["wait", "body > .toast"], ["text", "toast", "body > .toast"],
         ["until", "[...document.querySelectorAll('main .kv span')].some(s => s.textContent === 'needs a look')"], ["get", "after_yes", reason],
         ["wait", "main .cards > .card:last-child table"], ["text", "history", "main .cards > .card:last-child"],
-        ["show", okey("cafe", bad)], ["until", KV], ["click", "main .pghead .bar.top > .btn"], ["fill", "main .aform .fld input", "anything"],
+        ["show", okey("cafe", bad)], ["until", KV], ["click", "main .pghead .bar.top > .btn"], ["fill", "main .aform .fld textarea", "anything"],
         ["click", "main .aform .acts .btn.pri"], ["wait", "main .aform .msg.bad"], ["text", "check", "main .aform .msg"],
-        ["get", "asked1", "document.querySelector('#confirm').open"]])
+        ["get", "asked1", "document.querySelector('#confirm').open"],
+        # a long input: the confirmation still reads in words (the preview isn't cut)
+        ["show", okey("cafe", fresh)], ["until", KV], ["click", "main .pghead .bar.top > .btn"],
+        ["fill", "main .aform .fld textarea", "long " * 900], ["click", "main .aform .acts .btn.pri"], ["wait", "#confirm[open]"],
+        ["text", "long_title", "#confirm h3"], ["text", "long_prev", "#c-prev"], ["click", "#c-no"],
+        # an action under More: a required choice starts empty; ABI's own check of an input marks the field
+        ["click", "main .aform .acts .btn:not(.pri)"], ["click", "main .pghead .bar.top .more > .btn"], ["click", "main .pghead .bar.top .more .menu button"], ["wait", "main .aform select"],
+        ["get", "choice", "(s => [s.value, s.options[0].text])(document.querySelector('main .aform select'))"],
+        # set as a script does: the browser's own length check only counts what a person typed, so ABI's check is the one that answers
+        ["get", "_", "(i => { i.value = 'w'.repeat(150); i.dispatchEvent(new Event('input', {bubbles: true})) })(document.querySelector('main .aform .fld input'))"],
+        ["click", "main .aform .acts .btn.pri"], ["wait", "main .aform .msg.bad"], ["text", "unchosen", "main .aform .msg"],
+        ["get", "pick", "(s => { s.value = JSON.stringify('deputy'); s.dispatchEvent(new Event('input', {bubbles: true})); return s.value })(document.querySelector('main .aform select'))"],
+        ["click", "main .aform .acts .btn.pri"], ["until", "document.querySelector('main .aform .msg').textContent.includes('too long')"], ["text", "too_long", "main .aform .msg"],
+        ["get", "marked", "[...document.querySelectorAll('main .aform .invalid')].map(e => e.closest('.fld').querySelector('label').textContent)"],
+        # an action called "Remove…" is no project delete: a plain main button, its own question, the object named
+        ["show", okey("customer", cust)], ["until", KV], ["all", "rm_top", "main .pghead .bar.top > .btn"],
+        ["get", "rm_class", "document.querySelector('main .pghead .bar.top > .btn').className"], ["click", "main .pghead .bar.top > .btn"], ["wait", "main .aform"],
+        ["get", "rm_submit", "(b => [b.textContent, b.className, !!b.closest('.more')])(document.querySelector('main .aform .acts .btn'))"],
+        ["click", "main .aform .acts .btn.pri"], ["wait", "#confirm[open]"], ["text", "rm_title", "#confirm h3"], ["text", "rm_lead", "#c-msg"], ["text", "rm_yes", "#c-yes"],
+        ["text", "rm_prev", "#c-prev"], ["click", "#c-yes"], ["wait", "body > .toast"], ["text", "rm_toast", "body > .toast"],
+        # the run's flow page names the object it ran for
+        ["show", "flw:cafe_visit"], ["wait", "main .lastrun .oopen"], ["click", "main .lastrun .oopen"], ["until", KV], ["get", "from_flow", "CUR"],
+        # the chat agent's confirmation of such an action reads like the form's
+        ["get", "chat", "(c => [c.title, c.lead, plainPreview(c.preview)])(chatAsk({title: 'ABI asks for your confirmation', message: " + json.dumps(CHAT_ASK) + "}))"],
+        ["get", "chat_other", "chatAsk({title: 'ABI asks for your confirmation', message: 'Destructive: deletes report x.\\n\\nProceed?'}).message"]])
     assert out["main_action"] == ["Flag for a visit"] and out["more"] == ["Note the manager", "Close the visit"], out
     assert out["labels"] == ["Reason"] and out["hints"] == ["Why this café needs a visit."] and out["fields"] == 1 and out["primary"] == 1, out
     assert out["empty"].startswith("Reason:") and out["asked0"] is False, "an empty required field stops in the form, with no request"
@@ -704,6 +761,46 @@ def test_action_form_confirms(objs, tmp_path):
     asked = e.post("/api/run_object_action", {"project": PO, "type": "cafe", "key": [fresh], "action": "flag_visit", "inputs": {"reason": "again"}})
     assert set(asked) == {"confirm"} and set(asked["confirm"]) == {"id", "message", "preview"} and "token" not in json.dumps(asked), asked
     assert objs["sql"](f"SELECT visit_reason FROM cafe_contacts WHERE cafe_id = '{fresh}'") == [["needs a look"]]
+    # round 2
+    assert out["top_hidden"] is True and out["named"] == 2, "while the form is open the top button is gone: the action's name is the form's title and its button"
+    assert out["declined_red"] is False, "a no is no error"
+    assert out["long_title"] == "Flag for a visit?" and "{" not in out["long_prev"] and "Reason: long long" in out["long_prev"], out["long_prev"][:200]
+    assert out["choice"] == ["", "Choose…"] and out["unchosen"].startswith("Kind:"), "a required choice starts empty and is asked for"
+    assert out["too_long"] == "Who is too long (at most 100 characters)." and out["marked"] == ["Who"], out
+    assert objs["sql"](f"SELECT manager FROM cafe_contacts WHERE cafe_id = '{fresh}'") == [[None]]
+    assert out["rm_top"] == ["Remove the visit flag"] and "danger" not in out["rm_class"] and out["rm_submit"] == ["Remove the visit flag", "btn pri", False], out
+    assert out["rm_title"] == "Remove the visit flag?" and out["rm_yes"] == "Remove the visit flag" and cust in out["rm_lead"] and "Customer" in out["rm_lead"], out
+    assert "leaves the project" not in out["rm_lead"] + out["rm_prev"] and "Segment:" in out["rm_prev"] and "Saved" in out["rm_toast"] and "deleted" not in out["rm_toast"], out
+    assert objs["sql"](f"SELECT segment FROM customers WHERE customer_id = '{cust}'") == [["Unflagged"]]
+    assert out["from_flow"] == okey("cafe", fresh), "the flow's last run links the café it ran for"
+    assert out["chat"][0] == "Flag for a visit?" and "Brew North" in out["chat"][1] and "editor approves" in out["chat"][1], out["chat"]
+    assert "Reason: why" in out["chat"][2] and "starts" not in out["chat"][2] and not IDS.search(" ".join(out["chat"])), out["chat"]
+    assert out["chat_other"] == "ABI asks for your confirmation", "any other confirmation reads as before"
+    # ABI names the object of an action-started run to its runner and to Editors and Owners, never to another Viewer
+    mine = e.post("/api/flow_runs", {"project": PO, "flow": "cafe_visit"})["result"]["runs"]
+    assert mine and all(r["object"] == {"type": "cafe", "key": [fresh]} for r in mine), mine
+    v = objs["viewer"]
+    v.page()
+    theirs = v.post("/api/flow_runs", {"project": PO, "flow": "cafe_visit"})["result"]["runs"]
+    assert theirs and not any("object" in r for r in theirs), theirs
+    # a confirmation asked in Developer isn't redeemed after the switch to Viewer
+    e.post("/mode", {"mode": "viewer"})
+    try:
+        late = e.post(f"/confirm/{asked['confirm']['id']}", {})
+        assert "Viewer mode is read-only" in late.get("error", ""), late
+    finally:
+        e.post("/mode", {"mode": "developer"})
+    assert objs["sql"](f"SELECT visit_reason FROM cafe_contacts WHERE cafe_id = '{fresh}'") == [["needs a look"]]
+    # the agent team's step: a person's Approve never runs an object action as their own write (an agent's is a proposal)
+    import team
+    team.write(PO, "pending.json", [{"id": "p1", "status": "waiting", "task": "t1", "agent": "analyst", "why": "test",
+                                     "action": "mcp__abi__run_object_action", "args": {"type": "cafe", "key": [fresh], "action": "close"}}])
+    try:
+        refused = e.post("/team/answer", {"id": "p1", "decision": "approve"})
+        assert refused == {"error": "'run_object_action' is a step for ABI's own app."}, refused
+    finally:
+        team.write(PO, "pending.json", [])
+    assert objs["sql"](f"SELECT visit_reason FROM cafe_contacts WHERE cafe_id = '{fresh}'") == [["needs a look"]]
 
 
 def test_object_graph_has_every_link(objs, people, tmp_path):
@@ -712,7 +809,9 @@ def test_object_graph_has_every_link(objs, people, tmp_path):
     o = abi.call("ontology", project=PO)
     said = sorted(f"{ln['name']} · {ln['cardinality'].replace('-', ' ')}" for ln in o["links"])
     assert len(said) == 3 and {ln["cardinality"] for ln in o["links"]} == {"many-to-one", "many-to-many"}, o["links"]
-    html = objs["owner"].page()["sections"]["Objects"]
+    # what the phone's overview draws (it has no canvas): the picture ABI makes from the project's files (render.sections)
+    html = drive(objs["owner"], tmp_path, [["show", "objects"], ["wait", "main .odiag svg"],
+                                           ["get", "html", "document.querySelector('main .odiag').innerHTML"]], width=390)["html"]
     for ln in o["links"]:
         assert f">{ln['name']} · {ln['cardinality']}</text>" in html, ln
     assert all(f">{t['name']}</text>" in html for t in o["objects"]) and html.count("<rect") == len(o["objects"]), html[:300]
@@ -738,16 +837,40 @@ def test_report_click_opens_object_page(objs, tmp_path):
     top = abi.call("visual_data", project=PO, report="cafes", page="main", visual="by_name")["rows"][0][0]
     first = abi.call("visual_data", project=PO, report="cafes", page="main", visual="by_key")["rows"][0][0]
     name = objs["sql"](f"SELECT cafe_name FROM cafes WHERE cafe_id = '{first}'")[0][0]
+    abi.call("post_message", project=PO, channel="inbox", text="Cafés by revenue.", data={
+        "measures": ["revenue"], "dimensions": ["cafes.cafe_name"], "order_by": [{"field": "revenue", "desc": True}], "limit": 3})
+    unfilter = [["click", "main .fchip button"], ["until", "!document.querySelector('main .fchip')"]]
+    odd = ['obj:cafe:["a%41"]', 'obj:cafe:["x/y:z"]']  # keys the address bar has to carry as they are
     out = drive(objs["owner"], tmp_path, [
-        ["show", "rep:cafes"], ["wait", "main [data-lk=by_name] [data-r='0']", "attached"], ["fire", "main [data-lk=by_name] [data-r='0']"],
-        ["until", KV], ["text", "by_title", "main .pghead h1"], ["get", "cur", "CUR"],
-        ["show", "rep:cafes"], ["wait", "main [data-lk=by_key] tr[data-r]"], ["click", "main [data-lk=by_key] tr[data-r]"],
+        # a click on a mark filters, as in 1.2.5; the filter's chip offers Open, which shows the object's page; Back returns
+        ["show", "rep:cafes"], ["wait", "main [data-lk=by_name] [data-r='0']", "attached"], ["text", "lede", "main .pghead .ttl p"], ["fire", "main [data-lk=by_name] [data-r='0']"],
+        ["wait", "main .fbar .oopen"], ["get", "cur0", "CUR"], ["text", "open", "main .fbar .oopen"],
+        ["until", "document.querySelectorAll('main [data-lk=by_key] tr[data-r]').length === 1"],
+        ["click", "main .fbar .oopen"], ["until", KV], ["text", "by_title", "main .pghead h1"], ["get", "cur", "CUR"],
+        ["get", "back", "(history.back(), new Promise(r => setTimeout(r, 800))).then(() => CUR)"], ["wait", "main .fchip"], *unfilter,
+        ["wait", "main [data-lk=by_key] tr[data-r]"], ["click", "main [data-lk=by_key] tr[data-r]"], ["wait", "main .fbar .oopen"], ["click", "main .fbar .oopen"],
         ["until", KV], ["text", "by_key", "main .pghead h1"], ["get", "cur2", "CUR"],
-        ["show", "rep:cafes"], ["wait", "main [data-lk=by_region] [data-r='0']", "attached"], ["fire", "main [data-lk=by_region] [data-r='0']"],
-        ["wait", "main .fchip"], ["get", "cur3", "CUR"], ["all", "filters", "main .fchip b"]])
+        ["show", "rep:cafes"], ["wait", "main .fchip"], *unfilter,
+        ["wait", "main [data-lk=by_region] [data-r='0']", "attached"], ["fire", "main [data-lk=by_region] [data-r='0']"],
+        ["wait", "main .fchip"], ["get", "cur3", "CUR"], ["all", "filters", "main .fchip b"], ["get", "opens", "document.querySelectorAll('main .fbar .oopen').length"], *unfilter,
+        # an Inbox message's rows that are objects open their pages
+        ["show", "inbox"], ["wait", "main .mdata tr[data-r]"], ["click", "main .mdata tr[data-r]"], ["until", KV], ["text", "inbox", "main .pghead h1"],
+        # a chat answer: only a link to an object's page becomes a link, and it opens that page
+        ["get", "md", "md('[x](javascript:alert(1)) [Bremen](#obj:cafe) [y](#obj:cafe\" onmouseover=\"alert(1)) [z](#home) [w](#obj:<b>) [v](#obj:cafe:1)')"],
+        ["get", "_", "(bubble('ai', '[%s](#obj:cafe)'), document.querySelector('#chat .log a.olink').click())" % name],
+        ["until", "CUR === %s && %s" % (json.dumps(okey("cafe", first)), KV)], ["text", "chat", "main .pghead h1"],
+        # the address bar carries a key as it is: read back once, after a reload too
+        ["get", "_", "(window.__keys = [], window.__api = api, api = (n, x) => { if (n === 'get_object') __keys.push(x.key[0]); return __api(n, x) }, 1)"],
+        ["show", odd[0]], ["wait", "main .emptyx"], ["get", "hash", "location.hash"], ["show", odd[1]], ["wait", "main .emptyx"], ["get", "asked", "__keys"],
+        ["reload"], ["wait", "main .emptyx"], ["get", "reloaded", "CUR"]])
     assert out["by_title"] == top and out["cur"].startswith("obj:cafe:"), out
     assert out["by_key"] == name and out["cur2"] == okey("cafe", first), out
     assert out["cur3"] == "rep:cafes" and out["filters"] == ["Region"], "a member that is no object filters, as before"
+    assert out["cur0"] == "rep:cafes" and out["open"] == f"Open {top}" and out["back"] == "rep:cafes" and out["opens"] == 0, out
+    assert "filter by that member; Open" in out["lede"] and out["lede"].count("Open") == 1, "one hint, in the report's own lede"
+    assert out["inbox"] == top and out["chat"] == name, out
+    assert out["md"].count("<a ") == 1 and '<a href="#obj:cafe" class=olink>Bremen</a>' in out["md"] and "<b>" not in out["md"], out["md"]
+    assert out["asked"] == ["a%41", "x/y:z"] and "%2541" in out["hash"] and out["reloaded"] == odd[1], out
 
 
 def test_report_form_card_runs_action(objs, tmp_path):
@@ -770,7 +893,15 @@ def test_report_form_card_runs_action(objs, tmp_path):
                         (CARD | {"query": {"measures": ["revenue"]}}, "`query`")):
         refused = with_card(card)
         assert "reports/visits.json $.pages[0].visuals[1]" in refused["error"] and field in refused["error"], refused
+    # round 2: a card with `form` and no type is told to add type "form"; a key has as many values as the type's key
+    untyped = with_card({k: v for k, v in CARD.items() if k != "type"})
+    assert "reports/visits.json $.pages[0].visuals[1]: Missing required field(s) `type`" in untyped["error"] and '`type`: "form"' in untyped["error"], untyped
+    keyed = with_card(CARD | {"form": {"action": "flag_visit", "key": ["CF001", "extra"]}})
+    assert "reports/visits.json $.pages[0].visuals[1].form.key: The key has 2 value(s); a Café is identified by 1." in keyed["error"], keyed
     assert with_card(CARD)["result"]["pages"][0]["visuals"] == ["flagged", "flag"]
+    shared = engine("import json, sys\nfrom abi.reports import share\n"
+                    "print(json.dumps([v['id'] for p in share.layout(sys.argv[1], 'visits', None, None, 'gone')['pages'] for v in p['visuals']]))", PO)
+    assert shared.returncode == 0 and json.loads(shared.stdout.strip().splitlines()[-1]) == ["flagged"], shared.stderr[-2000:]  # a share lays out no form card
     assert abi.call("visual_data", project=PO, report="visits", page="main")["visuals"][1] == {
         "id": "flag", "type": "text", "title": CARD["title"], "text": "Flag for a visit"}
     with pytest.raises(abi.ActionError) as gone:  # an action type a form card uses can't go
@@ -808,11 +939,60 @@ def test_report_form_card_runs_action(objs, tmp_path):
         ["text", "title", "main [data-lk=flag] h3"], ["all", "labels", "main [data-lk=flag] .fld > label"],
         ["click", "main [data-lk=flag] .acts .btn.pri"], ["wait", "main [data-lk=flag] .msg.bad"], ["text", "unpicked", "main [data-lk=flag] .msg"],
         ["fill", "main [data-lk=flag] .opick input", cafe], ["until", "document.querySelectorAll('main [data-lk=flag] .opick .hits button').length === 1"], ["all", "matches", "main [data-lk=flag] .opick .hits button"],
-        ["click", "main [data-lk=flag] .opick .hits button"], ["fill", "main [data-lk=flag] .fld > input", "from the report"],
+        ["click", "main [data-lk=flag] .opick .hits button"], ["fill", "main [data-lk=flag] .fld > textarea", "from the report"],
         ["click", "main [data-lk=flag] .acts .btn.pri"], ["wait", "#confirm[open]"], ["text", "lead", "#c-msg"], ["get", "before", VISIT_REASON % json.dumps(fresh)],
         ["click", "#c-yes"], ["wait", "body > .toast"], ["text", "toast", "body > .toast"], ["get", "kpi2", kpi], ["get", "cur", "CUR"],
-        ["get", "after", VISIT_REASON % json.dumps(fresh)]])
+        ["get", "after", VISIT_REASON % json.dumps(fresh)],
+        # two cafés of one name are told apart in the picker by a property they differ in
+        ["get", "_", "(window.__api = api, api = (n, x) => n === 'list_objects' ? Promise.resolve({type: 'cafe', key: ['cafe_id'], title: 'cafe_name',"
+                     " columns: ['cafe_id', 'cafe_name', 'city'], rows: [['A1', 'Twin', 'Berlin'], ['A2', 'Twin', 'Bremen'], ['A3', 'Lone', 'Berlin']], more: false}) : __api(n, x), 1)"],
+        ["fill", "main [data-lk=flag] .opick input", "t"], ["until", "document.querySelectorAll('main [data-lk=flag] .opick .hits button').length === 3"],
+        ["all", "twins", "main [data-lk=flag] .opick .hits button"]])
+    assert out["twins"] == ["Twin · Berlin", "Twin · Bremen", "Lone"], out["twins"]
     assert out["title"].startswith(CARD["title"]) and out["labels"] == ["Café", "Reason"] and "Pick the café first" in out["unpicked"], out
     assert out["matches"] == [cafe] and cafe in out["lead"] and out["before"] is None, out
     assert out["after"] == "from the report" and "Saved" in out["toast"] and out["cur"] == "rep:cafes", out
     assert int(out["kpi2"]) == int(out["kpi"]) + 1, f"the page's visuals read their rows again: {out['kpi']} → {out['kpi2']}"
+
+
+def test_the_published_copy_shows_objects_and_runs_nothing(objs, tmp_path):
+    """Round 2 (A-M3): Publish makes the copy Viewer reads. There a Viewer lists the objects and opens one as they see
+    it; its page has no action button and says its history is the working project's; the report's form card is gone
+    and leaves no hole in the grid; the copy holds no action type."""
+    v, owner, good = objs["viewer"], objs["owner"], objs["good"]
+    try:
+        abi.call("commit", project=PO, message="pages test: before publishing")
+    except abi.ActionError as e:  # nothing new to commit
+        assert e.status == 409, e.body
+    owner.page()
+    r = owner.post("/publish", {})
+    if r.get("confirm"):
+        r = owner.post(f"/confirm/{r['confirm']['id']}", {})
+    assert "result" in r, r
+    pub = f"{PO}_pub"
+    count = lambda p: [abi.call("sql_query", project=p, sql=f"SELECT count(*) FROM {t}")["rows"] for t in ("cafes", "customers", "orders")]  # noqa: E731
+    want, end = count(PO), time.monotonic() + 240
+    while time.monotonic() < end:  # the worker's minute, then the copy's load
+        try:
+            if count(pub) == want:
+                break
+        except abi.ActionError:
+            pass
+        time.sleep(2)
+    else:
+        pytest.fail("the published copy's tables didn't load")
+    page = v.page()
+    assert page["project"] == pub and abi.call("ontology", project=pub)["actions"] == [], "the copy holds no action type"
+    assert [t["id"] for t in page["ontology"]["objects"]] == ["cafe", "customer", "order"] and not page["ontology"].get("actions"), page["ontology"].get("actions")
+    north = {r[0] for r in objs["sql"]("SELECT cafe_name FROM cafes WHERE region = 'North'")}
+    out = drive(v, tmp_path, [
+        ["show", "obj:cafe"], ["wait", "main .pick tr[data-r]"], ["get", "names", "[...document.querySelectorAll('main .pick tr[data-r]')].map(tr => tr.cells[0].textContent)"],
+        ["show", okey("cafe", good)], ["until", KV], ["until", "document.querySelectorAll('main .cards > .card.wide .pick table').length === 2"],
+        ["text", "h1", "main .pghead h1"], ["text", "history", "main .cards > .card:last-child"], ["text", "kv", "main .kv"],
+        ["get", "acts", "document.querySelectorAll('main .pghead .bar.top .btn, main .aform').length"],
+        ["show", "rep:cafes"], ["wait", "main .grid [data-lk=by_region]"], ["get", "cards", "[...document.querySelectorAll('main .grid > .card')].map(c => c.dataset.lk)"],
+        ["get", "hole", "(g => Math.round(g.getBoundingClientRect().bottom - Math.max(...[...g.children].map(c => c.getBoundingClientRect().bottom))))(document.querySelector('main .grid'))"],
+        ["get", "rowgaps", "(cs => cs.map(c => c.getBoundingClientRect()).sort((a, b) => a.top - b.top).map((r, i, a) => i ? Math.round(r.top - Math.max(...a.slice(0, i).map(x => x.bottom))) : 0))([...document.querySelectorAll('main .grid > .card')])"]])
+    assert out["names"] and set(out["names"]) <= north and out["h1"] in north and "Seats" not in out["kv"], out
+    assert "kept in the working project" in out["history"] and "Nothing has happened" not in out["history"] and out["acts"] == 0, out["history"]
+    assert out["cards"] == ["flagged", "by_name", "by_key", "by_region"] and out["hole"] <= 1 and max(out["rowgaps"]) <= 24, f"no form card and no hole where it was: {out}"

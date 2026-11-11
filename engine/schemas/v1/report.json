@@ -80,9 +80,9 @@
       "if": {"required": ["type"], "properties": {"type": {"const": "text"}}},
       "then": {"required": ["text"], "not": {"anyOf": [{"required": ["query"]}, {"required": ["form"]}]}},
       "else": {
-        "if": {"required": ["type"], "properties": {"type": {"const": "form"}}},
-        "then": {"required": ["form"], "not": {"anyOf": [{"required": ["query"]}, {"required": ["text"]}]}},
-        "else": {"required": ["query"], "not": {"anyOf": [{"required": ["text"]}, {"required": ["form"]}]}}
+        "if": {"anyOf": [{"required": ["type"], "properties": {"type": {"const": "form"}}}, {"required": ["form"]}]},
+        "then": {"required": ["form", "type"], "properties": {"type": {"const": "form"}}, "not": {"anyOf": [{"required": ["query"]}, {"required": ["text"]}]}},
+        "else": {"required": ["query"], "not": {"required": ["text"]}}
       }
     },
     "query": {

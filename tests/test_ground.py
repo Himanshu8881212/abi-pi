@@ -59,6 +59,17 @@ def test_a_link_label_opens_like_a_sentence():
     assert ground.check("See [Atlantis Monthly](/x) with 98,765 views.", ROWS)["names"] == ["Atlantis Monthly"]  # mid-sentence: still a name
 
 
+def test_an_object_named_as_a_link_to_its_page_grounds():
+    """1.2.6 M7: SYSTEM.md has the agent write an object it read as a link to its page, [title](#obj:<type>): the title
+    grounds as any name and the target holds only the type's ID, so nothing in it is masked. A key in the target would
+    be: the check reads it as a figure, which is why the link carries none."""
+    rows = [{"columns": ["cafe_id", "cafe_name", "revenue"], "rows": [["CF009", "Bremen Mitte", 1235.52]]}]
+    for text in ("[Bremen Mitte](#obj:cafe) made 1,235.52 in revenue.", "The top one is [Bremen Mitte](#obj:cafe), with 1,235.52."):
+        bad = ground.check(text, rows, spans=True)
+        assert bad["numbers"] == [] and bad["names"] == [] and ground.mask(text, bad) == text, bad
+    assert ground.check("[Bremen Mitte](#obj:cafe:XY123) made 1,235.52.", rows)["numbers"] == ["123"]
+
+
 def test_the_other_side_of_a_yes_no_column_is_no_invented_name():
     """Release run 30 Oct: "Nonmembers" for `loyalty_member` = false was masked, and with it the plain word in prose."""
     res = [{"columns": ["loyalty_member", "average_ticket"], "rows": [[True, 5.6544], [False, 5.6574]]}]

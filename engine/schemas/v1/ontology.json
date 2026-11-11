@@ -53,7 +53,7 @@
         "object": {"$ref": "#/$defs/id"},
         "name": {"$ref": "#/$defs/label"},
         "description": {"$ref": "#/$defs/text"},
-        "role": {"enum": ["viewer", "editor", "owner"], "default": "editor"},
+        "role": {"enum": ["viewer", "editor", "owner"], "default": "editor", "description": "who may run it through the API or an agent; the app's forms and buttons run actions in Developer mode only (Editors and Owners)"},
         "inputs": {"type": "object", "description": "a JSON Schema of type object (checked with tools.validate)"},
         "checks": {"type": "array", "items": {"type": "object", "required": ["value", "op", "to", "message"], "additionalProperties": false,
           "properties": {"value": {"type": "string"}, "op": {"enum": ["=", "!=", ">", ">=", "<", "<=", "in"]}, "to": {}, "message": {"$ref": "#/$defs/text"}}},

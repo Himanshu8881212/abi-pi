@@ -19,7 +19,7 @@ export default function Print({ params: q }: { params: URLSearchParams }) {
   useBrand(brand.data);
   const r = reps.data?.find((x) => x.id === report);
   const pages = ids.map((id) => ({ id, p: r?.pages.find((x) => x.id === id) }))
-    .map(({ id, p }) => ({ id, p, visuals: ordered((p?.visuals ?? []).filter((v) => !visual || v.id === visual)) }));
+    .map(({ id, p }) => ({ id, p, visuals: ordered((p?.visuals ?? []).filter((v) => (!visual || v.id === visual) && v.type !== "form")) })); // 1.2.6 M7: a form card isn't printed
   const all = pages.flatMap(({ id, visuals }) => visuals.map((v) => ({ page: id, v })));
   const data = useQueries({
     queries: all.map(({ page, v }) => ({ queryKey: ["visual", project, report, page, v.id, filters],

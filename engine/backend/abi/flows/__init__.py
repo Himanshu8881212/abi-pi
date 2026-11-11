@@ -958,17 +958,20 @@ class Runs(storage.ProjectRef):
 
 @action(Role.viewer)
 def flow_runs(conn, user: User, args: Runs) -> dict:
-    """Run history, newest first, with each step's trace: status, input, output, error and timings, and the run's LLM `tokens`. With `run`, only that run: it has ended when its status is ok, failed, stopped or rejected (queued: waiting for the worker or a retry; waiting: for an approval)."""
-    runs = conn.execute("SELECT id, flow, status, error, created, finished, started_by, trigger ? 'action' AS acted FROM flow_runs"
+    """Run history, newest first, with each step's trace: status, input, output, error and timings, and the run's LLM `tokens`. With `run`, only that run: it has ended when its status is ok, failed, stopped or rejected (queued: waiting for the worker or a retry; waiting: for an approval). A run an object action started names its `object` (type, key) to its runner, Editors and Owners."""
+    runs = conn.execute("SELECT id, flow, status, error, created, finished, started_by, trigger ? 'action' AS acted,"
+                        " trigger->'type' AS otype, trigger->'key' AS okey FROM flow_runs"
                         " WHERE project = %s AND flow = coalesce(%s, flow) AND id = coalesce(%s, id) ORDER BY created DESC, id LIMIT %s",
                         [args.project, args.flow, args.run, args.limit]).fetchall()
     # 1.2.6 M4: an object action's run carries its runner's typed inputs: theirs, and Editors' and Owners', only
     editor = (role_in(conn, user, args.project) or 0) >= Role.editor
     typed = set()
     for r in runs:
-        if r.pop("acted") and r.pop("started_by") != user.id and not editor:
+        acted, mine, obj = r.pop("acted"), r.pop("started_by") == user.id, {"type": r.pop("otype"), "key": r.pop("okey")}
+        if acted and not mine and not editor:
             typed.add(r["id"])
-        r.pop("started_by", None)
+        elif acted:  # 1.2.6 M7: the object it ran on, to its runner, Editors and Owners only (a key may be hidden from anyone else)
+            r["object"] = obj
     ids = [r["id"] for r in runs]
     steps = conn.execute("SELECT run_id, step, status, input, output, error, started, finished FROM flow_steps"
                          " WHERE run_id = ANY(%s) ORDER BY pos", [ids]).fetchall()
