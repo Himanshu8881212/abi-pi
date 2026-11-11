@@ -63,7 +63,7 @@ READS = {"changes", "check_condition", "data_quality", "dataset_data", "docs", "
          "ml_models", "preview_steps", "readiness", "report_snapshot", "rls_rules", "run_tool", "semantic_model",
          "semantic_query", "test_agent", "test_tool", "visual_data", "ontology", "get_object", "list_objects", "object_history"}  # 1.2.6 M6, M7: object reads
 ALLOWED = READS | WRITES | READS_ONLY  # the page's actions; every other one is ABI's app's
-ACCOUNT = {"set_password", "create_personal_token", "revoke_personal_token", "start_mfa", "confirm_mfa", "disable_mfa"}  # the confirmations Viewer mode still redeems
+ACCOUNT = {"set_password", "create_personal_token", "revoke_personal_token", "start_mfa", "confirm_mfa", "disable_mfa"}  # the confirmations Viewer mode still redeems: account work (a password, personal tokens, two-step sign-in), your own or, as an Owner, another person's
 
 CSS = """
 /* layout: a top bar (project, live state, the agent), a left rail grouped by what you want to do, one page at a time with
@@ -682,7 +682,7 @@ async function api(action,args){
  const post=(u,b)=>fetch(u,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json());
  let r=await post('/api/'+action,{project:D.project,...args});
  if(action==='run_object_action')ASK_WHAT='';  // an action on an object is never a project delete, whatever it is called
- if(r.confirm){if(!await ask(action==='run_object_action'?actAsk(r.confirm):r.confirm))throw new Error('You declined. Nothing changed.');r=await post('/confirm/'+r.confirm.id)}
+ if(r.confirm){if(!await ask(action==='run_object_action'?{...actAsk(r.confirm),plain:true}:r.confirm))throw new Error('You declined. Nothing changed.');r=await post('/confirm/'+r.confirm.id)}
   if(r.error)throw Object.assign(new Error(plainErr(r.error)),{fields:r.fields});if(/^(set_|save_|delete_|add_|remove_|enable_|create_|edit_|approve_|reject_|undo|commit|publish_|train_|score_)/.test(action))refreshPending();return r.result}
 let PEND_T=null;function refreshPending(){clearTimeout(PEND_T);PEND_T=setTimeout(async()=>{try{D.pending=await (await fetch('/api/changes',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({project:D.project})})).json().then(x=>x.result||D.pending);vc();const cb=$('#changes');cb.classList.remove('pulse');void cb.offsetWidth;if(D.pending?.files?.length)cb.classList.add('pulse')}catch(e){}},400)}
 let ASK_WHAT='';  // what the person is deleting, for ABI's confirmation
@@ -1726,7 +1726,7 @@ function actionForm(a,getKey,done){const c=card(a.name),S=a.inputs?.properties||
   if(!s.enum&&ty==='string'){if(s.minLength)e.minLength=s.minLength;if(s.maxLength)e.maxLength=s.maxLength}
   if(ty!=='boolean')e.required=req.includes(k);if(s.default!==undefined){if(ty==='boolean')e.checked=!!s.default;else e.value=s.enum?JSON.stringify(s.default):s.default}
   F[k]=[e,ty,lbl,s];c.append(fld(lbl+(e.required||ty==='boolean'?'':' (optional)'),e,s.description))});
- r.append(go);c.append(r,m);c.addEventListener('input',()=>{if(m.classList.contains('bad'))m.textContent=''});
+ r.append(go);c.append(r,m);c.addEventListener('input',ev=>{ev.target.classList.remove('invalid');ev.target.removeAttribute('aria-invalid');if(m.classList.contains('bad'))m.textContent=''});
  // its own button, not act(): an action may be called anything ("Remove the visit flag") and is never a project delete
  go.onclick=async()=>{go.disabled=true;c.querySelectorAll('.invalid').forEach(x=>{x.classList.remove('invalid');x.removeAttribute('aria-invalid')});
   try{const inputs={},key=await getKey();Object.entries(F).forEach(([k,[e,ty,lbl,s]])=>{need(e,e.checkValidity(),`${lbl}: ${e.validationMessage}`);
@@ -1781,7 +1781,7 @@ function objPick(T,set){const w=h('div','opick'),q=h('input','f'),ls=h('div','hi
  const find=async()=>{const my=++n;let r;try{r=await api('list_objects',{type:T.id,...(q.value.trim()?{search:q.value.trim()}:{}),limit:8})}catch(e){if(my===n)ls.replaceChildren(h('span','file',e.message));return}
   if(my!==n)return;const ti=r.columns.indexOf(r.title),kx=r.key.map(c=>r.columns.indexOf(c)),id=x=>kx.map(i=>x[i]).join(' · ');
   const apart=x=>{const same=r.rows.filter(y=>y[ti]===x[ti]);if(ti<0||same.length<2)return '';const i=r.columns.findIndex((c,i)=>i!==ti&&!kx.includes(i)&&new Set(same.map(y=>String(y[i]))).size===same.length);const v=i<0?id(x):pval(T,T.properties.find(p=>p.column===r.columns[i])||{},x[i]);return v===null||v===''?'':' · '+v};
-  ls.replaceChildren(...r.rows.map(x=>{const b=h('button','sl',String(x[ti]??id(x))+apart(x));b.type='button';b.onclick=()=>{set(kx.map(i=>x[i]));q.value=b.textContent;q.classList.remove('invalid');ls.replaceChildren()};return b}));
+  ls.replaceChildren(...r.rows.map(x=>{const b=h('button','sl',String(x[ti]??id(x))+apart(x));b.type='button';b.onclick=()=>{set(kx.map(i=>x[i]));q.value=b.textContent;q.classList.remove('invalid');q.removeAttribute('aria-invalid');ls.replaceChildren()};return b}));
   if(!r.rows.length)ls.append(h('span','file','No match.'))};
  q.oninput=()=>{set(null);clearTimeout(tm);tm=setTimeout(find,250)};q.onfocus=()=>{if(!ls.children.length&&!q.value)find()};return w}
 const SERVER_KEYS=['owner','status','version','disabled','error','latest_run','latest_score','active_run','evaluation','sharing','last_runs','tokens'];

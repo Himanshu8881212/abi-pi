@@ -612,6 +612,8 @@ export default async function abi(pi: ExtensionAPI) {
 		const yes = await ctx.ui.confirm("ABI asks for your confirmation", `${message}${preview ? `\n\nPreview:\n${preview}` : ""}\n\nProceed?`);
 		log({ event: "confirm", tool, decision: yes ? "yes" : "no" });
 		if (!yes) return { status: "The person declined. Nothing changed; don't retry.", message };
+		// the person may have switched to Viewer while the question was open: the yes changes nothing then
+		if (await mode() === "viewer" && !READS.has(tool)) return { status: "Viewer mode: nothing changed. The person can switch to Developer in the app's top bar and ask again.", message };
 		const done = await rest(tool, input, tok);
 		return done.status < 300 ? { result: done.body, confirmed_by_person: true } : { error: done.body };
 	}

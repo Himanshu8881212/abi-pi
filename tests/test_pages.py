@@ -735,6 +735,7 @@ def test_action_form_confirms(objs, tmp_path):
         ["click", "main .aform .acts .btn.pri"], ["until", "document.querySelector('main .aform .msg').textContent.includes('too long')"], ["text", "too_long", "main .aform .msg"],
         ["get", "marked", "[...document.querySelectorAll('main .aform .invalid')].map(e => e.closest('.fld').querySelector('label').textContent)"],
         ["get", "aria", "[...document.querySelectorAll('main .aform [aria-invalid=true]')].length"],
+        ["fill", "main .aform .fld input", "ok"], ["get", "cleared", "document.querySelectorAll('main .aform .invalid, main .aform [aria-invalid]').length"],
         # an action called "Remove…" is no project delete: a plain main button, its own question, the object named
         ["show", okey("customer", cust)], ["until", KV], ["all", "rm_top", "main .pghead .bar.top > .btn"],
         ["get", "rm_class", "document.querySelector('main .pghead .bar.top > .btn').className"], ["click", "main .pghead .bar.top > .btn"], ["wait", "main .aform"],
@@ -777,6 +778,7 @@ def test_action_form_confirms(objs, tmp_path):
     assert out["too_long"] == "Who is too long (at most 100 characters)." and out["marked"] == ["Who"], out
     assert objs["sql"](f"SELECT manager FROM cafe_contacts WHERE cafe_id = '{fresh}'") == [[None]]
     assert out["aria"] == 1, "the field ABI's check names is marked for assistive technology too"
+    assert out["cleared"] == 0, "editing the field takes both marks off"
     assert out["rm_top"] == ["Remove the visit flag"] and "danger" not in out["rm_class"] and out["rm_submit"] == ["Remove the visit flag", "btn pri", False], out
     assert out["rm_title"] == "Remove the visit flag?" and out["rm_yes"] == "Remove the visit flag" and cust in out["rm_lead"] and "Customer" in out["rm_lead"], out
     assert "danger" not in out["rm_yes_class"], "its confirm button is a plain one, not a delete's red"
@@ -872,6 +874,33 @@ def test_object_graph_has_every_link(objs, people, tmp_path):
         ["get", "nav", "[...document.querySelectorAll('aside button.it')].map(b => b.dataset.k)"],
         ["show", "obj:cafe"], ["get", "cur", "CUR"], ["get", "keys", "Object.keys(PAGES).filter(k => k.startsWith('obj'))"]])
     assert "objects" not in none["nav"] and none["cur"] == "home" and none["keys"] == [], none
+
+
+def test_the_objects_picture_keeps_every_label_apart_and_whole(objs, tmp_path):
+    """Round 4 (M1, L1): the one-column picture of four types and six links, two of them between rows that add up the
+    same (their labels would share a line) and one with a long name: no two labels overlap, nothing is cut."""
+    links = [("Orders", "Cafés", "café", "many-to-one"), ("Orders", "Customers", "customer", "many-to-one"), ("Products", "Cafés", "sold in", "many-to-many"),
+             ("Orders", "Products", "product", "many-to-one"), ("Customers", "Cafés", "visited", "many-to-many"),
+             ("Customers", "Products", "customers who bought this product at least once", "many-to-many")]
+    svg = app.render.diagram({"objects": True, "relationships": [
+        {"from": {"table": a, "columns": [n]}, "to": {"table": b, "columns": [""]}, "name": n, "cardinality": c} for a, b, n, c in links]},
+        dict.fromkeys(["Cafés", "Customers", "Orders", "Products"]))
+    out = drive(objs["owner"], tmp_path, [["get", "pic", """(html => { const d = document.createElement('div'); d.innerHTML = html; document.querySelector('main').append(d);
+        const s = d.querySelector('svg'), vb = s.viewBox.baseVal, bb = e => e.getBBox(), ls = [...s.querySelectorAll('text')].filter(t => t.textContent.includes(' · ')).map(bb),
+              hit = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+        return {labels: ls.length, hits: ls.flatMap((a, i) => ls.slice(i + 1).filter(b => hit(a, b))).length, width: vb.width,
+                cut: [...s.querySelectorAll('text, rect')].map(bb).filter(b => b.x < 0 || b.y < 0 || b.x + b.width > vb.width || b.y + b.height > vb.height).length} })(""" + json.dumps(svg) + ")"]])["pic"]
+    assert out["labels"] == 6 and out["hits"] == 0, f"every link's label on a line of its own: {out}"
+    assert out["cut"] == 0 and out["width"] > 520, f"the picture is as wide as its longest label, nothing leaves it: {out}"
+
+
+def test_the_agents_confirmation_asks_the_mode_again_after_the_yes():
+    """Round 4 (P2): the harness checks Viewer mode when a tool call starts; the person may switch while ABI's question
+    is open, so the confirmation bridge asks again between their yes and the confirmed call."""
+    src = (abi.ROOT / ".pi/extensions/abi/index.ts").read_text()
+    bridge = src[src.index("async function confirmBridge("):]
+    yes, call = bridge.index("if (!yes) return"), bridge.index("await rest(tool, input, tok)")
+    assert yes < bridge.index('if (await mode() === "viewer" && !READS.has(tool)) return { status: "Viewer mode: nothing changed.', yes) < call
 
 
 def test_report_click_opens_object_page(objs, tmp_path):

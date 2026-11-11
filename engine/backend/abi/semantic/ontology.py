@@ -942,7 +942,9 @@ def object_history(conn, user: User, args: ObjectRef) -> dict:
              "inputs": r["input"].get("inputs") if sees or r["user_id"] == user.id else None}
             for r in conn.execute("SELECT at, user_id, user_name, via, input FROM audit_log WHERE project = %s AND action = 'run_object_action'"
                                   " AND status = 200 AND input->>'type' = %s AND ARRAY(SELECT jsonb_array_elements_text(input->'key')) = %s"
-                                  " ORDER BY at DESC, id DESC LIMIT %s", [p, x["id"], text, args.limit])]
+                                  # the audit log outlives a project: a new one under a deleted or renamed one's ID starts with no runs
+                                  " AND id > COALESCE((SELECT max(id) FROM audit_log WHERE project = %s AND action IN ('delete_project', 'rename_project')"
+                                  " AND status = 200), 0) ORDER BY at DESC, id DESC LIMIT %s", [p, x["id"], text, p, args.limit])]
     edits = []
     for t in dict.fromkeys([x["table"], *(a["writes"]["table"] for a in o.get("actions", []) if a["object"] == x["id"] and a.get("writes"))]):
         try:

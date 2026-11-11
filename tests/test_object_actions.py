@@ -12,7 +12,7 @@ import secrets
 import time
 
 import pytest
-from conftest import drop
+from conftest import drop, parquet
 from test_engine import engine
 from test_ontology_nobreak import brew
 from test_pages import sure
@@ -298,6 +298,31 @@ def test_history_lists_run_edit_flow(acts):
         assert r["run"].rsplit("-", 1)[1] in {x["run"] for x in h["flows"]}
     other = abi.call("object_history", project=P, type="cafe", key=[acts["bad"]])
     assert other["runs"] == [] and other["flows"] == [], "another café's history is its own"
+
+
+def test_history_starts_again_under_a_deleted_projects_id(tmp_path):
+    """Round 4 (P1): delete_project keeps the audit log, where an object's runs are read from. A new project made under
+    a deleted one's ID, with the same object, shows none of the old project's runs."""
+    p = "pi_obj_reborn"
+    (tmp_path / "orders.csv").write_text("order_id,channel\n1,web\n2,shop\n")
+    onto = {"objects": [{"id": "order", "table": "orders", "name": "Order", "plural": "Orders", "title": "order_id",
+                         "properties": [{"column": "channel", "meaning": "category"}]}],
+            "actions": [{"id": "mark", "object": "order", "name": "Mark", "writes": {"table": "orders", "set": {"channel": "marked"}}}]}
+
+    def make():
+        if p in {x["project"] for x in abi.call("list_projects")["projects"]}:
+            drop([p])
+        abi.load("demo", p, parquet(tmp_path / "orders.csv"))
+        sure("save_ontology", project=p, ontology=onto)
+    runs = lambda: abi.call("object_history", project=p, type="order", key=[1])["runs"]  # noqa: E731
+    make()
+    try:
+        abi.call("run_object_action", project=p, type="order", key=[1], action="mark")
+        assert [r["action"] for r in runs()] == ["mark"]
+        make()  # deleted, and made again under the same ID
+        assert runs() == [], "the old project's runs stay in the audit log, not in the new project's history"
+    finally:
+        drop([p])
 
 
 def test_history_hidden_object_404(acts):

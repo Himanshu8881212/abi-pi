@@ -307,10 +307,9 @@ def diagram(model: dict, kinds: dict) -> str:
     dims = [t for t in tables if t not in facts]
     H = 60 + 56 * max(len(facts), len(dims))
     pos = {t: (40, 40 + 56 * i) for i, t in enumerate(facts)} | {t: (460, 40 + 56 * i) for i, t in enumerate(dims)}
-    named = bool(model.get("objects"))
+    named, W, taken, out = bool(model.get("objects")), 700, set(), []
     if named:  # one column of outlined boxes, no table kinds
-        facts, H, pos = [], 44 + 72 * len(tables), {t: (40, 40 + 72 * i) for i, t in enumerate(tables)}
-    out = [f"<svg viewBox='0 0 {520 if named else 700} {H}' width=100% style='max-width:{560 if named else 760}px'>"]
+        facts, W, H, pos = [], 520, 44 + 80 * len(tables), {t: (40, 40 + 80 * i) for i, t in enumerate(tables)}
     for i, r in enumerate(model.get("relationships", [])):
         (x1, y1), (x2, y2) = pos[r["from"]["table"]], pos[r["to"]["table"]]
         d, b = f"M{x1 + 200},{y1 + 18} C{x1 + 300},{y1 + 18} {x2 - 100},{y2 + 18} {x2},{y2 + 18}", 40 + 24 * (i % 4)
@@ -319,13 +318,18 @@ def diagram(model: dict, kinds: dict) -> str:
         out.append(f"<path d='{d}' fill=none stroke='var(--ink)' stroke-width=1.5>"
                    f"<title>{esc(r['from']['table'])}.{esc(','.join(r['from']['columns']))} → {esc(r['to']['table'])}.{esc(','.join(r['to']['columns']))} ({esc(r.get('cardinality') or 'many-to-one')})</title></path>")
         if named:
-            out.append(f"<text x={x1 + 206 + b * 3 // 4} y={(y1 + y2) // 2 + 23} style='fill:var(--ink);font-size:15px;paint-order:stroke;stroke:var(--card);stroke-width:5px'>"
-                       f"{esc(r['name'])} · {esc(r.get('cardinality') or '')}</text>")
+            lx, ly, label = x1 + 206 + b * 3 // 4, (y1 + y2) // 2 + 23, f"{r['name']} · {r.get('cardinality') or ''}"
+            while ly in taken:  # two links whose rows add up the same: the next free line below
+                ly += 20
+            taken.add(ly)
+            # ponytail: a label's width is taken as 9px a character (15px text); measure it if names in wide scripts get cut
+            W, H = max(W, lx + 9 * len(label) + 8), max(H, ly + 12)
+            out.append(f"<text x={lx} y={ly} style='fill:var(--ink);font-size:15px;paint-order:stroke;stroke:var(--card);stroke-width:5px'>{esc(label)}</text>")
     for t, (x, y) in pos.items():
         out.append(f"<rect x={x} y={y} width=200 height=36 fill='{'var(--ink)' if t in facts else 'var(--card)'}' stroke='var(--ink)' stroke-width='2'/>"
                    f"<text x={x + 10} y={y + 22} style='fill:{'var(--paper)' if t in facts else 'var(--ink)'};font-size:{16 if named else 13}px;font-weight:600'>{esc(t)}</text>"
                    f"<text x={x + 190} y={y + 22} text-anchor=end style='fill:{'var(--paper)' if t in facts else 'var(--mute)'}'>{esc('' if named else kinds.get(t) or '')}</text>")
-    return "".join(out) + "</svg>"
+    return f"<svg viewBox='0 0 {W} {H}' width=100% style='max-width:{W + 40 if named else 760}px'>" + "".join(out) + "</svg>"
 
 
 def _cardinality(model: dict, start: str, via: list[str]) -> str:
