@@ -44,7 +44,7 @@ def rows_of(project: str, reports: set[str]) -> dict:
         if isinstance(r, dict) and r.get("id") in reports:
             for p in r["pages"]:
                 for v in p["visuals"]:
-                    if v.get("type") != "text" and v.get("text") is None:
+                    if v.get("query"):  # a text or form card has no rows
                         out["rows"] += abi.call("visual_data", project=project, report=r["id"], page=p["id"], visual=v["id"]).get("rows", [])
     return out
 

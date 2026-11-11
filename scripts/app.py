@@ -56,11 +56,12 @@ READS_ONLY ={"run_flow", "run_agent"}  # not changes to the project, but they ac
 WRITES = {"set_rls_rule", "set_measure", "delete_measure", "set_glossary_term", "delete_glossary_term", "save_model", "delete_model", "enable_flow", "train_model", "score_model", "refresh",
           "commit", "undo", "add_data", "delete_source", "delete_table", "set_table", "add_relationship", "remove_relationship",
           "save_dataset", "delete_dataset", "save_report", "delete_report", "save_flow", "delete_flow", "save_ml_model",
-          "delete_ml_model", "save_tool", "publish_tool", "delete_tool", "save_agent", "publish_agent", "delete_agent", "set_steps", "edit_cells", "approve_edit", "reject_edit", "undo_edits", "create_input_table"}
+          "delete_ml_model", "save_tool", "publish_tool", "delete_tool", "save_agent", "publish_agent", "delete_agent", "set_steps", "edit_cells", "approve_edit", "reject_edit", "undo_edits", "create_input_table",
+          "run_object_action"}  # 1.2.6 M7: an object page's or a form card's action, a write-back as the person (Developer only, as every write)
 READS = {"changes", "check_condition", "data_quality", "dataset_data", "docs", "edit_history", "edit_proposals", "export_visual",
          "flow_runs", "history", "how_calculated", "list_agents", "list_flows", "list_reports", "list_tools", "load_runs",
          "ml_models", "preview_steps", "readiness", "report_snapshot", "rls_rules", "run_tool", "semantic_model",
-         "semantic_query", "test_agent", "test_tool", "visual_data", "ontology", "get_object", "list_objects"}  # 1.2.6 M6: object reads
+         "semantic_query", "test_agent", "test_tool", "visual_data", "ontology", "get_object", "list_objects", "object_history"}  # 1.2.6 M6, M7: object reads
 ALLOWED = READS | WRITES | READS_ONLY  # the page's actions; every other one is ABI's app's
 
 CSS = """
@@ -591,6 +592,14 @@ body[data-mode=viewer] .rowcard .f{min-height:0;padding:2px 0;border-color:trans
 .mobile body[data-mode=viewer] .rowcard .fld>label.l{margin:6px 0 0;font-size:12px}.mobile body[data-mode=viewer] .rowcard .f{font-size:15px}
 .mpick{mask-image:linear-gradient(to bottom,#000 calc(100% - 14px),transparent);padding-bottom:10px}
 .node{width:250px}.node>span{-webkit-line-clamp:3}.node .ns{color:var(--mute)}.node.ok{border-left-color:var(--ink)}.node.ok .ns{color:var(--ink)}.state.hold{color:var(--ink);background:var(--hover)}.state.hold::before{background:var(--signal);opacity:1}.state.on::before,.msg.ok::before,p.ok::before,.kv span.ok::before,.mode.live::before{background:var(--ink)}.card>.item.sev-bad .txt,.card>details.more>.item.sev-bad .txt{color:var(--ink)}p.rdy{margin:8px 0 0;font-size:13.5px;line-height:1.5;color:var(--ink);text-wrap:pretty}table.prices td.mname{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}.card>h3+p.note{margin:0 0 6px}.qrow{align-items:center}.qrow>.btn{margin:0!important;flex:none}input.f{text-overflow:ellipsis}.card p.empty{text-wrap:pretty}.tcard .stepchips .chip i{font:11.5px var(--mono);font-style:normal;color:color-mix(in srgb,var(--ink) 62%,var(--mute))}.tcard .stepchips .chip{font-size:13px}.more>.btn.mbtn{color:color-mix(in srgb,var(--ink) 78%,var(--mute))}.tcard input[type=checkbox]{border-color:color-mix(in srgb,var(--ink) 45%,var(--line))}.hist td .ic{width:14px;height:14px;color:var(--mute);margin-right:9px;vertical-align:-2px}#switcher .lk{display:grid;grid-template-columns:30px 1fr;column-gap:12px;align-items:center;text-align:left}#switcher .lk>.pav{grid-row:1/3;width:30px;height:30px;border-radius:8px;background:var(--hover);display:grid;place-items:center;font:600 13px var(--display);color:var(--ink)}#switcher .lk.on>.pav{background:var(--signal);color:#fff}#switcher .lk>span:empty{display:none}.person{padding:10px 0}.pmore{margin-top:0}.pmore summary{padding:2px 0 0 42px}.person>.msg:empty{display:none}.chtitle{display:flex;align-items:baseline;gap:8px;padding:16px 20px 4px;font:600 16px var(--display)}.chtitle .ic{width:17px;height:17px;color:var(--signal);align-self:center}.chtitle .file{margin-left:auto;font:400 12.5px var(--text)}.mobile #chat header{border-top:0}.mobile body[data-mode=viewer] .rowcard .f.code{font-family:var(--text);letter-spacing:0;font-size:14.5px}.rowcard:not(.editing) textarea.f.code{white-space:pre;overflow:hidden;mask-image:linear-gradient(to right,#000 88%,transparent)}.state.hold::before{background:var(--ink)!important}.pubnote{margin:-4px 0 14px}.pinhint{text-align:center;margin:8px 0 0}.mobile .scroll{mask-image:linear-gradient(to right,#000 86%,transparent)}.mobile .scroll>table{min-width:520px}.mobile .scroll th,.mobile .scroll td{white-space:nowrap}.nw{white-space:nowrap}.warnnote{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin-top:12px;padding:10px 12px;border-radius:var(--r);background:color-mix(in srgb,var(--signal) 8%,var(--sheet));color:var(--ink);font-size:13.5px;line-height:1.45}.warnnote>.ic{width:15px;height:15px;color:var(--signal);flex:none}.warnnote>span{flex:1;min-width:60%}table.edt{width:100%}.shppl{max-height:min(46vh,420px);overflow:auto;margin-right:-6px;padding-right:6px}.cnt{white-space:nowrap}.unv{display:inline-block;padding:0 6px;border-radius:5px;background:var(--hover);color:var(--mute);font-size:.92em}.gnote{display:block;margin-top:10px;color:var(--mute);font-size:12.5px}#c-prev{font:14px/1.55 var(--text);white-space:pre-wrap}.pmodels{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0}.pmodels>.file{margin-right:4px}html:not(.mobile) .card h3 button.pin:not(.on){opacity:.55}.mobile .pinned .kpi .v,.mobile .cards.pins .kpi .v{font-size:clamp(20px,7.2vw,26px)!important}.mobile .tcard .two{grid-template-columns:1fr 1fr!important;gap:10px}#chat.full .chtitle,main #chat .chtitle,.pg #chat .chtitle{display:none}.pubnote{display:block;width:fit-content;margin:0 0 12px;padding:4px 11px;border-radius:999px;background:var(--hover);font-size:12.5px;line-height:1.4}.card .card.flat{box-shadow:none;background:none;margin-top:0}.card .card.flat>label.l:first-of-type{margin-top:16px}.card .card.flat>label.chk{margin-top:14px}.card .card.flat>.acts{margin-top:20px}
+/* 1.2.6 M7 objects: a list's search and filters, its pages, a form's fields, the object picker, a connection's label */
+.obar{margin:0 0 12px}.obar>input.f{flex:1 1 220px;min-width:0;margin:0}.obar>select.f{flex:0 1 auto;width:auto;max-width:100%;margin:0}
+.olist .scroll{max-height:none}p.ohint{margin:-4px 0 12px}.pager{justify-content:flex-end;margin-top:12px}.pager .file{margin:0}.pick tr[data-r]:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+.aform>.fld{margin-top:14px;max-width:560px}.aform>.fld .f{width:100%}.aform>.fld input[type=checkbox]{display:block;margin-top:8px}.aform>.fld>.file{margin:6px 0 0}.aform>p.file{margin:-8px 0 4px}
+.opick .hits{display:flex;flex-flow:row wrap;gap:6px;margin-top:8px}.opick .hits:empty{display:none}
+.canvas text.lbl{fill:var(--ink);font-size:11.5px}
+.cards>.card>.kv{grid-template-columns:minmax(96px,auto) minmax(0,1fr)}.card>.kpis{gap:20px 24px;grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}.card>.kpis .kpi{min-width:0}.card>.kpis .kpi .v{font-size:28px}
+.canvas rect.lblbg{fill:var(--paper)}
 """
 
 JS = r"""
@@ -614,7 +623,7 @@ const wait=ms=>new Promise(z=>setTimeout(z,ms));
 const IC={home:'M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3z',chat:'M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z',
  sources:'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3',
  staged:'M12 3 3 7.5l9 4.5 9-4.5zM3 12l9 4.5 9-4.5M3 16.5 12 21l9-4.5',tables:'M3 4h18v16H3zM3 9h18M3 14.5h18M9 9v11',edits:'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4',
- model:'M4 4h6v6H4zM14 14h6v6h-6zM14 4h6v6h-6zM10 7h4M17 10v4',measures:'M18 4H6l6 8-6 8h12',glossary:'M5 4.5A1.5 1.5 0 0 1 6.5 3H20v15H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H20v-3',
+ model:'M4 4h6v6H4zM14 14h6v6h-6zM14 4h6v6h-6zM10 7h4M17 10v4',objects:'M6 8.5A2.75 2.75 0 1 0 6 3a2.75 2.75 0 0 0 0 5.5zM18 8.5A2.75 2.75 0 1 0 18 3a2.75 2.75 0 0 0 0 5.5zM12 21a2.75 2.75 0 1 0 0-5.5 2.75 2.75 0 0 0 0 5.5zM8.75 5.75h6.5M7.2 8.3l3.5 7.4M16.8 8.3l-3.5 7.4',measures:'M18 4H6l6 8-6 8h12',glossary:'M5 4.5A1.5 1.5 0 0 1 6.5 3H20v15H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H20v-3',
  datasets:'M3 6h18M6 12h12M10 18h4',reports:'M4 20h16M7 16v-5M12 16V6M17 16v-8',monitor:'M3 12h4l3-8 4 16 3-8h4',inbox:'M3 13h5l1.5 3h5L16 13h5M5.5 5h13L21 13v6H3v-6z',
  explore:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM15.5 8.5l-2 5-5 2 2-5z',boardpack:'M3 7h18v13H3zM8 7V4h8v3M3 12h18',documents:'M6 3h8l5 5v13H6zM14 3v5h5M9 13h7M9 17h7',
  onepager:'M6 3h12v18H6zM9 7h6M9 11h6M9 15h3',dataexport:'M12 3v12M7 10l5 5 5-5M4 20h16',video:'M3 5h18v14H3zM10 9l5 3-5 3z',
@@ -667,7 +676,7 @@ async function api(action,args){
  
  const post=(u,b)=>fetch(u,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json());
  let r=await post('/api/'+action,{project:D.project,...args});
- if(r.confirm){if(!await ask(r.confirm))throw new Error('You declined. Nothing changed.');r=await post('/confirm/'+r.confirm.id)}
+ if(r.confirm){if(!await ask(action==='run_object_action'?actAsk(r.confirm):r.confirm))throw new Error('You declined. Nothing changed.');r=await post('/confirm/'+r.confirm.id)}
   if(r.error)throw new Error(plainErr(r.error));if(/^(set_|save_|delete_|add_|remove_|enable_|create_|edit_|approve_|reject_|undo|commit|publish_|train_|score_)/.test(action))refreshPending();return r.result}
 let PEND_T=null;function refreshPending(){clearTimeout(PEND_T);PEND_T=setTimeout(async()=>{try{D.pending=await (await fetch('/api/changes',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({project:D.project})})).json().then(x=>x.result||D.pending);vc();const cb=$('#changes');cb.classList.remove('pulse');void cb.offsetWidth;if(D.pending?.files?.length)cb.classList.add('pulse')}catch(e){}},400)}
 let ASK_WHAT='';  // what the person is deleting, for ABI's confirmation
@@ -677,6 +686,7 @@ function ask(c){return new Promise(res=>{const d=$('#confirm'),bad=/\b(delet|rem
 // ABI's preview of what it will do, in words where it is a known shape (a role change: "editor1: Viewer → Editor")
 function plainPreview(t){t=String(t||'');const who=Object.fromEntries([...(D.rls?.accounts||[]).map(a=>[String(a.id),a.name]),...(window.ME?.id?[[String(ME.id),ME.name]]:[])]),R=x=>x?x[0].toUpperCase()+x.slice(1):'No access',nm=u=>who[String(u)]||'a person';
  const k=t.search(/\{[\s\S]*\}\s*$/),head=k>0?t.slice(0,k).replace(/Preview:\s*$/,'').trim():'';let j;try{j=JSON.parse(k>=0?t.slice(k):t)}catch(e){return people(t)}
+ if(j&&j.action&&j.object&&otype(j.object.type))return actWords(j);  // an action on an object: what was entered, what changes
  const rule=x=>`${colName(x.column)} (${x.table}): `+(Array.isArray(x.users)?x.users.map(u=>`${u.name||nm(u.id)} sees ${(u.values||[]).join(', ')||'no rows'}`):Object.entries(x.users||{}).map(([u,v])=>`${nm(u)} sees ${(v||[]).join(', ')||'no rows'}`)).join('; ');
  // roles as before → after; row rules (ABI calls them "rules" or "rls") as before and after, or unchanged
  let out=null;const parts=[],rr=j&&(j.rules||j.rls);if(j&&Array.isArray(j.roles))parts.push(...j.roles.map(r=>`${nm(r.user)}: ${R(r.old)} → ${R(r.new)}`));
@@ -686,7 +696,7 @@ function plainPreview(t){t=String(t||'');const who=Object.fromEntries([...(D.rls
  return out==null?people(t):[people(head),out].filter(Boolean).join('\n\n')}
 // "as user 1" in ABI's words: the person's name
 function people(t){const who=Object.fromEntries([...(D.rls?.accounts||[]).map(a=>[String(a.id),a.name]),...(window.ME?.id?[[String(ME.id),ME.name]]:[])]);return String(t||'').replace(/\s*Confirm to proceed\.?/g,'').replace(/\b(flow|report|ML model|tool|agent) '([a-z0-9_]+)'/g,(m,k,id)=>`${k} “${idsToNames(id)===id?id.replace(/_/g,' ').replace(/^./,c=>c.toUpperCase()):idsToNames(id)}”`).replace(/\buser (\d+)\b/g,(m,u)=>who[u]?who[u]:'a person').replace(/project '[a-z0-9_-]+_pub'/g,'the published version').replace(new RegExp(`project '${D.project}'`,'g'),'this project').replace(/Enabling flow (“[^”]+”) lets its data condition trigger run it unattended as [^.]+\./,'$1 then checks every minute and posts to the Inbox, using your access.').replace(/Enabling flow (“[^”]+”) lets its (\w[\w ]*?) trigger run it unattended as [^.]+\./,'$1 then runs on its $2 by itself, using your access.')}
-function plainErr(m){return String(m||'').replace(/^.*?rejected by the MEL compile:\s*\d+ error\(s\):?\s*/i,'The formula has an error: ').replace(/The formula has an error:\s*[;.]\s*/,'The formula has an error, so nothing changed. Check its column names and brackets. ').replace(/(nothing changed\.[^;]*?)[;.]?\s*nothing changed\.?/i,'$1').replace(/\(DECISIONS [A-Z]-\d+\)/g,'').replace(/\buser (\d+)\b/g,'a person').trim()}
+function plainErr(m){return objWords(String(m||'')).replace(/^.*?rejected by the MEL compile:\s*\d+ error\(s\):?\s*/i,'The formula has an error: ').replace(/The formula has an error:\s*[;.]\s*/,'The formula has an error, so nothing changed. Check its column names and brackets. ').replace(/(nothing changed\.[^;]*?)[;.]?\s*nothing changed\.?/i,'$1').replace(/\(DECISIONS [A-Z]-\d+\)/g,'').replace(/\buser (\d+)\b/g,'a person').trim()}
 // an id in ABI's text (a measure, a flow, a report) as its name
 function idsToNames(t){const M=new Map([...(D.measures||[]),...(D.flows||[]),...(D.reports||[]),...(D.ml||[]),...(D.datasets||[])].filter(x=>x.id&&x.name).map(x=>[x.id,x.name]));return String(t??'').replace(/\b[a-z][a-z0-9_]{2,}\b/g,w=>M.get(w)||w)}
 // Share a report: its link (for anyone who already has access) and who that is; access is changed in Users & access
@@ -702,7 +712,7 @@ function plur(t){return String(t??'').replace(/(\d[\d,]*) ([a-z]+)\(s\)/gi,(m,n,
 async function openWhenThere(k){for(let i=0;i<40&&!PAGES[k];i++){if(i===3)refreshPending();await wait(300)}if(!PAGES[k]){try{D.flows=(await api('list_flows',{})).flows||D.flows;sidebar()}catch(e){}}PAGES[k]?show(k):toast('It is saved; it shows in the list in a moment.')}
 function h3i(i,t){const x=h('h3');x.append(ic(i),t);return x}
 function say(box,text,bad){box.textContent=text;box.className='msg '+(bad?'bad':'ok')}
-const CARDIC={'Rows':'tables','Edit history':'history','Waiting for approval':'check','Agent':'agents','Usage':'reports','Email':'mail','Single sign-on':'lock','Connect a provider':'plus','Messages':'inbox','Alerts':'alert','Data freshness':'refresh','Model readiness':'model','ML models':'ml','Flows':'flows','Row-level rules':'security','Hidden columns':'lock','Roles':'people','Restrict rows for a person':'filter','Two-step sign-in':'lock','What this controls':'info','Export':'dataexport','Import':'upload','Commits':'history','Search the vault':'search','Saved analyses':'explore','New analysis':'explore','Add a person':'user','Invite':'mail'};
+const CARDIC={'Rows':'tables','Edit history':'history','Waiting for approval':'check','Agent':'agents','Usage':'reports','Email':'mail','Single sign-on':'lock','Connect a provider':'plus','Messages':'inbox','Alerts':'alert','Data freshness':'refresh','Model readiness':'model','ML models':'ml','Flows':'flows','Row-level rules':'security','Hidden columns':'lock','Roles':'people','Restrict rows for a person':'filter','Two-step sign-in':'lock','What this controls':'info','Export':'dataexport','Import':'upload','Commits':'history','Search the vault':'search','Saved analyses':'explore','New analysis':'explore','Add a person':'user','Invite':'mail','Properties':'tables','History':'history'};
 function card(title,sub){const c=h('div','card'),t=h('h3');if(CARDIC[title])t.append(ic(CARDIC[title]));t.append(h('span','',title));if(sub&&(/\s/.test(sub)||/\.json$/.test(sub)))t.title=sub;else if(sub)t.append(h('span','file',sub));c.append(t);return c}
 // a list of editable items as aligned rows under one header (rows mode); a field is its label (shown on phones) and input
 function fld(label,el,note){const d=h('div','fld');d.append(h('label','l',label),el);if(note)d.append(h('div','file',note));return d}
@@ -760,8 +770,8 @@ async function pinCard(p,c){const body=h('div','body'),go=ib('open','Open its pa
  wd.onclick=async()=>{const x=PINS.find(x=>pinKey(x)===pinKey(p));x.wide=!x.wide;await pinPost({pins:PINS});show('home')};tools.append(l,r2,wd,go,un);
  un.onclick=async()=>{PINS=PINS.filter(x=>pinKey(x)!==pinKey(p));await pinPost({pins:PINS});c.remove()};
  const r=p.ref,line=(t,cls)=>body.append(h('p',cls||'',t));
- try{if(p.kind==='visual'){go.onclick=()=>show('rep:'+r.report);const d=await api('visual_data',{report:r.report,page:r.page,visual:r.visual});requestAnimationFrame(()=>chart(body,d))}
-  else if(p.kind==='analysis'){go.onclick=()=>{PENDING.explore={...r.q,chart:r.type};show('explore')};const d=await api('semantic_query',{limit:500,...r.q});d.format=d.format||{};d.type=r.type||'bar';d.id='pin';requestAnimationFrame(()=>chart(body,d))}
+ try{if(p.kind==='visual'){go.onclick=()=>show('rep:'+r.report);const d=await api('visual_data',{report:r.report,page:r.page,visual:r.visual});requestAnimationFrame(()=>chart(body,d));objClicks(body,D.reports.find(x=>x.id===r.report)?.pages.find(x=>x.id===r.page)?.visuals.find(x=>x.id===r.visual)?.dim,d)}
+  else if(p.kind==='analysis'){go.onclick=()=>{PENDING.explore={...r.q,chart:r.type};show('explore')};const d=await api('semantic_query',{limit:500,...r.q});d.format=d.format||{};d.type=r.type||'bar';d.id='pin';requestAnimationFrame(()=>chart(body,d));objClicks(body,r.q.dimensions?.[0],d)}
   else if(p.kind==='monitor'){go.onclick=()=>show('monitor');const ck=(D.app?.monitor?.checks||[]).find(x=>x.id===r);if(!ck){line('This check was removed.','empty');return}const x=await monEval(ck);line(x.text,x.ok?'ok':'bad')}
   else if(p.kind==='flow'){go.onclick=()=>show('flw:'+r);const f=(D.flows||[]).find(x=>x.id===r);const x=await api('flow_runs',{flow:r}).catch(()=>({}));const one=x.runs?.[0]||x;
    line(`${f?.enabled?'On':'Off'} · last run: ${one.status||'never'}`,one.status==='failed'?'bad':one.status==='ok'?'ok':'')}
@@ -822,6 +832,9 @@ function report(box,rep){let flt=PENDING.filters||RFLT[rep.id]||[];PENDING.filte
   if((window.ME||{admin:true}).admin&&!MOBILE){const sh=btn('Share',()=>shareDialog(rep));sh.classList.add('w');sh.prepend(ic('people'));tb.append(sh)}
   const dr=btn('Delete report',async()=>{ASK_WHAT=rep.name||rep.id;try{await KIND.report.del({id:rep.id});undoToast(rep.name||rep.id);show('reports')}catch(e){if(!/declined/.test(e.message))toast(e.message,1)}});dr.classList.add('mi');dr.setAttribute('role','menuitem');more(tb).append(dr)}const top=h('div','fbar'),chips=h('span','fchips'),addb=h('button','btn fadd','+ Filter'),clr=h('button','flink','Clear all');clr.hidden=!flt.length;
  top.append(chips,addb,clr);if(MOBILE)top.append(box.querySelector(':scope>.bar.top .fexp')||h('span'));const tabs=h('nav','tabs'),grid=h('div','grid'),msg=h('div','msg');box.append(top,msg,tabs,grid);
+ // 1.2.6 M7: a visual grouped by an object type's title or key shows objects; say that a click opens one
+ {const ts=OT().filter(T=>rep.pages.some(p=>p.visuals.some(v=>v.dim&&(v.dim===`${T.table}.${T.title}`||T.key.length===1&&v.dim===`${T.table}.${T.key[0]}`))));
+  if(ts.length)msg.before(h('p','file ohint',`In a chart or a table, a click on one of the ${ts.map(T=>T.plural.toLowerCase()).join(' or ')} opens its page.`))}
  // filters: one per column, a list of members ("in"); a chart click or a slicer sets it, the bar shows and edits it
  const vals=c=>{const f=flt.find(f=>f.column===c);return f?[].concat(f.value):[]};
  const setVals=(c,vs)=>{flt=flt.filter(f=>f.column!==c);if(vs.length)flt.push({column:c,op:'in',value:vs});draw()};
@@ -861,22 +874,34 @@ function report(box,rep){let flt=PENDING.filters||RFLT[rep.id]||[];PENDING.filte
   // a row of headline numbers that leaves columns empty shares the row out; a KPI is two rows tall at most
   const span={},rowsY={};vs.filter(v=>v.text===undefined).forEach(v=>(rowsY[v.layout.y]??=[]).push(v));Object.values(rowsY).forEach(r=>{const w=r.reduce((a,v)=>a+(v.layout.w||6),0);if(r.every(kp)&&w<12){let left=12;r.forEach((v,i)=>{const x=i===r.length-1?left:Math.round((v.layout.w||6)*12/w);span[v.id]=x;left-=x})}});
     if(MOBILE){let n=0;for(const v of vs.filter(v=>v.text===undefined)){if(!kp(v))break;n++}v0odd=n%2?vs.filter(v=>v.text===undefined)[n-1]?.id:null}
-  vs.forEach(v=>{if(v.text!==undefined){const t=h('p','rtext',v.text);t.dataset.lk=v.id;t.dataset.w=12;t.style.gridColumn='span 12';grid.append(t);return}
+  vs.forEach(v=>{if(v.form){formCard(v);return}if(v.text!==undefined){const t=h('p','rtext',v.text);t.dataset.lk=v.id;t.dataset.w=12;t.style.gridColumn='span 12';grid.append(t);return}
    const c=h('div','card'),cw=span[v.id]||Math.min(12,v.layout.w||6);let ch=kp(v)?Math.min(2,v.layout.h||2):v.layout.h;
    // a few rows (a filter, a viewer's region) don't keep a card sized for many: alone on its row or on a phone, it shrinks to them
    {const dd=v.live||v.data,n=(dd?.rows||[]).length,ty=dd?.type||v.type,one=Object.keys(dd?.measures||{}).length===1&&(dd?.columns||[]).length===2;if(ch&&(MOBILE||cw===12)&&n&&n<=6&&(one&&['bar','map'].includes(ty)||ty==='slicer'))ch=Math.min(ch,Math.max(2,Math.ceil((60+n*(ty==='slicer'?46:36))/70)))}c.style.gridColumn=`span ${cw}`;c.dataset.lk=v.id;c.dataset.w=cw;if(ch){c.dataset.h=ch*70-16;c.style.gridRow=`span ${ch}`}if(MOBILE&&v.id===v0odd)c.classList.add('pair');if(kp(v))c.classList.add('kcard');
    c.innerHTML=`<h3><span></span><span class="tools"><button data-a="t">Table</button><button data-a="c">CSV</button><button data-a="h">How</button></span></h3><div class="body"></div><pre class="how" hidden></pre>`;
    $('h3 span',c).textContent=v.title||v.id;if(v.text===undefined)$('h3',c).append(pinBtn({kind:'visual',ref:{report:rep.id,page:p.id,visual:v.id},title:v.title||v.id}));grid.append(c);const body=$('.body',c),d=v.live||v.data;
-   if(!d||d.error||v.error){body.append(h('div','bad',d?.error||v.error||'no data'));return}
+   if(!d||d.error||v.error){body.append(h('div','bad',plainErr(d?.error||v.error||'no data')));return}
    if(flt.length&&(!d.rows.length||d.rows.every(r=>r.every(x=>x===null||typeof x!=='number')))){body.append(h('p','empty','No rows for these filters: they fall outside what this visual covers (the report\'s period or population). Remove a filter to see it again.'));return}
    // no filter and no rows: a row rule leaves this person nothing here; say so, never a bare —
    if(!flt.length&&(window.ME||{}).role==='viewer'&&d.type!=='slicer'&&(!d.rows.length||d.rows.every(r=>r.every(x=>x===null)))){body.append(emptyBox('lock','Your access shows no rows here','A row rule doesn\'t list you for this data. A project owner can add you to it in Security.'));return}
    if(d.type==='slicer'&&v.dim){$('[data-a=t]',c).remove();slicer(body,d,vals(v.dim),vs=>setVals(v.dim,vs));$('[data-a=c]',c).onclick=()=>csv(d);
     $('[data-a=h]',c).onclick=()=>{const x=$('.how',c);x.hidden=!x.hidden;x.textContent=v.how};return}
    let asTable=false;const dr=()=>{body.innerHTML='';asTable?table(body,d):chart(body,d)};
-   if(v.dim){body.classList.add('pick');body.onclick=e=>{const r=d.rows[e.target.closest?.('[data-r]')?.dataset.r];if(r)cross(v.dim,r[0])}}  // a mark knows its row (render.mark)
+   if(v.dim)objClicks(body,v.dim,d,r=>cross(v.dim,r[0]));  // a mark knows its row (render.mark): an object opens its page, any other member filters by it
    requestAnimationFrame(dr);$('[data-a=t]',c).onclick=()=>{asTable=!asTable;dr()};$('[data-a=c]',c).onclick=()=>csv(d);
    $('[data-a=h]',c).onclick=()=>{const x=$('.how',c);x.hidden=!x.hidden;x.textContent=v.how+(flt.length?`\nfilters ${JSON.stringify(flt)}`:'')}})}
+ // a form card (1.2.6 M7): an action's inputs, run on the object the card names or the person picks in it; after it
+ // ran, the page's visuals read their rows again. Developer only, like every write: Viewer's page has no form
+ function formCard(v){const a=OA().find(x=>x.id===v.form.action),T=a&&otype(a.object);if(!a||!T||MODE==='viewer'||RANK[a.role||'editor']>myRank())return;
+  // the object: the one picked in the card, or the one whose title is typed in full (a redraw keeps what was typed)
+  let key=v.form.key||null,pk=null;const c=actionForm(a,async()=>{if(!key&&pk?.value.trim())try{const x=await api('list_objects',{type:T.id,filters:[{property:T.title,op:'=',value:pk.value.trim()}],limit:2});if(x.rows.length===1)key=x.key.map(k=>x.rows[0][x.columns.indexOf(k)])}catch(e){}
+    if(pk)need(pk,key,`Pick the ${low(T)} first.`);return key},async r=>{await reload();return actDone(a,r)}),cw=Math.min(12,v.layout.w||6),ch=v.layout.h||6,at=()=>c.querySelector(':scope>.fld')||c.querySelector(':scope>.acts');
+  if(v.title)c.querySelector('h3 span').textContent=v.title;c.dataset.lk=v.id;c.dataset.w=cw;c.style.gridColumn=`span ${cw}`;c.dataset.h=ch*70-16;c.style.gridRow=`span ${ch}`;
+  if(!key){const w=objPick(T,k=>key=k);pk=w.querySelector('input');at().before(fld(T.name,w))}
+  else api('get_object',{type:T.id,key}).then(o=>at().before(h('p','mtext',`${T.name}: ${o.title??key.join(', ')}`))).catch(e=>say(c.querySelector(':scope>.msg'),e.message,1));
+  grid.append(c)}
+ async function reload(){await Promise.all(rep.pages.map(async p=>{let got;try{got=Object.fromEntries((await api('visual_data',{report:rep.id,page:p.id})).visuals.map(d=>[d.id,d]))}catch(e){return}
+   p.visuals.forEach(v=>{const d=got[v.id];if(v.text!==undefined||!d)return;if(d.error){v.error=d.error;delete v.data}else{v.data=d;delete v.error}})}));flt.length?await draw():page(cur)}
  rep.pages.forEach(p=>{const b=h('button','',p.name||p.id);b.dataset.id=p.id;b.onclick=()=>page(p);tabs.append(b)});flt.length?draw():page(cur)}
 const colName=c=>{const k=String(c).split('.').pop().replace(/_/g,' ');return k.charAt(0).toUpperCase()+k.slice(1)};
 // a slicer: its members as toggles (with the measure beside each), several at once; a search over a long list
@@ -1275,7 +1300,7 @@ function explore(box){const q0=PENDING.explore||EXQ||{};PENDING.explore=null;
      d={...x,columns:x.columns.filter((_,i)=>i!==iy&&i!==im),rows:x.rows.filter(r=>k(r)===top).map(r=>r.filter((_,i)=>i!==iy&&i!==im))};const y=Math.floor(top/100),mo=top%100;per=`${MON[mo-1]} ${y} against ${MON[(mo+10)%12]} ${mo===1?y-1:y}`}
    else d=await api('semantic_query',{...q,...(q.dimensions.length?{order_by:[{field:q.dimensions[0]}]}:{}),limit:500});d.format=d.format||{};d.type=type;d.id='analysis';
    out.append(h('p','file',[per,...(q.filters||[]).filter(f=>!per||!f.column.startsWith('calendar.')).map(f=>`${colName(f.column)} ${f.op==='in'?'is':f.op} ${[].concat(f.value).join(', ')}`)].filter(Boolean).join(' · ')||'All rows, no filter'));
-   const b=h('div');out.append(b);requestAnimationFrame(()=>type==='table'?table(b,d):chart(b,d));return d}catch(e){say(msg,e.message,1)}}
+   const b=h('div');out.append(b);requestAnimationFrame(()=>type==='table'?table(b,d):chart(b,d));objClicks(b,q.dimensions[0],d);return d}catch(e){say(msg,e.message,1)}}
  const fr=h('div','formrow'),ff=fld('Filter',fc);ff.append(fv);const mp=pickList(ms);fr.append(fld('Measures',mp),fld('By',dm),ff,fld('Chart',ty));c.append(fr);
  act(c,'Run',async()=>{await run(query(),ty.value)},1);
  act(c,'Keep',async()=>{const q=query();if(!q.measures.length)return 'Pick at least one measure.';
@@ -1544,6 +1569,167 @@ function modelCanvas(box,fit){const T=D.model?.tables||{},R=(D.model?.relationsh
    try{await api('add_relationship',{from:a,to:b});toast('Joined')}catch(e){toast(e.message)}};
   window.addEventListener('pointermove',mv);window.addEventListener('pointerup',up)});
  requestAnimationFrame(draw);new ResizeObserver(()=>draw()).observe(kit.wrap);if(fit)requestAnimationFrame(()=>requestAnimationFrame(()=>kit.setZ(Math.min(1,(kit.wrap.clientWidth-24)/Math.max(1,kit.w),(innerHeight*.78)/Math.max(1,kit.ht)))))}
+// ---------- Objects (1.2.6 M7): the things the business works with (a café, a customer), the model's object types.
+// Every screen reads as the person through ABI's list_objects, get_object and object_history (their rows and columns;
+// a hidden object reads like a missing one); a form runs run_object_action through ABI's confirmation, never by itself.
+// Business names only: a type's, a property's, a connection's and an action's display names, never an id ----------
+const OT=()=>D.ontology?.objects||[],OA=()=>D.ontology?.actions||[],otype=id=>OT().find(t=>t.id===id),cap=s=>{s=String(s??'');return s.charAt(0).toUpperCase()+s.slice(1)};
+const pname=p=>p.name||colName(p.column),low=T=>T.name.toLowerCase(),RANK={viewer:1,editor:2,owner:3},myRank=()=>RANK[(window.ME||{role:'owner'}).role]||0;
+// a property's value as a page shows it: an identifier as it is, a flag as Yes or No, a probability as a percentage
+const pval=(T,p,v)=>v===null||v===undefined?null:v===MASK?'hidden for your access':typeof v==='boolean'?(v?'Yes':'No'):typeof v!=='number'?cell(v):
+ p.meaning==='identifier'||T.key.includes(p.column)||p.column===T.title||PLAIN.test(p.column)?String(v):p.meaning==='probability'?fmt(v,{style:'percent',decimals:1}):v;
+// obj:<type> is that type's list, obj:<type>:<key> one object's page: a link that can be kept, shared and reloaded
+const okey=(t,k)=>'obj:'+t+':'+encodeURIComponent(JSON.stringify(k)),openObj=(t,k)=>show(okey(t,k));
+function objReg(k){const i=k.indexOf(':',4),T=otype(i<0?k.slice(4):k.slice(4,i));if(!T)return;if(i<0){PAGES[k]=[T.plural,b=>objectsPage(b,T)];return}
+ let s=k.slice(i+1),key;try{s=decodeURIComponent(s)}catch(e){}try{key=JSON.parse(s)}catch(e){return}if(Array.isArray(key)&&key.length)PAGES[k]=[T.name,b=>objectPage(b,T,key)]}
+function objBar(box,on){const bar=h('div','row bar lead seg');[...(PAGES.objects?[['objects','Overview']]:[]),...OT().map(t=>['obj:'+t.id,t.plural])].forEach(([k,n])=>{const b=h('button','chip'+(k===on?' on':''),n);b.onclick=()=>show(k);bar.append(b)});box.append(bar)}
+// a type's objects as a table (the report's table): the title, the named properties and the type's measures; a title
+// search, a filter per category and pages. `fixed`: list_objects filters that stay (an object page's connection: the
+// objects linked to that one). A row opens its object's page
+function objTable(box,T,fixed,n){n=n||50;const bar=h('div','row obar'),q=h('input','f'),out=h('div','pick olist'),foot=h('div','row pager'),st={offset:0,flt:{},n:0};let tm;
+ q.type='search';q.placeholder=`Search ${T.plural.toLowerCase()}`;q.setAttribute('aria-label',q.placeholder);if(!fixed&&PENDING.osearch){q.value=PENDING.osearch;PENDING.osearch=null}bar.append(q);
+ const own=T.properties.filter(p=>!p.column.includes('.')&&p.column!==T.title),named=own.filter(p=>(p.name||p.meaning)&&!T.key.includes(p.column)),P=c=>T.properties.find(p=>p.column===c)||{column:c},
+  cols=[T.title,...(named.length?named:own.filter(p=>!T.key.includes(p.column))).map(p=>p.column)].slice(0,MOBILE?2:6),ms=fixed?[]:(T.measures||[]).slice(0,MOBILE?1:3),m0=(T.measures||[])[0]||D.measures[0]?.id;
+ // a filter per category: its members as the model counts them, for this person
+ if(!fixed&&m0)own.filter(p=>p.meaning==='category'||p.meaning==='flag').slice(0,3).forEach(p=>{const s=sel([['',`${pname(p)}: all`]]);s.setAttribute('aria-label',pname(p));s.onchange=()=>{st.flt[p.column]=s.value;st.offset=0;load()};bar.append(s);
+  api('semantic_query',{measures:[m0],dimensions:[`${T.table}.${p.column}`],limit:200}).then(r=>r.rows.forEach(x=>{if(x[0]!==null)s.append(new Option(String(x[0]),JSON.stringify(x[0])))})).catch(()=>s.remove())});
+ q.oninput=()=>{clearTimeout(tm);tm=setTimeout(()=>{st.offset=0;load()},300)};
+ out.onclick=e=>{const i=e.target.closest?.('tr[data-r]')?.dataset.r;if(i!==undefined&&st.keys?.[i])openObj(T.id,st.keys[i])};out.onkeydown=e=>{if(e.key==='Enter')out.onclick(e)};
+ async function load(){const my=++st.n,flt=Object.entries(st.flt).filter(([,v])=>v),some=q.value.trim()||flt.length;let r;
+  try{r=await api('list_objects',{type:T.id,filters:[...(fixed||[]),...flt.map(([c,v])=>({property:c,op:'=',value:JSON.parse(v)}))],...(q.value.trim()?{search:q.value.trim()}:{}),limit:n,offset:st.offset})}
+  catch(e){if(my===st.n){out.replaceChildren(h('p','empty',e.message));foot.textContent='';bar.hidden=!!fixed}return}
+  if(my!==st.n)return;bar.hidden=!!fixed&&!(r.more||st.offset||some);foot.textContent='';
+  // nothing to list: say what to do next, and never whether rows exist that this person can't see
+  if(!r.rows.length){out.replaceChildren(h('p','empty',some?`No ${low(T)} matches. Clear the search${flt.length?' or the filter':''} to see them all.`:(fixed?'None to show here':`No ${T.plural.toLowerCase()} to show`)+(D.rls?.restricted?' with your access. A project owner sets what you see in Security.':'.')));return}
+  const ix=c=>r.columns.indexOf(c),shown=cols.filter(c=>ix(c)>=0);st.keys=r.rows.map(x=>r.key.map(k=>x[ix(k)]));
+  const d={columns:[...shown],measures:Object.fromEntries(shown.map(c=>[c,pname(P(c))])),format:{},rows:r.rows.map(x=>shown.map(c=>pval(T,P(c),x[ix(c)])))};
+  // the type's measures for this page's objects: one query by the key (left out when ABI refuses it). ponytail: a
+  // type with a several-column key lists no measures; its object pages show them
+  if(ms.length&&T.key.length===1){const kc=`${T.table}.${T.key[0]}`;try{const m=await api('semantic_query',{measures:ms,dimensions:[kc],filters:[{column:kc,op:'in',value:st.keys.map(k=>k[0])}],limit:n}),by=new Map(m.rows.map(x=>[String(x[0]),x.slice(1)]));
+    if(my!==st.n)return;d.columns.push(...ms);Object.assign(d.measures,m.measures);Object.assign(d.format,m.format||{});d.rows.forEach((x,i)=>x.push(...(by.get(String(st.keys[i][0]))||ms.map(()=>null))))}catch(e){}}
+  rows(out,d);out.classList.add('pick');const mark=()=>{out.querySelectorAll('th').forEach(th=>th.removeAttribute('title'));out.querySelectorAll('tr[data-r]').forEach(tr=>{tr.tabIndex=0;tr.setAttribute('role','link')})};
+  mark();new MutationObserver(mark).observe(out.querySelector('table'),{childList:true,subtree:true});
+  if(st.offset||r.more){const b=(t,on,fn)=>{const x=h('button','btn',t);x.disabled=!on;x.onclick=fn;return x};
+   foot.append(b('Previous',st.offset,()=>{st.offset=Math.max(0,st.offset-n);load()}),h('span','file',`${st.offset+1} to ${st.offset+r.rows.length}`),b('Next',r.more,()=>{st.offset+=n;load()}))}}
+ box.append(bar,out,foot);load()}
+function objectsPage(box,T){objBar(box,'obj:'+T.id);if(T.description&&T.description!==MASK)box.querySelector('.pghead .ttl')?.append(h('p','',T.description));const c=h('div','card');box.append(c);objTable(c,T)}
+// Data Model › Objects: the types as boxes and their connections as named lines with how many meet how many (a phone
+// reads them as a list); a box's Open lists that type's objects
+function objectsHome(box){objBar(box,'objects');const L=(D.ontology.links||[]).filter(l=>otype(l.from)&&otype(l.to)),ids=OT().map(t=>t.id);
+ const props=T=>{const p=T.properties.filter(p=>p.name||p.meaning);return (p.length?p:T.properties).slice(0,6)};
+ if(MOBILE){const g=h('div','cards mlist2');OT().forEach(T=>{const c=card(T.plural),cl=h('div','stepchips');if(T.description&&T.description!==MASK)c.append(h('p','mtext',T.description));
+   T.links.forEach(w=>cl.append(h('span','chip',`${w.name} → ${otype(w.to)?.plural||''}`)));if(T.links.length)c.append(h('div','file','Connections'),cl);act(c,'Open',async()=>show('obj:'+T.id));g.append(c)});box.append(g);return}
+ box.append(h('h4','sub','Objects and connections'),h('p','file','Each box is a kind of thing the business works with; each line is a connection between two of them, read along the line. Drag a box by its title to move it; Open lists its objects.'));
+ const W=250,key='abi-opos-'+D.project,hgt=t=>46+props(otype(t)).length*27,depth={};let pos={};try{pos=JSON.parse(localStorage.getItem(key)||'{}')}catch(e){}
+ const save=()=>{try{localStorage.setItem(key,JSON.stringify(pos))}catch(e){}};
+ // columns by depth along the connections (no loops back); every second column starts lower, so a line across two columns passes above the one between
+ {const s=ids.filter(t=>!L.some(l=>l.to===t&&l.from!==t));(s.length?s:ids.slice(0,1)).forEach(t=>depth[t]=0)}
+ for(let i=0;i<ids.length;i++)L.forEach(l=>{const a=l.from,b=l.to;if(a!==b&&depth[a]!==undefined&&(depth[b]===undefined||depth[b]<depth[a]+1)&&depth[a]<ids.length)depth[b]=depth[a]+1});
+ const layout=()=>{const cols={};ids.forEach(t=>(cols[depth[t]??0]??=[]).push(t));Object.entries(cols).forEach(([d,list])=>{let y=24+(d%2)*72;list.forEach(t=>{if(!pos[t])pos[t]={x:24+d*(W+150),y};y=Math.max(y,pos[t].y)+hgt(t)+40})})};
+ const extent=()=>kit.extent(Math.max(...ids.map(t=>pos[t].x+W))+(L.some(l=>Math.abs(pos[l.from].x-pos[l.to].x)<W)?230:24),Math.max(...ids.map(t=>pos[t].y+hgt(t)+24)));
+ const kit=canvasKit(box,()=>{pos={};layout();ids.forEach(t=>{boxes[t].style.left=pos[t].x+'px';boxes[t].style.top=pos[t].y+'px'});save();extent();draw()});
+ const {stage,svg}=kit,boxes={};layout();
+ ids.forEach(t=>{const T=otype(t),b=h('div','tbl dim'),hd=h('div','th'),go=h('button','badge','Open'),cs=h('div','cols');b.style.left=pos[t].x+'px';b.style.top=pos[t].y+'px';go.title=`List the ${T.plural.toLowerCase()}`;go.onclick=()=>show('obj:'+t);
+  hd.append(h('span','',T.plural),go);props(T).forEach(p=>{const r=h('div','col');r.append(h('span','',pname(p)));cs.append(r)});b.append(hd,cs);stage.append(b);boxes[t]=b;
+  hd.onpointerdown=e=>{if(e.target===go)return;e.preventDefault();const [sx,sy]=kit.local(e.clientX,e.clientY),ox=pos[t].x,oy=pos[t].y;hd.setPointerCapture(e.pointerId);
+   hd.onpointermove=m=>{const [x,y]=kit.local(m.clientX,m.clientY);pos[t]={x:Math.max(0,ox+x-sx),y:Math.max(0,oy+y-sy)};b.style.left=pos[t].x+'px';b.style.top=pos[t].y+'px';extent();draw()};
+   hd.onpointerup=()=>{hd.onpointermove=null;save()}}});
+ // a connection: a line from its type to the one it leads to (the dot), its name and cardinality at the middle; two
+ // boxes of one column are joined by an arc on their right, and a second connection of the same two sits lower
+ function draw(){svg.innerHTML='';svg.setAttribute('width',kit.w);svg.setAttribute('height',kit.ht);const n={};
+  L.forEach(l=>{const A=pos[l.from],B=pos[l.to],ya=A.y+19,yb=B.y+19,pk=[l.from,l.to].sort().join(),k=n[pk]=(n[pk]||0)+1;let d,lx,ly,x2,anc='middle';
+   if(Math.abs(A.x-B.x)<W){const x=Math.max(A.x,B.x)+W,r=30+k*28;x2=B.x+W;d=`M${A.x+W},${ya} C${x+r},${ya} ${x+r},${yb} ${x2},${yb}`;lx=x+r*.75+6;ly=(ya+yb)/2+4;anc='start'}
+   else{const R=A.x<B.x,x1=R?A.x+W:A.x;x2=R?B.x:B.x+W;const dx=Math.max(40,Math.abs(x2-x1)/2)*(R?1:-1);d=`M${x1},${ya} C${x1+dx},${ya} ${x2-dx},${yb} ${x2},${yb}`;lx=(x1+x2)/2;ly=(ya+yb)/2+4+(k-1)*18}
+   el('path',{d,class:'ln'},svg);el('circle',{cx:x2,cy:yb,r:4,class:'one'},svg);const t=el('text',{x:lx,y:ly,class:'lbl','text-anchor':anc},svg);t.textContent=`${l.name} · ${String(l.cardinality||'').replace(/-/g,' ')}`;
+   const bb=t.getBBox();svg.insertBefore(el('rect',{x:bb.x-5,y:bb.y-2,width:bb.width+10,height:bb.height+4,class:'lblbg'}),t)})}
+ kit.draw=draw;extent();requestAnimationFrame(draw);new ResizeObserver(()=>draw()).observe(kit.wrap)}
+// one object: what it is (its properties), its numbers (the type's measures, filtered to it), what it connects to (a
+// section per connection; each neighbour opens its own page) and what happened to it. Its actions are buttons: the
+// first one the page's main action, the others under More; each opens a form of the action's inputs
+async function objectPage(box,T,key){const bar=h('div','row bar lead');bar.append(btn('← '+T.plural,()=>show('obj:'+T.id)));box.append(bar);
+ const tt=box.querySelector('.pghead .ttl'),eb=tt.querySelector('.eyebrow')||tt.insertBefore(h('div','eyebrow'),tt.firstChild);eb.textContent=T.name;
+ const mine=MODE==='viewer'?[]:OA().filter(a=>a.object===T.id&&RANK[a.role||'editor']<=myRank());let fc=null,tb=null;
+ if(mine.length){tb=h('div','row bar top');mine.forEach((a,i)=>{const b=btn(a.name,()=>{const was=fc?.dataset.a;fc?.remove();fc=null;tb.firstChild.classList.add('pri');if(was===a.id)return;
+    fc=actionForm(a,()=>key,async r=>{show(CUR);return actDone(a,r)});fc.dataset.a=a.id;act(fc,'Cancel',()=>{fc.remove();fc=null;tb.firstChild.classList.add('pri')});
+    tb.firstChild.classList.remove('pri');box.querySelector('.pghead').after(fc);fc.querySelector('.fld input,.fld select,.fld textarea')?.focus()},!i);
+   b.classList.add('w');if(i){b.classList.add('mi');b.setAttribute('role','menuitem');more(tb).append(b)}else tb.append(b)});box.append(tb)}
+ let o;try{o=await api('get_object',{type:T.id,key})}catch(e){if(box.isConnected){tb?.remove();box.append(emptyBox('lock','Not available',e.message,[`Open ${T.plural.toLowerCase()}`,async()=>show('obj:'+T.id)]))}return}
+ if(!box.isConnected)return;const title=String(o.title??key.join(' · '));box.querySelector('.pghead h1').textContent=title;$('#pgname').textContent=title;document.title=title+' · '+D.project;if(PAGES[CUR])PAGES[CUR][0]=title;setTimeout(ctx);
+ if(T.description&&T.description!==MASK)tt.append(h('p','',T.description));
+ const g=h('div','cards'),pc=card('Properties'),kv=h('div','kv');
+ o.columns.forEach((c,i)=>{const p=T.properties.find(p=>p.column===c);if(!p||c===T.title)return;const v=pval(T,p,o.rows[0][i]);kv.append(h('b','',pname(p)),h('span','',v===null?'—':typeof v==='number'?fmt(v):String(v)))});pc.append(kv);g.append(pc);
+ if(o.measures){const mc=card('Measures'),ks=h('div','kpis'),ids=Object.keys(o.measures);mc.append(ks);g.append(mc);const vals=ids.map(m=>o.rows[0][o.columns.indexOf(m)]);
+  chart(ks,{type:'kpi',columns:ids,measures:o.measures,format:Object.fromEntries(ids.map((m,i)=>[m,Math.abs(vals[i])>=1e6?{compact:true,decimals:2}:{}])),rows:[vals]})}
+ else if(o.measures_error){const mc=card('Measures');mc.append(h('p','empty',plainErr(o.measures_error)));g.append(mc)}
+ // ponytail: an object with a several-column key asks one condition per key column (each must hold for a linked object)
+ T.links.slice(0,12).forEach(w=>{const Y=otype(w.to);if(!Y||w.inverse&&w.to===T.id)return;const c=card(cap(w.name));c.classList.add('wide');if(cap(w.name)!==Y.plural)c.querySelector('h3').append(h('span','file',Y.plural));
+  objTable(c,Y,key.map((v,i)=>({link:w.link,property:T.key[i],op:'=',value:v})),10);g.append(c)});
+ const hc=card('History');hc.classList.add('wide');g.append(hc);box.append(g);objHistory(hc,T,key)}
+// what happened to an object, newest first: the actions run on it, the changes to it and what those started
+async function objHistory(c,T,key){let x;try{x=await api('object_history',{type:T.id,key,limit:50})}catch(e){c.append(h('p','empty',e.message));return}
+ const ts=v=>{const d=new Date(String(v).replace(' ','T'));return isNaN(d)?String(v??''):d.toISOString()},e0=v=>v===null||v===undefined||v===''?'(empty)':v===MASK?'(hidden for your access)':String(v),
+  P=c=>pname(T.properties.find(p=>p.column===c||p.column.endsWith('.'+c))||{column:c});
+ const all=[...x.runs.map(r=>[ts(r.at),OA().find(a=>a.id===r.action)?.name||'Action',r.user||'',r.inputs?Object.entries(r.inputs).map(([k,v])=>`${colName(k)}: ${e0(v)}`).join(', '):'']),
+  ...x.edits.flatMap(e=>{const i=n=>e.columns.indexOf(n);return e.rows.map(r=>[ts(r[i('reviewed_at')]||r[i('timestamp')]),r[i('column')]?`${P(r[i('column')])} changed`:'Added',r[i('user')]||'',
+    (r[i('column')]?`${e0(r[i('old_value')])} → ${e0(r[i('new_value')])}`:'')+({active:'',synced:''}[r[i('status')]]??` (${r[i('status')]})`)])}),
+  ...x.flows.map(f=>[ts(f.created),`${(D.flows||[]).find(y=>y.id===f.flow)?.name||'Follow-up'}: ${{ok:'finished',failed:'failed',running:'running',queued:'waiting to start'}[f.status]||f.status}`,'',''])].sort((a,b)=>b[0].localeCompare(a[0]));
+ if(!all.length){c.append(h('p','empty',`Nothing has happened to this ${low(T)} yet. Actions run on it and changes to it show here.`));return}
+ // a phone reads it as a list (the Inbox's items): when and who, then what
+ if(MOBILE){all.forEach(([at,what,who,more])=>{const d=h('div','item');d.append(h('div','file',[cell(at),who].filter(Boolean).join(' · ')),h('div','txt',[what,more].filter(Boolean).join(': ')));c.append(d)});return}
+ const t=h('div');c.append(t);rows(t,{columns:['When','What','Who','Details'],rows:all})}
+// an action's form: only its inputs (the action type's JSON Schema), each with its description as the hint. The browser
+// checks what is required, lengths and ranges; ABI checks the rest and its message shows in the form. Submit asks ABI,
+// which asks the person to confirm when the action says so (api → ask): a form never confirms by itself
+function actionForm(a,getKey,done){const c=card(a.name),S=a.inputs?.properties||{},req=a.inputs?.required||[],F={};c.classList.add('aform','w');
+ if(a.description&&a.description!==MASK)c.append(h('p','file',a.description));
+ Object.entries(S).forEach(([k,s])=>{const ty=[].concat(s.type||'string').find(x=>x!=='null'),num=ty==='integer'||ty==='number',lbl=s.title||colName(k);let e;
+  if(s.enum)e=sel([...(req.includes(k)?[]:[['','(none)']]),...s.enum.map(v=>[JSON.stringify(v),String(v)])]);
+  else if(ty==='boolean'){e=h('input');e.type='checkbox'}
+  else if(!num&&(s.maxLength||0)>120){e=h('textarea','f');e.rows=3}
+  else{e=h('input','f');e.type=num?'number':{date:'date','date-time':'datetime-local',email:'email',uri:'url'}[s.format]||'text';if(num)e.step=ty==='integer'?1:'any';
+   if(s.minimum!==undefined)e.min=s.minimum;if(s.maximum!==undefined)e.max=s.maximum;if(s.pattern)e.pattern=s.pattern}
+  if(!s.enum&&ty==='string'){if(s.minLength)e.minLength=s.minLength;if(s.maxLength)e.maxLength=s.maxLength}
+  if(ty!=='boolean')e.required=req.includes(k);if(s.default!==undefined){if(ty==='boolean')e.checked=!!s.default;else e.value=s.enum?JSON.stringify(s.default):s.default}
+  F[k]=[e,ty,lbl,s];c.append(fld(lbl+(e.required||ty==='boolean'?'':' (optional)'),e,s.description))});
+ act(c,a.name,async()=>{const inputs={},key=await getKey();Object.entries(F).forEach(([k,[e,ty,lbl,s]])=>{need(e,e.checkValidity(),`${lbl}: ${e.validationMessage}`);
+   if(ty==='boolean')inputs[k]=e.checked;else if(e.value!=='')inputs[k]=s.enum?JSON.parse(e.value):ty==='integer'||ty==='number'?+e.value:e.value});
+  return done(await api('run_object_action',{type:a.object,key,action:a.id,inputs}))},1);return c}
+// what an action did, in words: saved (or sent for approval) and what it started
+function actDone(a,r){const w=r.write?.status,f=a.flow&&(D.flows||[]).find(x=>x.id===a.flow)?.name;
+ return [w==='proposed'?'Sent for approval: an editor approves the change under Data › Edits.':w?'Saved. Undo it under Data › Edits.':'',r.run?`Started ${f?`“${f}”`:'its follow-up'}.`:'',
+  /couldn't be queued/.test(r.note||'')?'It starts as soon as the queue is back.':''].filter(Boolean).join(' ')||'Done.'}
+// ABI's confirmation of an action on an object, in the person's words: the action's name as the question, the object by
+// its title, then what was entered and what changes (plainPreview → actWords). The yes stays the person's click
+function actAsk(c){let j;try{j=JSON.parse(c.preview)}catch(e){return c}const a=OA().find(x=>x.id===j.action),T=otype(j.object?.type);if(!a||!T)return c;
+ return {...c,title:`${a.name}?`,yes:a.name,message:'',lead:`${T.name} “${j.object.title??j.object.key.join(', ')}”.`+(/proposal an Editor approves/.test(c.message||'')?' An editor approves the change before it applies.':'')}}
+function actWords(j){const a=OA().find(x=>x.id===j.action),T=otype(j.object?.type),S=a?.inputs?.properties||{},v=x=>x===null||x===undefined||x===''?'(empty)':x===MASK?'(hidden for your access)':String(x),
+  pn=c=>pname((T?.properties||[]).find(p=>p.column===c||p.column===`${j.writes.table}.${c}`)||{column:c});
+ return [...Object.entries(j.inputs||{}).map(([k,x])=>`${S[k]?.title||colName(k)}: ${v(x)}`),...(j.writes?.changes||[]).map(c=>`${pn(c.column)}: ${v(c.old)} → ${v(c.new)}`),
+  ...(j.flow?[`Then starts “${(D.flows||[]).find(f=>f.id===j.flow)?.name||'its follow-up'}”.`]:[])].join('\n')}
+// ABI's words about objects in the person's: display names for ids, and what to do next
+function objWords(t){const L=D.ontology?.links||[],nm=(l,i)=>l.find(x=>x.id===i)?.name||i;
+ const out=t.replace(/No visible (.+?) with key [\s\S]*? in project '[^']+'\./,(m,n)=>`This ${n.toLowerCase()} isn't available: it may have been removed, or your access doesn't include it.`)
+  .replace(/You can't read the (.+?) of project '[^']+' one by one: what identifies them is hidden from you\./,(m,n)=>`You can't open ${n.toLowerCase()} one by one: what identifies them is hidden for your access.`)
+  .replace(/Measure '([^']+)' follows the many-to-many link '([^']+)', and totals across it are refused[^.]*\./g,(m,i,l)=>`“${nm(D.measures||[],i)}” can't be shown as one total here: the same rows count for several members (“${nm(L,l)}”), so it is shown per member instead.`)
+  .replace(/the many-to-many link '([^']+)'/g,(m,l)=>`“${nm(L,l)}”, where the same rows count for several members`)
+  .replace(/Link '[^']+' joins on a column you can't read\./,'This isn\'t shown with your access.')
+  .replace(/Inputs don't match the `inputs` schema of [^\n]*(\n[\s\S]*)?$/,'Some of what you entered doesn\'t fit. Check each field and try again.')
+  .replace(/\baction type '([^']+)'/gi,(m,i)=>`“${nm(OA(),i)}”`).replace(/\bobject type '([^']+)'/gi,(m,i)=>nm(OT(),i)).replace(/\blink '([^']+)'/gi,(m,i)=>`“${nm(L,i)}”`).replace(/:? `ontology` lists [^.]*\./g,'.');
+ return out===t?t:out.replace(/ (in|of) project '[^']+'/g,'')}
+// a visual grouped by a type's key or title shows objects: a click on one opens its page (any other member: `other`)
+function objDim(dim,d){const [t,c]=String(dim||'').split('.');return OT().find(T=>T.table===t&&(T.title===c||T.key.every(k=>d.columns.includes(`${t}.${k}`))))}
+async function objOpen(T,d,r){const kx=T.key.map(k=>d.columns.indexOf(`${T.table}.${k}`));if(kx.every(i=>i>=0)){openObj(T.id,kx.map(i=>r[i]));return}
+ // by its title alone: the one object of that title, else the type's list searched by it
+ try{const x=await api('list_objects',{type:T.id,filters:[{property:T.title,op:'=',value:r[0]}],limit:2}),ix=x.key.map(k=>x.columns.indexOf(k));if(x.rows.length===1){openObj(T.id,ix.map(i=>x.rows[0][i]));return}}catch(e){toast(e.message,1);return}
+ PENDING.osearch=String(r[0]);show('obj:'+T.id)}
+function objClicks(body,dim,d,other){const T=objDim(dim,d);if(!T&&!other)return;body.classList.add('pick');
+ body.onclick=e=>{const r=d.rows[e.target.closest?.('[data-r]')?.dataset.r];if(!r)return;T&&r[0]!==null?objOpen(T,d,r):other?.(r)}}
+// pick one object by its title (a form card with no fixed object): type to search, choose from the matches
+function objPick(T,set){const w=h('div','opick'),q=h('input','f'),ls=h('div','hits');let tm,n=0;q.type='search';q.placeholder=`Search ${T.plural.toLowerCase()}`;w.append(q,ls);
+ const find=async()=>{const my=++n;let r;try{r=await api('list_objects',{type:T.id,...(q.value.trim()?{search:q.value.trim()}:{}),limit:8})}catch(e){ls.replaceChildren(h('span','file',e.message));return}
+  if(my!==n)return;const ti=r.columns.indexOf(r.title),kx=r.key.map(c=>r.columns.indexOf(c));ls.replaceChildren(...r.rows.map(x=>{const b=h('button','sl',String(x[ti]??kx.map(i=>x[i]).join(' · ')));b.type='button';
+   b.onclick=()=>{set(kx.map(i=>x[i]));q.value=b.textContent;q.classList.remove('invalid');ls.replaceChildren()};return b}));if(!r.rows.length)ls.append(h('span','file','No match.'))};
+ q.oninput=()=>{set(null);clearTimeout(tm);tm=setTimeout(find,250)};q.onfocus=()=>{if(!ls.children.length&&!q.value)find()};return w}
 const SERVER_KEYS=['owner','status','version','disabled','error','latest_run','latest_score','active_run','evaluation','sharing','last_runs','tokens'];
 const KIND={
  flow:{label:'flow',save:o=>api('save_flow',{flow:o}),del:o=>api('delete_flow',{flow:o.id}),
@@ -1872,13 +2058,14 @@ function vaultPage(box){
 
 // ---------- Knowledge: the agent team ----------
 // ---------- sidebar ----------
-const PENDING={filters:null,explore:null,share:null,open:null,added:null};
+const PENDING={filters:null,explore:null,share:null,open:null,added:null,osearch:null};
 const LEDE={vault:'Your business definitions, finance rules and KPI specs. The agents check them before they define a measure.',home:'Start here: ask anything, see what needs attention, and every part of the project at a glance.',datasets:'Saved questions to the model: measures by dimensions, with filters. Reports, flows and ML reuse them.',
  measures:'The business numbers. Edit a formula and ABI checks it before it saves; Test shows the total.',model:'Your data models: the whole model and each named model. Open one to see its tables and how they join.',
  chat:'Ask a question, ask where something is, or ask for a change. The agent can open pages for you.',boardpack:'The documents, data and video a review needs, made by the board-pack agent and checked first.',documents:'A report, some of its pages or one view, as ABI renders it: PDF, PNG or PowerPoint.',onepager:'One page for the board: headline numbers, two charts and the caveats, built by the agent.',dataexport:'The rows behind any view, as CSV or Excel, or a query\'s rows as CSV.',video:'A silent explainer of report views, animated from ABI\'s numbers, one caption per slide.',settings:'The agent\'s model and effort, and the providers it may use. Keys are stored encrypted.',people:'Who may sign in, as Viewer, Editor or Owner, and which sections and reports each person sees.',transfer:'The whole project as one zip, to keep, move or rebuild. Imports are checked and undoable.',edits:'Corrections and new rows on the gold tables, kept on top of the loaded data and undoable.',reports:'The saved reports of this project. Open one to filter it and click through.',monitor:'Is anything wrong right now: data freshness, model readiness, ML runs and flows.',inbox:'Alerts and posts from Monitor and flows, with their figures, and the project\'s own alerts.',explore:'Your own analysis on the governed model: the numbers match the reports. Keep the ones you want.',glossary:'What the business words mean and which measures implement them.',sources:'Bronze: the data as it landed, one source per file or bucket folder. Reload, add or delete a source.',
  staged:'Silver: cleaned and combined tables between the sources and the final tables, hidden from the model.',tables:'Gold: the final business tables the model and measures are built on. Edit kind, key, description and steps.',flows:'Automations. Run one now and follow its steps, or switch it on or off.',
  ml:'Forecasts, segments and anomaly models. Train, score and read the latest run.',tools:'Calculations your agents can call. Run one with inputs or run its tests.',
  agents:'Custom agents for this project. Ask one a question or run its evaluation set.',docs:'The project documentation ABI writes from its definitions.',
+ objects:'The things the business works with (a café, a customer): what each one is, its numbers, what it connects to and what you can do with it.',
  security:'Who sees which rows. Roles are set in ABI itself.',environments:'Where each environment reads its data from.',history:'Every change is a commit in ABI. Newest first.'};let PAGES={},CUR='home';const side=$('aside');
 // what a page is for, said to a Viewer (who reads, and does not build)
 const VLEDE={sources:'Bronze: the data as it landed, one source per file or bucket folder, and when each last loaded.',staged:'Silver: the cleaned and combined tables between the sources and the final tables.',
@@ -1889,7 +2076,7 @@ const VLEDE={sources:'Bronze: the data as it landed, one source per file or buck
 function nav(){const all=navAll(),me=window.ME||{admin:true};return all.filter(([g,items])=>items.length&&(g==='Start'||!me.sections||me.sections.includes(g)))}
 function navAll(){return [['Start',[['home','Home',home],['chat','Chat',chatPage]]],
  ['Data',[...(MODE==='viewer'?[]:[['sources','Sources',sources,D.sources.length],['staged','Staged',stagedPage,(D.layers||[]).filter(t=>t.layer==='silver').length]]),['tables','Tables',tablesPage,(D.model?Object.keys(D.model.tables||{}).length:D.tables.length)],...(MODE==='viewer'?[]:[['edits','Edits',editsPage]])]],
- ['Data Model',[['model','Data models',modelsPage,(D.models||[]).length+1],['measures','Measures',measures,D.measures.length],
+ ['Data Model',[['model','Data models',modelsPage,(D.models||[]).length+1],...(OT().length?[['objects','Objects',objectsHome,OT().length]]:[]),['measures','Measures',measures,D.measures.length],
  ['glossary','Glossary',glossary,D.glossary.length],['datasets','Queries',datasets,D.datasets.length]]],
  ['Visualizations',[['reports','Reports',reportsPage,D.reports.length],['monitor','Monitor',monitorPage],['inbox','Inbox',inboxPage,INBOXN],['explore','Explore',explore,MINE.length||'']]],
  ['Export',[['boardpack','Board pack',boardPage,(D.app?.packs||[]).length],['documents','Documents',documentsPage],['onepager','One-pager',onePagerPage],['dataexport','Data',dataExportPage],['video','Video',videoPage],['transfer','Project',transferPage]]],
@@ -1906,7 +2093,7 @@ function sidebar(){side.innerHTML='';PAGES={};side.setAttribute('aria-label','Pa
  items.forEach(([k,label,fn,n])=>{PAGES[k]=[label,fn];const b=h('button','it');b.dataset.k=k;
   b.append(ic(k),h('span','lb',label));if(n!==undefined&&n!=='')b.append(h('span','n',String(n)));b.onclick=()=>show(k);list.append(b)});
  sec.append(hd,list);side.append(sec)});D.reports.forEach(r=>PAGES['rep:'+r.id]=[r.name||r.id,b=>report(b,r)]);PAGES['mdl:all']=['Whole model',b=>openModel(b,'')];(D.flows||[]).forEach(f=>PAGES['flw:'+f.id]=[f.name||f.id,b=>flowPage(b,f)]);
- (D.models||[]).forEach(m=>PAGES['mdl:'+m.id]=[m.name,b=>openModel(b,m.id)]);
+ (D.models||[]).forEach(m=>PAGES['mdl:'+m.id]=[m.name,b=>openModel(b,m.id)]);OT().forEach(t=>objReg('obj:'+t.id));
  // AGPL-3.0 §13: every page offers the running version's source (ABI_SOURCE_URL for a changed build)
  if(window.ME?.source){const a=h('a','src',`ABI-PI ${ME.version} · source code (AGPL-3.0)`);a.href=ME.source;a.target='_blank';a.rel='noopener';side.append(a)}}
 // the nav opens at the top with the active page in view: when it is taller than the screen, the groups other than
@@ -1914,13 +2101,13 @@ function sidebar(){side.innerHTML='';PAGES={};side.setAttribute('aria-label','Pa
 function fitNav(act){side.querySelectorAll('.sec.auto').forEach(s=>s.classList.remove('folded','auto'));side.scrollTop=0;if(MOBILE||!act)return;
  requestAnimationFrame(()=>{if(side.scrollHeight<=side.clientHeight+2)return;const mine=act.closest('.sec');[...side.querySelectorAll('.sec')].reverse().forEach(s=>{if(side.scrollHeight<=side.clientHeight+2)return;
   const g=s.dataset.g;if(s===mine||g==='Start'||FOLD[g]===false||s.classList.contains('folded'))return;s.classList.add('folded','auto')});side.scrollTop=0})}
-let PREV='home';
-function show(k){document.querySelectorAll('body>.toast:not([style])').forEach(t=>{if(Date.now()-(+t.dataset.t||0)>1500)t.remove()});if(!PAGES[k]){if(k&&k!=='home')window.__redir=MOBILE?'That page opens on a computer, in Developer: a phone shows the published project.':MODE==='viewer'?'That page has nothing in the published version, so Home opened instead.':'That page is not here any more, so Home opened instead.';k='home'}if(k!=='chat'&&CUR!=='chat')PREV=k;else if(k==='chat'&&CUR!=='chat')PREV=CUR;{const cb=$('#chat');if(cb.classList.contains('full')){cb.classList.remove('full');wideT(0);document.body.append(cb);cb.classList.remove('open');document.body.classList.remove('chat-open')}}CUR=k;setTimeout(ctx);const sk=k.startsWith('rep:')?'reports':k.startsWith('mdl:')?'model':k.startsWith('flw:')?'flows':k;side.querySelectorAll('button.it').forEach(b=>{b.classList.toggle('on',b.dataset.k===sk);b.toggleAttribute('aria-current',b.dataset.k===sk)});
+let PREV='home';const navKey=k=>k.startsWith('rep:')?'reports':k.startsWith('mdl:')?'model':k.startsWith('flw:')?'flows':k.startsWith('obj:')?'objects':k;  // a page's entry in the sidebar
+function show(k){document.querySelectorAll('body>.toast:not([style])').forEach(t=>{if(Date.now()-(+t.dataset.t||0)>1500)t.remove()});if(k&&!PAGES[k]&&k.startsWith('obj:'))objReg(k);if(!PAGES[k]){if(k&&k!=='home')window.__redir=MOBILE?'That page opens on a computer, in Developer: a phone shows the published project.':MODE==='viewer'?'That page has nothing in the published version, so Home opened instead.':'That page is not here any more, so Home opened instead.';k='home'}if(k!=='chat'&&CUR!=='chat')PREV=k;else if(k==='chat'&&CUR!=='chat')PREV=CUR;{const cb=$('#chat');if(cb.classList.contains('full')){cb.classList.remove('full');wideT(0);document.body.append(cb);cb.classList.remove('open');document.body.classList.remove('chat-open')}}CUR=k;setTimeout(ctx);const sk=navKey(k);side.querySelectorAll('button.it').forEach(b=>{b.classList.toggle('on',b.dataset.k===sk);b.toggleAttribute('aria-current',b.dataset.k===sk)});
  const act=side.querySelector('button.it.on');if(act)act.closest('.sec').classList.remove('folded');fitNav(act);
  const box=$('main');box.innerHTML='';const pg=h('div','pg'),head=h('div','pghead'),pn=$('#pgname');pn.textContent=PAGES[k][0];document.title=PAGES[k][0]+' · '+D.project;
  pn.title=(k.startsWith('rep:')?'Filter the report or click a bar to filter by it. Every number comes from ABI.':LEDE[k])||'';
  // the page says what it is and what it is for, above its actions (the header's crumb says where it sits)
- {const tt=h('div','ttl'),rp=k.startsWith('rep:')&&D.reports.find(r=>'rep:'+r.id===k),sec=nav().find(([,its])=>its.some(([x])=>x===(k.startsWith('rep:')?'reports':k.startsWith('mdl:')?'model':k.startsWith('flw:')?'flows':k)))?.[0];
+ {const tt=h('div','ttl'),rp=k.startsWith('rep:')&&D.reports.find(r=>'rep:'+r.id===k),sec=nav().find(([,its])=>its.some(([x])=>x===navKey(k)))?.[0];
   if(sec&&sec!=='Start')tt.append(h('div','eyebrow',sec));tt.append(h('h1','',PAGES[k][0]));const ld=rp?(rp.spec?.description||rp.description||'Filter it, or click a bar or a slice to filter by that member. Every number comes from ABI.'):(MODE==='viewer'&&VLEDE[k])||LEDE[k];
   if(ld)tt.append(h('p','',ld));head.append(tt)}
  {const h0=box.offsetHeight;if(h0)box.style.minHeight=h0+'px'}pg.append(head);if(window.__redir){const n=h('p','note');n.append(ic('info'),h('span','',window.__redir));pg.append(n);window.__redir=''}box.append(pg);{const r=PAGES[k][1](pg);if(r?.then){const sk=h('div','skel');sk.append(h('div','sk w40'),h('div','sk'),h('div','sk w70'));const tm=setTimeout(()=>pg.append(sk),350);r.finally(()=>{clearTimeout(tm);sk.remove();box.style.minHeight=''})}else requestAnimationFrame(()=>box.style.minHeight='')}setTimeout(()=>names(pg),60);new MutationObserver(()=>{clearTimeout(pg._nm);pg._nm=setTimeout(()=>names(pg),120)}).observe(pg,{childList:true,subtree:true});lay(pg,k);new MutationObserver(()=>lay(pg,k)).observe(pg,{childList:true,subtree:true});
@@ -1967,7 +2154,7 @@ $('#layreset').onclick=()=>{if(CUR.startsWith('rep:')){toast('A report\'s layout
 function goTo(){if($('#goto'))return;const d=h('dialog'),q=h('input','f'),list=h('div','golist');d.id='goto';q.placeholder='Go to a page, report, model or flow…';q.setAttribute('aria-label','Go to');
  const groups=Object.fromEntries(nav().flatMap(([g,its])=>its.map(([k])=>[k,g])));let sel=0,hits=[];
  const draw=()=>{const t=q.value.trim().toLowerCase();hits=Object.entries(PAGES).filter(([k,[l]])=>!t||l.toLowerCase().includes(t)||k.toLowerCase().includes(t)).slice(0,12);sel=Math.min(sel,Math.max(0,hits.length-1));list.innerHTML='';
-  hits.forEach(([k,[l]],i)=>{const b=h('button','goit'+(i===sel?' on':'')),base=k.split(':')[0];b.append(ic(IC[k]?k:{rep:'reports',mdl:'model',flw:'flows'}[base]||'open'),h('span','lb',l),h('span','file',groups[k]||{rep:'Report',mdl:'Model',flw:'Flow'}[base]||''));
+  hits.forEach(([k,[l]],i)=>{const b=h('button','goit'+(i===sel?' on':'')),base=k.split(':')[0];b.append(ic(IC[k]?k:{rep:'reports',mdl:'model',flw:'flows',obj:'objects'}[base]||'open'),h('span','lb',l),h('span','file',groups[k]||{rep:'Report',mdl:'Model',flw:'Flow',obj:'Objects'}[base]||''));
    b.onclick=()=>{d.close();d.remove();show(k)};list.append(b)});if(!hits.length)list.append(h('p','empty pad','Nothing by that name.'))};
  q.oninput=()=>{sel=0;draw()};q.onkeydown=e=>{if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();sel=(sel+(e.key==='ArrowDown'?1:-1)+hits.length)%Math.max(1,hits.length);draw()}
   else if(e.key==='Enter'&&hits[sel]){d.close();d.remove();show(hits[sel][0])}};d.onclose=()=>d.remove();d.append(q,list);document.body.append(d);d.showModal();draw();q.focus()}
@@ -2215,7 +2402,7 @@ def app_save(project: str, name: str, data, by: str = "") -> None:
 
 AT_ONCE = 6  # ABI calls one page's data has under way at once: the page's lists and its visuals (M3.3)
 ASKED = ("changes", "semantic_model", "list_reports", "list_flows", "ml_models", "list_tools", "list_agents", "readiness",
-         "data_quality", "rls_rules", "history")  # not docs: its worked examples run a query per measure, so the Docs page asks
+         "data_quality", "rls_rules", "history", "ontology")  # not docs: its worked examples run a query per measure, so the Docs page asks
 
 
 class Reads(ThreadPoolExecutor):
@@ -2279,6 +2466,9 @@ def _snapshot(dest: Path, project: str, pending: dict | None, ask, ex: Reads | N
     sections.pop("Security")  # the raw rules name every person's values (SE-6): the page draws ABI's rls_rules, as the person
     kinds = {t: (v or {}).get("kind") for t, v in model["tables"].items()}
     sections["Model"] = f"<div class=card>{render.diagram(model, kinds)}</div>"
+    ont = ask("ontology") or {}  # 1.2.6 M7: object types, links and action types as this person reads them (none: as before)
+    if ont.get("objects"):
+        sections["Objects"] = f"<div class=card>{render.objects(ont)}</div>"
     out = {"project": project, "measures": measures, "reports": reports, "dims": dims, "flows": live("list_flows", "flows", "flows"),
            "ml": live("ml_models", "models", "ml"), "tools": live("list_tools", "tools", "tools"),
            "agents": live("list_agents", "agents", "agents"),
@@ -2287,7 +2477,7 @@ def _snapshot(dest: Path, project: str, pending: dict | None, ask, ex: Reads | N
            "columns": sm.get("columns") or {}, "sources": sorted(sources), "source_specs": sources, "table_steps": table_steps,
            "tables": sorted(model["tables"]), "readiness": ask("readiness"), "pending": pending,
            "quality": ask("data_quality"), "rls": ask("rls_rules"), "history": (ask("history") or {}).get("commits", []),
-           "docs": None, "sections": sections, "published": published(project.removesuffix("_pub")),
+           "docs": None, "sections": sections, "ontology": ont, "published": published(project.removesuffix("_pub")),
            "stamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
     q = out["quality"] or {}
     qi = {c: i for i, c in enumerate(q.get("columns") or [])}
@@ -2350,6 +2540,18 @@ def owner_only(bundle: dict) -> None:
             t["measures"] = [x for x in t.get("measures") or [] if x not in gone]
 
 
+def read_only(bundle: dict) -> None:
+    """1.2.6 M7: the published copy runs nothing. It gets no flows (publish_bundle), so no action types either (one that
+    starts a flow would fail the copy's import) and no form cards for them: Viewer reads objects, actions run in
+    Developer, on the project itself."""
+    if isinstance(o := bundle.get("model/ontology.json"), dict):
+        o.pop("actions", None)
+    for rel, r in bundle.items():
+        if rel.startswith("reports/") and isinstance(r, dict):
+            for p in r.get("pages") or []:
+                p["visuals"] = [v for v in p.get("visuals") or [] if v.get("type") != "form"]
+
+
 def publish_bundle(project: str) -> tuple[str, dict, str]:
     """Commit is ABI's; Publish copies the last commit (never uncommitted work) into the published project, through
     ABI's import checks (and its confirmations). Viewer reads only that copy."""
@@ -2363,6 +2565,7 @@ def publish_bundle(project: str) -> tuple[str, dict, str]:
         if f.is_file() and ".git" not in f.relative_to(dest).parts and f.name not in (".gitkeep", "app.html") and not rel.startswith("flows/"):
             bundle[rel] = json.loads(f.read_text()) if rel.endswith(".json") else f.read_text()
     owner_only(bundle)
+    read_only(bundle)
     pub = pub_id(project)
     if not abi.folder(pub):
         abi.new_project(dest.parent.name, pub, f"{(bundle.get('project.json') or {}).get('name', project)} (published)")
@@ -2828,7 +3031,8 @@ def own(project: str, base: dict, rules: dict) -> dict:
     """A restricted person's page: what every restricted person sees (base, its rows read by none), with the reports'
     rows read as this person and their own rules."""
     with Reads() as ex:
-        return base | {"reports": report_data(project, [r["spec"] for r in base["reports"]], base["measures"], ex), "rls": rules}
+        return base | {"reports": report_data(project, [r["spec"] for r in base["reports"]], base["measures"], ex), "rls": rules,
+                       "ontology": read("ontology", project) or {}}  # a type's properties leave out the columns hidden from this person
 
 
 def changed(project: str) -> None:
@@ -2923,7 +3127,8 @@ _SEC = {"Data": "add_data delete_source delete_table set_steps preview_steps ref
         "Visualizations": "save_report delete_report", "Export": "export_visual report_snapshot", "Govern": "commit undo set_rls_rule",
         "Automate": "save_flow delete_flow enable_flow run_flow save_ml_model delete_ml_model train_model score_model save_tool publish_tool"
                     " delete_tool run_tool test_tool save_agent publish_agent delete_agent run_agent test_agent"}
-ACTION_SECTION: dict[str, tuple] = {a: (sec,) for sec, acts in _SEC.items() for a in acts.split()} | {"set_table": ("Data", "Data Model")}
+ACTION_SECTION: dict[str, tuple] = {a: (sec,) for sec, acts in _SEC.items() for a in acts.split()} | {
+    "set_table": ("Data", "Data Model"), "run_object_action": ("Data Model", "Visualizations")}  # an object page's button, a report's form card
 
 
 def section_of(path: str) -> str | tuple | None:
@@ -4049,7 +4254,8 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
                 pending[cid] = (action, args, b["confirm_token"], after, getattr(asking, "hid", None))  # the page never sees the token
                 preview = json.dumps(b["preview"], indent=1, default=str)[:4000] if b.get("preview") else ""
                 return {"confirm": {"id": cid, "message": b.get("message", "Confirm?"), "preview": preview}}
-            detail = "\n".join((f"{x['error']} {x.get('fix') or ''}" if x.get("error") else  # ABI's checks; a 422 names the field
+            at = lambda x: f"{x.get('file')} {x.get('path')}: " if action == "save_report" and x.get("file") else ""  # noqa: E731  a report is written as JSON: where in it
+            detail = "\n".join((f"{at(x)}{x['error']} {x.get('fix') or ''}" if x.get("error") else  # ABI's checks; a 422 names the field
                                  f"{'.'.join(map(str, x.get('loc') or []))}: {x.get('msg')}").strip() for x in b.get("errors") or [] if isinstance(x, dict))
             return {"error": "\n".join(filter(None, [b.get("message"), detail])) or json.dumps(b)[:500]}
 

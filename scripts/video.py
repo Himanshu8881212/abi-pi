@@ -140,7 +140,7 @@ def build(project: str, report: str, pages=None, views=None, theme="paper", seco
         if pages and p["id"] not in pages:
             continue
         for v in p["visuals"]:
-            if (views and v["id"] not in views) or v.get("text") is not None or v.get("type") == "text":
+            if (views and v["id"] not in views) or not v.get("query"):  # a text or form card is no slide
                 continue
             d = abi.call("visual_data", project=project, report=report, page=p["id"], visual=v["id"])
             s = slide(v, d)

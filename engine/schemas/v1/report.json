@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schema.abi.invalid/v1/report.json",
   "title": "Report",
-  "description": "reports/<id>.json: one report (RP-2): pages, visuals, layout and filters. Visuals are bound to the model by ID only (PC-1): each data visual's `query` is the semantic query format (`$defs.query` of datasets.json: measure IDs and table.column dimensions) and its data comes from the semantic engine. Filters (RP-4) apply at three levels and all must hold: report `filters`, page `filters`, and the visual's `query.filters`. `type` is optional: without it the chart type is chosen automatically (RP-3); `format` overrides the automatic number format per measure ID. A slicer lists the members of its first dimension that its query returns. Layout is in cells of a 12-column snap grid (RP-4).",
+  "description": "reports/<id>.json: one report (RP-2): pages, visuals, layout and filters. Visuals are bound to the model by ID only (PC-1): each data visual's `query` is the semantic query format (`$defs.query` of datasets.json: measure IDs and table.column dimensions) and its data comes from the semantic engine. Filters (RP-4) apply at three levels and all must hold: report `filters`, page `filters`, and the visual's `query.filters`. `type` is optional: without it the chart type is chosen automatically (RP-3); `format` overrides the automatic number format per measure ID. A slicer lists the members of its first dimension that its query returns. Layout is in cells of a 12-column snap grid (RP-4). A form card (type form) has no query: it runs an action type on one object.",
   "type": "object",
   "required": ["$schema", "id", "name", "pages"],
   "additionalProperties": false,
@@ -38,10 +38,20 @@
       "additionalProperties": false,
       "properties": {
         "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$"},
-        "type": {"enum": ["kpi", "bar", "line", "pie", "table", "matrix", "scatter", "slicer", "map", "text", "combo", "waterfall", "funnel", "heatmap", "treemap", "sankey"], "description": "RP-1/RP-8 visual type (map: countries by name or ISO-2/ISO-3 code; combo: first measure as bars, the others as lines; waterfall: steps of one measure; heatmap and Sankey: two dimensions); omit for the automatic choice (RP-3)"},
+        "type": {"enum": ["kpi", "bar", "line", "pie", "table", "matrix", "scatter", "slicer", "map", "text", "combo", "waterfall", "funnel", "heatmap", "treemap", "sankey", "form"], "description": "RP-1/RP-8 visual type (map: countries by name or ISO-2/ISO-3 code; combo: first measure as bars, the others as lines; waterfall: steps of one measure; heatmap and Sankey: two dimensions; form: a form card, see `form`); omit for the automatic choice (RP-3)"},
         "title": {"type": "string"},
         "query": {"$ref": "#/$defs/query"},
         "text": {"type": "string", "description": "Markdown of a text visual"},
+        "form": {
+          "type": "object",
+          "required": ["action"],
+          "additionalProperties": false,
+          "description": "A form card (type form): the person fills in an action type's inputs and runs it on one object.",
+          "properties": {
+            "action": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$", "description": "An action type ID (model/ontology.json)."},
+            "key": {"type": "array", "minItems": 1, "items": {"type": ["string", "number", "boolean"]}, "description": "The object's key value(s); omit to let the person pick the object in the card."}
+          }
+        },
         "format": {
           "type": "object",
           "description": "Number format per measure ID; overrides the automatic format (RP-3)",
@@ -68,8 +78,12 @@
         }
       },
       "if": {"required": ["type"], "properties": {"type": {"const": "text"}}},
-      "then": {"required": ["text"], "not": {"required": ["query"]}},
-      "else": {"required": ["query"], "not": {"required": ["text"]}}
+      "then": {"required": ["text"], "not": {"anyOf": [{"required": ["query"]}, {"required": ["form"]}]}},
+      "else": {
+        "if": {"required": ["type"], "properties": {"type": {"const": "form"}}},
+        "then": {"required": ["form"], "not": {"anyOf": [{"required": ["query"]}, {"required": ["text"]}]}},
+        "else": {"required": ["query"], "not": {"anyOf": [{"required": ["text"]}, {"required": ["form"]}]}}
+      }
     },
     "query": {
       "type": "object",
@@ -127,7 +141,8 @@
            "layout": {"x": 0, "y": 4, "w": 6, "h": 4}},
           {"id": "category", "type": "slicer", "query": {"measures": ["sales"], "dimensions": ["products.category"]}},
           {"id": "by-country", "type": "map", "query": {"measures": ["sales"], "dimensions": ["customers.country"]}},
-          {"id": "note", "type": "text", "text": "Figures exclude returns."}
+          {"id": "note", "type": "text", "text": "Figures exclude returns."},
+          {"id": "flag", "type": "form", "title": "Flag a café for a visit", "form": {"action": "flag_visit"}, "layout": {"x": 6, "y": 4, "w": 6, "h": 4}}
         ]}
      ]}
   ]

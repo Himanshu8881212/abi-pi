@@ -84,10 +84,10 @@ def people(tmp_path_factory):
 class Browser:
     """A person signed in to the app: their session cookie, and the page key once a page opened."""
 
-    def __init__(self, port: int, name: str, pw):
+    def __init__(self, port: int, name: str, pw, project: str = P):
         if isinstance(pw, Path):  # the owner: data/accounts.txt, read as scripts/creds.py does (never printed)
             pw = next(x.split()[-1] for x in pw.read_text().splitlines() if re.match(rf"\s*{re.escape(name)}\b", x))
-        self.port, self.cookie, self.key = port, "", ""
+        self.port, self.cookie, self.key, self.project = port, "", "", project
         st, _, hd = self.http("POST", "/signin", urllib.parse.urlencode({"name": name, "password": pw}),
                               {"Content-Type": "application/x-www-form-urlencoded"})
         assert st == 303, f"{name} can't sign in"
@@ -104,14 +104,14 @@ class Browser:
 
     def page(self) -> dict:
         """The page as this person opens it: its data (window.APP), computed as them."""
-        st, b, _ = self.http("GET", f"/?p={P}")
+        st, b, _ = self.http("GET", f"/?p={self.project}")
         assert st == 200, st
         self.key = self.key or re.search(r"KEY='([^']+)'", b)[1]
         return json.loads(re.search(r"window.APP=(\{.*?\});\s*const tip", b, re.S)[1].replace("<\\/", "</"))
 
     def post(self, path, body) -> dict:
         return json.loads(self.http("POST", path, json.dumps(body), {"Content-Type": "application/json", "X-Abi-App": self.key,
-                                                                    "X-Abi-Client": "pages", "X-Abi-Project": P})[1])
+                                                                    "X-Abi-Client": "pages", "X-Abi-Project": self.project})[1])
 
 
 def seen(page: dict) -> dict:
@@ -428,3 +428,391 @@ def test_a_page_has_no_raw_security_rules(tmp_path, monkeypatch):
     monkeypatch.setattr(app.abi, "folder", lambda p: tmp_path / "ws" / p)
     out = app._snapshot(tmp_path, "proj", None, lambda a: None, None)
     assert "Security" not in out["sections"] and "South" not in json.dumps(out), out["sections"].keys()
+
+
+# ---------- 1.2.6 M7: object pages, the object-type graph and a report's form card, in the engine's Chromium ----------
+
+PO = "pi_pages_objs"
+VISIT = {"id": "cafe_visit", "name": "Café visit", "enabled": False, "trigger": {"type": "manual"}, "steps": [
+    {"id": "look", "type": "action", "action": "get_object", "input": {"type": "cafe", "key": "{{ data.trigger.key }}"}}]}
+CARD = {"id": "flag", "type": "form", "title": "Flag a café for a visit", "form": {"action": "flag_visit"}, "layout": {"x": 6, "y": 7, "w": 6, "h": 6}}
+REPORT = {"id": "cafes", "name": "Cafés", "pages": [{"id": "main", "name": "Main", "visuals": [
+    {"id": "flagged", "type": "kpi", "title": "Flagged cafés", "query": {"measures": ["flagged"]}, "layout": {"x": 0, "y": 0, "w": 4, "h": 2}},
+    {"id": "by_name", "type": "bar", "title": "Revenue by café", "layout": {"x": 0, "y": 2, "w": 6, "h": 5},
+     "query": {"measures": ["revenue"], "dimensions": ["cafes.cafe_name"], "order_by": [{"field": "revenue", "desc": True}], "limit": 8}},
+    {"id": "by_key", "type": "table", "title": "Orders by café", "layout": {"x": 6, "y": 2, "w": 6, "h": 5},
+     "query": {"measures": ["orders_rows"], "dimensions": ["cafes.cafe_id"], "order_by": [{"field": "cafes.cafe_id"}], "limit": 8}},
+    {"id": "by_region", "type": "bar", "title": "Revenue by region", "query": {"measures": ["revenue"], "dimensions": ["cafes.region"]},
+     "layout": {"x": 0, "y": 7, "w": 6, "h": 4}}, CARD]}]}
+IDS = re.compile(r"ontology|object type|many-to-many|\blink\b|cafe_id|cafe_name|cafe_contacts|opened_on|visit_reason|flag_visit|order_cafe", re.I)
+
+
+def ontology(bad_format: str) -> dict:
+    """Cafés (with a manager and a visit reason kept in an input table), customers and orders; three action types on
+    cafés: one confirmed, with a check and a flow; one plain; one for Editors."""
+    reason = {"type": "object", "required": ["reason"], "additionalProperties": False, "properties": {"reason": {
+        "type": "string", "minLength": 1, "maxLength": 100, "title": "Reason", "description": "Why this café needs a visit."}}}
+    return {
+        "objects": [
+            {"id": "cafe", "table": "cafes", "name": "Café", "plural": "Cafés", "title": "cafe_name", "description": "One Brewline shop.",
+             "properties": [{"column": "city", "meaning": "city"}, {"column": "region", "meaning": "category"},
+                            {"column": "opened_on", "name": "Opened", "meaning": "date"}, {"column": "seats", "meaning": "quantity"},
+                            {"column": "format", "meaning": "category"}, {"column": "cafe_contacts.manager", "name": "Manager", "meaning": "person"},
+                            {"column": "cafe_contacts.visit_reason", "name": "Visit reason", "meaning": "text"}],
+             "measures": ["revenue", "orders_rows"]},
+            {"id": "customer", "table": "customers", "name": "Customer", "plural": "Customers", "title": "customer_id",
+             "properties": [{"column": "segment", "meaning": "category"}, {"column": "home_country", "name": "Home country", "meaning": "country"}],
+             "measures": ["revenue"]},
+            {"id": "order", "table": "orders", "name": "Order", "plural": "Orders", "title": "order_id",
+             "properties": [{"column": "revenue", "meaning": "money"}, {"column": "quantity", "meaning": "quantity"}]}],
+        "links": [
+            {"id": "order_cafe", "from": "order", "to": "cafe", "name": "café", "inverse": "orders", "via": ["orders-cafe_id"]},
+            {"id": "order_customer", "from": "order", "to": "customer", "name": "customer", "inverse": "orders", "via": ["orders-customer_id"]},
+            {"id": "visited", "from": "customer", "to": "cafe", "name": "visited", "inverse": "customers who visited",
+             "via": ["orders-customer_id", "orders-cafe_id"]}],
+        "actions": [
+            {"id": "flag_visit", "object": "cafe", "name": "Flag for a visit", "description": "Asks the regional team to visit this café.",
+             "role": "viewer", "confirm": True, "inputs": reason,
+             "checks": [{"value": "{{ data.object.format }}", "op": "!=", "to": bad_format, "message": "These cafés are visited by another team."}],
+             "writes": {"table": "cafe_contacts", "set": {"visit_reason": "{{ data.inputs.reason }}"}}, "flow": "cafe_visit"},
+            {"id": "note", "object": "cafe", "name": "Note the manager", "role": "viewer",
+             "inputs": {"type": "object", "required": ["who"], "properties": {"who": {"type": "string", "maxLength": 100}}},
+             "writes": {"table": "cafe_contacts", "set": {"manager": "{{ data.inputs.who }}"}}},
+            {"id": "close", "object": "cafe", "name": "Close the visit", "writes": {"table": "cafe_contacts", "set": {"visit_reason": "closed"}}}]}
+
+
+@pytest.fixture(scope="module")
+def objs(tmp_path_factory):
+    """PO: Brewline with the ontology above, a North-region Viewer who never sees cafés' seats and an Editor, each signed
+    in to an app started here (no published copy: Viewer reads the project), and the report REPORT. `good` is a North
+    café with a contact, `fresh` and `other` two without, `bad` one the check stops, `south` one the Viewer can't see."""
+    if not OWNER.exists():
+        pytest.skip("no accounts file")
+    from test_ontology_nobreak import brew  # not at top: it imports this module
+    brew(PO, tmp_path_factory.mktemp("objs"))
+    stamp, made = time.strftime("%H%M%S"), {}
+    s = app.serve(PO, 0, open_browser=False, signin=True)
+    try:
+        for who in ("viewer", "editor"):
+            made[who] = (f"pi_objs_{who}_{stamp}", secrets.token_urlsafe(16))
+            abi.call("create_user", name=made[who][0], password=made[who][1])
+            abi.call("set_role", project=PO, user=made[who][0], role=who)
+        ids = {u["name"]: u["id"] for u in abi.call("rls_rules", project=PO)["accounts"]}
+        sure("set_rls_rule", project=PO, id="region", table="cafes", column="region", users={ids[made["viewer"][0]]: ["North"]})
+        sure("set_column_rule", project=PO, id="seats", table="cafes", columns=["seats"])
+        sql = lambda q: abi.call("sql_query", project=PO, sql=q)["rows"]  # noqa: E731
+        [(bad, fmt)] = sql("SELECT cafe_id, format FROM cafes WHERE region = 'North' ORDER BY cafe_id LIMIT 1")
+        good, fresh, other = [x[0] for x in sql(f"SELECT cafe_id FROM cafes WHERE region = 'North' AND format <> '{fmt}' ORDER BY cafe_id LIMIT 3")]
+        south = sql("SELECT min(cafe_id) FROM cafes WHERE region = 'South'")[0][0]
+        sure("create_input_table", project=PO, table="cafe_contacts", key=["cafe_id"],
+             columns=[{"name": "cafe_id", "type": "VARCHAR"}, {"name": "manager", "type": "VARCHAR"}, {"name": "visit_reason", "type": "VARCHAR"}])
+        abi.call("add_relationship", project=PO, **{"from": "cafe_contacts.cafe_id", "to": "cafes.cafe_id"})
+        abi.call("edit_cells", project=PO, table="cafe_contacts", add=[{"cafe_id": good, "manager": "Ada Example", "visit_reason": "first"}])
+        abi.call("set_measure", project=PO, id="flagged", name="Flagged cafés", expression="COUNT(cafe_contacts.visit_reason)")
+        sure("save_flow", project=PO, flow=VISIT)
+        sure("save_ontology", project=PO, ontology=ontology(fmt))
+        abi.call("save_report", project=PO, report=REPORT)
+        port = s.server_address[1]
+        yield {"port": port, "owner": Browser(port, "admin", OWNER, PO), **{w: Browser(port, *made[w], PO) for w in made},
+               "editor_name": made["editor"][0], "good": good, "fresh": fresh, "other": other, "bad": bad, "south": south, "sql": sql}
+    finally:
+        s.shutdown()
+        for name, _ in made.values():
+            sure("delete_user", name=name)
+        drop([PO])
+
+
+DRIVE = r"""
+import json, sys
+from playwright.sync_api import sync_playwright
+a, out, errors = json.load(open(sys.argv[1])), {}, []
+with sync_playwright() as p:
+    b, phone = p.chromium.launch(args=["--disable-dev-shm-usage"]), a["width"] < 600
+    ctx = b.new_context(locale="en-US", viewport={"width": a["width"], "height": 844 if phone else 900}, is_mobile=phone, has_touch=phone)
+    ctx.add_cookies([{"name": a["cookie"].split("=", 1)[0], "value": a["cookie"].split("=", 1)[1], "url": a["url"]}])
+    pg = ctx.new_page(); pg.set_default_timeout(30000)
+    pg.on("pageerror", lambda e: errors.append(str(e)[:300]))
+    pg.goto(a["url"]); pg.wait_for_selector("aside button.it", state="attached")
+    for op, *x in a["steps"]:
+        try:
+            if op == "show": pg.evaluate("k => show(k)", x[0])
+            elif op == "click": pg.locator(x[0]).first.click()
+            elif op == "fire": pg.locator(x[0]).first.dispatch_event("click")  # a chart's mark, whatever is drawn over it
+            elif op == "fill": pg.fill(x[0], x[1])
+            elif op == "wait": pg.wait_for_selector(x[0], state=x[1] if len(x) > 1 else "visible")
+            elif op == "until": pg.wait_for_function(x[0])
+            elif op == "text": out[x[0]] = pg.locator(x[1]).first.inner_text()
+            elif op == "all": out[x[0]] = pg.locator(x[1]).all_inner_texts()
+            elif op == "get": out[x[0]] = pg.evaluate(x[1])
+            elif op == "shot": pg.screenshot(path=x[0], full_page=len(x) < 2)
+        except Exception as e:  # which step, and what the page showed then
+            raise SystemExit(f"step {[op, *x]}: {str(e)[:400]}\nerrors {errors}\nmain: {pg.inner_text('main')[:1500]}")
+    b.close()
+print(json.dumps({"errors": errors, **out}))
+"""
+
+
+def drive(who: Browser, tmp_path, steps: list, width: int = 1440) -> dict:
+    """The app as this signed-in person in headless Chromium (their session cookie), these steps run in order: what
+    they read off the page, and the page's script errors (none allowed)."""
+    from test_app import _chromium  # not at top: test_app starts its own app
+    f = tmp_path / f"steps-{time.monotonic_ns()}.json"
+    f.write_text(json.dumps({"url": f"http://127.0.0.1:{who.port}/?p={who.project}", "cookie": who.cookie, "width": width, "steps": steps}))
+    out = _chromium(DRIVE, str(f))
+    assert out.pop("errors") == [], "a script error on the page"
+    return out
+
+
+def okey(type_: str, key: str) -> str:
+    """An object page's key in the app, as its own okey() makes it."""
+    return f"obj:{type_}:" + urllib.parse.quote(json.dumps([key]), safe="")
+
+
+KV = "!!document.querySelector('main .kv')"
+VISIT_REASON = "api('get_object',{type:'cafe',key:[%s]}).then(o=>o.rows[0][o.columns.indexOf('cafe_contacts.visit_reason')])"
+
+
+def test_object_page_renders(objs, tmp_path):
+    """Data Model > Objects: a type's list (title, named properties, the type's measures; search, category filters,
+    pages); a row opens the object's page: the title, its properties, its measures filtered to it, a section per
+    connection whose neighbours open their own pages, and its history. Business names only, never an id; at a phone's
+    width nothing overflows."""
+    good = objs["good"]
+    o = abi.call("get_object", project=PO, type="cafe", key=[good])
+    was = dict(zip(o["columns"], o["rows"][0]))
+    names = {m["id"]: m["name"] for m in abi.call("semantic_model", project=PO, all=True)["measures"]}
+    out = drive(objs["owner"], tmp_path, [
+        ["get", "nav", "[...document.querySelectorAll('aside button.it')].map(b => b.dataset.k)"],
+        ["show", "obj:cafe"], ["wait", "main .pick tr[data-r]"], ["all", "heads", "main .pick th"],
+        ["get", "tips", "[...document.querySelectorAll('main .pick th')].map(t => t.title).join('')"],
+        ["all", "chips", ".pghead .seg .chip"], ["all", "pager", "main .pager button"],
+        ["until", "[...document.querySelectorAll('main .obar select')].every(s => s.options.length > 1)"],
+        ["get", "facets", "[...document.querySelectorAll('main .obar select')].map(s => [s.getAttribute('aria-label'), [...s.options].map(o => o.text)])"],
+        ["get", "rows", "document.querySelectorAll('main .pick tr[data-r]').length"],
+        ["click", "main .pager button:last-child"], ["until", "document.querySelector('main .pager .file')?.textContent === '51 to 100'"],
+        ["fill", "main .obar input", was["cafe_name"]], ["until", "document.querySelectorAll('main .pick tr[data-r]').length === 1"],
+        ["text", "row", "main .pick tr[data-r]"], ["click", "main .pick tr[data-r]"], ["until", KV],
+        ["until", "document.querySelectorAll('main .cards > .card.wide .pick table').length === 2"], ["wait", "main .cards > .card:last-child :is(table, p.empty)"],
+        ["text", "h1", "main .pghead h1"], ["text", "eyebrow", "main .pghead .eyebrow"], ["get", "cur", "CUR"],
+        ["all", "cards", "main .cards > .card > h3"], ["text", "kv", "main .kv"], ["all", "kpis", "main .kpis .kpi"], ["text", "main", "main"],
+        ["get", "wide", "[...document.querySelectorAll('main .cards > .card.wide')].map(c => [c.querySelector('h3').innerText, c.querySelectorAll('tr[data-r]').length])"],
+        ["click", "main .cards > .card.wide tr[data-r]"], ["until", KV + " && document.querySelector('main .pghead .eyebrow').textContent !== 'Café'"],
+        ["text", "eyebrow2", "main .pghead .eyebrow"], ["text", "main2", "main"],
+        ["get", "total", "plainErr(\"Measure 'revenue' follows the many-to-many link 'visited', and totals across it are refused: its members overlap, so they don't add up; ask without totals.\")"],
+        ["get", "stale", "plainErr(\"No action type 'flag_visit' on object type 'cafe' in project 'pi_pages_objs': `ontology` lists them.\")"]])
+    assert "objects" in out["nav"] and out["nav"].index("objects") == out["nav"].index("model") + 1, "Objects sits in Data Model"
+    assert out["chips"] == ["Overview", "Cafés", "Customers", "Orders"] and out["rows"] == 50 and out["pager"] == ["Previous", "Next"], out
+    assert out["heads"] == ["Cafe name", "City", "Region", "Opened", "Seats", "Format", names["revenue"], names["orders_rows"]], out["heads"]
+    assert out["tips"] == "", "a header's tooltip never shows a column id"
+    assert [f[0] for f in out["facets"]] == ["Region", "Format"] and {"North", "South"} < set(out["facets"][0][1]), out["facets"]
+    assert out["row"].split("\t")[:3] == [was["cafe_name"], was["city"], was["region"]], out["row"]
+    assert out["h1"] == was["cafe_name"] and out["eyebrow"].lower() == "café" and out["cur"] == okey("cafe", good), out
+    assert [c.split("\n")[0] for c in out["cards"]] == ["Properties", "Measures", "Orders", "Customers who visited", "History"], out["cards"]
+    for label, value in (("City", was["city"]), ("Region", was["region"]), ("Manager", "Ada Example"), ("Visit reason", "first"), ("Seats", str(was["seats"]))):
+        assert f"{label}\n{value}" in out["kv"], (label, out["kv"])
+    assert [k.split("\n")[-1] for k in out["kpis"]] == [names["revenue"], names["orders_rows"]], out["kpis"]
+    assert all(n > 0 for _, n in out["wide"][:2]), f"each connection lists its neighbours: {out['wide']}"
+    assert out["eyebrow2"].lower() == "order", "a neighbour opens its own page"
+    for text in (out["main"], out["main2"], out["total"], out["stale"]):
+        assert not IDS.search(text), f"an id or a model word on an object page: {IDS.search(text)[0]}"
+    assert "shown per member instead" in out["total"] and names["revenue"] in out["total"] and "pi_pages_objs" not in out["stale"], out["total"]
+    # a phone (always Viewer): the list, an object's page and the overview as a list, nothing wider than the screen
+    wide = "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+    phone = drive(objs["owner"], tmp_path, [
+        ["show", "obj:cafe"], ["wait", "main .pick tr[data-r]"], ["get", "list", wide],
+        ["show", okey("cafe", good)], ["until", KV], ["wait", "main .cards > .card.wide table"], ["wait", "main .cards > .card:last-child .item"],
+        ["get", "page", wide], ["text", "h1", "main .pghead h1"],
+        ["get", "acts", "document.querySelectorAll('main .pghead .bar.top .btn, main .aform').length"],
+        ["show", "objects"], ["wait", "main .mlist2 .card"], ["get", "home", wide], ["all", "types", "main .mlist2 .card h3"]], width=390)
+    assert phone["list"] <= 1 and phone["page"] <= 1 and phone["home"] <= 1 and phone["h1"] == was["cafe_name"] and phone["acts"] == 0, phone
+    assert [t.split("\n")[0] for t in phone["types"]] == ["Cafés", "Customers", "Orders"], phone["types"]
+
+
+def test_viewer_sees_only_visible(objs, tmp_path):
+    """Every screen reads as the signed-in person: a restricted Viewer lists only their rows, never a hidden column; an
+    object hidden from them reads exactly like one that doesn't exist; Viewer mode shows no action and no form, and the
+    server refuses a run."""
+    v, good, south = objs["viewer"], objs["good"], objs["south"]
+    north = {r[0] for r in objs["sql"]("SELECT cafe_id FROM cafes WHERE region = 'North'")}
+    cafe = next(t for t in v.page()["ontology"]["objects"] if t["id"] == "cafe")
+    assert "seats" not in [p["column"] for p in cafe["properties"]], "the hidden column isn't even named"
+    got = v.post("/api/list_objects", {"project": PO, "type": "cafe", "limit": 1000})["result"]
+    assert {r[got["columns"].index("cafe_id")] for r in got["rows"]} == north and "seats" not in got["columns"], got["columns"]
+    owner = objs["owner"]
+    owner.page()
+    assert len(owner.post("/api/list_objects", {"project": PO, "type": "cafe", "limit": 1000})["result"]["rows"]) > len(north)
+    hidden = v.post("/api/get_object", {"project": PO, "type": "cafe", "key": [south]})
+    missing = v.post("/api/get_object", {"project": PO, "type": "cafe", "key": ["CF-NONE"]})
+    assert "result" not in hidden and hidden["error"].replace(south, "CF-NONE") == missing["error"], (hidden, missing)
+    ran = v.post("/api/run_object_action", {"project": PO, "type": "cafe", "key": [good], "action": "note", "inputs": {"who": "Nobody"}})
+    assert "Viewer mode is read-only" in ran["error"] and objs["sql"](f"SELECT manager FROM cafe_contacts WHERE cafe_id = '{good}'") == [["Ada Example"]], ran
+    out = drive(v, tmp_path, [
+        ["show", "obj:cafe"], ["wait", "main .pick tr[data-r]"], ["all", "heads", "main .pick th"],
+        ["get", "regions", "[...new Set([...document.querySelectorAll('main .pick tr[data-r]')].map(tr => tr.cells[2].textContent))]"],
+        ["get", "rows", "document.querySelectorAll('main .pick tr[data-r]').length"],
+        ["show", okey("cafe", south)], ["wait", "main .emptyx"], ["text", "hidden", "main .emptyx"],
+        ["get", "acts", "document.querySelectorAll('main .pghead .bar.top .btn').length"],
+        ["show", okey("cafe", "CF-NONE")], ["wait", "main .emptyx"], ["text", "missing", "main .emptyx"],
+        ["show", okey("cafe", good)], ["until", KV], ["text", "kv", "main .kv"], ["text", "h1", "main .pghead h1"],
+        ["get", "acts2", "document.querySelectorAll('main .pghead .bar.top .btn, main .aform').length"],
+        ["show", "rep:cafes"], ["wait", "main .grid .card"], ["get", "forms", "document.querySelectorAll('main .aform').length"]])
+    assert "Seats" not in out["heads"] and out["regions"] == ["North"] and out["rows"] == min(50, len(north)), out
+    assert out["hidden"] == out["missing"] and "isn't available" in out["hidden"] and "Open cafés" in out["hidden"], out["hidden"]
+    assert "Seats" not in out["kv"] and "Ada Example" in out["kv"] and out["acts"] == out["acts2"] == out["forms"] == 0, out
+
+
+def test_action_form_confirms(objs, tmp_path):
+    """An object's actions are buttons (one main action, the others under More). A button opens a form of exactly the
+    action's inputs, the input's description as its hint. An empty required field stops in the form; a filled form asks
+    ABI, whose confirmation is the person's click: nothing is written before the yes, nothing after a no; after the yes
+    the page shows the new value and the run in the history. A check that doesn't hold shows its message in the form.
+    The page never holds the confirm token."""
+    e, fresh, bad = objs["editor"], objs["fresh"], objs["bad"]
+    reason = VISIT_REASON % json.dumps(fresh)
+    out = drive(e, tmp_path, [
+        ["show", okey("cafe", fresh)], ["until", KV], ["all", "main_action", "main .pghead .bar.top > .btn"],
+        ["get", "more", "[...document.querySelectorAll('main .pghead .bar.top .more .menu button')].map(b => b.textContent)"],
+        ["click", "main .pghead .bar.top > .btn"], ["wait", "main .aform"], ["all", "labels", "main .aform .fld > label"],
+        ["all", "hints", "main .aform .fld > .file"], ["get", "fields", "document.querySelectorAll('main .aform :is(input, select, textarea)').length"],
+        ["get", "primary", "document.querySelectorAll('main .btn.pri').length"],
+        ["click", "main .aform .acts .btn.pri"], ["wait", "main .aform .msg.bad"], ["text", "empty", "main .aform .msg"],
+        ["get", "asked0", "document.querySelector('#confirm').open"],
+        ["fill", "main .aform .fld input", "needs a look"], ["click", "main .aform .acts .btn.pri"], ["wait", "#confirm[open]"],
+        ["text", "title", "#confirm h3"], ["text", "lead", "#c-msg"], ["text", "preview", "#c-prev"], ["text", "yes", "#c-yes"],
+        ["get", "raw", "document.querySelector('#c-abi').hidden"], ["get", "before", reason],
+        ["click", "#c-no"], ["wait", "main .aform .msg.bad"], ["text", "declined", "main .aform .msg"], ["get", "after_no", reason],
+        ["click", "main .aform .acts .btn.pri"], ["wait", "#confirm[open]"], ["click", "#c-yes"], ["wait", "body > .toast"], ["text", "toast", "body > .toast"],
+        ["until", "[...document.querySelectorAll('main .kv span')].some(s => s.textContent === 'needs a look')"], ["get", "after_yes", reason],
+        ["wait", "main .cards > .card:last-child table"], ["text", "history", "main .cards > .card:last-child"],
+        ["show", okey("cafe", bad)], ["until", KV], ["click", "main .pghead .bar.top > .btn"], ["fill", "main .aform .fld input", "anything"],
+        ["click", "main .aform .acts .btn.pri"], ["wait", "main .aform .msg.bad"], ["text", "check", "main .aform .msg"],
+        ["get", "asked1", "document.querySelector('#confirm').open"]])
+    assert out["main_action"] == ["Flag for a visit"] and out["more"] == ["Note the manager", "Close the visit"], out
+    assert out["labels"] == ["Reason"] and out["hints"] == ["Why this café needs a visit."] and out["fields"] == 1 and out["primary"] == 1, out
+    assert out["empty"].startswith("Reason:") and out["asked0"] is False, "an empty required field stops in the form, with no request"
+    name = objs["sql"](f"SELECT cafe_name FROM cafes WHERE cafe_id = '{fresh}'")[0][0]
+    assert out["title"] == "Flag for a visit?" and out["yes"] == "Flag for a visit" and name in out["lead"] and out["raw"] is True, out
+    assert "Reason: needs a look" in out["preview"] and "Visit reason: (empty) → needs a look" in out["preview"] and "Café visit" in out["preview"], out["preview"]
+    assert not IDS.search(out["title"] + out["lead"] + out["preview"]), "the confirmation is in the person's words"
+    assert out["before"] is None and out["after_no"] is None and "declined" in out["declined"], "nothing runs before the yes, or after a no"
+    assert out["after_yes"] == "needs a look" and "Saved" in out["toast"] and "Café visit" in out["toast"], out
+    assert "Flag for a visit" in out["history"] and objs["editor_name"] in out["history"] and "Visit reason changed" in out["history"], out["history"]
+    assert out["check"] == "These cafés are visited by another team." and out["asked1"] is False, out
+    assert objs["sql"](f"SELECT count(*) FROM cafe_contacts WHERE cafe_id = '{bad}'") == [[0]]
+    # the app's own answer to the form's request: ABI's question without its token; unanswered, nothing is written
+    e.page()
+    asked = e.post("/api/run_object_action", {"project": PO, "type": "cafe", "key": [fresh], "action": "flag_visit", "inputs": {"reason": "again"}})
+    assert set(asked) == {"confirm"} and set(asked["confirm"]) == {"id", "message", "preview"} and "token" not in json.dumps(asked), asked
+    assert objs["sql"](f"SELECT visit_reason FROM cafe_contacts WHERE cafe_id = '{fresh}'") == [["needs a look"]]
+
+
+def test_object_graph_has_every_link(objs, people, tmp_path):
+    """The object-type graph: every type a box, every link a line with its name and cardinality, on the canvas and in
+    the page's offline HTML (render.diagram). A project without an ontology has neither, and no Objects page."""
+    o = abi.call("ontology", project=PO)
+    said = sorted(f"{ln['name']} · {ln['cardinality'].replace('-', ' ')}" for ln in o["links"])
+    assert len(said) == 3 and {ln["cardinality"] for ln in o["links"]} == {"many-to-one", "many-to-many"}, o["links"]
+    html = objs["owner"].page()["sections"]["Objects"]
+    for ln in o["links"]:
+        assert f">{ln['name']} · {ln['cardinality']}</text>" in html, ln
+    assert all(f">{t['name']}</text>" in html for t in o["objects"]) and html.count("<rect") == len(o["objects"]), html[:300]
+    out = drive(objs["owner"], tmp_path, [
+        ["show", "objects"], ["wait", "main .canvas .tbl"], ["until", "document.querySelectorAll('main .canvas text.lbl').length > 0"],
+        ["get", "labels", "[...document.querySelectorAll('main .canvas text.lbl')].map(t => t.textContent)"], ["all", "boxes", "main .canvas .tbl .th > span"], ["text", "heading", "main h4.sub"],
+        ["get", "paths", "document.querySelectorAll('main .canvas path.ln').length"],
+        ["click", "main .canvas .tbl .badge"], ["wait", "main .pick tr[data-r]"], ["get", "cur", "CUR"]])
+    assert sorted(out["labels"]) == said and out["paths"] == 3 and sorted(out["boxes"]) == ["Cafés", "Customers", "Orders"], out
+    assert out["heading"] == "Objects and connections" and out["cur"].startswith("obj:"), out
+    # no ontology: the page data, the sidebar and the pages are as before
+    page = people["owner"].page()
+    assert page["ontology"]["objects"] == [] and "Objects" not in page["sections"], page["ontology"]
+    none = drive(people["owner"], tmp_path, [
+        ["get", "nav", "[...document.querySelectorAll('aside button.it')].map(b => b.dataset.k)"],
+        ["show", "obj:cafe"], ["get", "cur", "CUR"], ["get", "keys", "Object.keys(PAGES).filter(k => k.startsWith('obj'))"]])
+    assert "objects" not in none["nav"] and none["cur"] == "home" and none["keys"] == [], none
+
+
+def test_report_click_opens_object_page(objs, tmp_path):
+    """In a report, a mark or a row that is an object (the visual groups by a type's title or key) opens that object's
+    page; any other member still filters the report."""
+    top = abi.call("visual_data", project=PO, report="cafes", page="main", visual="by_name")["rows"][0][0]
+    first = abi.call("visual_data", project=PO, report="cafes", page="main", visual="by_key")["rows"][0][0]
+    name = objs["sql"](f"SELECT cafe_name FROM cafes WHERE cafe_id = '{first}'")[0][0]
+    out = drive(objs["owner"], tmp_path, [
+        ["show", "rep:cafes"], ["wait", "main [data-lk=by_name] [data-r='0']", "attached"], ["fire", "main [data-lk=by_name] [data-r='0']"],
+        ["until", KV], ["text", "by_title", "main .pghead h1"], ["get", "cur", "CUR"],
+        ["show", "rep:cafes"], ["wait", "main [data-lk=by_key] tr[data-r]"], ["click", "main [data-lk=by_key] tr[data-r]"],
+        ["until", KV], ["text", "by_key", "main .pghead h1"], ["get", "cur2", "CUR"],
+        ["show", "rep:cafes"], ["wait", "main [data-lk=by_region] [data-r='0']", "attached"], ["fire", "main [data-lk=by_region] [data-r='0']"],
+        ["wait", "main .fchip"], ["get", "cur3", "CUR"], ["all", "filters", "main .fchip b"]])
+    assert out["by_title"] == top and out["cur"].startswith("obj:cafe:"), out
+    assert out["by_key"] == name and out["cur2"] == okey("cafe", first), out
+    assert out["cur3"] == "rep:cafes" and out["filters"] == ["Region"], "a member that is no object filters, as before"
+
+
+def test_report_form_card_runs_action(objs, tmp_path):
+    """A form card is a visual of type `form` in the report's JSON, saved through save_report like any other (a wrong one
+    is refused naming the file and the field), so it is in Git and in the project export; where forms aren't drawn it
+    reads as its action's name; the published copy gets none. On the report page it shows the action's inputs and an
+    object picker; submit runs the action through ABI's confirmation and the page's visuals read their rows again."""
+    import io
+    import zipfile
+
+    import transfer
+    e, fresh = objs["editor"], objs["other"]
+    e.page()
+    visits = {"id": "visits", "name": "Visits", "pages": [{"id": "main", "name": "Main", "visuals": [REPORT["pages"][0]["visuals"][0], CARD]}]}
+    with_card = lambda card: e.post("/api/save_report", {"project": PO, "report": visits | {"pages": [{  # noqa: E731
+        "id": "main", "name": "Main", "visuals": [visits["pages"][0]["visuals"][0], card]}]}})
+    wrong = with_card(CARD | {"form": {"action": "flag_visits"}})
+    assert "reports/visits.json $.pages[0].visuals[1].form.action: Unknown action type 'flag_visits'." in wrong["error"] and "flag_visit," in wrong["error"], wrong
+    for card, field in ((CARD | {"form": {"act": "flag_visit"}}, "$.pages[0].visuals[1].form: "), ({k: v for k, v in CARD.items() if k != "form"}, "`form`"),
+                        (CARD | {"query": {"measures": ["revenue"]}}, "`query`")):
+        refused = with_card(card)
+        assert "reports/visits.json $.pages[0].visuals[1]" in refused["error"] and field in refused["error"], refused
+    assert with_card(CARD)["result"]["pages"][0]["visuals"] == ["flagged", "flag"]
+    assert abi.call("visual_data", project=PO, report="visits", page="main")["visuals"][1] == {
+        "id": "flag", "type": "text", "title": CARD["title"], "text": "Flag for a visit"}
+    with pytest.raises(abi.ActionError) as gone:  # an action type a form card uses can't go
+        sure("delete_ontology_item", project=PO, kind="action", id="flag_visit")
+    assert gone.value.status == 409 and "still used" in gone.value.body["message"], gone.value.body
+    assert any(x["file"] == "reports/cafes.json" and x["path"].endswith(".form.action") for x in gone.value.body["errors"]), gone.value.body
+    abi.call("commit", project=PO, message="pages test: a form card")
+    z = zipfile.ZipFile(io.BytesIO(transfer.export(PO)))
+    bundle = {n.removeprefix("abi/"): json.loads(z.read(n)) if n.endswith(".json") else z.read(n).decode() for n in z.namelist() if n.startswith("abi/")}
+    assert CARD in bundle["reports/visits.json"]["pages"][0]["visuals"], "the card is in the project's files, so in Git and the export"
+    copy = {k: v for k, v in bundle.items() if not k.startswith("flows/")}  # what Publish sends: no flows
+    with pytest.raises(abi.ActionError) as flow:
+        abi.call("import_project", project=PO, bundle=copy, dry_run=True)
+    assert flow.value.status == 422 and "cafe_visit" in json.dumps(flow.value.body), "an action type's flow isn't in the copy"
+    app.read_only(copy)
+    assert "actions" not in copy["model/ontology.json"] and all(v.get("type") != "form" for r, c in copy.items() if r.startswith("reports/")
+                                                                for p in c["pages"] for v in p["visuals"])
+    abi.call("import_project", project=PO, bundle=copy, dry_run=True)  # the read-only copy passes ABI's import checks
+    # the docs page's example is what the schemas take (docs/objects.md)
+    doc = [json.loads(b) for b in re.findall(r"```json\n(.*?)\n```", (ROOT / "docs/objects.md").read_text(), re.S)]
+    assert [d["$schema"].rsplit("/", 1)[-1] for d in doc] == ["ontology.json", "report.json"]
+    abi.call("import_project", project=PO, dry_run=True, bundle=bundle | {"model/ontology.json": doc[0], f"reports/{doc[1]['id']}.json": doc[1]} | {
+        r: c | {"pages": [p | {"visuals": [v for v in p["visuals"] if v.get("type") != "form"]} for p in c["pages"]]}
+        for r, c in bundle.items() if r.startswith("reports/")})
+    gen = app._GEN.get(PO, 0)
+    app.changed(PO)  # the commit above was made behind the app's back: its pages read the project again
+    for _ in range(300):
+        if app._GEN.get(PO, 0) > gen:
+            break
+        time.sleep(0.1)
+    cafe = objs["sql"](f"SELECT cafe_name FROM cafes WHERE cafe_id = '{fresh}'")[0][0]
+    kpi = "document.querySelector('main [data-lk=flagged] .kpi .v').textContent"
+    out = drive(e, tmp_path, [
+        ["show", "rep:cafes"], ["wait", "main .grid [data-lk=flag].aform"], ["wait", "main [data-lk=flagged] .kpi .v"], ["get", "kpi", kpi],
+        ["text", "title", "main [data-lk=flag] h3"], ["all", "labels", "main [data-lk=flag] .fld > label"],
+        ["click", "main [data-lk=flag] .acts .btn.pri"], ["wait", "main [data-lk=flag] .msg.bad"], ["text", "unpicked", "main [data-lk=flag] .msg"],
+        ["fill", "main [data-lk=flag] .opick input", cafe], ["until", "document.querySelectorAll('main [data-lk=flag] .opick .hits button').length === 1"], ["all", "matches", "main [data-lk=flag] .opick .hits button"],
+        ["click", "main [data-lk=flag] .opick .hits button"], ["fill", "main [data-lk=flag] .fld > input", "from the report"],
+        ["click", "main [data-lk=flag] .acts .btn.pri"], ["wait", "#confirm[open]"], ["text", "lead", "#c-msg"], ["get", "before", VISIT_REASON % json.dumps(fresh)],
+        ["click", "#c-yes"], ["wait", "body > .toast"], ["text", "toast", "body > .toast"], ["get", "kpi2", kpi], ["get", "cur", "CUR"],
+        ["get", "after", VISIT_REASON % json.dumps(fresh)]])
+    assert out["title"].startswith(CARD["title"]) and out["labels"] == ["Café", "Reason"] and "Pick the café first" in out["unpicked"], out
+    assert out["matches"] == [cafe] and cafe in out["lead"] and out["before"] is None, out
+    assert out["after"] == "from the report" and "Saved" in out["toast"] and out["cur"] == "rep:cafes", out
+    assert int(out["kpi2"]) == int(out["kpi"]) + 1, f"the page's visuals read their rows again: {out['kpi']} → {out['kpi2']}"

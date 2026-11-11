@@ -99,6 +99,11 @@ def _explain(e, kind: str) -> tuple[str, str]:
         return (f"A field here isn't allowed by {where}.",
                 f"Use only these fields: {', '.join(allowed)}." if allowed else f"Remove the extra field (see {where}).")
     v = e.validator_value  # always the schema's own value
+    if e.validator == "not" and isinstance(v, dict) and isinstance(e.instance, dict):  # fields that don't go with the others
+        if extra := [s["required"][0] for s in v.get("anyOf", [v])  # the schema's own names, never an instance key
+                     if isinstance(s, dict) and len(s.get("required", [])) == 1 and s["required"][0] in e.instance]:
+            return (f"Field(s) {', '.join(f'`{p}`' for p in extra)} can't be combined with the other fields here (see {where}).",
+                    "Remove " + ", ".join(f"`{p}`" for p in extra) + ".")
     rule = f": {json.dumps(v)}" if isinstance(v, (str, int, float)) or isinstance(v, list) and all(
         isinstance(x, (str, int, float)) for x in v) else ""  # not subschemas (oneOf, $ref, items)
     fix = f"Use {json.dumps(v)}." if e.validator == "const" else FIXES.get(e.validator, f"See {where}.")
@@ -270,7 +275,8 @@ def _references(conn, project: str, files: dict) -> list[dict]:
              for j, m in enumerate(ds["query"]["measures"]) if m not in measures]
     model = files.get("model/model.json")
     tables = model and {t["table"] for t in model.get("tables", [])}  # None: no model to check against
-    errs += [e for rel, c in files.items() if _kind(rel) == "report" for e in _report(rel, c, measures, tables)]
+    acts = sorted(a["id"] for a in (files.get(ontology.FILE) or {}).get("actions", []))
+    errs += [e for rel, c in files.items() if _kind(rel) == "report" for e in _report(rel, c, measures, tables, acts)]
     # ABI-PI: named models (model/models.json) hold model tables and measures; a report names one that exists, and its
     # visuals stay inside it when the model lists its measures
     named = {x["id"]: x for x in (files.get("model/models.json") or {}).get("models", [])}
@@ -345,8 +351,9 @@ def _input_table(rel: str, c: dict) -> list[dict]:
     return errs
 
 
-def _report(rel: str, r: dict, measures: set, tables: set | None) -> list[dict]:
-    """RP-2: a report binds to the model by ID: known measure IDs and model tables, unique page and visual IDs."""
+def _report(rel: str, r: dict, measures: set, tables: set | None, acts: list[str]) -> list[dict]:
+    """RP-2: a report binds to the model by ID: known measure IDs and model tables, unique page and visual IDs; a form
+    card (1.2.6 M7) names an action type of the ontology."""
     errs = []
 
     def cols(path: str, names: list[str]) -> None:
@@ -369,6 +376,9 @@ def _report(rel: str, r: dict, measures: set, tables: set | None) -> list[dict]:
         unique(f"{at}.visuals", p["visuals"], "visual")
         for vi, v in enumerate(p["visuals"]):
             errs += _query(rel, f"{at}.visuals[{vi}].query", v.get("query", {}), measures, tables)
+            if "form" in v and v["form"]["action"] not in acts:
+                errs.append(_err(rel, f"{at}.visuals[{vi}].form.action", f"Unknown action type '{v['form']['action']}'.",
+                                 f"Use an action type of {ontology.FILE}: {', '.join(acts) or 'none yet (save_ontology adds one)'}."))
     return errs
 
 

@@ -206,6 +206,10 @@ def visual_data(conn, user: User, args: VisualRef) -> dict:
 
 def _visual(conn, user: User, args: VisualRef, r: dict, p: dict, v: dict) -> dict:
     if "query" not in v:
+        if "form" in v:  # 1.2.6 M7: where forms aren't drawn (exports, shares, embeds) a form card reads as its action type's name
+            acts = model._read(args.project, "ontology.json").get("actions", [])
+            return {"id": v["id"], "type": "text", "title": v.get("title"),
+                    "text": next((a["name"] for a in acts if a["id"] == v["form"]["action"]), "")}
         return {"id": v["id"], "type": "text", "title": v.get("title"), "text": v["text"]}
     q, _, off = _query(args.project, r, p, v, [f.model_dump(mode="json") for f in args.interaction])
     if r.get("model"):  # ABI-PI: a report built in a named model reads only that model
@@ -406,7 +410,8 @@ class SaveReport(storage.ProjectRef):
         "The whole report (schemas/v1/report.json): {id, name, description?, filters?, hide_details? (true: no per-visual time zone caption and inline 'How is this calculated?' on the canvas), pages: [{id, name, filters?,"
         " visuals: [{id, type? (kpi|bar|line|pie|table|matrix|scatter|slicer|map|text|combo|waterfall|funnel|heatmap|treemap|sankey; omit for automatic), title?,"
         " query? (semantic query: measures (IDs), dimensions (table.column), filters, order_by, limit),"
-        " text? (text visual), format? {measure_id: {style, decimals, compact}}, layout? {x, y, w, h} (12-column grid)}]}]}."
+        " text? (text visual), form? (form card, type form, no query: {action: an action type ID, key?: the object's key; without it the person picks the object}),"
+        " format? {measure_id: {style, decimals, compact}}, layout? {x, y, w, h} (12-column grid)}]}]}."
         " Filters are {column: table.column, op, value}."))
 
 
