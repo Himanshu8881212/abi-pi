@@ -356,6 +356,12 @@ def _fire(project: str, t: str, snap: int) -> None:
 @action(Role.editor)
 def propose_edit(conn, user: User, args: Edits) -> dict:
     """Proposes cell edits, added and deleted rows for a keyed table without applying them: the proposal is stored with old and new values for the user to review, and applies only when they approve it (approve_edit)."""
+    from abi import flows  # not at top: flows imports the semantic package, which imports this module
+
+    if flows.OBJECT.get():  # 1.2.6 M8: also an agent step's tool call
+        raise ActionFailed(403, "An alert for one object can't propose an edit: a proposal shows its values to everyone who reviews"
+                                " edits, and the alert reaches only project members who see that object. Post to the Inbox instead"
+                                " (post_message), and let the person propose the edit.")
     return _batch(user, args, "proposed")
 
 

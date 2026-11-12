@@ -601,7 +601,7 @@ def send_email(conn, user: User, args: SendEmail) -> dict:
             for u, t, own, _ in got:
                 deliver_email(conn, args.project, [u["email"]], t["subject"], t["body"], own, None)
             sent = [u["email"] for u, *_ in got]
-            return {"sent": True, "to": sent, "skipped": [a for a in to if a not in sent]}
+            return {"sent": bool(sent), "to": sent, "skipped": [a for a in to if a not in sent]}
         if test is None:
             deliver_email(conn, args.project, args.to, args.subject, args.body, data, snap, **extra)
         else:

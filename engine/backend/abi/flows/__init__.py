@@ -655,7 +655,8 @@ def execute(run_id: str, last: bool = True) -> None:
             # M4 LOW-4: a 4xx, so the run fails now: the flow file is the same on every retry
             raise ActionFailed(409, f"step(s) {', '.join(bad)} aren't ones an action type's flow may run.")
         if alert and (bad := [s["id"] for s in f["steps"] if not _per_ok(s)]):
-            raise ActionFailed(409, f"step(s) {', '.join(bad)} aren't ones an alert for one object may run.")
+            raise ActionFailed(409, f"step(s) {', '.join(bad)} aren't ones an alert for one object may run. Save the flow again with only"
+                                    " these steps: refresh a table, ask an agent, export a report, check a measure, post to the Inbox, send an email.")
         data = {"trigger": run["trigger"]} if run["trigger"] else {}
         test = TEST_RUN.set(owner.id if run_id.rsplit("/", 1)[1].startswith("test-") else None)
         inbound = actions.INBOUND.set(message)  # D-32: its steps' audit rows hold the text's length + hash only
@@ -677,8 +678,8 @@ def execute(run_id: str, last: bool = True) -> None:
                      ["queued" if again else "failed" if error else halt[0] if halt else "ok", error or (halt and halt[1]), again, run_id])
     if not alert:
         notify_change("flow", project, head, error, "works again.", flow)  # FL-5, D-10, MA-7
-    elif owner and error:  # that an object met the condition is the owner's to know, not the feed's (every member's). Said
-        # once per flow until the problem's text changes; no "works again": another object's run that went well doesn't
+    elif owner and error and not again:  # that an object met the condition is the owner's to know, not the feed's (every member's). Said
+        # once a day per flow until the problem's text changes, after the last try; no "works again": another object's run that went well doesn't
         # say this one's does. A flow whose file is gone has no owner to tell: its run keeps the error
         _to_owner(project, owner.id, flow, "failed", head + error)
     if not again and not alert:
@@ -689,12 +690,12 @@ def execute(run_id: str, last: bool = True) -> None:
 
 def _to_owner(project: str, user_id: int, flow: str, kind: str, problem: str | None, fixed: str | None = None) -> None:
     """1.2.6 M8: what the feed would say about a per-object alert, in the flow owner's own inbox instead: `problem` when
-    it differs from the flow's last message of this `kind`, `fixed` once after a problem (as `notify_change`, D-10). The
+    it differs from the flow's last message of this `kind` in the last day (the same problem is said again a day on), `fixed` once after a problem (as `notify_change`, D-10). The
     flow's ID and the kind go with the message, so two flows of one name keep their own state."""
     msg, about = problem or fixed, {"flow": flow, "kind": kind}
     with db.connect() as conn:
         last = conn.execute("SELECT text FROM inbox WHERE project = %s AND recipient = %s AND sender = 'flows' AND data @> %s"
-                            " ORDER BY id DESC LIMIT 1", [project, user_id, Jsonb(about)]).fetchone()
+                            " AND at > now() - interval '1 day' ORDER BY id DESC LIMIT 1", [project, user_id, Jsonb(about)]).fetchone()
         if msg and (last and last["text"]) != msg and (problem or last):
             conn.execute("INSERT INTO inbox (project, sender, text, data, recipient) VALUES (%s, 'flows', %s, %s, %s)",
                          [project, msg, Jsonb({"columns": [], "rows": []} | about), user_id])
@@ -850,6 +851,8 @@ def _per_object(project: str, f: dict, now: datetime, u: User) -> None:
         # before it wrote, as they are now
         since = conn.execute("SELECT since FROM flow_conditions WHERE project = %s AND flow = %s AND object = '' FOR UPDATE",
                              [project, f["id"]]).fetchone()["since"]
+        if _load(project, f["id"])["trigger"] != t:  # saved while this tick waited: the next tick works from the new file
+            return
         r = evaluate(project, t | {"query": _grouped(t["query"], keys + [title] * named)}, u.id)
         at, rows, long = [r["columns"].index(k) for k in keys], {}, 0
         for row in held(t, r["columns"], r["rows"]):
@@ -861,18 +864,17 @@ def _per_object(project: str, f: dict, now: datetime, u: User) -> None:
                     rows.setdefault(k, row)
         _to_owner(project, u.id, f["id"], "keys", long and (
             f"Flow {f['name']} can't alert for {long} of the {x['plural'].lower()}: what identifies them is too long to keep track of."
-            f" Shorten that value in the data, or use this alert for an object type with a shorter one."),
-            f"Flow {f['name']} alerts for every {x['name'].lower()} again.")
+            f" Shorten that value in the data, or use this alert for an object type with a shorter one."))
         label = lambda k: str(rows[k][r["columns"].index(title)]) if named or title in keys else ", ".join(map(str, json.loads(k)))  # noqa: E731
         state = {s["object"] for s in conn.execute("SELECT object FROM flow_conditions WHERE project = %s AND flow = %s", [project, f["id"]])}
         edge = sorted(k for k in rows if k not in state)
         # the objects with a run inside the cooldown (of this trigger: since it was saved): their edge is dropped. Read
-        # from the runs themselves, so a run a crashed tick started is never started twice. A stopped run sent nothing
-        # (nobody to reach: recorded in this transaction, so a crashed tick left none), so it starts no cooldown
+        # from the runs themselves, so a run a crashed tick started is never started twice. A stopped run that sent
+        # nothing (nobody to reach, or stopped before its first send) starts no cooldown; one that sent does
         cool = now - timedelta(minutes=t.get("cooldown_minutes", 1440))
         recent = {m["object"] for m in conn.execute(
             "SELECT DISTINCT substr(id, %s, 16) AS object FROM flow_runs WHERE project = %s AND flow = %s AND starts_with(id, %s)"
-            " AND status <> 'stopped' AND created > %s", [len(head) + 1, project, f["id"], head, max(cool, since or cool)])} if edge else set()
+            " AND (status <> 'stopped' OR EXISTS (SELECT 1 FROM flow_sends s WHERE s.run_id = flow_runs.id)) AND created > %s", [len(head) + 1, project, f["id"], head, max(cool, since or cool)])} if edge else set()
         due = [k for k in edge if name(k) not in recent]
         started, missed = 0, []
         for k in due[:PER_TICK]:
@@ -887,9 +889,11 @@ def _per_object(project: str, f: dict, now: datetime, u: User) -> None:
             who = ontology.recipients(conn, project, obj, t["recipients"], u) if "recipients" in t else None
             if who:
                 trigger |= {"recipients": who["to"], "members": who["members"]}
-                if who["skipped"] or not who["members"]:
+                mute = [{"value": v, "why": "has no email address on their account: add one under Users & access"} for v in who["nomail"]
+                        ] if any(s.get("action") == "send_email" for s in f["steps"]) else []
+                if who["skipped"] or mute or not who["members"]:
                     missed.append(f"{label(k)}: " + (", ".join(f"{s['value']} ({s['why']})" if s["value"] else s["why"]
-                                                               for s in who["skipped"]) or "nobody is named"))
+                                                               for s in who["skipped"] + mute) or "nobody is named"))
             run = f"{head}{name(k)}-{now.astimezone(UTC):%Y-%m-%dT%H:%M:%SZ}"
             if who and not who["members"]:  # nobody to alert: the run ends here, not a failure, and its trace says who was left out
                 conn.execute("INSERT INTO flow_runs (id, project, flow, trigger, status, error, finished) VALUES (%s, %s, %s, %s, 'stopped',"

@@ -142,7 +142,7 @@ relationship onto `cafes`) and the café type lists it as a property with a mean
   with the file, the field and the fix: a Slack, Teams or webhook channel, `notify`, an approval, a tool step,
   `run_flow`, a report, docs or tool result attached to a send, an "answer changed" check, and an object type on a
   live table (its own, a one-to-one property's or the recipients link's). Inside the run every published API tool is
-  refused too, reading ones as well (an agent's tool call included). It can't be run by hand. A failed run is reported in the owner's own Inbox, not in the project's alerts.
+  refused too, reading ones as well, and so is `propose_edit` (an agent's tool call included). It can't be run by hand. A failed run is reported in the owner's own Inbox, not in the project's alerts.
 - In the app, **Monitor › New monitor** makes the same flow: choose "each café" under Check and who it is for under
   Send to. On the Monitor card and in the Inbox, a café's name opens its page.
 

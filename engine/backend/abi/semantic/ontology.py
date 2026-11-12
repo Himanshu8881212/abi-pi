@@ -807,7 +807,7 @@ def recipients(conn, project: str, got: dict, rc: dict, user: User) -> dict:
     vals = list(dict.fromkeys(str(v).strip() for v in vals))
     users = conn.execute("SELECT id, name, workspace_owner, email FROM users WHERE (email = ANY(%s::text[]) OR name = ANY(%s::text[]))"
                          f" AND {IN_PROJECT}", [[v.lower() for v in vals], vals, p]).fetchall()
-    kept = {}
+    kept, nomail = {}, []
     for v in vals:
         u = next((u for u in users if v.lower() == u["email"] or v == u["name"]), None)
         if u is None:
@@ -819,7 +819,8 @@ def recipients(conn, project: str, got: dict, rc: dict, user: User) -> dict:
             skipped.append({"value": v, "why": f"can't see this {got['name']}"})
             continue
         kept[u["id"]] = u["email"]
-    return {"to": [e for e in kept.values() if e], "members": list(kept), "skipped": skipped}
+        nomail += [v] * (not u["email"])
+    return {"to": [e for e in kept.values() if e], "members": list(kept), "skipped": skipped, "nomail": nomail}
 
 
 class Where(BaseModel):

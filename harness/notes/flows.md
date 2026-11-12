@@ -11,5 +11,7 @@
   post and emails reach only project members who can see that object. `"recipients": {"property": <an email or person
   property>, "link"?: <link id>}` sends to the people the object names; use `"to": "{{ data.trigger.recipients }}"` with
   `"when": {"value": "{{ data.trigger.recipients }}", "op": "!=", "to": []}` on that step (without it, a run whose
-  people have no email stops there). Only refresh, agent, snapshot, condition steps and inbox/email sends run in it.
+  people have no email stops there). It runs only steps refresh, agent, snapshot, condition (on a measure) and the
+  actions send_email, post_message (channel inbox), refresh, run_agent, report_snapshot, semantic_query, get_object,
+  list_objects, visual_data; inside it every API tool and propose_edit are refused, an agent step's calls too.
 - `run_flow` runs now; `flow_runs` shows status. `subscribe` sets a person's own alert.

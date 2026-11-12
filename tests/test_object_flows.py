@@ -736,7 +736,8 @@ def test_the_run_itself_refuses_what_the_save_check_refuses(w):
             ({"id": "post", "type": "action", "action": "post_message", "input": {"channel": "ops", "text": "Behind {{ data.trigger.title }}"}},
              "step 'post' failed: An alert for one object reaches only project members who see it: channel 'ops' has readers that can't be"
              " checked. Post to channel inbox, or use send_email."),
-            ({"id": "tool", "type": "tool", "tool": "hook"}, "step(s) tool aren't ones an alert for one object may run."))):
+            ({"id": "tool", "type": "tool", "tool": "hook"}, "step(s) tool aren't ones an alert for one object may run. Save the flow again with only"
+             " these steps: refresh a table, ask an agent, export a report, check a measure, post to the Inbox, send an email."))):
         sure("save_flow", project=P, flow=flow("behind_alarm", [POST | {"input": POST["input"] | {"text": "Behind {{ data.trigger.title }}"}}]))
         f = json.loads(path.read_text())
         path.write_text(json.dumps(f | {"steps": [step]}))  # behind ABI's back: what no save lets through
@@ -784,6 +785,16 @@ def test_the_run_itself_refuses_what_the_save_check_refuses(w):
     assert sorted(x["status"] for x in runs("mixed_alarm", 3)) == ["failed", "failed", "ok"]
     told = [m["text"] for m in inbox() if m["text"].startswith("Flow Mixed alarm (owner ")]
     assert len(told) == 1 and told[0].endswith(HINT) and not [m for m in inbox() if "Mixed alarm" in m["text"] and "works again" in m["text"]], told
+    r = engine("import sys\nfrom abi import db\nwith db.connect() as c:\n    c.execute(\"UPDATE inbox SET at = at - interval '2 days' WHERE project = %s"
+               " AND text LIKE 'Flow Mixed alarm (owner %%'\", sys.argv[1:])".replace("sys.argv[1:]", json.dumps([P])))  # round 4: two days on
+    assert r.returncode == 0, r.stderr[-2000:]
+    alarms(w)
+    tick("mixed_alarm", ahead=61)
+    alarms(w, s)
+    tick("mixed_alarm", ahead=62)
+    runs("mixed_alarm", 4)
+    again = [m["text"] for m in inbox() if m["text"].startswith("Flow Mixed alarm (owner ")]
+    assert again == told * 2, "the same failure more than a day later is told again"
     # the people named have no email address: the run stops at the email step, with the reason
     sure("save_flow", project=P, flow=flow("nomail_alarm", [{k: v for k, v in MAIL.items() if k != "when"}, POST],
                                            recipients={"property": "cafe_contacts.manager"}))
@@ -799,6 +810,23 @@ def test_the_run_itself_refuses_what_the_save_check_refuses(w):
     assert r["status"] == "stopped" and r["error"] == ("stopped at step 'mail': the people this alert is for have no email address on their account,"
                                                        " so nothing was mailed."), r
     assert [x["step"] for x in r["steps"]] == ["_recipients", "mail"], "the post after it didn't run"
+    # round 4: the owner is told that person has no email address; a run that posted before it stopped keeps its cooldown
+    assert [m for m in inbox() if m["text"].startswith("Flow Nomail alarm couldn't reach") and f"{names[e]}: {w['made']['editor']} (has no email address"
+            " on their account: add one under Users & access)" in m["text"]]
+    sure("save_flow", project=P, flow=flow("posted_alarm", [POST | {"input": POST["input"] | {"text": "Posted {{ data.trigger.title }}"}},
+                                                            {k: v for k, v in MAIL.items() if k != "when"}], recipients={"property": "cafe_contacts.manager"}))
+    abi.call("set_user_email", name=w["made"]["editor"], email=None)
+    try:
+        for _ in (1, 2):  # two edges inside the cooldown
+            alarms(w)
+            tick("posted_alarm")
+            alarms(w, e)
+            tick("posted_alarm")
+        [r] = runs("posted_alarm", 1)
+    finally:
+        abi.call("set_user_email", name=w["made"]["editor"], email=w["mail"]["editor"])
+    assert r["status"] == "stopped" and [x["step"] for x in r["steps"]] == ["_recipients", "post", "mail"], r
+    assert len([m for m in inbox(w["tok"]["editor"]) if m["text"].startswith("Posted ")]) == 1, "one post: the second edge is inside its cooldown"
     # a stopped run (nobody to reach) starts no cooldown; a changed list of people is said again
     sure("save_flow", project=P, flow=flow("again_alarm", [POST | {"input": POST["input"] | {"text": "Again {{ data.trigger.title }}"}}],
                                            recipients={"property": "cafe_contacts.manager"}))
