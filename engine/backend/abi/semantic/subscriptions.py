@@ -78,7 +78,7 @@ def evaluate(project: str, c: dict, user_id: int | None) -> dict:
             a, b = v.get(now), v.get(before)
             pct = round((a - b) / abs(b) * 100, 4) if a is not None and b else None
             cols = [*keys, m, *(f"previous_{k.split('.', 1)[1]}" for k in keys), f"previous_{m}", "change_pct"]
-            rows, m = ([[*now, a, *before, b, pct]] if before else []), "change_pct"
+            rows = [[*now, a, *before, b, pct]] if before else []
         else:
             rows = [row for row in rows if tuple(row[:n]) == now]
     return {"holds": bool(held(c, cols, rows)), "columns": cols, "rows": rows, "measures": r["measures"], "filters": r["filters"]}

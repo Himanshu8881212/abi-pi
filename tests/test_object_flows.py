@@ -41,6 +41,10 @@ from datetime import UTC, datetime, timedelta
 from abi import db, flows
 a = json.loads(sys.stdin.read())
 cap, flows.PER_TICK = flows.PER_TICK, a.get("cap") or flows.PER_TICK
+if a.get("slow"):  # this tick holds the flow's lock for a while after it started a run
+    import time
+    start = flows.start
+    flows.start = lambda *x, **k: (start(*x, **k), time.sleep(a["slow"]))[0]
 for f in a["flows"]:
     flows._data_condition(a["project"], flows._load(a["project"], f), datetime.now(UTC) + timedelta(minutes=a["ahead"]))
 with db.connect() as c:
@@ -49,6 +53,17 @@ with db.connect() as c:
     feed = [r["message"] for r in c.execute("SELECT message FROM notifications WHERE project = %s AND message LIKE %s ORDER BY id DESC LIMIT 1",
                                             [a["project"], "%data condition%"])]
 print(json.dumps({"cap": cap, "state": state, "feed": feed}))
+"""
+
+# the worker's whole minute tick (flows.tick), as if the projects on disk were all but one
+WHOLE = r"""
+import json, sys
+from datetime import UTC, datetime
+from abi import flows
+a = json.loads(sys.stdin.read())
+real = flows.git.projects
+flows.git.projects = lambda: [p for p in real() if p != a["without"]]
+flows.tick(datetime.now(UTC))
 """
 
 # a database as schema 6 left it (flow_conditions keyed by project and flow, one row of state), upgraded by this code
@@ -83,9 +98,9 @@ def sql(q: str) -> list:
     return abi.call("sql_query", project=P, sql=q)["rows"]
 
 
-def tick(fid: str, ahead: int = 0, cap: int | None = None, check: bool = True) -> dict:
+def tick(fid: str, ahead: int = 0, cap: int | None = None, check: bool = True, slow: int = 0) -> dict:
     """One check of flow `fid`; returns the cap as shipped and the flow's state: {object: holds}, '' the flow's own row."""
-    r = engine(TICK, timeout=600, stdin=json.dumps({"project": P, "flows": [fid] if check else [], "state": fid, "ahead": ahead, "cap": cap}))
+    r = engine(TICK, timeout=600, stdin=json.dumps({"project": P, "flows": [fid] if check else [], "state": fid, "ahead": ahead, "cap": cap, "slow": slow}))
     assert r.returncode == 0, r.stderr[-2000:]
     out = json.loads(r.stdout.splitlines()[-1])
     assert not [m for m in out["feed"] if "can't be checked" in m], out["feed"]
@@ -474,7 +489,7 @@ def test_app_says_it_per_object(w, tmp_path):
     flow. Monitor and the flow's page say "For each café" and "Send to: the café's manager", never an id; the flow's
     page offers no Run now. The Inbox alert names its café and opens the café's page. Screenshots beside (tmp_path)."""
     import app
-    from test_pages import Browser, drive
+    from test_pages import OWNER, Browser, drive
     e, name, hubs = w["e"], w["names"][w["e"]], set(app.HUBS)
     alarms(w)
     srv = app.serve(P, 0, open_browser=False, signin=True)
@@ -490,7 +505,8 @@ def test_app_says_it_per_object(w, tmp_path):
             ["get", "send_hidden", f"({form % json.dumps('Send to')}).hidden"],
             ["get", "check", pick("Check", "cafes.cafe_id")], ["get", "send_to", f"[...({form % json.dumps('Send to')}).options].map(o => o.text)"],
             ["get", "to", pick("Send to", json.dumps({"property": "cafe_contacts.manager"}, separators=(",", ":")))],
-            ["text", "sum", "main .monform p.sum"], ["shot", str(tmp_path / "monitor-form.png")],
+            ["text", "sum", "main .monform p.sum"], ["get", "hint", f"(e => e.hidden ? '' : e.textContent)(({form % json.dumps('Send to')}).nextElementSibling)"],
+            ["shot", str(tmp_path / "monitor-form.png")],
             ["click", "main .monform button:has-text('Create')"], ["wait", "#confirm[open]"], ["click", "#c-yes"],
             ["until", f"({card})?.innerText.includes('For each café')"], ["until", f"({card})?.innerText.includes('No café where')"], ["get", "card", f"({card}).innerText"]])
         assert out["check"] == "each café, with an alert of its own" and out["send_hidden"] is True, out
@@ -498,6 +514,7 @@ def test_app_says_it_per_object(w, tmp_path):
         assert out["sum"] == "For each café: alerts when Alarm is above 0. Send to: the café's manager, in the Inbox.", out["sum"]
         assert "For each café: ABI checks it every minute, also with this page closed. Send to: the café's manager, in the Inbox." in out["card"]
         assert "No café where Alarm is above 0" in out["card"], out["card"]
+        assert out["hint"].startswith("People are found by their account's email or name."), out["hint"]  # round 2 (M2)
         f = json.loads((abi.ABI_PROJECTS / P / "flows/monitor_alarm_raised.json").read_text())
         assert f["trigger"]["per"] == "cafe" and f["trigger"]["recipients"] == {"property": "cafe_contacts.manager"} and f["enabled"]
         assert f["steps"][0]["input"]["text"] == "Monitor: Alarm raised: {{ data.trigger.title }}. It alerts for each café when Alarm is above 0."
@@ -509,6 +526,8 @@ def test_app_says_it_per_object(w, tmp_path):
         msg = f"[...document.querySelectorAll('main .item')].find(d => d.textContent.includes({json.dumps(text)}))"
         out = drive(ed, tmp_path, [
             ["show", "monitor"], ["until", f"({card})?.innerText.includes('Holds now')"], ["get", "card", f"({card}).innerText"], ["shot", str(tmp_path / "monitor.png")],
+            ["get", "links", f"[...({card}).querySelectorAll('.mtext .oopen')].map(b => b.textContent)"],  # round 2 (M1): a name opens its page
+            ["click", "main .mtext .oopen"], ["wait", "main .kv"], ["text", "opened", "main h1"],
             ["show", "flw:monitor_alarm_raised"], ["wait", "main .lastrun"], ["until", "document.querySelector('main .lastrun .oopen')"],
             ["get", "flow", "document.querySelector('main').innerText"], ["all", "buttons", "main .bar.top button"],
             ["shot", str(tmp_path / "flow.png")],
@@ -521,6 +540,16 @@ def test_app_says_it_per_object(w, tmp_path):
         assert "Runs by itself, once for each café that starts to meet its condition." in out["flow"] and "Run now" not in out["buttons"], out["buttons"]
         assert not re.search(r"cafe_id|cafe_contacts|data\.trigger|monitor_alarm|\bper\b", out["flow"] + out["card"]), "no ids, columns or field names"
         assert out["open"] == f"Open {name}" and name in out["figs"] and out["title"] == name, out
+        assert out["links"] == [name] and out["opened"] == name, "on the Monitor card, the café's name opens the café's page"
+        rest = [m for m in inbox() if "started to meet its condition" in m["text"] and m["data"].get("objects")]
+        if rest and OWNER.exists():  # round 2 (M1): the owner's message of the objects past the cap, each by its name
+            item = f"[...document.querySelectorAll('main .item')].find(d => d.textContent.includes({json.dumps(rest[-1]['text'])}))"
+            seen = drive(Browser(srv.server_address[1], "admin", OWNER, P), tmp_path, [
+                ["show", "inbox"], ["until", f"!!({item})"], ["get", "names", f"[...({item}).querySelectorAll('.oopen')].map(b => b.textContent)"],
+                ["get", "heads", f"[...({item}).querySelectorAll('th')].map(t => t.textContent)"], ["shot", str(tmp_path / "inbox-rest.png")],
+                ["get", "_", f"({item}).querySelector('.oopen').click()"], ["wait", "main .kv"], ["text", "title", "main h1"]])
+            assert seen["names"] == [o["title"] for o in rest[-1]["data"]["objects"]] and seen["title"] == seen["names"][0], seen
+            assert seen["heads"] == ["Café", "Alarm"], "its name and the figures, no key column"
         assert all((tmp_path / f"{x}.png").stat().st_size > 10_000 for x in ("monitor-form", "monitor", "flow", "inbox"))
         ed.page()
         r = ed.post("/monitor", {"action": "delete", "id": "alarm_raised"})  # its flow goes with it, after ABI's confirmation
@@ -531,6 +560,128 @@ def test_app_says_it_per_object(w, tmp_path):
         for k in set(app.HUBS) - hubs:
             app.HUBS.pop(k, None)
         alarms(w)
+
+
+def feed(token: str) -> list:
+    """The project's alerts as this person's Inbox page gets them."""
+    with abi.as_user(token):
+        return [n["message"] for n in abi._open("GET", "/api/notifications")[1] if n.get("project") == P]
+
+
+def test_the_owner_is_told_whom_an_alert_cannot_reach(w):
+    """Round 2 (M2, L3, L5, L11): a recipient who isn't in the project, or nobody named, no longer ends silently: the
+    flow's owner gets one Inbox message naming the cafés and people and what to do, said again only when it changes. A
+    one-to-one property reads in a step as {{ data.trigger.object.<table>.<column> }}. With a cap, the rest are listed
+    by key and name so each opens, and "got an alert" counts only the runs started. A failed run is told to the owner's
+    Inbox, never to the project's feed, where a restricted Viewer would learn that some café met the condition."""
+    a, b, n, e, names, out = w["a"], w["b"], w["n"], w["e"], w["names"], w["mail"]["outsider"]
+    post = POST | {"input": POST["input"] | {"text": "Told: {{ data.trigger.title }}, managed by {{ data.trigger.object.cafe_contacts.manager }}"}}
+    sure("save_flow", project=P, flow=flow("told_alarm", [post], recipients={"property": "cafe_contacts.manager"}))
+    alarms(w)
+    tick("told_alarm")
+    alarms(w, a, b, n)
+    tick("told_alarm")
+    assert sorted(r["status"] for r in runs("told_alarm", 3)) == ["ok", "stopped", "stopped"]
+    head = "Flow Told alarm couldn't reach everyone its alert is for. "
+    told = [m["text"] for m in inbox() if m["text"].startswith(head)]
+    part = {b: f"{names[b]}: {out} (not a member of this project)", n: f"{names[n]}: nobody is named"}
+    assert told == [head + "; ".join(part[k] for k in sorted(part)) + ". People are found by their account's"
+                    " email or name: add the person to this project with that email (People), or correct the value. They get the alert the"
+                    " next time the condition starts to hold for that café."], told
+    for who in ("editor", "north"):
+        assert not [m for m in inbox(w["tok"][who]) if "couldn't reach" in m["text"]], f"{who} is not told"
+    mine = [m["text"] for m in inbox(w["tok"]["north"]) if m["text"].startswith("Told: ")]
+    assert mine == [f"Told: {names[a]}, managed by {w['mail']['north']}"], "a one-to-one property, as the recipient sees it"
+    alarms(w)
+    tick("told_alarm", ahead=61)
+    alarms(w, a, b, n)
+    tick("told_alarm", ahead=62)
+    runs("told_alarm", 6)
+    assert [m["text"] for m in inbox() if m["text"].startswith(head)] == told, "the same people again: not said twice"
+    # under the cap: one run started (café a's), the others listed by key and name; a stopped one is not "an alert"
+    sure("save_flow", project=P, flow=flow("few_alarm", [post], recipients={"property": "cafe_contacts.manager"}))
+    alarms(w)
+    tick("few_alarm")
+    alarms(w, a, b, e)
+    cafes = sorted([a, b, e])
+    tick("few_alarm", cap=2)
+    got = {r["object"]["key"][0]: r["status"] for r in runs("few_alarm", 2)}
+    assert set(got) == set(cafes[:2]), got
+    [rest] = [m for m in inbox() if m["text"].startswith("Flow Few alarm: 3 ")]
+    started = sum(v == "ok" for v in got.values())
+    assert f"{started} of them got an alert. The other 1 are listed here" in rest["text"], rest["text"]
+    assert rest["data"]["objects"] == [{"key": [cafes[2]], "title": names[cafes[2]]}] and rest["data"]["type"] == "cafe"
+    assert rest["data"]["keys"] == ["cafes.cafe_id"] and rest["data"]["rows"] == [{"cafes.cafe_id": cafes[2], "alarm": 1}]
+    # a failed run: the owner's Inbox, not the feed
+    sure("save_flow", project=P, flow=flow("fail_alarm", [{k: v for k, v in MAIL.items() if k != "when"} | {
+        "input": MAIL["input"] | {"to": [f"x@unconfirmed-{w['dom']}"]}}]))
+    r = engine("import sys\nfrom abi import db\nwith db.connect() as c:\n    c.execute('DELETE FROM send_targets WHERE project = %s AND target = %s',"
+               " sys.argv[1:])".replace("sys.argv[1:]", json.dumps([P, f"email:unconfirmed-{w['dom']}"])))  # as if never confirmed
+    assert r.returncode == 0, r.stderr[-2000:]
+    alarms(w)
+    tick("fail_alarm")
+    alarms(w, a)
+    tick("fail_alarm")
+    [r] = runs("fail_alarm", 1)
+    assert r["status"] == "failed" and r["error"].endswith("yourself and confirm it; the next run then sends."), r["error"]
+    assert [m["text"] for m in inbox() if m["text"].startswith("Flow Fail alarm (owner ")][-1].endswith(r["error"])
+    for who in ("north", "editor"):
+        assert not [m for m in feed(w["tok"][who]) if "Fail alarm (owner" in m], f"nothing of it in {who}'s feed"
+    assert not [m for m in feed(w["tok"]["north"]) if re.search(r"Flow (Told|Few|Fail|Late|Cafe|Cap|Manager|Linked|Members|Literal) alarm \(owner", m)], \
+        "a restricted Viewer's feed never says that a per-object alert ran"
+
+
+def test_overlapping_ticks_and_the_cleanup_keep_the_state(w):
+    """Round 2 (L1, L2): a tick that waited for another's lock reads the state that tick wrote, so the cap holds and the
+    rest are reported once; the worker's cleanup leaves a switched-off flow's rows and those of a project not listed
+    in that tick."""
+    cafes = sorted(w[k] for k in "abs")
+    sure("save_flow", project=P, flow=flow("twice_alarm", [POST | {"input": POST["input"] | {"text": "Twice {{ data.trigger.title }}"}}]))
+    alarms(w)
+    tick("twice_alarm")
+    alarms(w, *cafes)
+    env = subprocess.run(["sh", "-c", "scripts/engine.sh env"], cwd=ROOT, capture_output=True, text=True).stdout
+    first = subprocess.Popen(["sh", "-c", f"{env}\nexec {ROOT / 'engine/backend/.venv/bin/python'} -c \"$0\"", TICK], cwd=ROOT, text=True,
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    first.stdin.write(json.dumps({"project": P, "flows": ["twice_alarm"], "state": "twice_alarm", "ahead": 0, "cap": 1, "slow": 20}))
+    first.stdin.close()
+    end = time.monotonic() + 120  # its run is in, its lock held
+    while not abi.call("flow_runs", project=P, flow="twice_alarm")["runs"]:
+        assert time.monotonic() < end and first.poll() is None, first.stderr.read()[-2000:]
+        time.sleep(0.5)
+    state = tick("twice_alarm", cap=1)["state"]  # waits for the first one
+    assert first.wait(120) == 0, first.stderr.read()[-2000:]
+    assert state == {"": False} | {json.dumps([k]): True for k in cafes}
+    assert [r["object"]["key"][0] for r in runs("twice_alarm", 1)] == cafes[:1], "one run: the second tick saw the first one's state"
+    assert len([m for m in inbox() if m["text"].startswith("Flow Twice alarm: 3 ")]) == 1, "the rest are reported once"
+    # the cleanup: the flow is switched off and stays; then its project isn't among those the tick lists
+    for without in ("", P):
+        r = engine(WHOLE, timeout=600, stdin=json.dumps({"without": without}))
+        assert r.returncode == 0, r.stderr[-2000:]
+        assert tick("twice_alarm", check=False)["state"] == state, f"rows kept (tick without {without or 'nothing'})"
+
+
+def test_a_per_object_flow_runs_only_what_is_on_its_list(w):
+    """Round 2 (M3, L6, L9): an allow-list at save, each refusal with file, field and fix: no status post (notify), no
+    approval, tool step, run_flow or "answer changed" check, and no attached rows that can't be filtered to the object;
+    and a published tool that sends is refused inside the run, before anything else of it."""
+    said = lambda f: {p: (e, fix) for _, p, e, fix in refused(f)}  # noqa: E731
+    steps = [{"id": "ok", "type": "approval", "message": "Send it?"}, {"id": "tool", "type": "tool", "tool": "lookup"},
+             {"id": "again", "type": "action", "action": "run_flow", "input": {"flow": "cafe_alarm"}},
+             {"id": "ask", "type": "agent", "agent": "helper", "prompt": "Why?"}, {"id": "new", "type": "condition", "changed": "ask"},
+             POST | {"input": POST["input"] | {"data": {"measures": ["site_alarm"]}}}]
+    got = said(flow("listed", steps) | {"notify": {"channel": "ops", "on": ["failed"]}})
+    assert "Leave `notify` out" in got["$.notify"][1] and "aren't posted to a channel" in got["$.notify"][0]
+    for i, what in ((0, "approval"), (1, "tool"), (2, "run_flow")):
+        e, fix = got[f"$.steps[{i}]"]
+        assert f"({what}) isn't one an alert for one object may run" in e and "Use only agent, condition, refresh, snapshot steps" in fix, (e, fix)
+    assert "$.steps[3]" not in got or "may run" not in got["$.steps[3]"][0], "an agent step is on the list (its sends are checked when it runs)"
+    assert "compares with the run before it, which is another object's" in got["$.steps[4]"][0]
+    e, fix = got["$.steps[5].input.data"]
+    assert e.startswith("Step 'post' attaches rows that can't be filtered to one Café: ") and "table 'cafes'" in fix
+    assert not (abi.ABI_PROJECTS / P / "flows/listed.json").exists()
+    src = (ROOT / "engine/backend/abi/tools/__init__.py").read_text()
+    assert src.index("if sends(t) and builtin.flows.OBJECT.get():") < src.index("if sends(t) and (test := builtin.flows.TEST_RUN.get()) is not None:")
 
 
 def test_a_pending_step_stays_waiting_when_the_person_is_in_viewer_mode():

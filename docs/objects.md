@@ -117,21 +117,31 @@ relationship onto `cafes`) and the café type lists it as a property with a mean
 - `per` is the object type's `id`. ABI checks the condition for each café and starts one run for each café whose row
   **starts** to hold; a café that keeps holding gets no second alert until it stops and starts again (and
   `cooldown_minutes` has passed, a day by default). At most 50 cafés start in one check; if more start at once, the
-  flow's owner gets one Inbox message listing the others.
-- A run reads its café as `{{ data.trigger.title }}`, `{{ data.trigger.key }}` and `{{ data.trigger.object.<column> }}`.
+  flow's owner gets one Inbox message listing the others by name.
+- A run reads its café as `{{ data.trigger.title }}`, `{{ data.trigger.key }}` and `{{ data.trigger.object.<column> }}`;
+  a property from a one-to-one table as `{{ data.trigger.object.cafe_contacts.manager }}`.
 - `recipients.property` is a property with the meaning `email` or `person`. Its value names a **project member**, by
   their account's email or name. With `"link": "<link id>"` it is read from the objects that link reaches instead
   (a café's employees). Leave `recipients` out and the Inbox post goes to everyone in the project who can see the café.
 - Only project members are ever sent to, and each only when they can see that café themselves. They get their own
-  rows of `data`, filtered to the café. Anyone else is skipped, and the run's trace (`flow_runs`) says who and why.
-  An address in the data never becomes a recipient by itself.
+  rows of `data`, filtered to the café. An address in the data never becomes a recipient by itself. Anyone else is
+  skipped: the run's trace (`flow_runs`) says who and why, and the flow's owner gets an Inbox message naming them and
+  what to do (add the person to the project with that email). When nobody can be reached the run ends as stopped.
+- The condition is checked with the flow owner's access. A recipient who can see the café but not all of its rows
+  (some of its orders, say) still learns that the café met the condition; the rows they get are only their own.
 - `{{ data.trigger.recipients }}` is those members' account emails. The first email to a domain the project hasn't
-  mailed before still waits for a person: until someone has sent one email there and confirmed it, the email step
-  fails with "needs confirmation".
-- A per-object alert posts to the Inbox or sends email. It can't post to a Slack or Teams channel, attach a report or
-  a published tool's result, or be run by hand.
+  mailed before still waits for a person: the email step fails with "needs confirmation" and says what to do. To
+  confirm, send one email to an address of that domain yourself (ask the agent, or `send_email`) and confirm ABI's
+  question; the next alert then goes out.
+- What a per-object alert may do, and nothing else: steps `refresh`, `agent`, `snapshot` and `condition` (on a
+  measure), and the actions `send_email`, `post_message` to channel `inbox`, `refresh`, `run_agent`,
+  `report_snapshot`, `semantic_query`, `get_object`, `list_objects` and `visual_data`. Saving refuses everything else
+  with the file, the field and the fix: a Slack, Teams or webhook channel, `notify`, an approval, a tool step,
+  `run_flow`, a report, docs or tool result attached to a send, an "answer changed" check, and an object type on a
+  live table. Inside the run a published tool that sends a request outside is refused too (an agent's tool call as
+  well). It can't be run by hand. A failed run is reported in the owner's own Inbox, not in the project's alerts.
 - In the app, **Monitor › New monitor** makes the same flow: choose "each café" under Check and who it is for under
-  Send to.
+  Send to. On the Monitor card and in the Inbox, a café's name opens its page.
 
 ## Who can use a form
 

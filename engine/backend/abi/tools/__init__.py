@@ -270,6 +270,9 @@ def run_tool(conn, user: User, args: RunTool) -> dict:
         have = Role.viewer
     if (have or 0) < need:
         raise ActionFailed(403, f"Tool '{args.tool}' needs the {need.name} role in project '{args.project}'.")
+    if sends(t) and builtin.flows.OBJECT.get():  # 1.2.6 M8: also an agent step's tool call
+        raise ActionFailed(403, f"Tool '{args.tool}' sends a {t['request']['method']} request outside; an alert for one object reaches only"
+                                " project members who see it. Use post_message (channel inbox) or send_email.")
     if sends(t) and (test := builtin.flows.TEST_RUN.get()) is not None:  # AT-4: a test run's outside write reaches only the owner's inbox
         method, host = t["request"]["method"], urlsplit(t["request"]["url"]).hostname
         builtin._inbox(conn, args.project, user, f"Test run: {method} request to {host} through tool {t['id']} (not sent)", None, None, test)

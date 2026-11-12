@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field, ValidationError
 from abi import actions, semantic, storage
 from abi.actions import ActionFailed, action, require_confirmation
 from abi.project import SCHEMA, bundle, git
-from abi.security import Role, User, role_in
+from abi.security import IN_PROJECT, Role, User, role_in
 from abi.semantic import lineage, live, model, rls
 
 FILE = "model/ontology.json"
@@ -774,6 +774,17 @@ def get_object(conn, user: User, args: Get) -> dict:
 RECIPIENTS = 50  # send_email takes as many addresses
 
 
+def nested(columns: list, row: list) -> dict:
+    """An object's values by column; a one-to-one property (`table.column`) also under its table, so a flow reads it as
+    {{ data.trigger.object.<table>.<column> }} (a path splits on dots). A column of the object named like that table wins."""
+    out = dict(zip(columns, row))
+    for c, v in zip(columns, row):
+        t, _, col = c.partition(".")
+        if col and isinstance(out.setdefault(t, {}), dict):
+            out[t][col] = v
+    return out
+
+
 def recipients(conn, project: str, got: dict, rc: dict, user: User) -> dict:
     """1.2.6 M8 (owner, 6 Nov 2026): who a per-object alert is for. The values of the email or person property
     `rc.property` of object `got` (get_object's answer), or of the objects `rc.link` reaches from it, read as `user` (the
@@ -794,8 +805,8 @@ def recipients(conn, project: str, got: dict, rc: dict, user: User) -> dict:
     if len(vals) > RECIPIENTS:
         vals, skipped = vals[:RECIPIENTS], [{"value": None, "why": f"more than {RECIPIENTS} recipients: only the first {RECIPIENTS} are used"}]
     vals = list(dict.fromkeys(str(v).strip() for v in vals))
-    users = conn.execute("SELECT id, name, workspace_owner, email FROM users WHERE (email = ANY(%s::text[]) OR name = ANY(%s::text[])) AND (workspace_owner"
-                         " OR id IN (SELECT user_id FROM project_roles WHERE project = %s))", [[v.lower() for v in vals], vals, p]).fetchall()
+    users = conn.execute("SELECT id, name, workspace_owner, email FROM users WHERE (email = ANY(%s::text[]) OR name = ANY(%s::text[]))"
+                         f" AND {IN_PROJECT}", [[v.lower() for v in vals], vals, p]).fetchall()
     kept = {}
     for v in vals:
         u = next((u for u in users if v.lower() == u["email"] or v == u["name"]), None)

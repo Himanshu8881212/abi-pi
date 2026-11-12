@@ -165,6 +165,9 @@ MEMBERS = ("(tenant IS NOT DISTINCT FROM (SELECT tenant FROM project_tenants WHE
            " OR id IN (SELECT user_id FROM project_roles WHERE project = %s))")
 
 
+IN_PROJECT = "(workspace_owner OR id IN (SELECT user_id FROM project_roles WHERE project = %s))"  # holds a role there (`role_in`)
+
+
 def tenant_of(conn: psycopg.Connection, user: User) -> str | None:
     """The account's tenant (SC-9); None = a platform account."""
     row = conn.execute("SELECT tenant FROM users WHERE id = %s", [user.id]).fetchone()

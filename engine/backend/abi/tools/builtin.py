@@ -7,8 +7,11 @@ print view of a report page or visual in one headless Chromium per call (Playwri
 Every `${secret:NAME}` they use is checked against its allowed hosts before any connection (D-2). Channel `inbox` is
 the project's in-app inbox (AT-1, IB-1), stored in Postgres. AT-4: inside a task test run (`flows.TEST_RUN`) both send
 actions send nothing out and write one private inbox message to the task owner naming the original targets.
-1.2.6 M8: inside a per-object run (`flows.OBJECT`) both send only to project members who see the run's object themselves,
-each with their own rows of the attached request, filtered to that object (`_only`, `_seeing`).
+1.2.6 M8: inside a per-object run (`flows.OBJECT`) send_email mails only the account addresses of project members who see
+the run's object themselves, and post_message posts only to the inbox, to those members (the trigger's recipients, else
+everyone who sees it); each gets their own rows of the attached query or condition, filtered to that object (`_only`,
+`_seeing`). A channel, a tool's result, a report and the docs are refused there; so is a published tool that sends
+(tools.run_tool), a status post (`notify`) and every step outside flows._per_ok.
 FL-6: the first send to an email domain or channel not yet confirmed in the project needs a confirmation (D-1 style
 409 + token, from any caller); confirmed targets are stored per project. Principle 7: when the agent sends, every
 number in its text must be a value of the attached tool or query result (`data`), which goes with the message.
@@ -531,16 +534,19 @@ def _only(project: str, ob: dict, args) -> SemanticQuery | Check | None:
     return args.data.model_copy(update={"query": q}) if isinstance(args.data, Check) else q
 
 
-def _seeing(conn, project: str, ob: dict, where: str, values: list, request: SemanticQuery | Check | None, filled: dict) -> list[tuple]:
+def _seeing(conn, project: str, ob: dict, where: str, values: list, request: SemanticQuery | Check | None, filled: dict,
+            restricted: bool = False) -> list[tuple]:
     """1.2.6 M8 (owner, 6 Nov 2026): the project members matching `where` who see a per-object run's object themselves
     (get_object as each; anyone else gets nothing and learns nothing), each with what is theirs: (the account; the texts:
     an unrestricted member's as the run filled them, a restricted Viewer's the authored text with {{ data.trigger.title }}
     and {{ data.trigger.object.* }} from the object as they see it and every other value masked, D-47; the attached
-    request's rows read as them, or None; the object as they see it: type, key, title)."""
+    request's rows read as them, or None; the object as they see it: type, key, title). `restricted`: restricted Viewers only."""
     raw, out = flows.RAW.get() or {}, []
-    for u in conn.execute(f"SELECT id, name, workspace_owner, email FROM users WHERE {where} AND (workspace_owner OR id IN"
-                          " (SELECT user_id FROM project_roles WHERE project = %s)) ORDER BY id", [*values, project]).fetchall():
+    for u in conn.execute(f"SELECT id, name, workspace_owner, email FROM users WHERE {where} AND {security.IN_PROJECT} ORDER BY id",
+                          [*values, project]).fetchall():
         me = User(u["id"], u["name"], u["workspace_owner"])
+        if restricted and not rls.restricted(project, me.id):
+            continue
         try:
             got = ontology.get_object(conn, me, ontology.Get(project=project, type=ob["type"], key=ob["key"]))
         except ActionFailed:
@@ -549,7 +555,7 @@ def _seeing(conn, project: str, ob: dict, where: str, values: list, request: Sem
             own = _data(conn, me, project, request)
         except ActionFailed:
             own = None
-        view = {"trigger": {"title": got["title"], "object": dict(zip(got["columns"], got["rows"][0]))}}
+        view = {"trigger": {"title": got["title"], "object": ontology.nested(got["columns"], got["rows"][0])}}
 
         def mine(m: re.Match, view=view) -> str:
             try:
@@ -632,8 +638,7 @@ def post_message(conn, user: User, args: PostMessage) -> dict:
                 got = _seeing(conn, args.project, ob, "id = ANY(%s::bigint[])", [ob["members"]], req, {"text": args.text})
             else:  # everyone who sees it: unrestricted members see every object (one post), restricted Viewers a copy each
                 _inbox(conn, args.project, user, args.text, (data or none) | {"object": {k: ob[k] for k in ("type", "key", "title")}}, None)
-                got = _seeing(conn, args.project, ob, "NOT workspace_owner AND id IN (SELECT user_id FROM project_roles WHERE project = %s"
-                              " AND role = 'viewer')", [args.project], req, {"text": args.text}) if rls.rules(args.project) else []
+                got = _seeing(conn, args.project, ob, "TRUE", [], req, {"text": args.text}, True) if rls.rules(args.project) else []
             for u, t, own, o in got:
                 _inbox(conn, args.project, user, t["text"], (own or none) | {"object": o}, None, u["id"])
         elif args.channel == INBOX:
