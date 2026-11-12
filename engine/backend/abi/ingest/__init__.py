@@ -216,9 +216,20 @@ def readable(conn, user: User, project: str, location: str) -> None:
                             " workspace owner (who reads every path in the files folder).")
 
 
+def _not_decisions(project: str, t: str) -> None:
+    """1.2.6 M11: no load and no steps fill the table that keeps a type's same-as decisions: its rows are decide_same's
+    write-back batches only (a person's confirmed decisions)."""
+    from abi.semantic import same  # not at top: it imports the semantic package
+
+    if x := same.kept(project, t):
+        raise ActionFailed(409, f"Table '{t}' is kept for the decisions about which {x['plural']} are the same one (object type"
+                                f" '{x['id']}' has `resolve`): nothing loads into it. Load under another name.")
+
+
 @action(Role.editor, definition=True)
 def add_data(conn, user: User, args: Source) -> dict:
     """Loads a file, folder, database or HTTP API into the project's table as a new snapshot, replacing that table's data, saves the source as sources/<table>.json, then refreshes the tables that read it. A REST/JSON or CSV API is an https `location` (the endpoint, fixed query parameters in `api.query`) with an `api` object: `records` is the JSON pointer to the array of records (e.g. /data/items), `pagination` how to get the next page (page or offset number in `param`, a cursor at `pointer` sent as `param`, or a next link at `pointer` or in the Link header), `auth` takes only ${secret:NAME} references (names from list_secrets, never a typed key), `columns` maps and types fields, `incremental` {field, param} sends the largest loaded value of `field` to load only new records, and `every_hours` sets the schedule (default daily). Loading from a host the project hasn't loaded from yet waits for the person's Confirm click. A big load (millions of rows) answers at once with a run ID and loads in the background: load_runs says when it is in."""
+    _not_decisions(args.project, args.table)
     if args.table in transform.inputs(args.project):  # D-20: an input table's name is reserved; a load would drop its edits
         raise ActionFailed(409, f"'{args.table}' is an input table (its rows are edits), so no data loads into it. Load"
                                 " under another name, or delete the input table first.")
@@ -253,6 +264,7 @@ class TableSteps(storage.ProjectRef):
 def set_steps(conn, user: User, args: TableSteps) -> dict:
     """Saves a table's transform steps (the first one names a loaded `source`, or a `table` the project builds: silver reads bronze's table and gold silver's, with no source read again), loads the table through them, then refreshes the tables that read it. On an input table (schema-first, declared columns) the steps map a source onto it: they must output exactly its declared column names with values that cast to the declared types; its hand-entered rows stay as edits. A big table answers at once with a run ID and loads in the background (load_runs)."""
     t, first = args.table, args.steps[0]
+    _not_decisions(args.project, t)
     try:
         transform.compile(t, args.steps)
         graph = _graph({**transform.tables(args.project), t: args.steps}, {f.stem for f in (git.path(args.project) / "sources").glob("*.json")})

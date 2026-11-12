@@ -684,7 +684,7 @@ async function api(action,args){
  const post=(u,b)=>fetch(u,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json());
  let r=await post('/api/'+action,{project:D.project,...args});
  if(action==='run_object_action')ASK_WHAT='';  // an action on an object is never a project delete, whatever it is called
- if(r.confirm){if(!await ask(action==='run_object_action'?{...actAsk(r.confirm),plain:true}:action==='decide_same'?{...r.confirm,plain:true,preview:''}:r.confirm))throw new Error('You declined. Nothing changed.');r=await post('/confirm/'+r.confirm.id)}
+ while(r.confirm){if(!await ask(action==='run_object_action'?{...actAsk(r.confirm),plain:true}:action==='decide_same'?{...r.confirm,plain:true,preview:''}:r.confirm))throw new Error('You declined. Nothing changed.');r=await post('/confirm/'+r.confirm.id)}
   if(r.error)throw Object.assign(new Error(plainErr(r.error)),{fields:r.fields});if(/^(set_|save_|delete_|add_|remove_|enable_|create_|edit_|approve_|reject_|undo|commit|publish_|train_|score_|decide_)/.test(action))refreshPending();return r.result}
 let PEND_T=null;function refreshPending(){clearTimeout(PEND_T);PEND_T=setTimeout(async()=>{try{D.pending=await (await fetch('/api/changes',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({project:D.project})})).json().then(x=>x.result||D.pending);vc();const cb=$('#changes');cb.classList.remove('pulse');void cb.offsetWidth;if(D.pending?.files?.length)cb.classList.add('pulse')}catch(e){}},400)}
 let ASK_WHAT='';  // what the person is deleting, for ABI's confirmation
@@ -1669,20 +1669,26 @@ function objectsPage(box,T){objBar(box,'obj:'+T.id);if(T.description&&T.descript
 function sameCard(box,T,key){if(!T.resolve||MODE==='viewer'||myRank()<2)return;const c=card('Possible duplicates'),many=T.plural.toLowerCase();c.classList.add('wide');c.hidden=true;box.append(c);
  const nm=o=>{const b=h('button','flink oopen',String(o.title??'(no name)'));b.onclick=()=>openObj(T.id,[o.key]);return b},
   line=(lead,os)=>{const d=h('div','txt');d.append(lead);os.forEach((o,i)=>d.append(i?(i===os.length-1?' and ':', '):' ',nm(o)));return d},
-  go=async(args,done,action)=>{try{await api(action||'decide_same',args);toast(done);show(CUR)}catch(e){toast(e.message,!/^You declined/.test(e.message))}};
- api('find_same',{type:T.id,...(key?{key:key[0]}:{})}).then(r=>{if(!c.isConnected)return;
-  r.groups.forEach((g,gi)=>{const d=h('div','item'),a=h('div','row acts'),n=g.objects.length,by=Object.fromEntries(g.objects.map(o=>[o.key,o])),keys=g.objects.map(o=>o.key);
+  go=async(args,done,action)=>{try{await api(action||'decide_same',args);toast(done);show(CUR)}catch(e){toast(e.message,!/^You declined/.test(e.message))}},
+  doubt=p=>p.why.some(w=>w.startsWith('different '));
+ api('find_same',{type:T.id,...(key?{key:key[0]}:{})}).then(r=>{if(!c.isConnected)return;let pri=1;
+  r.groups.forEach(g=>{const d=h('div','item'),a=h('div','row acts'),n=g.objects.length,by=Object.fromEntries(g.objects.map(o=>[o.key,o])),keys=g.objects.map(o=>o.key),unsure=g.pairs.some(doubt);
    d.append(line(`These ${n} ${many} look like the same one:`,g.objects));
-   g.pairs.slice(0,6).forEach(p=>{const e=h('div','file');if(n>2)e.append(nm(by[p.a]),' and ',nm(by[p.b]),': ');e.append(p.why.join(', '));d.append(e)});
-   a.append(btn(`Same ${low(T)}`,()=>go({type:T.id,keys,decision:'same'},`They count as one ${low(T)} now. Undo it under Decided.`),!gi),btn('Not the same',()=>go({type:T.id,keys,decision:'different'},'They won\'t be proposed again. Undo it under Decided.')));d.append(a);c.append(d)});
+   // what speaks against a group is always shown, and such a group never carries the page's one primary button
+   [...g.pairs.filter(doubt),...g.pairs.filter(p=>!doubt(p))].slice(0,6).forEach(p=>{const e=h('div','file');if(n>2)e.append(nm(by[p.a]),' and ',nm(by[p.b]),': ');e.append(p.why.join(', '));d.append(e)});
+   a.append(btn(`Same ${low(T)}`,()=>go({type:T.id,keys,decision:'same'},`They count as one ${low(T)} now. Undo it under Decided.`),!unsure&&pri),btn('Not the same',()=>go({type:T.id,keys,decision:'different'},'They won\'t be proposed again. Undo it under Decided.')));if(!unsure)pri=0;d.append(a);c.append(d)});
   if(r.more)c.append(h('p','file','There are more: decide these and the next ones show.'));
   if(r.note)c.append(h('p','file',`Some ${many} share a very common detail (an empty postcode, say) and weren't compared through it.`));
-  if((r.records||[]).length>1){if(!r.groups.length)c.querySelector('h3').lastChild.textContent=`Records of this ${low(T)}`;c.append(h('h4','sub',`Made of ${r.records.length} records`));r.records.forEach(o=>{const d=h('div','item'),a=h('div','row acts');d.append(h('div','txt',[o.title,o.source].filter(Boolean).join(' · ')));
+  if((r.records||[]).length>1){if(!r.groups.length)c.querySelector('h3').lastChild.textContent=`Records of this ${low(T)}`;else c.append(h('h4','sub',`Made of ${r.records.length} records`));
+   if(!r.groups.length)c.append(h('p','file',`Made of ${r.records.length} records`));r.records.forEach(o=>{const d=h('div','item'),a=h('div','row acts');d.append(h('div','txt',[o.title,o.source].filter(Boolean).join(' · ')));
     a.append(btn('Take out',()=>go({type:T.id,keys:[o.key],decision:'split'},`It is its own ${low(T)} again. Undo it under Decided.`)));d.append(a);c.append(d)})}
-  if(r.decisions.length){c.append(h('h4','sub','Decided'));if(!key&&r.decisions.length>5)c.append(h('p','file',`The latest 5. Each ${low(T)}'s page lists the decisions about it.`));r.decisions.slice(0,key?20:5).forEach(x=>{const d=h('div','item');
-    d.append(h('div','file',[cell(String(x.at).replace(' ','T')+'Z'),x.user,x.undone?'undone':''].filter(Boolean).join(' · ')),line({same:'The same one:',different:'Not the same:',split:'Taken out:'}[x.decision]||'Changed by hand:',x.objects));
-    if(!x.undone){const a=h('div','row acts');a.append(btn('Undo',()=>go({table:r.table,batch:x.batch},'Taken back.','undo_edits')));d.append(a)}c.append(d)})}
-  c.hidden=!c.querySelector('.item')}).catch(e=>{if(c.isConnected){c.append(h('p','empty',e.message));c.hidden=false}})}
+  c.hidden=!c.querySelector('.item');
+  // what was decided: a card of its own, under the type's list (never pushing it down) or under the object's records
+  if(r.decisions.length){const dc=card('Decided');dc.classList.add('wide');box.append(dc);if(!key&&r.decisions.length>5)dc.append(h('p','file',`The latest 5. Each ${low(T)}'s page lists the decisions about it.`));
+   r.decisions.slice(0,key?20:5).forEach(x=>{const d=h('div','item');
+    d.append(h('div','file',[cell(String(x.at).replace(' ','T')+'Z'),x.user,x.undone?'undone':''].filter(Boolean).join(' · ')),
+     x.out&&x.of?line(`Taken out of ${x.of.title??'it'}:`,x.out):line({same:'The same one:',different:'Not the same:',split:'Taken apart:'}[x.decision]||'Changed by hand:',x.objects));
+    if(!x.undone){const a=h('div','row acts');a.append(btn('Undo',()=>go({table:r.table,batch:x.batch},'Taken back.','undo_edits')));d.append(a)}dc.append(d)})}}).catch(e=>{if(c.isConnected){c.append(h('p','empty',e.message));c.hidden=false}})}
 // Data Model › Objects: the types as boxes and their connections as named lines with how many meet how many. A phone has
 // no canvas: it reads the picture ABI draws from the project's files (render.sections) and each type as a card
 function objectsHome(box){objBar(box,'objects');const L=(D.ontology.links||[]).filter(l=>otype(l.from)&&otype(l.to)),ids=OT().map(t=>t.id);
@@ -4379,7 +4385,7 @@ def serve(default: str, port: int = 8790, open_browser: bool = True, tailnet: bo
             return out
         except abi.ActionError as e:
             b = e.body if isinstance(e.body, dict) else {"message": str(e.body)}
-            if e.status == 409 and b.get("confirm_token") and token is None:
+            if e.status == 409 and b.get("confirm_token") and (token is None or action == "decide_same"):  # a decision whose rows changed meanwhile asks again (api() shows the new question)
                 cid = secrets.token_urlsafe(12)
                 pending[cid] = (action, args, b["confirm_token"], after, getattr(asking, "hid", None))  # the page never sees the token
                 preview = json.dumps(b["preview"], indent=1, default=str) if b.get("preview") else ""

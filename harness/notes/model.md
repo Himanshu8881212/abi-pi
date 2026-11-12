@@ -38,8 +38,8 @@
 - `decide_same {type, keys, decision}`: `same` (they count as one from now on), `different` (never proposed together
   again), `split` (take records out of the object they were merged into). ABI always asks the person to confirm; you
   never decide for them, and never call it for a whole list unasked: propose, then let them pick. A merge against an
-  earlier "different" answers 409 with both names: the person undoes that first. Never write the decisions table
-  with edit_cells or propose_edit (refused).
+  earlier "different" or take-out answers 409 with both names: the person undoes that first. Undoing a decision a
+  newer one builds on answers 409 naming the newer one. Never write or load the decisions table yourself (refused).
 - After `same`, every query, measure, object page, flow and ML model counts the group once, under one stable ID (the
   key of its first record). Undo a decision: `undo_edits {table, batch}` with the values `decide_same` or
   `find_same.decisions` gave. A restricted Viewer sees a merged object only through the records they may see.

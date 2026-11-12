@@ -95,6 +95,13 @@ def _hidden(project: str, user_id: int | None) -> dict[str, set[str]]:
     return out
 
 
+def same_as(t: str, cols) -> bool:
+    """1.2.6 M11: table `t` with columns `cols` is a decisions table (semantic/same.py): named same_as_<table>, with
+    exactly the columns a, b and same, in any order. The one test of it: such a table is written by decide_same only
+    (writeback._batch), shows restricted readers no rows (`_context`) and is the only shape the views resolve from."""
+    return t.startswith("same_as_") and set(cols) == {"a", "b", "same"}
+
+
 def restricted(project: str, user_id: int | None) -> bool:
     """D-42: a user below Editor in a project with rules. System reads (user_id None) are never restricted."""
     if user_id is None or not rules(project):
@@ -553,7 +560,7 @@ def _context(project: str, user_id: int, con, snap: int, edited: frozenset, mode
     # 1.2.6 M11: a same-as table (same.py) holds the type's key values of the records people decided about, also where
     # the key column is hidden from this reader, and no restricted reader needs it (the views read the base table, proposals
     # and decisions are an Editor's): it shows them no rows, whatever else filters it
-    conds |= {t: "FALSE" for t, c in model_columns.items() if t.startswith("same_as_") and list(c) == ["a", "b", "same"]}
+    conds |= {t: "FALSE" for t, c in model_columns.items() if same_as(t, c)}
     hid = _hidden(project, user_id)
 
     def drop(t: str, cols) -> tuple[str | None, list[str]]:

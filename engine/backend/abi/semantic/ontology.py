@@ -274,7 +274,9 @@ def check(project: str, files: dict) -> list[dict]:
     on a live table is refused here too (records are compared and merged in loaded tables only)."""
     if FILE not in files:
         return []
-    return references(files, _cols(project)) + [
+    from abi.semantic import same  # not at top: it imports this module
+
+    return references(files, _cols(project)) + same.blockers(project, files) + [
         {"file": FILE, "path": f"$.objects[{i}].resolve", "error": f"Object type '{x['id']}': `resolve` works on loaded tables, and '{x['table']}' is a live table.",
          "fix": "Take `resolve` off the type, or load the table (a source that imports it) instead of reading it live."}
         for i, x in enumerate((files[FILE] or {}).get("objects", []) if isinstance(files[FILE], dict) else []) if "resolve" in x and live.is_live(project, x["table"])]

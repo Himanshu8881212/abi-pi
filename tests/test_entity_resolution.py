@@ -111,6 +111,27 @@ try:
 except actions.ActionFailed as e:
     print(json.dumps([e.status, "confirm_token" in e.body, e.body["message"]]))
 """
+# the worker builds the query copies too; built here so the first timing reads them
+COPIES = r"""
+import sys, time
+from abi import semantic
+P = sys.stdin.read().strip()
+for i in range(5):
+    try:
+        semantic.build_copies(P)
+        break
+    except Exception:
+        time.sleep(2)
+print("{}")
+"""
+CONTACTS = """contact_id,name,phone
+1,Kim,12345678
+2,Kim A,+45 12345678
+3,Lou,030 123456
+4,Lou B,+49 30 123456
+5,Max,(212) 555-0199
+6,Mia,(312) 555-0199
+"""
 PEOPLE = """person_id,name,phone,email,vat
 1,Ann Lee,(212) 555-0123,,
 2,Bob Ray,(312) 555-0123,,
@@ -568,6 +589,16 @@ def test_er_only_decide_same_writes_decisions(er):
     assert r.returncode == 0, r.stderr[-2000:]
     assert json.loads(r.stdout.splitlines()[-1]) == [409, True, "Undo: Tee Haus and Teehaus Frankfurt are the same customer. Confirm to proceed."]
     assert stored() == was
+    # the harness replays an agent's call over REST with X-Abi-Confirm: ask. That is no person's click either: ABI asks
+    with pytest.raises(abi.ActionError) as e:
+        abi.call("undo_edits", confirm="ask", project=P, table=S, batch=yes["batch"])
+    assert e.value.status == 409 and e.value.body["confirm_token"] and stored() == was
+    assert e.value.body["message"] == "Undo: Tee Haus and Teehaus Frankfurt are the same customer. Confirm to proceed."
+    edit = call("edit_cells", table="customers", edits=[{"key": [107], "column": "address", "value": "Domplatz 2"}])
+    with pytest.raises(abi.ActionError) as e:  # any table's undo, replayed that way
+        abi.call("undo_edits", confirm="ask", project=P, table="customers", batch=edit["batch"])
+    assert e.value.status == 409 and e.value.body["confirm_token"]
+    call("undo_edits", table="customers", batch=edit["batch"])
     # the token signs the rows the decision changes
     with pytest.raises(abi.ActionError) as e:
         call("decide_same", type="customer", keys=[103, 104, 120], decision="same")
@@ -579,6 +610,86 @@ def test_er_only_decide_same_writes_decisions(er):
     assert e.value.status == 409 and e.value.body["confirm_token"] != token and stored() == [], "what it showed is no longer what it would do"
 
 
+def test_er_decisions_come_from_decide_same_only(er, tmp_path):
+    """Nothing but decide_same puts a row into a decisions table. No load and no steps fill the one of a type with
+    `resolve`, and an input table can't take its name. A table of that shape under a type without `resolve` (columns
+    a, b, same in any order) takes no write-back either, so no row waits there to become a decision; and a table of
+    that name with another shape, which does take edits, keeps `resolve` from being saved until it is deleted."""
+    decide("same", 120, 121)
+    was = stored()
+    for action, args in (("set_steps", {"table": S, "steps": [{"type": "source", "source": "customers"}]}),
+                         ("add_data", {"table": S, "location": str(tmp_path / "x.parquet")}),
+                         ("create_input_table", {"table": S, "columns": [{"name": "a", "type": "BIGINT"}], "key": ["a"]})):
+        with pytest.raises(abi.ActionError) as e:
+            call(action, **args)
+        assert e.value.status == 409 and "decisions about which Customers are the same one" in e.value.body["message"], (action, e.value.body)
+    assert stored() == was and by("revenue")[120] == 31
+    # under the order type, which has no `resolve`: the same shape, its columns in another order
+    t, row = "same_as_orders", {"a": 1, "b": 2, "same": True}
+    call("create_input_table", table="same_as_things", key=["b", "a"], columns=[{"name": c, "type": ty} for c, ty in (("b", "BIGINT"), ("a", "BIGINT"), ("same", "BOOLEAN"))])
+    try:
+        for action in ("edit_cells", "propose_edit"):
+            with pytest.raises(abi.ActionError) as e:
+                call(action, table="same_as_things", add=[row])
+            assert e.value.status == 409 and "Decide with decide_same" in e.value.body["message"]
+        r = engine("from abi.semantic import rls\nprint(rls.same_as('same_as_orders', ['b', 'a', 'same']), rls.same_as('same_as_orders', ['a', 'b', 'same', 'note']),"
+                   " rls.same_as('orders', ['a', 'b', 'same']))")
+        assert r.returncode == 0 and r.stdout.split()[-3:] == ["True", "False", "False"], r.stderr[-2000:]
+    finally:
+        sure("delete_table", project=P, table="same_as_things")
+    with_resolve = {**ONTO, "objects": [ONTO["objects"][0], {**ONTO["objects"][1], "resolve": {"exact": [{"column": "customer_id"}]}}]}
+    # the name taken by a table with one column more: it takes edits by hand, so `resolve` can't be added over it
+    call("create_input_table", table=t, key=["a", "b"], columns=[{"name": c, "type": ty} for c, ty in (
+        ("a", "BIGINT"), ("b", "BIGINT"), ("same", "BOOLEAN"), ("note", "VARCHAR"))])
+    try:
+        call("edit_cells", table=t, add=[row | {"note": "by hand"}])
+        with pytest.raises(abi.ActionError) as e:
+            call("save_ontology", ontology=with_resolve)
+        [err] = [x for x in e.value.body["errors"] if x["path"] == "$.objects[1].resolve"]
+        assert e.value.status == 422 and "is no decisions table" in err["error"] and f"Delete table '{t}' first" in err["fix"], err
+        assert len(call("list_objects", type="order", limit=1000)["rows"]) == 17, "and no order was merged"
+    finally:
+        sure("delete_table", project=P, table=t)
+
+
+def test_er_undo_of_an_older_decision(er):
+    """Undoing an older decision either does what it says or is refused with the newer decision to undo first, in the
+    person's words; never "undone" with nothing changed. (A) two groups merged into one: undoing one of the first
+    merges takes that record out again. (B) after the record that carried the ID was taken out, the first merge can't
+    be undone before the take-out. (C) a merge can't be undone under a take-out from it; in order, both go, and no
+    notification about the decisions table is ever posted."""
+    decide("same", 103, 104)
+    cd = decide("same", 109, 110)
+    assert decide("same", 103, 109)["id"] == "103" and by("revenue")[103] == 50
+    call("undo_edits", table=S, batch=cd["batch"])
+    rev = by("revenue")
+    assert rev[103] == 39 and rev[110] == 11 and 109 not in rev, "(A) 110 is its own customer again; 109 stays"
+    # (B)
+    first = decide("same", 120, 121)
+    decide("same", 120, 107)
+    out = decide("split", 120)
+    was = stored()
+    with pytest.raises(abi.ActionError) as e:
+        call("undo_edits", table=S, batch=first["batch"])
+    said = e.value.body["message"]
+    assert e.value.status == 409 and said == "A newer decision builds on this one: undo “Tee Haus taken out of Solo Ltd” first.", said
+    assert stored() == was and by("revenue")[107] == 23 and by("revenue")[120] == 15
+    [d] = [d for d in found()[0]["decisions"] if d["batch"] == out["batch"]]
+    assert ([o["title"] for o in d["out"]], d["of"]["title"], d["undone"]) == (["Tee Haus"], "Solo Ltd", False)
+    # (C)
+    merge = decide("same", 101, 902)
+    take = decide("split", 902)
+    with pytest.raises(abi.ActionError) as e:
+        call("undo_edits", table=S, batch=merge["batch"])
+    assert e.value.status == 409 and e.value.body["message"] == "A newer decision builds on this one: undo “ACME Gmbh taken out of Acme GmbH” first."
+    assert (101, 902, False) in stored(), "the take-out stands: still not the same"
+    call("undo_edits", table=S, batch=take["batch"])
+    assert by("revenue")[101] == 180
+    call("undo_edits", table=S, batch=merge["batch"])
+    assert by("revenue")[101] == 150 and not [r for r in stored() if 902 in r[:2]]
+    assert "same_as" not in json.dumps(call("inbox")), "no feed line about the decisions table"
+
+
 def test_er_phone_conflicting_keys_and_production(tmp_path):
     """Its own small project. Two phones are the same with and without the country code or the leading zeros, never
     when they differ in their first digits (the last 9 digits alone would say so). The same email under two VAT numbers
@@ -586,13 +697,16 @@ def test_er_phone_conflicting_keys_and_production(tmp_path):
     first decision is refused with the right next step (its table comes by a promote); once the table is there,
     decisions are made in production."""
     (tmp_path / "people.csv").write_text(PEOPLE)
-    if KEYS in {x["project"] for x in abi.call("list_projects")["projects"]}:
-        drop([KEYS])
+    (tmp_path / "contacts.csv").write_text(CONTACTS)
+    drop([x for x in (KEYS, KEYS + "_pub") if x in {x["project"] for x in abi.call("list_projects")["projects"]}])
     k = lambda action, **a: abi.call(action, project=KEYS, **a)  # noqa: E731
     try:
-        abi.load("demo", KEYS, parquet(tmp_path / "people.csv"))
+        abi.load("demo", KEYS, parquet(tmp_path / "people.csv", tmp_path / "contacts.csv"))
         k("set_table", table="people", key=["person_id"])
+        k("set_table", table="contacts", key=["contact_id"])
         sure("save_ontology", project=KEYS, ontology={"objects": [{
+            "id": "contact", "table": "contacts", "name": "Contact", "plural": "Contacts", "title": "name",
+            "resolve": {"exact": [{"column": "phone", "as": "phone"}]}}, {
             "id": "person", "table": "people", "name": "Person", "plural": "People", "title": "name",
             "properties": [{"column": "vat", "name": "VAT number"}],
             "resolve": {"exact": [{"column": "phone", "as": "phone"}, {"column": "email", "as": "email"}, {"column": "vat"}]}}]})
@@ -600,6 +714,18 @@ def test_er_phone_conflicting_keys_and_production(tmp_path):
         groups = [sorted(o["key"] for o in g["objects"]) for g in r["groups"]]
         assert groups == [["1", "3"], ["6", "7"], ["4", "5"]], "Bob's number differs in its area code; the doubtful group is last"
         assert [g["pairs"][0]["why"] for g in r["groups"]] == [["same phone"], ["same phone"], ["same email", "different VAT number"]]
+        # short national numbers with and without the country code share a block (their last 7 digits) and are the same
+        short = k("find_same", type="contact")
+        assert [sorted(o["key"] for o in g["objects"]) for g in short["groups"]] == [["1", "2"], ["3", "4"]], short["groups"]
+        assert {w for g in short["groups"] for p in g["pairs"] for w in p["why"]} == {"same phone"}
+        # where a published version exists, the question says that it keeps showing them separately
+        with pytest.raises(abi.ActionError) as e:
+            k("decide_same", type="person", keys=[1, 3], decision="same")
+        assert "published version" not in e.value.body["message"]
+        abi.new_project("demo", KEYS + "_pub")
+        with pytest.raises(abi.ActionError) as e:
+            k("decide_same", type="person", keys=[1, 3], decision="same")
+        assert e.value.status == 409 and "People reading the published version keep seeing them separately" in e.value.body["message"]
         sure("set_environment", project=KEYS, branch="main", production=True)
         with pytest.raises(abi.ActionError) as e:
             k("decide_same", type="person", keys=[1, 3], decision="same")
@@ -616,7 +742,7 @@ def test_er_phone_conflicting_keys_and_production(tmp_path):
         assert e.value.status == 403 and "production environment" in e.value.body["message"]
     finally:
         sure("set_environment", project=KEYS, branch="main", production=False)
-        drop([KEYS])
+        drop([x for x in (KEYS, KEYS + "_pub") if x in {x["project"] for x in abi.call("list_projects")["projects"]}])
 
 
 # ---------- the app: Possible duplicates on a type's list, the records on a customer's page ----------
@@ -731,6 +857,9 @@ def test_er_blocking_scales(tmp_path, record_property):
         # C6, measured: the same aggregate (sales by postcode, 1,000,000 orders joined to 100,000 companies) before any
         # decision, with one merge in force (the tables then read through the resolved views, without query copies), and
         # after that merge is undone (as before again). Each is a first, uncached read of its snapshot
+        built = engine(COPIES, timeout=600, stdin=BIG)
+        assert built.returncode == 0, built.stderr[-2000:]
+
         def timed() -> tuple[float, dict]:
             t0 = time.perf_counter()
             rows = abi.call("semantic_query", project=BIG, measures=["sales"], dimensions=["companies.postcode"])["rows"]
@@ -744,6 +873,18 @@ def test_er_blocking_scales(tmp_path, record_property):
         record_property("er_views_cost", {"before": round(t_before, 2), "merged": round(t_merged, 2), "undone": round(t_undone, 2)})
         assert merged == before == undone and sum(before.values()) == sum(1 + i % 97 for i in range(1000000)), "the pair shares a postcode: same figures"
         assert t_merged < 5, f"{t_merged:.2f} s"
+        # a pair in different postcodes (company 1 and its copy under another name, one postcode on): the copy's orders
+        # move to company 1's postcode, so the figures show that the merge is in force
+        here, there = 10000 + 7919 % 5000, 10000 + 7919 % 5000 + 1
+        moves = sum(1 + i % 97 for i in range(1000000) if (i * 7919) % n == n - dup + 1)
+        yes = sure("decide_same", project=BIG, type="company", keys=[1, n - dup + 1], decision="same")
+        t_moved, moved = timed()
+        abi.call("undo_edits", project=BIG, table="same_as_companies", batch=yes["batch"])
+        t_back, back = timed()
+        print(f"M11 C-3 measurement, pair in two postcodes: {t_moved:.2f} s with the merge in force, {t_back:.2f} s after it is undone")
+        record_property("er_views_cost_moved", {"merged": round(t_moved, 2), "undone": round(t_back, 2)})
+        assert moves > 0 and moved[here] == before[here] + moves and moved[there] == before[there] - moves, (moves, before[here], moved[here])
+        assert back == before and sum(moved.values()) == sum(before.values()) and t_moved < 5
     finally:
         drop([BIG])
 

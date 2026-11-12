@@ -33,7 +33,7 @@
       "properties": {
         "exact": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"type": "object", "required": ["column"], "additionalProperties": false,
           "properties": {"column": {"type": "string", "description": "a column of the type's table"},
-                         "as": {"enum": ["id", "email", "phone"], "default": "id", "description": "how it is normalised before comparing: id (letters and digits, upper-cased: a VAT or registration number), email (trimmed, lower-cased), phone (its last 9 digits)"}}}},
+                         "as": {"enum": ["id", "email", "phone"], "default": "id", "description": "how it is normalised before comparing: id (letters and digits, upper-cased: a VAT or registration number), email (trimmed, lower-cased), phone (digits only, without leading zeros: two are the same when the shorter one, 7 digits or more, ends the longer one)"}}}},
         "fuzzy": {"type": "array", "minItems": 1, "maxItems": 6, "items": {"type": "object", "required": ["column", "threshold"], "additionalProperties": false,
           "properties": {"column": {"type": "string", "description": "a text column of the type's table (a name, an address)"},
                          "threshold": {"type": "number", "exclusiveMinimum": 0, "maximum": 1, "description": "how alike two values must be, from 0 to 1 (0.9 is a careful start)"},

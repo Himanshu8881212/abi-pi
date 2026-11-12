@@ -246,27 +246,36 @@ records are the same one; a person decides. The example is a `customers` table k
   shows the source rows. A merged customer's page lists its records; **Take out** splits one off again.
 - Every decision is listed under **Decided** with who and when, and **Undo** takes it back. Decisions are kept in the
   input table `same_as_customers` (hidden from the model; one logged edit batch each). Only `decide_same` writes it:
-  `edit_cells` and `propose_edit` refuse it, Data › Edits doesn't offer it, a flow can't undo a decision and an agent's
-  undo asks the person.
+  every other write-back, load and step into it is refused, Data › Edits doesn't offer it, a flow can't undo a
+  decision and an agent's undo asks the person. A decision that a newer one builds on is undone after that one
+  ("A newer decision builds on this one: undo … first").
 - **Not the same** holds until it is undone: the two are not proposed together again, a proposed group never contains
   both, and a merge that would make them one, directly or through other records, is refused with their names.
 - The group's ID stays the key of its first record while that record is in it. It moves to the first of the rest when
   that record is taken out, and the group shows under the first remaining record when it disappears from the source.
 - A table with one row per record (predictions, an input table keyed like the type) shows the row of the record the
   group shows under. Write-back (the Data grid, an action's write) edits a source record, never the group.
+- A merged customer shows the values of the record it shows under. The other records' own values (another spelling of
+  the name, another address) are no longer searched, filtered or matched against new records; they stay in the Data grid.
+- **Take out** says the record is not that customer: it is not proposed for it or merged into it again until the
+  take-out is undone under Decided.
 - Row-level security: a restricted Viewer sees a merged customer only when they may see at least one of its records,
   and then only those records' values, orders and counts. Where the record carrying the group's ID is hidden from
   them, the customer shows under the first record they see. Proposals and decisions are for Editors and Owners; a
   restricted Viewer reads nothing of the decisions table. On a phone the app is read-only: it shows the merged list
   and no **Possible duplicates** card.
 - Decisions are data of one environment, like edits: a promote, a project export or import and the published version
-  carry the table's definition and none of its rows. In a production environment `decide_same` works once the table
+  carry the table's definition and none of its rows. So people reading the published version (Viewer mode, a phone)
+  keep seeing merged customers separately; the merge confirmation says so when a published version exists. What
+  Publish carries is decided in 1.2.7. In a production environment `decide_same` works once the table
   came by a promote (make the first decision in dev, promote, then decide in production).
 - Speed: while a type has at least one merged record, queries on its table and on every table pointing at it read
   through views instead of ABI's query copies and shared partials. One measurement on pve1 (100,000 companies,
-  1,000,000 orders, sales by postcode, first read of a snapshot): 0.17 s before any decision, 0.28 s with one merge
-  in force, 0.17 s after it was undone (`test_er_blocking_scales` records it on every run). Bigger tables and wider
-  dimensions were not measured.
+  1,000,000 orders, sales by postcode, first read of a snapshot, query copies built): 0.18 s before any decision,
+  0.39 to 0.44 s with one merge in force (about twice as long), 0.20 to 0.22 s after it was undone
+  (`test_er_blocking_scales` records it on every run). After the last merge is undone, queries stop reading through
+  the views at once; the fast copies are used again once the background worker has rebuilt them. Bigger tables and
+  wider dimensions were not measured.
 - Wrong references are refused when the ontology is saved, with the file, the field and the fix, for example
   `model/ontology.json $.objects[0].resolve.fuzzy[0].column: Object type 'customer': table 'customers' has no column 'nam'.`
 - Limits in 1.2.6: the records of a type live in one table (append the systems' tables first, in Data), that table
