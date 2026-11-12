@@ -40,12 +40,12 @@ from test_pages import sure
 import abi
 
 P = "pi_opt"
-CAFES = """cafe_id,name,region,revenue_per_hour,hourly_wage,max_hours,planned_hours,budget_hours,units
-1,Café Nord,North,50,30,40,10,10.5,0
-2,Café Hafen,North,40,25,40,10,10.5,0
-3,Café Süd,South,30,20,50,10,10.5,0
-4,Café Markt,South,20,16,50,10,10.5,0
-5,Café West,South,8,8,50,0,0.5,0
+CAFES = """cafe_id,name,region,revenue_per_hour,hourly_wage,max_hours,planned_hours,budget_hours,units,hours_needed,floor_hours,hours_2dp,hours_0dp
+1,Café Nord,North,50,30,40,10,10.5,0,5,45,0,0
+2,Café Hafen,North,40,25,40,10,10.5,0,5,0,0,0
+3,Café Süd,South,30,20,50,10,10.5,0,5,0,0,0
+4,Café Markt,South,20,16,50,10,10.5,0,,0,0,0
+5,Café West,South,8,8,50,0,0.5,0,,0,0,0
 """
 VISITS = """visit_id,cafe_id,amount
 1,1,200
@@ -107,7 +107,22 @@ PICK = {"id": "pick", "name": "What to take", "over": {"type": "thing", "filters
         "decide": {"name": "Taken", "write": "amount", "max": 1, "integer": True}, "time_limit_s": 2,
         "objective": {"goal": "maximize", "name": "Value", "per_unit": {"property": "value"}},
         "limits": [{"name": f"Room {i + 1}", "per_unit": {"property": f"v{i + 1}"}, "max": sum(v[:400]) // 3} for i, v in enumerate(ROOM)]}
-ALL = (HOURS, UNITS, WAGE, TIGHT, FLOOR, OPEN, FEW, SPLIT, MANY, BY_TIPS, CHEAP, DOWN, PICK)
+RANGE = HOURS | {"id": "range", "name": "Hours within a range", "limits": [{"name": "Total hours", "min": 90, "max": 100}, REGION]}
+# every café at its most is 230 hours: the range's least is out of reach, its most has nothing to do with it
+RANGE_NO = HOURS | {"id": "range_no", "name": "A range out of reach", "limits": [{"name": "Total hours", "min": 250, "max": 300}]}
+NEED = HOURS | {"id": "need", "name": "Hours needed first", "decide": HOURS["decide"] | {"min": {"property": "hours_needed"}}}
+BOUNDS = HOURS | {"id": "bounds", "name": "A floor above the ceiling", "decide": HOURS["decide"] | {"min": {"property": "floor_hours"}}}
+# hours_2dp holds two decimals. The cheapest hours first use 3,200 of the wages; Nord's 30 an hour get the other 310.08:
+# 10.336 hours, held as 10.34, which is 310.20: the rounded plan uses 3,510.20 of 3,510.08
+ROUND = {"id": "round", "name": "Hours to hand out", "over": {"type": "cafe"},
+         "decide": {"name": "Hours", "write": "hours_2dp", "max": {"property": "max_hours"}},
+         "objective": {"goal": "maximize", "name": "Hours given", "per_unit": 1},
+         "limits": [{"name": "Wage budget", "per_unit": {"property": "hourly_wage"}, "max": 3510.08}]}
+# 60 groups of one slot each: more limit rows than an agent is shown rows
+GROUPS = {"id": "groups", "name": "Five slots", "over": {"type": "slot"}, "decide": {"name": "Picked", "write": "pick", "max": 1, "integer": True},
+          "objective": {"goal": "maximize", "name": "Weight", "per_unit": {"property": "w1"}},
+          "limits": [{"name": "Per slot", "group": "name", "max": 1}, {"name": "Slots to pick", "max": 5}]}
+ALL = (HOURS, UNITS, WAGE, TIGHT, FLOOR, OPEN, FEW, SPLIT, MANY, BY_TIPS, CHEAP, DOWN, PICK, RANGE, RANGE_NO, NEED, BOUNDS, ROUND, GROUPS)
 # an LLM's call (via "agent"), with no token and with a made-up one: what ABI answers each time
 AGENT = r"""
 import json, sys
@@ -135,15 +150,16 @@ from abi import db, optimize
 a = json.loads(sys.stdin.read())
 out = {}
 with db.connect() as c:
-    u = c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"]
+    u = c.execute("SELECT id FROM users WHERE name = %s", [a["user"]]).fetchone()["id"] if a.get("user") else c.execute(
+        "SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"]
     if a["do"] == "count":
         out = c.execute("SELECT count(*) AS n FROM optimizer_runs WHERE project = %s AND optimizer = %s", [a["project"], a["optimizer"]]).fetchone()
     elif a["do"] == "fake":  # `n` open runs, `age` minutes old
         ids = [str(uuid.uuid4()) for _ in range(a["n"])]
         for i, x in enumerate(ids):
-            c.execute("INSERT INTO optimizer_runs (id, project, optimizer, user_id, restricted, spec, status, created) VALUES"
-                      " (%s, %s, %s, %s, false, '{}', %s, now() - make_interval(mins => %s))",
-                      [x, a["project"], a["optimizer"] + (str(i) if a["n"] > 1 else ""), u, a.get("status", "running"), a["age"]])
+            c.execute("INSERT INTO optimizer_runs (id, project, optimizer, user_id, restricted, spec, status, created, started) VALUES"
+                      " (%s, %s, %s, %s, false, '{}', %s, now() - make_interval(mins => %s), now() - make_interval(mins => %s))",
+                      [x, a["project"], a["optimizer"] + (str(i) if a["n"] > 1 else ""), u, a.get("status", "running"), a["age"], a["age"]])
         out = {"ids": ids}
     elif a["do"] == "read":
         out = {"rows": [[r["status"], r["error"]] for r in c.execute("SELECT status, error FROM optimizer_runs WHERE id = ANY(%s::uuid[]) ORDER BY id", [a["ids"]])]}
@@ -208,11 +224,14 @@ def registry(do: str, **args) -> dict:
     return json.loads(r.stdout.splitlines()[-1])
 
 
-def grounded(r: dict) -> bool:
+def grounded(r: dict, first: int | None = None, names: bool = False) -> bool:
     """Every figure the run's sentence states is a value of the run's rows (plan, now or limit): what the agent's
-    grounding check reads. Nothing else grounds one: no count, no key, no time."""
-    have = {float(v) for x in r["rows"] for v in x[2:5] if isinstance(v, int | float)}
-    return {float(n.replace(",", "")) for n in re.findall(r"\d[\d,]*(?:\.\d+)?", r["text"])} <= have
+    grounding check reads. Nothing else grounds one: no count, no key, no time. `first`: of its first rows only (an
+    agent is shown 20). `names`: the objects' own names hold digits (Slot 12): they are names, taken out first."""
+    have, text = {float(v) for x in r["rows"][:first] for v in x[2:5] if isinstance(v, int | float)}, r["text"]
+    for x in sorted((x[1] for x in r["rows"] if x[5] is not None), key=len, reverse=True) if names else ():
+        text = text.replace(x, "")
+    return {float(n.replace(",", "")) for n in re.findall(r"\d[\d,]*(?:\.\d+)?", text)} <= have
 
 
 def objects(r: dict) -> dict:
@@ -234,7 +253,10 @@ def _opt(tmp_path_factory):
         f"{i},{THING[i - 1]},{i % 7 + 1},{0 if i <= 400 else 0.5},{VALUE[i - 1]}," + ",".join(str(v[i - 1]) for v in ROOM) + "\n" for i in range(1, 1002)))
     if P in {x["project"] for x in abi.call("list_projects")["projects"]}:
         drop([P])
-    abi.load("demo", P, parquet(*(d / f"{t}.csv" for t in ("cafes", "visits", "tips", "slots", "things"))))
+    import duckdb  # the cafés' own Parquet: two of its columns are DECIMAL, with two decimals and with none
+    duckdb.sql(f"COPY (SELECT * REPLACE (CAST(hours_2dp AS DECIMAL(10,2)) AS hours_2dp, CAST(hours_0dp AS DECIMAL(10,0)) AS hours_0dp)"
+               f" FROM read_csv('{d / 'cafes.csv'}')) TO '{d / 'cafes.parquet'}' (FORMAT parquet)")
+    abi.load("demo", P, [str(d / "cafes.parquet"), *parquet(*(d / f"{t}.csv" for t in ("visits", "tips", "slots", "things")))])
     name, pw = f"pi_opt_viewer_{time.strftime('%H%M%S')}", secrets.token_urlsafe(16)
     try:
         for t in ("cafe", "visit", "tip", "slot", "thing"):
@@ -283,18 +305,19 @@ def test_opt_allocation_optimal(opt):
     assert (r["status"], r["outcome"], r["time_limit_s"]) == ("ok", "best", 60), "the default time limit is 60 s"
     assert r["columns"] == ["what", "name", "plan", "now", "limit", "key"] and r["rows"] == [
         ["Total", "Revenue", 4000, 1400, None, None],
-        ["Limit fully used", "Total hours", 100, None, 100, None],
-        ["Limit fully used", "Hours per region: North", 60, None, 60, None],
-        ["Limit", "Hours per region: South", 40, None, 60, None],
+        ["Changes", "Proposed for approval", 4, None, None, None],
         ["Café", "Café Nord", 40, 10, "at its most", [1]],
         ["Café", "Café Süd", 40, 10, None, [3]],
         ["Café", "Café Hafen", 20, 10, None, [2]],
         ["Café", "Café Markt", 0, 10, None, [4]],
-        ["Café", "Café West", 0, 0, None, [5]]], r["rows"]
+        ["Café", "Café West", 0, 0, None, [5]],
+        ["Limit fully used", "Total hours", 100, None, 100, None],
+        ["Limit fully used", "Hours per region: North", 60, None, 60, None],
+        ["Limit", "Hours per region: South", 40, None, 60, None]], r["rows"]
     assert all(type(x[2]) is int for x in r["rows"][4:]), "whole hours"
     assert r["text"] == ("The best plan of “Hours per café” gives 40 Hours to Café Nord, 40 to Café Süd, 20 to Café Hafen. Revenue: 4,000 (now 1,400)."
                          " Fully used: Total hours, Hours per region: North. At their most Hours: Café Nord."
-                         " Proposed as changes for a person to approve; nothing is changed until then.")
+                         " Proposed as 4 changes for a person to approve; nothing is changed until then.")
     assert not re.search(r"cafe_id|planned_hours|revenue_per_hour|\bcafes\b|optimi[sz]er|solver|constraint|ontology|object type|\bLP\b|\bMIP\b", r["text"])
     # every figure of the sentence is a value of the rows: what the agent's grounding check reads
     have = {float(v) for x in r["rows"] for v in x[2:5] if isinstance(v, int | float)}
@@ -302,11 +325,11 @@ def test_opt_allocation_optimal(opt):
     u = run("units")  # the measure, read per café
     assert u["rows"][0] == ["Total", "Revenue", 3400, 0, None, None] and objects(u) == {
         "Café Nord": 10, "Café Hafen": 2, "Café Süd": 0, "Café Markt": 0, "Café West": 0}
-    assert u["rows"][1] == ["Limit fully used", "Units to hand out", 12, None, 12, None]
+    assert u["rows"][-1] == ["Limit fully used", "Units to hand out", 12, None, 12, None]
     w = run("wage")  # fractions
     assert objects(w) == pytest.approx({"Café Nord": 40, "Café Hafen": 40, "Café Süd": 15.5, "Café Markt": 0, "Café West": 0}, abs=1e-6)
     assert w["rows"][0][:4] == ["Total", "Revenue", pytest.approx(4065, abs=1e-6), pytest.approx(1400 + 0.5 * (50 + 40 + 30 + 20) + 0.5 * 8)]
-    assert w["rows"][1] == ["Limit fully used", "Wage budget", pytest.approx(2510, abs=1e-6), None, 2510, None]
+    assert w["rows"][-1] == ["Limit fully used", "Wage budget", pytest.approx(2510, abs=1e-6), None, 2510, None]
     assert "15.5 to Café Süd" in w["text"] and "Revenue: 4,065 (now 1,474)" in w["text"]
     assert cells() == NOW and cells("units") == dict.fromkeys(NOW, 0), "a run changes nothing"
 
@@ -407,9 +430,10 @@ def test_opt_time_limit(opt):
     assert r["text"] == ("“An even split” found no plan in the time it is allowed, so nothing is proposed. Plan for fewer Slots at a time,"
                          " or ask the agent to allow this plan more time.")
     big = run("many")
-    assert big["status"] == "failed" and big["rows"] == [] and big["error"] == (
-        "“Too many things” would plan for more Things than one run takes. Plan for fewer at a time, for example one region"
+    assert (big["status"], big["outcome"]) == ("ok", "too_many") and big["rows"] == [["Limit", "Things in one run", None, None, 1000, None]] and big["text"] == (
+        "“Too many things” would plan for more than 1,000 Things, the most one run takes. Plan for fewer at a time, for example one region"
         " or one period per plan: ask the agent to narrow this plan.")
+    assert grounded(big) and "proposal" not in big
     for bad, why in ((0, "minimum"), (601, "maximum"), (1.5, "type")):  # the limit itself is bounded by the schema
         with pytest.raises(abi.ActionError) as e:
             call("save_optimizer", optimizer=SPLIT | {"time_limit_s": bad})
@@ -434,11 +458,11 @@ def test_opt_rls_scope(opt):
     r = run("hours", tok)
     assert r["rows"] == [
         ["Total", "Revenue", 1700, 500, None, None],
-        ["Limit", "Total hours", 60, None, 100, None],
-        ["Limit fully used", "Hours per region: South", 60, None, 60, None],
         ["Café", "Café Süd", 50, 10, "at its most", [3]],
         ["Café", "Café Markt", 10, 10, None, [4]],
-        ["Café", "Café West", 0, 0, None, [5]]], r["rows"]
+        ["Café", "Café West", 0, 0, None, [5]],
+        ["Limit", "Total hours", 60, None, 100, None],
+        ["Limit fully used", "Hours per region: South", 60, None, 60, None]], r["rows"]
     assert r["text"] == ("The best plan of “Hours per café” gives 50 Hours to Café Süd, 10 to Café Markt. Revenue: 1,700 (now 500)."
                          " Fully used: Hours per region: South. At their most Hours: Café Süd."
                          " This is the plan for the Cafés you see; nothing is changed. An Editor's run proposes it as changes for approval.")
@@ -540,22 +564,23 @@ def test_opt_minimise_equal_and_at_least(opt):
     r = run("cheap")
     assert (r["status"], r["outcome"]) == ("ok", "best") and r["rows"] == [
         ["Total", "Wage cost", 1290, 910, None, None],
-        ["Exactly", "Hours to cover", 100, None, 100, None],
-        ["At least, just met", "Staffed regions: North", 10, None, 10, None],
-        ["At least", "Staffed regions: South", 90, None, 10, None],
+        ["Changes", "Proposed for approval", 4, None, None, None],
         ["Café", "Café West", 50, 0, "at its most", [5]],
         ["Café", "Café Markt", 40, 10, None, [4]],
         ["Café", "Café Hafen", 10, 10, None, [2]],
         ["Café", "Café Nord", 0, 10, None, [1]],
-        ["Café", "Café Süd", 0, 10, None, [3]]], r["rows"]
+        ["Café", "Café Süd", 0, 10, None, [3]],
+        ["Exactly", "Hours to cover", 100, None, 100, None],
+        ["At least, just met", "Staffed regions: North", 10, None, 10, None],
+        ["At least", "Staffed regions: South", 90, None, 10, None]], r["rows"]
     assert r["text"] == ("The best plan of “Cheapest cover” gives 50 Hours to Café West, 40 to Café Markt, 10 to Café Hafen. Wage cost: 1,290 (now 910)."
                          " Just met: Staffed regions: North. At their most Hours: Café West."
-                         " Proposed as changes for a person to approve; nothing is changed until then.")
+                         " Proposed as 4 changes for a person to approve; nothing is changed until then.")
     assert grounded(r) and "fully used" not in r["text"].lower()
     d = run("down")
     assert d["outcome"] == "unbounded" and d["text"] == (
         "“Down” has no best plan: Cost can fall without end. Add a limit: the most or the least Hours per Café, or a limit on a total.")
-    for name in ("tight", "floor", "open", "few", "split"):  # no plan: still no figure of its own
+    for name in ("tight", "floor", "open", "few", "split", "range_no", "bounds"):  # no plan: still no figure of its own
         assert grounded(run(name)), name
 
 
@@ -582,12 +607,20 @@ def test_opt_needs_every_number(opt):
     does for a property without a number. Numbers a file can't hold are refused when it is saved, never a server error."""
     r = run("by_tips")
     assert r["status"] == "failed" and r["rows"] == [] and r["error"] == (
-        "“Units by tips” can't be worked out: Café “Café West” has no number for Tips. Fill it in, or ask the agent to leave such Cafés out of this plan.")
+        "“Units by tips” can't be worked out: Café “Café West” has no number for Tips. Ask the agent to leave such Cafés out of this plan,"
+        " or to use a measure that gives 0 for them.")
+    n = run("need")  # a property: two cafés have no hours needed
+    assert n["status"] == "failed" and n["rows"] == [] and n["error"] == (
+        "“Hours needed first” can't be worked out: Cafés “Café Markt”, “Café West” have no number for Hours needed."
+        " Fill it in, or ask the agent to leave such Cafés out of this plan.")
     assert "proposal" not in r and waiting() == {}
     with pytest.raises(abi.ActionError) as e:
-        call("save_optimizer", optimizer=HOURS | {"id": "huge", "limits": [TOTAL | {"max": 1e13}]})
+        call("save_optimizer", optimizer=HOURS | {"id": "huge", "limits": [TOTAL | {"max": 1e16}]})
     assert e.value.status == 422 and [(x["file"], x["path"], x["fix"]) for x in e.value.body["errors"]] == [
-        ("optimizers/huge.json", "$.limits[0].max", "Use a smaller unit (thousands, millions).")]
+        ("optimizers/huge.json", "$.limits[0].max", "Use a larger unit (thousands, millions).")]
+    big = HOURS | {"id": "huge", "limits": [TOTAL | {"max": 1e15}], "over": {"type": "cafe", "filters": [{"property": "cafe_id", "op": "<", "value": 1e17}]}}
+    assert call("save_optimizer", optimizer=big) == {"id": "huge"}, "the largest number a file takes; a filter's value is the data's"
+    sure("delete_optimizer", project=P, optimizer="huge")
     for bad in (float("nan"), float("inf"), -float("inf")):
         with pytest.raises(abi.ActionError) as e:
             call("save_optimizer", optimizer=HOURS | {"id": "huge", "objective": HOURS["objective"] | {"per_unit": bad}})
@@ -602,7 +635,7 @@ def test_opt_one_open_proposal(opt):
     assert set(waiting()) == {first["proposal"]["batch"], other["proposal"]["batch"]}
     assert "withdrawn" not in first["text"]
     second = run("hours")
-    assert second["text"].endswith(" Proposed as changes for a person to approve; nothing is changed until then."
+    assert second["text"].endswith(" Proposed as 4 changes for a person to approve; nothing is changed until then."
                                    " An earlier proposal of this plan that was still open is withdrawn.")
     assert set(waiting()) == {second["proposal"]["batch"], other["proposal"]["batch"]} and cells() == NOW and grounded(second)
     h = call("edit_history", table="cafes", limit=1000)
@@ -628,7 +661,7 @@ def test_opt_registry_stays_small_and_never_stuck(opt):
     assert registry("count", optimizer="few")["n"] == 5
     stale = registry("fake", optimizer="few", n=1, age=31)["ids"] + registry("fake", optimizer="ghost", n=1, age=31)["ids"]
     assert run("few")["outcome"] == "empty", "a run left open for longer than a run can take blocks nothing"
-    assert registry("read", ids=stale[1:])["rows"] == [["failed", "The run did not finish (its worker stopped). Run it again."]]
+    assert registry("read", ids=stale[1:])["rows"] == [["failed", "The run did not finish. Run it again."]]
     assert registry("read", ids=stale[:1])["rows"] == [] and registry("count", optimizer="few")["n"] == 5, "and goes with the old runs"
     live = registry("fake", optimizer="few", n=1, age=0)["ids"]
     try:
@@ -639,11 +672,24 @@ def test_opt_registry_stays_small_and_never_stuck(opt):
             abi.call("delete_project", project=P)
         assert e.value.status == 409 and "queued or running" in e.value.body["message"]
         registry("interrupted", id=live[0])  # what the worker does for a run whose job stalled
-        assert registry("read", ids=live)["rows"] == [["failed", "The run did not finish (its worker stopped). Run it again."]]
+        assert registry("read", ids=live)["rows"] == [["failed", "The run did not finish. Run it again."]]
         assert run("few")["outcome"] == "empty"
     finally:
         registry("drop", ids=stale + live)
-    full = registry("fake", optimizer="queue", n=10, age=0, status="queued")["ids"]
+    # one person's runs don't fill the project's places: three at a time each (the fourth is told so) ...
+    three = registry("fake", optimizer="mine", n=3, age=0)["ids"] + registry("fake", optimizer="waiting", n=1, age=300, status="queued")["ids"]
+    try:
+        with pytest.raises(abi.ActionError) as e:
+            call("run_optimizer", optimizer="few")
+        assert e.value.status == 409 and e.value.body["message"] == "You already have several plans being worked out. Try again when one of them is done."
+        assert [x[0] for x in registry("read", ids=three)["rows"]].count("queued") == 1, "a run that waits is not stale after 30 minutes"
+    finally:
+        registry("drop", ids=three)
+    waited = registry("fake", optimizer="waited", n=1, age=361, status="queued")["ids"]
+    assert run("few")["outcome"] == "empty" and registry("read", ids=waited)["rows"] == [["failed", "The run did not finish. Run it again."]]
+    registry("drop", ids=waited)
+    # ... and ten in the project, whoever they are
+    full = registry("fake", optimizer="queue", n=10, age=0, status="queued", user=opt["name"])["ids"]
     try:
         with pytest.raises(abi.ActionError) as e:
             call("run_optimizer", optimizer="hours")
@@ -682,6 +728,96 @@ def test_published_copies_carry_no_plans(opt):
     finally:
         if pub in {x["project"] for x in abi.call("list_projects")["projects"]}:
             drop([pub])
+
+
+def test_opt_first_rows_hold_the_plan(opt):
+    """An agent is shown a list's first 20 rows: the total, the number of changes and the objects come first, the
+    limits after them, so with 60 limits the sentence's figures and the plan's own are all in what the agent sees."""
+    r = run("groups")
+    rows = r["rows"]
+    assert r["outcome"] == "best" and rows[0] == ["Total", "Weight", sum(sorted(WEIGHTS[0])[-5:]), 0, None, None]
+    assert rows[1] == ["Changes", "Proposed for approval", 5, None, None, None]
+    assert all(x[0] == "Slot" and x[5] is not None for x in rows[2:62]) and [x[2] for x in rows[2:8]] == [1, 1, 1, 1, 1, 0]
+    assert len(rows) == 2 + 60 + 61 and all(x[0].startswith("Limit") for x in rows[62:]), "60 limits of one slot each, and the five to pick"
+    assert grounded(r, first=20, names=True) and r["text"].startswith("The best plan of “Five slots” gives 1 Picked to Slot ")
+    assert "Proposed as 5 changes for a person to approve" in r["text"]
+    for name in ("hours", "cheap", "round", "pick"):  # and so for every plan: its sentence stands on its first rows
+        assert grounded(run(name), first=20), name
+
+
+def test_opt_decimal_column_and_rounding(opt):
+    """A plan's numbers are held as its column holds them. Which limit is fully used is judged before rounding; when
+    the rounded plan goes past a limit, the sentence says so with both figures. A column without decimals takes
+    whole numbers only."""
+    r = run("round")
+    assert r["outcome"] == "best" and r["rows"] == [
+        ["Total", "Hours given", 200.34, 0, None, None],
+        ["Changes", "Proposed for approval", 5, None, None, None],
+        ["Café", "Café Markt", 50, 0, "at its most", [4]],
+        ["Café", "Café Süd", 50, 0, "at its most", [3]],
+        ["Café", "Café West", 50, 0, "at its most", [5]],
+        ["Café", "Café Hafen", 40, 0, "at its most", [2]],
+        ["Café", "Café Nord", 10.34, 0, None, [1]],
+        ["Limit fully used", "Wage budget", 3510.2, None, 3510.08, None]], r["rows"]
+    assert r["text"] == ("The best plan of “Hours to hand out” gives 50 Hours to Café Markt, 50 to Café Süd, 50 to Café West, and some to other Cafés."
+                         " Hours given: 200.34 (now 0). Fully used: Wage budget."
+                         " Rounded as the column holds its numbers, the plan uses 3,510.2 of Wage budget (3,510.08 allowed)."
+                         " At their most Hours: Café Markt, Café Süd, Café West and others."
+                         " Proposed as 5 changes for a person to approve; nothing is changed until then.")
+    assert grounded(r)
+    mine = waiting()[r["proposal"]["batch"]]
+    assert sorted((c["row"]["cafe_id"], c["new"]) for c in mine["changes"]) == [(1, "10.34"), (2, "40.00"), (3, "50.00"), (4, "50.00"), (5, "50.00")]
+    with pytest.raises(abi.ActionError) as e:  # DECIMAL(10,0): whole numbers
+        call("save_optimizer", optimizer=ROUND | {"id": "whole", "decide": ROUND["decide"] | {"write": "hours_0dp"}})
+    assert e.value.status == 422 and [(x["file"], x["path"]) for x in e.value.body["errors"]] == [("optimizers/whole.json", "$.decide.integer")]
+    assert call("save_optimizer", optimizer=ROUND | {"id": "whole", "decide": ROUND["decide"] | {"write": "hours_0dp", "integer": True}}) == {"id": "whole"}
+    w = run("whole")
+    sure("delete_optimizer", project=P, optimizer="whole")
+    assert objects(w) == {"Café Markt": 50, "Café Süd": 50, "Café West": 50, "Café Hafen": 40, "Café Nord": 10} and w["rows"][-1] == [
+        "Limit", "Wage budget", 3500, None, 3510.08, None] and "Rounded" not in w["text"]
+
+
+def test_opt_ranges_and_an_objects_own_bounds(opt):
+    """A limit with a least and a most: the plan says which end it reaches; in a conflict only the bound that is in the
+    way is named, with its figure in a row. An object whose own least is above its own most is named, with both."""
+    r = run("range")
+    assert r["rows"][0] == ["Total", "Revenue", 4000, 1400, None, None] and ["Limit fully used", "Total hours", 100, None, 100, None] in r["rows"]
+    no = run("range_no")
+    assert no["outcome"] == "infeasible" and no["rows"] == [
+        ["Limit in conflict", "Hours per Café: at most its Max hours", None, None, None, None],
+        ["Limit in conflict", "Total hours (at least 250)", None, None, 250, None]]
+    assert no["text"] == ("No plan fits: these limits can't all hold: Hours per Café: at most its Max hours; Total hours (at least 250)."
+                          " Relax one of them, then run it again.")
+    b = run("bounds")
+    assert b["outcome"] == "infeasible" and b["text"] == (
+        "No plan fits: Café “Café Nord” needs at least 45 Hours and can take at most 40. Change one of the two, then run it again.")
+    assert b["rows"] == [["Limit in conflict", "Hours for Café Nord: at least", None, None, 45, [1]],
+                         ["Limit in conflict", "Hours for Café Nord: at most", None, None, 40, [1]]]
+    assert "proposal" not in no and "proposal" not in b and cells() == NOW
+
+
+def test_opt_every_run_leaves_at_most_one_proposal(opt):
+    """One rule for an Editor's runs. A run refused before anything is worked out withdraws nothing, and the run whose
+    proposal is still open is never pruned; a run that finds no plan withdraws the earlier proposal and says so."""
+    def flip(o: dict) -> dict:
+        call("save_optimizer", optimizer=o | {"id": "flip", "name": "Flip"})
+        return run("flip")
+
+    try:
+        first = flip(HOURS)
+        batch = first["proposal"]["batch"]
+        for _ in range(6):  # refused: Café West has no tips
+            assert flip(BY_TIPS)["status"] == "failed"
+        assert batch in waiting() and registry("count", optimizer="flip")["n"] == 6, "five refusals kept, and the run whose proposal is open"
+        none = flip(TIGHT)
+        assert none["outcome"] == "infeasible" and none["text"] == (
+            "No plan fits: these limits can't all hold: Total hours (at most 100); Staffed regions (at least 60, for each Region)."
+            " Relax one of them, then run it again. The proposal an earlier run of this plan left open is withdrawn.")
+        assert batch not in waiting() and cells() == NOW
+        again = flip(HOURS)  # a plan again: one proposal, the new one
+        assert set(waiting()) == {again["proposal"]["batch"]} and "withdrawn" not in again["text"]
+    finally:
+        sure("delete_optimizer", project=P, optimizer="flip")
 
 
 def test_a_project_without_optimizers_reads_as_before():

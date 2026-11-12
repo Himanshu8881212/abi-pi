@@ -382,6 +382,7 @@ CREATE TABLE IF NOT EXISTS optimizer_runs (
   spec jsonb NOT NULL,
   status text NOT NULL CHECK (status IN ('queued', 'running', 'ok', 'failed')),
   created timestamptz NOT NULL DEFAULT clock_timestamp(),
+  started timestamptz,  -- when a worker took it: a run is stale by how long it has been running, not waiting
   finished timestamptz,
   result jsonb,
   error text

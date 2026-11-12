@@ -2077,12 +2077,14 @@ function plans(box){const g=h('div','cards');box.append(g);
  D.optimizers.forEach((o,i)=>{const T=otype(o.over.type),c=card(o.name||o.id),out=h('div','plan');c.classList.add('wide');
   c.append(h('p','mtext',`Decides ${o.decide.name} for each ${T?low(T):'one'} so that ${o.objective.name||'the total'} is as ${o.objective.goal==='maximize'?'high':'low'} as it can be${(o.limits||[]).length?', within these limits: '+o.limits.map(l=>l.name).join(', '):''}.`),out);
   const draw=()=>{const r=o.latest_run;out.innerHTML='';
-   if(!r){out.append(h('p','empty',MODE==='developer'?'Not worked out yet.':'No plan to show yet.'));return}
+   if(!r){out.append(h('p','empty',MODE==='developer'?'Not worked out yet.':'No plan to show yet. A plan is worked out in Developer: ask one of the project\'s builders for it.'));return}
    if(['queued','running'].includes(r.status)){out.append(h('p','file','Working it out…'));return}
    if(r.status==='failed'){out.append(h('p','bad',r.error||'It could not be worked out.'));return}
    out.append(h('p','txt',r.text||''));const rows=r.rows||[],objs=rows.filter(x=>x[5]);
-   rows.filter(x=>/^(Limit|At least|Exactly)/.test(x[0])&&x[0]!=='Limit in conflict').forEach(x=>out.append(h('div','file',/^At least/.test(x[0])?`${x[1]}: at least ${fmt(x[4])}: ${fmt(x[2])}${/just met/.test(x[0])?' (just met)':''}`:
+   const lims=['best','found'].includes(r.outcome)?rows.filter(x=>/^(Limit|At least|Exactly)/.test(x[0])).sort((a,b)=>/used|met/.test(b[0])-/used|met/.test(a[0])):[];  // the ones that bind first
+   lims.slice(0,8).forEach(x=>out.append(h('div','file',/^At least/.test(x[0])?`${x[1]}: at least ${fmt(x[4])}: ${fmt(x[2])}${/just met/.test(x[0])?' (just met)':''}`:
     x[0]==='Exactly'?`${x[1]}: exactly ${fmt(x[4])}`:`${x[1]}: ${fmt(x[2])}${x[4]===null?'':' of '+fmt(x[4])}${x[0]==='Limit fully used'?' (fully used)':''}`)));
+   if(lims.length>8)out.append(h('div','file','The other limits hold too.'));
    if(objs.length){const tb=h('table'),hd=tb.createTHead().insertRow(),bd=tb.createTBody();[T?T.name:'Name','Now',o.decide.name,''].forEach(t=>hd.append(h('th','',t)));
     objs.slice(0,200).forEach(x=>{const tr=bd.insertRow(),nm=h('button','flink oopen',String(x[1]));nm.onclick=()=>openObj(r.type,x[5]);tr.insertCell().append(nm);[x[3]===null?'—':fmt(x[3]),fmt(x[2]),x[4]||''].forEach(v=>tr.insertCell().textContent=v)});
     const sc=h('div','scroll');sc.append(tb);out.append(sc);if(objs.length>200)out.append(h('p','file','The first 200 are shown.'))}

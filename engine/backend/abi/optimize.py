@@ -40,10 +40,11 @@ log = logging.getLogger(__name__)
 CAP = ontology.LIMIT
 TIME = 60  # seconds a run may take unless the file says `time_limit_s`
 TOL = 1e-6
-BIG = 1e12  # the largest number a file may hold: beyond it sums lose their cents and the solver its footing
-OPEN = 10  # runs queued or running at once in one project
+BIG = 1e15  # the largest number a file may hold: beyond it sums of doubles lose their units
+OPEN, MINE = 10, 3  # runs queued or running at once in one project, and of one person in it
 KEEP = 5  # finished runs kept per optimiser and person: the latest ones
-STALE = "The run did not finish (its worker stopped). Run it again."
+STALE = "The run did not finish. Run it again."
+FAULT = "The plan could not be worked out because something went wrong on ABI's side. Run it again; if it happens again, tell whoever looks after ABI for you."
 COLUMNS = ["what", "name", "plan", "now", "limit", "key"]  # a run's rows: the total, each limit, then each object
 _NUMERIC = (*ontology._INT, "DOUBLE", "FLOAT", "REAL")
 
@@ -135,7 +136,7 @@ def references(project: str, files: dict) -> list[dict]:
 
         if (w := o["decide"]["write"]) in key:
             errs.append(err(rel, "$.decide.write", f"'{w}' is a key column of table '{x['table']}'.", "Name the column the plan is proposed for."))
-        elif cols and cols.get(w) in ontology._INT and not o["decide"].get("integer"):
+        elif cols and _whole(cols.get(w, "")) and not o["decide"].get("integer"):
             errs.append(err(rel, "$.decide.integer", f"The plan is proposed for '{w}', a whole-number column, but may hold fractions.",
                             "Set `integer: true`, or propose it for a decimal column."))
         else:
@@ -160,15 +161,20 @@ def _fmt(v: float) -> str:
     return f"{v:,.2f}".rstrip("0").rstrip(".") if v != int(v) else f"{int(v):,}"
 
 
-def _bound(lim: dict) -> str:
-    if "equal" in lim:
-        return f"exactly {_fmt(lim['equal'])}"
-    return " and ".join(f"at {w} {_fmt(lim[k])}" for k, w in (("min", "least"), ("max", "most")) if k in lim)
+def _num(v: float):
+    """A figure as its rows hold it: a whole one as an int, so a sentence's "4,000" is the row's 4000."""
+    v = round(v, 6)
+    return int(v) if v == int(v) else v
 
 
 def _some(names: list[str]) -> str:
     """Up to three names, then "and others": a sentence states no count that its rows don't hold."""
     return ", ".join(names[:3]) + (" and others" if len(names) > 3 else "")
+
+
+def _whole(typ: str) -> bool:
+    """A column that holds whole numbers only: an integer type, or a DECIMAL without decimals."""
+    return typ in ontology._INT or bool(re.fullmatch(r"(?:DECIMAL|NUMERIC)\(\d+,\s*0\)", typ))
 
 
 def _broken(o: dict, at: str, why: str) -> ActionFailed:
@@ -177,11 +183,26 @@ def _broken(o: dict, at: str, why: str) -> ActionFailed:
                              f" this plan. (For a developer: optimizers/{o['id']}.json {at}: {why})")
 
 
+def _withdraw(conn, project: str, o: dict, user: User, keep: str | None = None) -> bool:
+    """One optimiser, at most one open proposal: the proposals earlier runs of `o` left open are rejected (all but
+    batch `keep`), and those runs marked, so they can be pruned. True when one was still open."""
+    was = {r["batch"] for r in conn.execute("SELECT result->'proposal'->>'batch' AS batch FROM optimizer_runs WHERE project = %s AND optimizer = %s"
+                                            " AND result->'proposal' IS NOT NULL AND result->'withdrawn' IS NULL", [project, o["id"]])} - {keep}
+    old = [p for p in writeback.edit_proposals(conn, user, storage.ProjectRef(project=project))["proposals"] if p["batch"] in was] if was else []
+    for p in old:
+        with contextlib.suppress(ActionFailed):  # decided by a person meanwhile
+            writeback.reject_edit(conn, user, writeback.Proposal(project=project, table=p["table"], batch=p["batch"]))
+    conn.execute("""UPDATE optimizer_runs SET result = result || '{"withdrawn": true}' WHERE project = %s AND optimizer = %s"""
+                 " AND result->'proposal' IS NOT NULL AND result->'proposal'->>'batch' IS DISTINCT FROM %s", [project, o["id"], keep])
+    return bool(old)
+
+
 def _plan(conn, project: str, o: dict, user: User) -> dict:
     """Items 41, 42: optimiser `o` over the objects `user` sees. The outcome as a dict: `outcome` (best; found: the
-    best plan found when the time ran out; infeasible, unbounded, timeout, empty), `text` (in the business's words),
-    `columns`/`rows` (COLUMNS: every figure the text states is a value of them) and, for an Editor's plan that changes
-    something, the `proposal` it was stored as."""
+    best plan found when the time ran out; infeasible, unbounded, timeout, empty, too_many), `text` (in the business's
+    words), `columns`/`rows` (COLUMNS: the total, the number of proposed changes, each object, then each limit; every
+    figure the text states is a value of them, and of the first rows an agent is shown) and, for an Editor's plan that
+    changes something, the `proposal` it was stored as."""
     start, seconds = time.monotonic(), o.get("time_limit_s", TIME)
     left = lambda: seconds - (time.monotonic() - start)  # noqa: E731
     x = next((t for t in ontology.read(project).get("objects", []) if t["id"] == o["over"]["type"]), None)
@@ -194,11 +215,12 @@ def _plan(conn, project: str, o: dict, user: User) -> dict:
                                            " (save_optimizer).") from None
     got = ontology.list_objects(conn, user, args)  # as the person: row-level security, hidden columns, the query log
     one, many, dec, obj = x["name"], x["plural"], o["decide"], o["objective"]
-    if got["more"]:  # the cap itself is in the docs: a refusal has no rows to hold a figure
-        raise ActionFailed(422, f"“{o['name']}” would plan for more {many} than one run takes. Plan for fewer at a time, for example one region"
-                                " or one period per plan: ask the agent to narrow this plan.")
-    cols, objs, key, n = got["columns"], got["rows"], got["key"], len(got["rows"])
     out = {"optimizer": o["id"], "type": x["id"], "time_limit_s": seconds, "columns": COLUMNS, "rows": []}
+    if got["more"]:  # nothing is worked out, so nothing an earlier run proposed is touched
+        return out | {"outcome": "too_many", "rows": [["Limit", f"{many} in one run", None, None, CAP, None]],
+                      "text": f"“{o['name']}” would plan for more than {CAP:,} {many}, the most one run takes. Plan for fewer at a time, for example"
+                              " one region or one period per plan: ask the agent to narrow this plan."}
+    cols, objs, key, n = got["columns"], got["rows"], got["key"], len(got["rows"])
     if not n:
         return out | {"outcome": "empty", "text": f"There is nothing to plan: “{o['name']}” found no {many} you can see"
                                                   + (" that match its filters." if o["over"].get("filters") else ".")}
@@ -206,19 +228,18 @@ def _plan(conn, project: str, o: dict, user: User) -> dict:
     label = lambda c: labels.get(c) or ontology._label(c)  # noqa: E731  only ever of a column this person reads
     title = [str(r[cols.index(got["title"])]) if got["title"] in cols else " ".join(str(r[cols.index(k)]) for k in key) for r in objs]
     keys = [[v if isinstance(v, str | int | float | bool) else str(v) for v in (r[cols.index(k)] for k in key)] for r in objs]
+    hidden = rls.restricted(project, user.id)
 
     def number(v) -> float | None:
         return float(v) if isinstance(v, int | float | Decimal) and not isinstance(v, bool) and math.isfinite(v) else None
 
-    def column(c: str) -> int:
-        if c not in cols:  # missing, or hidden from this person: alike, never read and never named
+    def column(c: str, at: str) -> int:
+        if c in cols:
+            return cols.index(c)
+        if hidden:  # missing, or hidden from this person: alike, never read and never named
             raise ActionFailed(422, f"“{o['name']}” can't be worked out for you: it needs a figure of the {many} that isn't there or that you"
                                     " can't read.")
-        return cols.index(c)
-
-    def missing(j: int, what: str) -> ActionFailed:
-        return ActionFailed(422, f"“{o['name']}” can't be worked out: {one} “{title[j]}” has no number for {what}."
-                                 f" Fill it in, or ask the agent to leave such {many} out of this plan.")
+        raise _broken(o, at, f"table '{x['table']}' has no column '{c}'; use one of: {', '.join(cols)} (save_optimizer).")
 
     mids = list(dict.fromkeys(v["measure"] for _, v in _refs(o) if isinstance(v, dict) and "measure" in v))
     per: dict = {}
@@ -231,63 +252,84 @@ def _plan(conn, project: str, o: dict, user: User) -> dict:
         per = {str(r[0]): r[1:] for r in q["rows"]}
     names = {m["id"]: m.get("name") or m["id"] for m in model._read(project, "measures.json").get("measures", [])}
 
-    def vector(v) -> list[float]:
+    def vector(v, at: str) -> list[float]:
         if not isinstance(v, dict):
             return [float(v)] * n
-        vals = []
-        for j, r in enumerate(objs):
-            if "measure" in v:  # no rows for this object: unknown, never a silent 0
-                f, what = number(per.get(str(keys[j][0]), [None] * len(mids))[mids.index(v["measure"])]), names.get(v["measure"], v["measure"])
-            else:
-                f, what = number(r[column(v["property"])]), label(v["property"])
-            if f is None:
-                raise missing(j, what)
-            vals.append(f)
+        if "measure" in v:  # no rows for an object: unknown, never a silent 0
+            vals, what = [number(per.get(str(ks[0]), [None] * len(mids))[mids.index(v["measure"])]) for ks in keys], names.get(v["measure"], v["measure"])
+            fix = f"Ask the agent to leave such {many} out of this plan, or to use a measure that gives 0 for them."
+        else:
+            i = column(v["property"], f"{at}.property")
+            vals, what, fix = [number(r[i]) for r in objs], label(v["property"]), f"Fill it in, or ask the agent to leave such {many} out of this plan."
+        if None in vals:
+            who = [f"“{title[j]}”" for j, f in enumerate(vals) if f is None]
+            raise ActionFailed(422, f"“{o['name']}” can't be worked out: {one if len(who) == 1 else many} {_some(who)} {'has' if len(who) == 1 else 'have'}"
+                                    f" no number for {what}. {fix}")
         return vals
 
     def said(v) -> str:
         return _fmt(v) if not isinstance(v, dict) else f"its {label(v['property'])}" if "property" in v else f"its {names.get(v['measure'], v['measure'])}"
 
-    w = column(dec["write"])
+    w = column(dec["write"], "$.decide.write")
     if dec["write"] in key:
         raise _broken(o, "$.decide.write", f"'{dec['write']}' identifies a {one}; name the column the plan is proposed for (save_optimizer).")
-    cost, lo = vector(obj["per_unit"]), vector(dec.get("min", 0))
-    hi = vector(dec["max"]) if "max" in dec else [None] * n
+    cost, lo = vector(obj["per_unit"], "$.objective.per_unit"), vector(dec.get("min", 0), "$.decide.min")
+    hi = vector(dec["max"], "$.decide.max") if "max" in dec else [None] * n
     integer, maximize = bool(dec.get("integer")), obj["goal"] == "maximize"
     typ = model.lake_columns(project).get(x["table"], {}).get(dec["write"], "")
-    if not integer and typ in ontology._INT:
+    if not integer and _whole(typ):
         raise _broken(o, "$.decide.integer", f"the plan is proposed for '{dec['write']}', a whole-number column, but may hold fractions;"
                                              " set `integer: true`, or propose it for a decimal column (save_optimizer).")
-    # a plan's numbers as the column holds them: a DECIMAL(10,2) column gets two decimals. ponytail: rounded after the
-    # solve, so a limit can be off by under half a unit of the last decimal per object; solve in the column's units if that matters
+    # a plan's numbers as the column holds them: a DECIMAL(10,2) column gets two decimals. Which limits are fully used is
+    # judged on the solver's own numbers; what the rounded plan uses is shown, and said when rounding took it past a limit
     places = int(d.group(1)) if (d := re.fullmatch(r"(?:DECIMAL|NUMERIC)\(\d+,\s*(\d+)\)", typ)) else 6
-    limits = []  # per limit of the file: its rows (coefficients, least, most, name), one per group value
-    for lim in o.get("limits", []):
-        a = vector(lim.get("per_unit", 1))
+    limits, parts = [], []  # per limit of the file: its rows (coefficients, least, most, name), one per group value; parts: per bound
+    for i, lim in enumerate(o.get("limits", [])):
+        a = vector(lim.get("per_unit", 1), f"$.limits[{i}].per_unit")
         least, most = (lim["equal"], lim["equal"]) if "equal" in lim else (lim.get("min"), lim.get("max"))
         groups: dict = {}
         if "group" in lim:
-            g = column(lim["group"])
+            g = column(lim["group"], f"$.limits[{i}].group")
             for j, r in enumerate(objs):
                 groups.setdefault(f"{lim['name']}: {'none' if r[g] is None else r[g]}", []).append(j)
-        limits.append([({j: a[j] for j in js if a[j]}, least, most, name) for name, js in (groups or {lim["name"]: range(n)}).items()])
+        rs = [({j: a[j] for j in js if a[j]}, least, most, name) for name, js in (groups or {lim["name"]: range(n)}).items()]
+        limits.append(rs)
+        each = f", for each {label(lim['group'])}" if "group" in lim else ""
+        if least is not None and most is not None and least != most:  # a range: each bound can be in a conflict by itself
+            parts += [(f"{lim['name']} (at least {_fmt(least)}{each})", least, [(c, least, None) for c, *_ in rs]),
+                      (f"{lim['name']} (at most {_fmt(most)}{each})", most, [(c, None, most) for c, *_ in rs])]
+        else:
+            word = "exactly" if "equal" in lim else "at least" if most is None else "at most"
+            parts.append((f"{lim['name']} ({word} {_fmt(least if most is None else most)}{each})", least if most is None else most, [r[:3] for r in rs]))
+    editor = (role_in(conn, user, project) or Role.viewer) >= Role.editor
+
+    def none(outcome: str, text: str, rows: list = ()) -> dict:
+        """No plan: an Editor's run also withdraws the proposal an earlier run of this optimiser left open, and says so."""
+        gone = editor and _withdraw(conn, project, o, user)
+        return out | {"outcome": outcome, "rows": list(rows), "text": text + (" The proposal an earlier run of this plan left open is withdrawn." if gone else "")}
 
     def run(c: list[float], units: list) -> tuple[str, list[float] | None]:
-        """Solved with the limits `units` holds: "least" and "most" (the bounds per object) and indexes into `limits`."""
+        """Solved with the limits `units` holds: "least" and "most" (the bounds per object) and indexes into `parts`."""
         return solve(c, lo if "least" in units else [None] * n, hi if "most" in units else [None] * n, integer,
-                     [r[:3] for u in units if isinstance(u, int) for r in limits[u]], maximize, left())
+                     [r for u in units if isinstance(u, int) for r in parts[u][2]], maximize, left())
 
-    units = ["least", *(["most"] if "max" in dec else []), *range(len(limits))]
+    if clash := [j for j in range(n) if hi[j] is not None and lo[j] > hi[j] + TOL]:  # one object's own two bounds: no solver needed
+        j = clash[0]
+        return none("infeasible", f"No plan fits: {one} “{title[j]}” needs at least {_fmt(lo[j])} {dec['name']} and can take at most {_fmt(hi[j])}"
+                                  + (f" (and so for other {many})" if len(clash) > 1 else "") + ". Change one of the two, then run it again.",
+                    [["Limit in conflict", f"{dec['name']} for {title[j]}: at least", None, None, _num(lo[j]), keys[j]],
+                     ["Limit in conflict", f"{dec['name']} for {title[j]}: at most", None, None, _num(hi[j]), keys[j]]])
+    units = ["least", *(["most"] if "max" in dec else []), *range(len(parts))]
     state, vals = run(cost, units)
     if state == "unbounded" and (again := run([0.0] * n, units)[0]) not in ("optimal", "found"):
         state = again  # the solver couldn't tell: without a cost, it is infeasible (or out of time)
     if state == "timeout":
-        return out | {"outcome": "timeout", "text": f"“{o['name']}” found no plan in the time it is allowed, so nothing is proposed. Plan for fewer"
-                                                    f" {many} at a time, or ask the agent to allow this plan more time."}
+        return none("timeout", f"“{o['name']}” found no plan in the time it is allowed, so nothing is proposed. Plan for fewer"
+                               f" {many} at a time, or ask the agent to allow this plan more time.")
     if state == "unbounded":
         total, way, edge = obj.get("name") or "the total", ("grow", "fall")[not maximize], ("the most", "the most or the least")[not maximize]
-        return out | {"outcome": "unbounded", "text": f"“{o['name']}” has no best plan: {total} can {way} without end."
-                                                      f" Add a limit: {edge} {dec['name']} per {one}, or a limit on a total."}
+        return none("unbounded", f"“{o['name']}” has no best plan: {total} can {way} without end."
+                                 f" Add a limit: {edge} {dec['name']} per {one}, or a limit on a total.")
     if state == "infeasible":
         keep = units  # a deletion filter: a limit the rest still conflicts without is not part of the conflict
         for u in units:
@@ -298,43 +340,44 @@ def _plan(conn, project: str, o: dict, user: User) -> dict:
             if st == "infeasible":
                 keep = trial
         if keep is None:
-            return out | {"outcome": "infeasible", "text": f"No plan fits: the limits of “{o['name']}” can't all hold. Which of them conflict could"
-                                                           " not be worked out in the time it is allowed. Loosen a limit and run it again, or ask"
-                                                           " the agent which limits to look at."}
+            return none("infeasible", f"No plan fits: the limits of “{o['name']}” can't all hold. Which of them conflict could not be worked out in the"
+                                      " time it is allowed. Loosen a limit and run it again, or ask the agent which limits to look at.")
+        rows = []
         for u in keep:
             if isinstance(u, int):
-                lim = o["limits"][u]
-                name, at = f"{lim['name']} ({_bound(lim)}{', for each ' + label(lim['group']) if 'group' in lim else ''})", lim.get("equal", lim.get("max", lim.get("min")))
+                name, at = parts[u][:2]
             else:
                 v = dec.get("min", 0) if u == "least" else dec["max"]
                 name, at = f"{dec['name']} per {one}: at {u} {said(v)}", None if isinstance(v, dict) else v
-            out["rows"].append(["Limit in conflict", name, None, None, at, None])
-        return out | {"outcome": "infeasible", "text": "No plan fits: these limits can't all hold: " + "; ".join(r[1] for r in out["rows"])
-                                                       + ". Relax one of them, then run it again."}
+            rows.append(["Limit in conflict", name, None, None, at, None])
+        return none("infeasible", "No plan fits: these limits can't all hold: " + "; ".join(r[1] for r in rows) + ". Relax one of them, then run it again.", rows)
 
     plan = [int(round(v)) if integer else round(v, places) + 0.0 for v in vals]
     now = [number(r[w]) for r in objs]
-    total = round(sum(c * p for c, p in zip(cost, plan)), 6)
-    before = None if None in now else round(sum(c * v for c, v in zip(cost, now)), 6)
+    total = _num(sum(c * p for c, p in zip(cost, plan)))
+    before = None if None in now else _num(sum(c * v for c, v in zip(cost, now)))
     near = lambda a, b: abs(a - b) <= TOL * max(1.0, abs(b))  # noqa: E731
     # what: Limit (at most), Limit fully used; At least, At least, just met; Exactly. plan = what the plan uses, limit = the bound
-    rows, full, met = [["Total", obj.get("name") or "Total", total, before, None, None]], [], []
+    lrows, full, met, past = [], [], [], []
     for rs in limits:
         for coefs, least, most, name in rs:
-            used = round(sum(c * plan[j] for j, c in coefs.items()), 6)
+            raw, used = sum(c * vals[j] for j, c in coefs.items()), _num(sum(c * plan[j] for j, c in coefs.items()))
             if least is not None and least == most:
-                rows.append(["Exactly", name, used, None, most, None])
-            elif most is not None and (near(used, most) or least is None or not near(used, least)):
-                rows.append(["Limit fully used" if near(used, most) else "Limit", name, used, None, most, None])
-                full += [name] * near(used, most)
+                lrows.append(["Exactly", name, used, None, most, None])
+            elif most is not None and (near(raw, most) or least is None or not near(raw, least)):
+                lrows.append(["Limit fully used" if near(raw, most) else "Limit", name, used, None, most, None])
+                full += [name] * near(raw, most)
             else:
-                rows.append(["At least, just met" if near(used, least) else "At least", name, used, None, least, None])
-                met += [name] * near(used, least)
+                lrows.append(["At least, just met" if near(raw, least) else "At least", name, used, None, least, None])
+                met += [name] * near(raw, least)
+            if most is not None and used > most and not near(used, most):
+                past.append(f"the plan uses {_fmt(used)} of {name} ({_fmt(most)} allowed)")
+            elif least is not None and used < least and not near(used, least):
+                past.append(f"the plan gives {_fmt(used)} to {name} ({_fmt(least)} needed)")
     order = sorted(range(n), key=lambda j: (-plan[j], title[j]))
-    top = [title[j] for j in order if hi[j] is not None and near(plan[j], hi[j])]
-    for j in order:
-        edge = "at its most" if hi[j] is not None and near(plan[j], hi[j]) else "at its least" if "min" in dec and near(plan[j], lo[j]) else None
-        rows.append([one, title[j], plan[j], ontology._json(objs[j][w]) if now[j] is not None else None, edge, keys[j]])
+    most_ = {j for j in range(n) if hi[j] is not None and near(vals[j], hi[j])}
+    orows = [[one, title[j], plan[j], ontology._json(objs[j][w]) if now[j] is not None else None,
+              "at its most" if j in most_ else "at its least" if "min" in dec and near(vals[j], lo[j]) else None, keys[j]] for j in order]
     given = [j for j in order if plan[j]]
     best = state == "optimal"
     text = (f"The best plan of “{o['name']}” gives " if best else f"The best plan of “{o['name']}” found in the time it is allowed gives ") + (", ".join(
@@ -344,61 +387,60 @@ def _plan(conn, project: str, o: dict, user: User) -> dict:
     text += "" if best else " A better plan may exist: allow it more time to be sure."
     text += f" Fully used: {', '.join(full)}." if full else " No limit is fully used." if limits and not met else ""
     text += f" Just met: {', '.join(met)}." if met else ""
-    text += f" At their most {dec['name']}: {_some(top)}." if top else ""
-    out |= {"outcome": "best" if best else "found", "rows": rows}
-    edits = [writeback.CellEdit(key=keys[j], column=dec["write"], value=plan[j]) for j in range(n) if now[j] is None or not near(now[j], plan[j])]
-    if (role_in(conn, user, project) or Role.viewer) < Role.editor:
+    text += f" Rounded as the column holds its numbers, {'; '.join(past[:3])}." if past else ""
+    text += f" At their most {dec['name']}: {_some([title[j] for j in order if j in most_])}." if most_ else ""
+    head = [["Total", obj.get("name") or "Total", total, before, None, None]]
+    out |= {"outcome": "best" if best else "found", "rows": head + orows + lrows}
+    if not editor:
         return out | {"text": text + f" This is the plan for the {many} you see; nothing is changed. An Editor's run proposes it as changes for approval."}
-    # item 41: never applied. One open proposal per optimiser: the ones its earlier runs left open are withdrawn first
-    was = {r["batch"] for r in conn.execute("SELECT result->'proposal'->>'batch' AS batch FROM optimizer_runs WHERE project = %s AND optimizer = %s"
-                                            " AND result->'proposal' IS NOT NULL", [project, o["id"]])}
-    old = [p for p in writeback.edit_proposals(conn, user, storage.ProjectRef(project=project))["proposals"] if p["batch"] in was]
-    for p in old:
-        with contextlib.suppress(ActionFailed):  # decided by a person meanwhile
-            writeback.reject_edit(conn, user, writeback.Proposal(project=project, table=p["table"], batch=p["batch"]))
+    # item 41: never applied. A proposal a person approves (approve_edit asks them, whoever calls it); then the ones
+    # earlier runs of this optimiser left open are withdrawn: the new one is stored first, so one always stands
+    edits = [writeback.CellEdit(key=keys[j], column=dec["write"], value=plan[j]) for j in range(n) if now[j] is None or not near(now[j], plan[j])]
     if not edits:
         text += f" The {many} already have these values, so there is nothing to propose."
-    else:  # a proposal a person approves (approve_edit asks them, whoever calls it)
+    else:
         p = writeback.propose_edit(conn, user, writeback.Edits(project=project, table=x["table"], edits=edits,
                                                                comment=f"The best plan of “{o['name']}”"[:2000]))
-        out["proposal"] = {"table": x["table"], "batch": p["batch"], "changes": len(edits)}
-        text += " Proposed as changes for a person to approve; nothing is changed until then."
-    return out | {"text": text + (" An earlier proposal of this plan that was still open is withdrawn." if old else "")}
+        out |= {"proposal": {"table": x["table"], "batch": p["batch"], "changes": len(edits)},
+                "rows": head + [["Changes", "Proposed for approval", len(edits), None, None, None]] + orows + lrows}
+        text += f" Proposed as {len(edits)} change{'s' * (len(edits) != 1)} for a person to approve; nothing is changed until then."
+    gone = _withdraw(conn, project, o, user, out.get("proposal", {}).get("batch"))
+    return out | {"text": text + (" An earlier proposal of this plan that was still open is withdrawn." if gone else "")}
 
 
 def _work(conn, run_id: str, project: str, o: dict, user: User) -> dict:
-    """Run `run_id` to its end and keep the outcome on it, committed. A refusal (ActionFailed) is kept in its own words;
-    any other failure, the outcome's own write included, only as "failed" (its text could quote a row; it is in the
-    server log)."""
+    """Run `run_id` to its end and keep the outcome on it, committed (only while it is still running: a run that was
+    failed meanwhile stays failed). A refusal (ActionFailed) is kept in its own words; any other failure, the
+    outcome's own write included, only as a fault (its text could quote a row; it is in the server's log)."""
     start = time.monotonic()
     try:
         out = _plan(conn, project, o, user) | {"seconds": round(time.monotonic() - start, 1)}
-        conn.execute("UPDATE optimizer_runs SET status = 'ok', finished = now(), result = %s WHERE id = %s", [Jsonb(out), run_id])
+        conn.execute("UPDATE optimizer_runs SET status = 'ok', finished = now(), result = %s WHERE id = %s AND status = 'running'", [Jsonb(out), run_id])
         conn.commit()
     except Exception as e:
         if not isinstance(e, ActionFailed):
             log.exception("optimizer run %s failed", run_id)
         conn.rollback()  # a failed statement leaves nothing to write in; the run's own row was committed when it started
-        conn.execute("UPDATE optimizer_runs SET status = 'failed', finished = now(), error = %s WHERE id = %s",
-                     [str(e) if isinstance(e, ActionFailed) else "The run failed unexpectedly; the details are in the server log.", run_id])
+        conn.execute("UPDATE optimizer_runs SET status = 'failed', finished = now(), error = %s WHERE id = %s AND status = 'running'",
+                     [str(e) if isinstance(e, ActionFailed) else FAULT, run_id])
         conn.commit()  # the failed run stays in the registry
         raise
     return {"run": run_id, "status": "ok", **out}
 
 
-def interrupted(run_id: str | None = None) -> None:
-    """A run nobody is working on ends failed, so it never reads "running" for ever and never blocks the next one:
-    `run_id` whose worker died (worker.retry_stalled_runs), and any run open for longer than a run can take."""
+def interrupted(run_id: str) -> None:
+    """A run whose worker died (worker.retry_stalled_runs) ends failed, so it never reads "running" for ever and never
+    blocks the next one."""
     with db.connect() as conn:
-        conn.execute("UPDATE optimizer_runs SET status = 'failed', finished = now(), error = %s WHERE status IN ('queued', 'running')"
-                     " AND (id = %s OR created < now() - interval '30 minutes')", [STALE, run_id])
+        conn.execute("UPDATE optimizer_runs SET status = 'failed', finished = now(), error = %s WHERE id = %s AND status IN ('queued', 'running')",
+                     [STALE, run_id])
 
 
 def job(run_id: str) -> None:
     """The worker's job (abi.worker.run_optimizer): a queued run, as the person who asked for it."""
     with db.connect() as conn:
-        r = conn.execute("UPDATE optimizer_runs SET status = 'running' WHERE id = %s AND status = 'queued' RETURNING project, spec, user_id",
-                         [run_id]).fetchone()
+        r = conn.execute("UPDATE optimizer_runs SET status = 'running', started = now() WHERE id = %s AND status = 'queued'"
+                         " RETURNING project, spec, user_id", [run_id]).fetchone()
         u = r and security.user(conn, r["user_id"])
     if r is None or u is None:  # not queued any more; a deleted account's runs went with it
         return
@@ -420,15 +462,15 @@ class Which(storage.ProjectRef):
 
 
 def _numbers(x, at: str = "$", size: bool = True) -> tuple[str, str, str] | None:
-    """(JSON path, error, fix) of the first number in the file that can't be used; None when every one can.
-    Without `size`: only what is no number at all."""
+    """(JSON path, error, fix) of the first number in the file that can't be used; None when every one can. A filter's
+    value is the data's, not the plan's: any size. Without `size`: only what is no number at all."""
     if isinstance(x, dict | list):
         return next((bad for k, v in (x.items() if isinstance(x, dict) else enumerate(x))
-                     if (bad := _numbers(v, f"{at}[{k}]" if isinstance(x, list) else f"{at}.{k}", size))), None)
+                     if (bad := _numbers(v, f"{at}[{k}]" if isinstance(x, list) else f"{at}.{k}", size and k != "filters"))), None)
     if isinstance(x, float) and not math.isfinite(x):
         return at, "This is not a number (NaN or infinity).", "Give a finite number."
     if size and isinstance(x, int | float) and not isinstance(x, bool) and abs(x) > BIG:
-        return at, f"This number is beyond {BIG:g}, the largest an optimiser takes.", "Use a smaller unit (thousands, millions)."
+        return at, f"This number is beyond {BIG:g}, the largest an optimiser takes.", "Use a larger unit (thousands, millions)."
     return None
 
 
@@ -467,19 +509,26 @@ def delete_optimizer(conn, user: User, args: Ref) -> dict:
 @action(Role.viewer)
 def run_optimizer(conn, user: User, args: Ref) -> dict:
     """Works out an optimiser's best plan over the objects you see, in the worker (read it with `optimizers`); an Editor's plan is stored as a proposal a person approves, never applied."""
-    o, p = imports.load(args.project, "optimizer", args.optimizer), args.project
-    interrupted()  # runs left open by a worker that died no longer count
+    o, p, live = imports.load(args.project, "optimizer", args.optimizer), args.project, "status IN ('queued', 'running')"
+    # this project's runs nobody works on any more: running for longer than a run can take, or queued for hours
+    conn.execute("UPDATE optimizer_runs SET status = 'failed', finished = now(), error = %s WHERE project = %s AND (status = 'running' AND"
+                 " started < now() - interval '30 minutes' OR status = 'queued' AND created < now() - interval '6 hours')", [STALE, p])
     run_id, inline = str(uuid.uuid4()), flows.IN_FLOW.get()  # a flow step already runs in the worker
-    # one statement: at most OPEN runs open in the project, and (the unique index optimizer_runs_open) one per person and optimiser
-    if not conn.execute("INSERT INTO optimizer_runs (id, project, optimizer, user_id, restricted, spec, status) SELECT %s, %s, %s, %s, %s, %s, %s"
-                        " WHERE (SELECT count(*) FROM optimizer_runs WHERE project = %s AND status IN ('queued', 'running')) < %s"
-                        " ON CONFLICT DO NOTHING", [run_id, p, o["id"], user.id, rls.restricted(p, user.id), Jsonb(o),
-                                                    "running" if inline else "queued", p, OPEN]).rowcount:
-        mine = conn.execute("SELECT 1 FROM optimizer_runs WHERE project = %s AND optimizer = %s AND user_id = %s AND status IN ('queued', 'running')",
-                            [p, o["id"], user.id]).fetchone()
-        raise ActionFailed(409, f"“{o['name']}” is already being worked out for you; its plan shows in a moment." if mine else
+    # one statement: at most OPEN runs open in the project and MINE of them one person's, and (the unique index
+    # optimizer_runs_open) one per person and optimiser
+    if not conn.execute("INSERT INTO optimizer_runs (id, project, optimizer, user_id, restricted, spec, status, started)"
+                        " SELECT %s, %s, %s, %s, %s, %s, %s, CASE WHEN %s THEN now() END"
+                        f" WHERE (SELECT count(*) FROM optimizer_runs WHERE project = %s AND {live}) < %s"
+                        f" AND (SELECT count(*) FROM optimizer_runs WHERE project = %s AND user_id = %s AND {live}) < %s ON CONFLICT DO NOTHING",
+                        [run_id, p, o["id"], user.id, rls.restricted(p, user.id), Jsonb(o), "running" if inline else "queued", inline,
+                         p, OPEN, p, user.id, MINE]).rowcount:
+        mine = [r["optimizer"] for r in conn.execute(f"SELECT optimizer FROM optimizer_runs WHERE project = %s AND user_id = %s AND {live}", [p, user.id])]
+        raise ActionFailed(409, f"“{o['name']}” is already being worked out for you; its plan shows in a moment." if o["id"] in mine else
+                                "You already have several plans being worked out. Try again when one of them is done." if len(mine) >= MINE else
                                 "Too many plans are being worked out in this project right now. Try again in a moment.")
-    conn.execute("DELETE FROM optimizer_runs WHERE project = %s AND optimizer = %s AND user_id = %s AND status IN ('ok', 'failed') AND id NOT IN"
+    # the latest KEEP finished runs per person stay, and any run whose proposal may still be open
+    conn.execute("DELETE FROM optimizer_runs WHERE project = %s AND optimizer = %s AND user_id = %s AND status IN ('ok', 'failed')"
+                 " AND (result->'proposal' IS NULL OR result->'withdrawn' IS NOT NULL) AND id NOT IN"
                  " (SELECT id FROM optimizer_runs WHERE project = %s AND optimizer = %s AND user_id = %s ORDER BY created DESC LIMIT %s)",
                  [p, o["id"], user.id, p, o["id"], user.id, KEEP])
     conn.commit()  # before the worker can pick the job up; a flow's run: before its outcome is kept

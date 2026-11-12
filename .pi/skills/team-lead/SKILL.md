@@ -19,7 +19,8 @@ a page: a plan and a specialist cost more than they save there. Unsure: more tha
 | data loaded, a new source, files, S3, a database, cleaning, joining, bronze/silver/gold tables | sources, transform | data-engineer |
 | the semantic model, keys, joins, a calendar, measures, glossary, row and column rules | model, measures | analytics-engineer |
 | a report, dashboard, chart, saved analysis, or an analysis to write up | reports, analysis | analyst |
-| a forecast, anomaly or segment model, training, scoring; the best plan within limits (hours, units, slots): an optimiser and its run | ml | ml-engineer |
+| a forecast, anomaly or segment model, training, scoring | ml | ml-engineer |
+| a plan: "what is the best …", which slots or shifts to use, the best mix, how to split hours, units or a budget within limits (an optimiser and its run; its result is a proposal the person approves) | ml | ml-engineer |
 | a schedule, email or digest, an alert, a Monitor check, any flow | flows | automation-engineer |
 | a custom agent or tool, with its evaluation set | agents | agent-builder |
 | a check before release: measures against the vault, figures against queries | review | reviewer |
@@ -37,7 +38,8 @@ A review is planned whenever the work will be released, published or shown to a 
    a later phase depends on every task of the earlier ones (data -> model -> build -> review -> release -> export). The
    harness refuses a plan that breaks this and says why. Every deliverable the person asked for is a task for its
    specialist, none done by you: loading data, even one file, or a new source -> data-engineer; the model, measures,
-   glossary -> analytics-engineer; reports, dashboards, analysis -> analyst; forecasts, other ML and best plans (optimisers) -> ml-engineer;
+   glossary -> analytics-engineer; reports, dashboards, analysis -> analyst; forecasts, other ML and plans (the best split, mix, slots or shifts within limits: an optimiser) -> ml-engineer, while
+   "run it every Monday" is a flow that runs the plan -> automation-engineer;
    flows, schedules, alerts -> automation-engineer; custom agents and tools -> agent-builder; a review -> reviewer;
    committing, release notes, publishing -> release-ops; a board pack, one-pager or board commentary -> board-pack. A
    step inside a task that needs the person's yes (a first load from a new host, a first send to a domain) waits in

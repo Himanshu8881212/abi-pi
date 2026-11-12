@@ -19,8 +19,8 @@ project bundle like every other definition. A project without one behaves exactl
 - `over`: the object type (see [objects.md](objects.md)); `filters` narrow it, as in `list_objects`.
 - `decide`: one number per object. `write` is the column of the type's table the plan is proposed for; its current
   values are the plan's "now". `min` (default 0), `max`, and `integer` for whole numbers.
-- `objective`: the sum of `per_unit` × the decided number, to `maximize` or `minimize`.
-- `limits`: each bounds the sum of `per_unit` (default 1) × the decided number with `max`, `min` or `equal`; with
+- `objective`: the sum over the objects of `per_unit` times the decided number, to `maximize` or `minimize`.
+- `limits`: each bounds the sum of `per_unit` (default 1) times the decided number with `max`, `min` or `equal`; with
   `group` it holds within each value of a column.
 - A value (`per_unit`, `decide.min`, `decide.max`) is a number, `{"property": <numeric column of the type's table>}` or
   `{"measure": <measure ID>}`, read per object. There is no expression language: a derived figure is a measure.
@@ -32,20 +32,34 @@ in the engine knows an industry.
 ## A run
 
 `run_optimizer` (the app: Automate > Plans, "Find the best plan") queues the run for the worker; `optimizers` reads it.
-The answer is a sentence and rows: the total (and what it is now), each limit with what the plan uses of it (an
-at-most limit says when it is fully used, an at-least limit when it is just met), and each object with its number now
-and in the plan. Every figure in the sentence is a value of the rows; the sentence states no count of its own. When no
-plan fits, the answer names the limits that can't hold together, and only those. A plan with no end, or over nothing,
-says so and what to do.
+The answer is a sentence and rows, in this order: the total (and what it is now), the number of values the proposal
+changes, each object with its number now and in the plan (the largest first), then each limit with what the plan uses
+of it (an at-most limit says when it is fully used, an at-least limit when it is just met). Every figure in the
+sentence is a value of the rows, and of the first rows: an agent is shown the first 20. When no plan fits, the answer
+names the limits that can't hold together, and only those (a limit with a least and a most: the bound that is in the
+way); an object whose own least is above its own most is named before anything is worked out. A plan with no end, over
+nothing, or over more objects than one run takes says so and what to do.
 
 **A run changes nothing.** An Editor's or Owner's plan is stored as one write-back proposal on `decide.write`, listed
 under Data > Edits; a person approves it there (`approve_edit` asks for their confirmation whoever calls it: an agent,
-a flow and a replayed call are all asked), and the approved batch is undone in one step. A new run first withdraws
-(rejects) the proposal an earlier run of the same optimiser left open, and says so: one optimiser, at most one open
-proposal. A Viewer's run shows the plan and proposes nothing. The agent can set an optimiser up (`save_optimizer`) and
-run it; a flow runs it with a step `{"type": "action", "action": "run_optimizer", "input": {"optimizer": "hours"}}`,
-on a schedule too: a run that finds a plan leaves a proposal, never a change, and a run that finds none fails the step
-with the reason. A flow started by an action type, and an alert for one object, may not run one.
+a flow and a replayed call are all asked), and the approved batch is undone in one step. A Viewer's run shows the plan
+and proposes nothing.
+
+**One optimiser, at most one open proposal.** For an Editor or Owner, every run that gets as far as working a plan out
+ends with at most one open proposal of that optimiser:
+- it finds a plan that changes something: the new proposal is stored first, then the proposals earlier runs left open
+  are withdrawn (rejected; they stay in the edit history), and the answer says so;
+- it finds a plan the objects already have: nothing is proposed, and an earlier open proposal is withdrawn;
+- it finds no plan (the limits conflict, the plan has no end, the time ran out without a plan): an earlier open
+  proposal is withdrawn, and the answer says so;
+- it is refused before anything is worked out (an object without a number, too many objects, a file that no longer
+  fits the model): nothing is withdrawn.
+A proposal a person already approved or rejected is never touched.
+
+The agent can set an optimiser up (`save_optimizer`) and run it; a flow runs it with a step
+`{"type": "action", "action": "run_optimizer", "input": {"optimizer": "hours"}}`, on a schedule too: a run that finds
+a plan leaves a proposal, never a change, and a run that finds none fails the step with the reason. A flow started by
+an action type, and an alert for one object, may not run one.
 
 **Row-level security.** The objects and measures are read as the person who runs it. A restricted Viewer's plan, its
 total, the limits it uses and the reason no plan fits are made of the objects they see; a plan that needs a column
@@ -67,18 +81,23 @@ approved plan wrote reaches it with the data, as every edit does.
 - Time: 60 seconds by default, `time_limit_s` 1 to 600. When the time runs out with a plan that holds every limit,
   that plan is the answer, labelled "found in the time it is allowed" (a better one may exist), and it is proposed
   like any other; with no plan found, nothing is proposed. The proposal is written after the limit (a cell at a time).
-- Numbers in the file are finite and at most 1e12 in size.
+- Numbers in the file are finite and at most 1e15 in size (a filter's value: any).
 - The limit's right-hand side is a constant; per-object bounds can be a property or a measure.
-- An object without a number for a property or a measure the optimiser uses stops the run and is named: nothing
-  counts as 0 silently.
+- An object without a number for a property or a measure the optimiser uses stops the run and is named (up to
+  three, "and others"): nothing counts as 0 silently. For a measure: leave such objects out with a filter, or use a
+  measure that gives 0.
 - A measure is read per object only for types with one key column.
 - The plan's numbers are rounded the way `decide.write` holds them (a DECIMAL(10,2) column: two decimals; otherwise
-  six) after the best plan is found, so a limit can be missed by less than half a unit of the last decimal per object.
+  six) after the best plan is found. Which limits are fully used or just met is judged on the plan before rounding;
+  the rows show what the rounded plan uses, and when rounding takes it past a limit (by less than half a unit of the
+  last decimal per object) the sentence says so with both figures: the plan is not re-solved in the column's units. A
+  whole-number column, a DECIMAL without decimals included, needs `integer: true`.
 - Among plans that are equally good, which one comes out is not specified.
 - "Which limits conflict" is one smallest set; other sets may exist. For a limit with `group` it does not say which
   group.
-- Runs are kept in the engine's database, not in Git: the latest 5 finished runs per optimiser and person. At most
-  one run per person and optimiser at a time, and 10 queued or running in a project. A run whose worker died ends
-  failed (within about a minute; at the latest after 30 minutes).
+- Runs are kept in the engine's database, not in Git: the latest 5 finished runs per optimiser and person, and any
+  run whose proposal may still be open. At most one run per person and optimiser at a time, 3 per person and 10 in a
+  project queued or running. A run whose worker died ends failed (within about a minute; at the latest when it has
+  been running for 30 minutes, or waiting for 6 hours, and the project's next run starts).
 - The app shows and runs plans; setting one up is done with the agent or by editing the file. The generated
   project documentation and the lineage map do not list optimisers yet.

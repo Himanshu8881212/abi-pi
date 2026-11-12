@@ -28,19 +28,22 @@
   object; one key column). A limit bounds the sum of per_unit × the decided number (per_unit default 1); `group`
   makes it hold within each value of a column. Names (`decide.name`, `objective.name`, each limit's `name`) are the
   person's business words: the plan's text uses them. Every object needs a number for each property and measure
-  used: one without stops the run and is named (fill it in, or filter such objects out). Shapes to start from, never
+  used: one without stops the run and is named (fill it in, filter such objects out, or use a measure that gives 0). Shapes to start from, never
   a rule: allocation (units per warehouse, max = capacity, one total limit), staffing (hours per café between the
   hours it needs and the hours it can use, the most revenue within a wage budget and a limit per region), maintenance
   slots (0/1 per slot with integer and max 1, `equal: 1` per machine, a limit per week). Say the
   goal, what is decided and each limit in words and save once the person agrees.
 - `run_optimizer {optimizer}` queues the run (default 60 s, at most 1,000 objects); read it with `optimizers
   {optimizer}` (at most twice; still queued or running: say it is being worked out). State the plan, the total and
-  the limits only from its rows (`what`: Total; Limit and Limit fully used: at most `limit`, the plan uses `plan`; At
-  least and At least, just met; Exactly; Limit in conflict; else the object's type with `plan` and `now`); relay
-  `text` for what happened and add no count of your own. `outcome` found: the time ran out with a plan that may not be
-  the best; say so. A plan is never applied: an Editor's run stores it as a proposal (`proposal`), which the person
-  approves under Data > Edits (`approve_edit` asks them), and withdraws the proposal an earlier run of the same
-  optimiser left open; a Viewer's run only shows the plan for what they see. "No plan fits": name the limits in
+  the limits only from its rows, in this order: Total; Changes (how many values the proposal changes); each object
+  (`what` is its type, with `plan` and `now`), the largest first; then the limits (Limit and Limit fully used: at most
+  `limit`, the plan uses `plan`; At least and At least, just met; Exactly; Limit in conflict). You are shown the first
+  20 rows: with many objects, name the largest and say the rest are on the Plans page. Relay `text` for what happened
+  and add no count of your own. `outcome` found: the time ran out with a plan that may not be the best; say so.
+  too_many: more objects than one run takes; narrow it with `over.filters`. A plan is never applied: an Editor's run
+  stores it as a proposal (`proposal`), which the person approves under Data > Edits (`approve_edit` asks them). One
+  optimiser has at most one open proposal: a run that finds a plan withdraws the earlier one, a run that finds none
+  withdraws it too and says so; a Viewer's run only shows the plan for what they see. "No plan fits": name the limits in
   conflict and ask which one to relax; never loosen a limit yourself. On a schedule: a flow step `{type: action,
   action: run_optimizer, input: {optimizer}}`; a run that finds a plan leaves one proposal, never a change, and a run
   that finds none fails the step with the reason. A published copy has no plans.

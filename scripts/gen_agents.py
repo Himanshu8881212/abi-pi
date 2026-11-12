@@ -12,7 +12,8 @@ COMMON = ["read", "ls", "abi_tools", "abi_sync", "abi_prefs", "abi_vault", "abi_
 READS = ["semantic_model", "semantic_query", "visual_data", "dataset_data", "data_quality", "readiness", "lineage", "docs",
          "how_calculated", "list_reports", "list_flows", "flow_runs", "ml_models", "list_tools", "list_agents", "changes",
          "history", "diff", "rls_rules", "preview_steps", "test_tool", "test_agent"]
-EXTRA = {"analyst": ["run_agent", "list_agents", "agent_runs"], "release-ops": ["data_quality", "flow_runs", "refresh"]}
+EXTRA = {"analyst": ["run_agent", "list_agents", "agent_runs", "optimizers"], "release-ops": ["data_quality", "flow_runs", "refresh"],
+         "automation-engineer": ["optimizers"]}  # 1.2.6 M12: they read plans (the analyst explains one, a flow runs one); only the ml-engineer makes them
 HARNESS = {"data-engineer": ["abi_load", "abi_project"], "release-ops": ["abi_cli"], "board-pack": ["abi_pack"],
            "analyst": ["abi_explore", "abi_monitor"], "automation-engineer": ["abi_monitor"]}  # the app's Explore and Monitor
 
