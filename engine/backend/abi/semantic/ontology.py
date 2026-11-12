@@ -156,6 +156,20 @@ def references(files: dict, cols: dict | None = None) -> list[dict]:
                 column(f"{at}.properties[{j}].column", what, pt or t, pc)
         errs.extend({"file": FILE, "path": f"{at}.measures[{j}]", "error": f"{what}: unknown measure '{ms}'.",
                      "fix": "Use a measure ID of model/measures.json."} for j, ms in enumerate(x.get("measures", [])) if ms not in measures)
+        if rs := x.get("resolve"):  # 1.2.6 M11: what find_same compares, all columns of the type's own table
+            if len(keys.get(t) or []) > 1:  # ponytail: one key column (the same-as table holds a pair of keys); a key tuple when a type needs it
+                err(f"{at}.resolve", f"{what}: `resolve` needs a table with one key column, and '{t}' is keyed by {', '.join(keys[t])}.",
+                    f"Give '{t}' one key column (set_table), or take `resolve` off the type.")
+            if (s := f"same_as_{t}") in tables and keys.get(s) != ["a", "b"]:
+                err(f"{at}.resolve", f"{what}: `resolve` keeps its decisions in table '{s}', and the model has another table of that name.",
+                    f"Rename that table, or take `resolve` off the type.")
+            for k in ("exact", "fuzzy"):
+                for j, f in enumerate(rs.get(k, [])):
+                    column(f"{at}.resolve.{k}[{j}].column", what, t, f["column"])
+            for j, c in enumerate(rs.get("block", [])):
+                column(f"{at}.resolve.block[{j}]", what, t, c)
+            if "source" in rs:
+                column(f"{at}.resolve.source", what, t, rs["source"])
 
     unique("link", o.get("links", []))
     defaults: dict = {}
@@ -744,6 +758,14 @@ def get_object(conn, user: User, args: Get) -> dict:
     where = " AND ".join(f"{storage._q(k)} = {rls.cast_lit(v, cols[t][k])}" for k, v in zip(keys, args.key))
     asked = {"get_object": x["id"], "key": args.key}
     found = _read(args.project, f"SELECT {', '.join(map(storage._q, own))} FROM {storage._q(t)} WHERE {where} LIMIT 1", asked, user.id)
+    if not found and "resolve" in x and len(keys) == 1:  # 1.2.6 M11: a record merged into another one they see is that object
+        from abi.semantic import same  # not at top: it imports this module
+
+        try:
+            if to := same.shown_as(args.project, x, args.key[0], user.id):
+                return get_object(conn, user, args.model_copy(update={"key": to}))
+        except duckdb.Error:  # a key that doesn't fit its column: missing, as below
+            pass
     if not found:  # SE-6: a hidden object and a missing one answer alike
         raise ActionFailed(404, f"No visible {x['name']} with key {json.dumps(args.key)} in project '{args.project}'.")
     columns, row = own, list(found[0])

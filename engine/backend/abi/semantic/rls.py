@@ -550,6 +550,9 @@ def _context(project: str, user_id: int, con, snap: int, edited: frozenset, mode
     # committed since the action began, or during this build, would put one version's views under another's key)
     fresh = fresh or _digest(project) != key[2]
     conds = conditions(project, user_id, read, {t: c for t, c in model_columns.items() if t not in edited})
+    # 1.2.6 M11, fail closed: a same-as table (the keys of the records people decided about, same.py) that nothing filters for
+    # this reader (its relationships onto the type are gone, or the type itself has no rule) shows them no rows
+    conds |= {t: "FALSE" for t, c in model_columns.items() if t.startswith("same_as_") and list(c) == ["a", "b", "same"] and t not in conds}
     hid = _hidden(project, user_id)
 
     def drop(t: str, cols) -> tuple[str | None, list[str]]:

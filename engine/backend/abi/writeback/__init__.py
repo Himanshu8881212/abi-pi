@@ -132,7 +132,7 @@ def _seen(project: str, t: str, user_id: int | None, col: str = "row_key") -> st
                      for rk, *xs in logged)  # VALUES columns: col0 the log's key text, col1.. the typed key
     typed = ", ".join(f"col{i + 1}" for i in range(len(key)))
     seen = semantic.execute(project, f"SELECT col0 FROM (VALUES {vals}) WHERE ({typed}) IN"
-                                     f" (SELECT {', '.join(map(_q, key))} FROM {_q(t)})", {"edit_rows_seen": t}, user_id)
+                                     f" (SELECT {', '.join(map(_q, key))} FROM {_q(t)})", {"edit_rows_seen": t}, user_id, raw=True)  # 1.2.6 M11: the source rows
     if not seen:
         return "false"
     # D-110: no edit of a hidden column, nor a whole-row add/delete (its values hold every column)

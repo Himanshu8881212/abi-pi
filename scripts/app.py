@@ -57,11 +57,13 @@ WRITES = {"set_rls_rule", "set_measure", "delete_measure", "set_glossary_term", 
           "commit", "undo", "add_data", "delete_source", "delete_table", "set_table", "add_relationship", "remove_relationship",
           "save_dataset", "delete_dataset", "save_report", "delete_report", "save_flow", "delete_flow", "save_ml_model",
           "delete_ml_model", "save_tool", "publish_tool", "delete_tool", "save_agent", "publish_agent", "delete_agent", "set_steps", "edit_cells", "approve_edit", "reject_edit", "undo_edits", "create_input_table",
-          "run_object_action"}  # 1.2.6 M7: an object page's or a form card's action, a write-back as the person (Developer only, as every write)
+          "run_object_action",  # 1.2.6 M7: an object page's or a form card's action, a write-back as the person (Developer only, as every write)
+          "decide_same"}  # 1.2.6 M11: a person's decision that objects are the same one, or not (ABI asks them to confirm)
 READS = {"changes", "check_condition", "data_quality", "dataset_data", "docs", "edit_history", "edit_proposals", "export_visual",
          "flow_runs", "history", "how_calculated", "list_agents", "list_flows", "list_reports", "list_tools", "load_runs",
          "ml_models", "preview_steps", "readiness", "report_snapshot", "rls_rules", "run_tool", "semantic_model",
-         "semantic_query", "test_agent", "test_tool", "visual_data", "ontology", "get_object", "list_objects", "object_history"}  # 1.2.6 M6, M7: object reads
+         "semantic_query", "test_agent", "test_tool", "visual_data", "ontology", "get_object", "list_objects", "object_history",  # 1.2.6 M6, M7: object reads
+         "find_same"}  # 1.2.6 M11: what looks like the same object (Editors and Owners; it merges nothing)
 ALLOWED = READS | WRITES | READS_ONLY  # the page's actions; every other one is ABI's app's
 ACCOUNT = {"set_password", "create_personal_token", "revoke_personal_token", "start_mfa", "confirm_mfa", "disable_mfa"}  # the confirmations Viewer mode still redeems: account work (a password, personal tokens, two-step sign-in), your own or, as an Owner, another person's
 
@@ -682,8 +684,8 @@ async function api(action,args){
  const post=(u,b)=>fetch(u,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json());
  let r=await post('/api/'+action,{project:D.project,...args});
  if(action==='run_object_action')ASK_WHAT='';  // an action on an object is never a project delete, whatever it is called
- if(r.confirm){if(!await ask(action==='run_object_action'?{...actAsk(r.confirm),plain:true}:r.confirm))throw new Error('You declined. Nothing changed.');r=await post('/confirm/'+r.confirm.id)}
-  if(r.error)throw Object.assign(new Error(plainErr(r.error)),{fields:r.fields});if(/^(set_|save_|delete_|add_|remove_|enable_|create_|edit_|approve_|reject_|undo|commit|publish_|train_|score_)/.test(action))refreshPending();return r.result}
+ if(r.confirm){if(!await ask(action==='run_object_action'?{...actAsk(r.confirm),plain:true}:action==='decide_same'?{...r.confirm,plain:true}:r.confirm))throw new Error('You declined. Nothing changed.');r=await post('/confirm/'+r.confirm.id)}
+  if(r.error)throw Object.assign(new Error(plainErr(r.error)),{fields:r.fields});if(/^(set_|save_|delete_|add_|remove_|enable_|create_|edit_|approve_|reject_|undo|commit|publish_|train_|score_|decide_)/.test(action))refreshPending();return r.result}
 let PEND_T=null;function refreshPending(){clearTimeout(PEND_T);PEND_T=setTimeout(async()=>{try{D.pending=await (await fetch('/api/changes',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({project:D.project})})).json().then(x=>x.result||D.pending);vc();const cb=$('#changes');cb.classList.remove('pulse');void cb.offsetWidth;if(D.pending?.files?.length)cb.classList.add('pulse')}catch(e){}},400)}
 let ASK_WHAT='';  // what the person is deleting, for ABI's confirmation
 function ask(c){return new Promise(res=>{const d=$('#confirm'),bad=!c.plain&&/\b(delet|remov|drop|revok|stop|disabl|overwrit)/i.test((c.title||'')+' '+(c.message||''));$('#c-yes').classList.toggle('danger-solid',bad);$('#c-yes').textContent=c.yes||(bad?(ASK_WHAT?'Delete':'Yes, go ahead'):'Confirm');$('#confirm h3').textContent=bad&&ASK_WHAT?`Delete “${ASK_WHAT}”?`:c.title||(c.id?'Confirm this change':'Confirm');
@@ -1660,7 +1662,27 @@ function objTable(box,T,fixed,n){n=n||50;const bar=h('div','row obar'),q=h('inpu
   if(st.offset||r.more){const b=(t,on,fn)=>{const x=h('button','btn',t);x.disabled=!on;x.onclick=fn;return x};
    (fixed?[foot]:[head,foot]).forEach(f=>f.append(b('Previous',st.offset,()=>{st.offset=Math.max(0,st.offset-n);load()}),h('span','file',`${st.offset+1} to ${st.offset+r.rows.length}`),b('Next',r.more,()=>{st.offset+=n;load()})))}}
  bar.append(head);box.append(bar,out,foot);load()}
-function objectsPage(box,T){objBar(box,'obj:'+T.id);if(T.description&&T.description!==MASK)box.querySelector('.pghead .ttl')?.append(h('p','',T.description));const c=h('div','card');box.append(c);objTable(c,T)}
+function objectsPage(box,T){objBar(box,'obj:'+T.id);if(T.description&&T.description!==MASK)box.querySelector('.pghead .ttl')?.append(h('p','',T.description));sameCard(box,T);const c=h('div','card');box.append(c);objTable(c,T)}
+// 1.2.6 M11: objects that look like the same one. ABI proposes them with why (find_same) and merges nothing; the person
+// decides (decide_same, through ABI's confirmation: the page never confirms by itself) and can take a decision back.
+// For Editors and Owners in Developer. Business names only: never a key, a table or a column. `key`: one object's page
+function sameCard(box,T,key){if(!T.resolve||MODE==='viewer'||myRank()<2)return;const c=card(key?`Records of this ${low(T)}`:'Possible duplicates'),many=T.plural.toLowerCase();c.classList.add('wide');c.hidden=true;box.append(c);
+ const nm=o=>{const b=h('button','flink oopen',String(o.title??'(no name)'));b.onclick=()=>openObj(T.id,[o.key]);return b},
+  line=(lead,os)=>{const d=h('div','txt');d.append(lead);os.forEach((o,i)=>d.append(i?(i===os.length-1?' and ':', '):' ',nm(o)));return d},
+  go=async(args,done,action)=>{try{await api(action||'decide_same',args);toast(done);show(CUR)}catch(e){toast(e.message,!/^You declined/.test(e.message))}};
+ api('find_same',{type:T.id,...(key?{key:key[0]}:{})}).then(r=>{if(!c.isConnected)return;
+  r.groups.forEach((g,gi)=>{const d=h('div','item'),a=h('div','row acts'),n=g.objects.length,by=Object.fromEntries(g.objects.map(o=>[o.key,o])),keys=g.objects.map(o=>o.key);
+   d.append(line(`These ${n} ${many} look like the same one:`,g.objects));
+   g.pairs.slice(0,6).forEach(p=>{const e=h('div','file');if(n>2)e.append(nm(by[p.a]),' and ',nm(by[p.b]),': ');e.append(p.why.join(', '));d.append(e)});
+   a.append(btn(`Same ${low(T)}`,()=>go({type:T.id,keys,decision:'same'},`They count as one ${low(T)} now. Undo it under Decided.`),!gi),btn('Not the same',()=>go({type:T.id,keys,decision:'different'},'They won\'t be proposed again. Undo it under Decided.')));d.append(a);c.append(d)});
+  if(r.more)c.append(h('p','file','There are more: decide these and the next ones show.'));
+  if(r.note)c.append(h('p','file',`Some ${many} share a very common detail (an empty postcode, say) and weren't compared through it.`));
+  if((r.records||[]).length>1){c.append(h('h4','sub',`Made of ${r.records.length} records`));r.records.forEach(o=>{const d=h('div','item'),a=h('div','row acts');d.append(h('div','txt',[o.title,o.source].filter(Boolean).join(' · ')));
+    a.append(btn('Take out',()=>go({type:T.id,keys:[o.key],decision:'split'},`It is its own ${low(T)} again. Undo it under Decided.`)));d.append(a);c.append(d)})}
+  if(r.decisions.length){c.append(h('h4','sub','Decided'));if(!key&&r.decisions.length>5)c.append(h('p','file',`The latest 5. Each ${low(T)}'s page lists the decisions about it.`));r.decisions.slice(0,key?20:5).forEach(x=>{const d=h('div','item');
+    d.append(h('div','file',[cell(String(x.at).replace(' ','T')+'Z'),x.user,x.undone?'undone':''].filter(Boolean).join(' · ')),line({same:'The same one:',different:'Not the same:',split:'Taken out:'}[x.decision]||'Changed by hand:',x.objects));
+    if(!x.undone){const a=h('div','row acts');a.append(btn('Undo',()=>go({table:r.table,batch:x.batch},'Taken back.','undo_edits')));d.append(a)}c.append(d)})}
+  c.hidden=!c.querySelector('.item')}).catch(e=>{if(c.isConnected){c.append(h('p','empty',e.message));c.hidden=false}})}
 // Data Model › Objects: the types as boxes and their connections as named lines with how many meet how many. A phone has
 // no canvas: it reads the picture ABI draws from the project's files (render.sections) and each type as a card
 function objectsHome(box){objBar(box,'objects');const L=(D.ontology.links||[]).filter(l=>otype(l.from)&&otype(l.to)),ids=OT().map(t=>t.id);
@@ -1714,6 +1736,7 @@ async function objectPage(box,T,key){const bar=h('div','row bar lead');bar.appen
  if((T.measures||[]).length){const mc=card('Measures'),ks=h('div','kpis');mc.classList.add('wide');mc.append(ks);g.append(mc);
   api('visual_data',{query:{measures:T.measures,filters:T.key.map((k,i)=>({column:`${T.table}.${k}`,op:'=',value:o.key[i]}))},type:'kpi'}).then(d=>chart(ks,d)).catch(e=>ks.replaceWith(h('p','empty',e.message)))}
  // ponytail: an object with a several-column key asks one condition per key column (each must hold for a linked object)
+ sameCard(g,T,o.key);
  T.links.slice(0,12).forEach(w=>{const Y=otype(w.to);if(!Y||w.inverse&&w.to===T.id)return;const c=card(cap(w.name));c.classList.add('wide');if(cap(w.name)!==Y.plural)c.querySelector('h3').append(h('span','file',Y.plural));
   objTable(c,Y,key.map((v,i)=>({link:w.link,property:T.key[i],op:'=',value:v})),10);g.append(c)});
  const hc=card('History');hc.classList.add('wide');g.append(hc);box.append(g);
@@ -3216,7 +3239,7 @@ ROUTE_SECTION = {"/edits/rows": "Data", "/upload": "Data", "/report/export": "Ex
                  "/report/email": "Export", "/inbox": "Visualizations"}
 REPORT_ACTIONS = {"visual_data", "report_snapshot", "export_visual", "save_report", "delete_report"}
 _SEC = {"Data": "add_data delete_source delete_table set_steps preview_steps refresh edit_cells approve_edit reject_edit undo_edits create_input_table",
-        "Data Model": "add_relationship remove_relationship set_measure delete_measure set_glossary_term delete_glossary_term save_dataset delete_dataset save_model delete_model",
+        "Data Model": "add_relationship remove_relationship set_measure delete_measure set_glossary_term delete_glossary_term save_dataset delete_dataset save_model delete_model decide_same",
         "Visualizations": "save_report delete_report", "Export": "export_visual report_snapshot", "Govern": "commit undo set_rls_rule",
         "Automate": "save_flow delete_flow enable_flow run_flow save_ml_model delete_ml_model train_model score_model save_tool publish_tool"
                     " delete_tool run_tool test_tool save_agent publish_agent delete_agent run_agent test_agent"}

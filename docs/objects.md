@@ -213,3 +213,42 @@ Viewer through the API or an agent.
 
 The published version carries the loaded data, not what actions and edits wrote in the working project: there, a
 property an action set (a manager, a visit reason) can read "—". The working project, in Developer, shows it.
+
+## The same thing twice (entity resolution)
+
+Two systems often hold the same customer under two IDs. Add `resolve` to the object type and ABI proposes which
+records are the same one; a person decides. The example is a `customers` table keyed by `customer_id` with the columns
+`name`, `vat`, `email`, `postcode` and `source_system`:
+
+```json resolve
+{"id": "customer", "table": "customers", "name": "Customer", "plural": "Customers", "title": "name",
+ "resolve": {
+   "exact": [{"column": "vat", "as": "id"}, {"column": "email", "as": "email"}],
+   "fuzzy": [{"column": "name", "threshold": 0.9}],
+   "block": ["postcode"],
+   "source": "source_system"}}
+```
+
+- `exact` columns are compared after normalising: `id` keeps letters and digits (a VAT number), `email` trims and
+  lower-cases, `phone` keeps the last 9 digits. `fuzzy` columns are text: `threshold` is how alike two values must be,
+  from 0 to 1 (`method`: `jaro_winkler`, the default, or `levenshtein`).
+- Two records are proposed as the same when an exact column is equal, or when every fuzzy column reaches its threshold
+  and no exact column differs. ABI never compares every pair: only records that share an exact value, a `block`
+  value (the same postcode) or the first 4 letters of the first fuzzy column. A value shared by more than 200
+  records (an empty-like postcode) is skipped, and the answer says so.
+- Nothing is merged by itself. The type's list shows **Possible duplicates** to Editors and Owners: "These 2 customers
+  look like the same one", with why. **Same customer** or **Not the same** is the person's decision, confirmed; in chat
+  the agent proposes (`find_same`) and ABI asks the person before `decide_same` does anything.
+- After **Same customer** the group is one customer under one stable ID (the key of its first record). Reports,
+  measures, the customer's page, flows and ML models count it once and show its orders together. The Data grid still
+  shows the source rows. A merged customer's page lists its records; **Take out** splits one off again.
+- Every decision is listed under **Decided** with who and when, and **Undo** takes it back. Decisions are kept in the
+  input table `same_as_customers` (hidden from the model; one logged edit batch each, as under Data › Edits).
+- Row-level security: a restricted Viewer sees a merged customer only when they may see at least one of its records,
+  and then only those records' values, orders and counts. Where the record carrying the group's ID is hidden from
+  them, the customer shows under the first record they see. Proposals and decisions are for Editors and Owners.
+- The published version carries the loaded data, not decisions: merge in the working project.
+- Wrong references are refused when the ontology is saved, with the file, the field and the fix, for example
+  `model/ontology.json $.objects[0].resolve.fuzzy[0].column: Object type 'customer': table 'customers' has no column 'nam'.`
+- Limits in 1.2.6: the records of a type live in one table (append the systems' tables first, in Data), that table
+  has one key column, and it is a loaded table, not a live one.

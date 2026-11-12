@@ -53,6 +53,7 @@ from abi.semantic import (  # noqa: F401  registers their actions
     model,
     ontology,
     rls,
+    same,
     sql,
     subscriptions,
     tiles,

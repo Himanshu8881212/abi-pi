@@ -90,11 +90,27 @@ def _edited(con, snap: int) -> frozenset[str]:
         return frozenset(views)
 
 
-def _effective(cur, con, snap: int, rls_schema: str | None = None) -> None:
+def _effective(cur, con, snap: int, rls_schema: str | None = None, same: str | None = None) -> None:
     """WB-4 hook: unqualified table names are the tables every query reads: the effective table (model.<t> + the
-    latest active edits) of an edited table, else lake.model.<t>; for a restricted user (SE-6) first its RLS views."""
+    latest active edits) of an edited table, else lake.model.<t>; for a restricted user (SE-6) first its RLS views;
+    1.2.6 M11: before those, the reader's views of the resolved objects (`_same`), when the project has any."""
     _edited(con, snap)
-    cur.execute(f"SET search_path = '{f'memory.{rls_schema},' if rls_schema else ''}memory.effective,lake.model'")
+    cur.execute(f"SET search_path = '{''.join(f'memory.{x},' for x in (same, rls_schema) if x)}memory.effective,lake.model'")
+
+
+def _model_columns(con, snap: int) -> dict[str, dict[str, str]]:
+    """M3.6: lake.model's columns, a catalog read per snapshot, not per read."""
+    if (hit := _model_cols.get(con)) is None or hit[0] != snap:
+        _model_cols[con] = hit = (snap, _columns_of(con.cursor(), "model"))
+    return hit[1]
+
+
+def _same(project: str, con, snap: int, ctx: str | None, user_id: int | None, raw: bool = False) -> str | None:
+    """1.2.6 M11: the schema of the resolved objects' views for this reader (same.schema), None for a project that
+    resolves nothing or a `raw` read (the source rows: the grid, write-back, the row-level security key reads)."""
+    from abi.semantic import same  # not at top: it imports this package
+
+    return None if raw else same.schema(project, con, snap, ctx, user_id)
 
 
 COPY_DISTINCT = 10_000  # a dimension column with more distinct values (names, keys) stays out of query copies
@@ -134,8 +150,11 @@ def _copies(project: str, m: dict) -> tuple[dict[str, str], dict[str, dict[str, 
     hashes the copy's definition and the DuckLake table IDs of the fact and its dimensions; a refresh or restore
     replaces a table (new ID) and a model change changes the definition, so an outdated copy is never read."""
     con = storage.lake(project)
+    from abi.semantic import same  # not at top: it imports this package
+
     cur, edited = con.cursor(), _edited(con, _snapshot(con))
     cols = _columns_of(cur, "model")
+    edited |= same.affected(project, m, cols)  # 1.2.6 M11: a copy holds the source rows, so resolved tables read through their views
     loc, types = locale(project), cols | _live.columns(project)
     days = planner.local(m, types, loc["time_zone"])
     meta = f"{storage._META}.{storage._q(project)}"
@@ -233,11 +252,9 @@ def _rls(project: str, user_id: int | None, con, snap: int, sql: str | None,
     user reads unfiltered."""
     if not rls.restricted(project, user_id):
         return None, {}
-    if (hit := _model_cols.get(con)) is None or hit[0] != snap:  # M3.6: a catalog read per snapshot, not per read
-        _model_cols[con] = hit = (snap, _columns_of(con.cursor(), "model"))
-    cols = hit[1]
+    cols = _model_columns(con, snap)
     ctx = rls.context(project, user_id, con, snap, _edited(con, snap), cols,
-                      lambda q, r: execute(project, q, {"rls": "keys"}, reads=r or None))
+                      lambda q, r: execute(project, q, {"rls": "keys"}, reads=r or None, raw=True))  # the source rows' keys
     if sql is not None:
         rls.check(project, user_id, sql, {*cols, *(reads or ())})
     return ctx
@@ -320,7 +337,7 @@ def _shared(project: str, con, snap: int, ctx: str | None, shared: dict) -> dict
 
 def execute(project: str, sql: str, asked: dict, user_id: int | None = None, live: str | None = None,
             over: str = 'SELECT * FROM "__live"', reads: dict | None = None, timeout: float | None = None,
-            shared: dict | None = None) -> list[tuple]:
+            shared: dict | None = None, raw: bool = False) -> list[tuple]:
     """Run one read on the project's lake. SE-5: imported tables in DuckDB; with `live` (a live table), `sql` is
     ClickHouse SQL on that table's source and `over` DuckDB SQL over its result as table "__live"; with `reads`
     ({name: (live table, ClickHouse SQL)}, from `plan`), DuckDB `sql` reads each ClickHouse result as table `name`
@@ -330,7 +347,8 @@ def execute(project: str, sql: str, asked: dict, user_id: int | None = None, liv
     `timeout` (s): a lake read still running then is interrupted (duckdb.InterruptException, SE-10).
     M3.6 `shared` ({read name: (fact, partials SQL)}, a restricted user's lake-only `plan`): each name is a temporary
     view of the shared partials through the user's own filter (`_shared`); raises _Unshared, unlogged, when they
-    can't be read (the caller plans the person's own read)."""
+    can't be read (the caller plans the person's own read).
+    1.2.6 M11: unqualified names read the resolved objects (`_same`) unless `raw`: the source rows."""
     con, start, rows, error = storage.lake(project), time.perf_counter(), None, None
     snap = _snapshot(con)  # read before the query, so a cached result is never older than its key
     with _cache_lock:  # per lake connection: a recreated lake restarts its snapshot IDs
@@ -341,6 +359,8 @@ def execute(project: str, sql: str, asked: dict, user_id: int | None = None, liv
         if shared:
             views = _shared(project, con, snap, ctx, shared)
             key = sql + "".join(f"\n-- {n} = {v}" for n, v in views.items())  # the tables are the snapshot's and SQL's
+        if top := None if live else _same(project, con, snap, ctx, user_id, raw):
+            key += f"\n-- {top}"  # its name hashes its views: a raw read and a resolved one never share a result
         # E-02.6: each live read gets its own table's filter in the ClickHouse SQL itself, logged as run
         add = lambda t, ch: _live.filtered(ch, _live.table_sql(project, t), *filters[t]) if t in filters else ch
         sql = add(live, sql) if live else sql
@@ -352,12 +372,12 @@ def execute(project: str, sql: str, asked: dict, user_id: int | None = None, liv
             rows = _live.run(project, {"__live": (live, sql)}, over)
         elif reads:
             def prepare(cur):
-                _effective(cur, con, snap, ctx)
+                _effective(cur, con, snap, ctx, top)
                 _profile(cur)
             rows, scanned = _live.run(project, reads, sql, prepare, _scanned)  # SC-11: its lake rows
         elif not cached:
             cur = con.cursor()
-            _effective(cur, con, snap, ctx)
+            _effective(cur, con, snap, ctx, top)
             if views:  # one transaction: a shared table dropped meanwhile (a newer snapshot) is still read
                 cur.begin()
             try:
@@ -573,7 +593,7 @@ def _plan(project: str, q: dict, user_id: int | None = None, expressions: list[d
     M3.6 `shared` (a dict: `query`'s), for a restricted user in a project without live tables: each context over a
     filtered lake fact the user sees every column of reads that fact's partials, grouped also by every column any
     user's filter of it reads, and `shared` gets {read name: (fact, partials SQL)} (planner `partials`)."""
-    from abi.semantic import model  # not at top: model imports this package
+    from abi.semantic import model, same  # not at top: both import this package
 
     ms = model._read(project, "measures.json").get("measures", [])
     _inline(expressions, ms, q.get("measures") or [], strict)
@@ -583,7 +603,7 @@ def _plan(project: str, q: dict, user_id: int | None = None, expressions: list[d
     mj = model._read(project, "model.json")
     # ponytail: ~7 ms of catalog reads per plan (S-09-fix-3); cache them by snapshot ID + model.json if that shows
     have = _columns_of(storage.lake(project).cursor(), "query")
-    names, _, days, rates = _copies(project, mj)
+    names, lake, days, rates = _copies(project, mj)
     pairs = _pairs(names, ms, mj.get("date_table") or {})
     # ponytail: no copies at all for a restricted user, not only for facts a rule touches; per-fact if Viewers are slow
     copies = {} if rls.restricted(project, user_id) else {
@@ -596,7 +616,8 @@ def _plan(project: str, q: dict, user_id: int | None = None, expressions: list[d
         live = {t: (_live.table_sql(project, t), types.get(t, {})) for t in _live._sources(project)}
         hid = rls.hidden(project, user_id)
         parts = {f: rls.key_columns(project, f) for f in rls.filtered(project) if not hid.get(f)} if (
-            SHARED_ROWS and shared is not None and not live and rls.restricted(project, user_id)) else None
+            SHARED_ROWS and shared is not None and not live and rls.restricted(project, user_id)
+            and not same.affected(project, mj, lake)) else None  # 1.2.6 M11: partials are the source rows'
         sql = planner.plan(q, measures, mj, copies, live, reads, days, rates, joins, parts, shared,
                            model._read(project, "ontology.json"))
     except (planner.PlanError, mel.MelError) as e:
@@ -712,7 +733,7 @@ def export(project: str, q: dict, fmt: Literal["arrow", "parquet"], user_id: int
     cur, tmp = con.cursor(), tempfile.mkdtemp(prefix="abi-export-")
     path = os.path.join(tmp, "export.parquet")
     try:
-        _effective(cur, con, snap, ctx)
+        _effective(cur, con, snap, ctx, _same(project, con, snap, ctx, user_id))
         _profile(cur)
         if fmt == "arrow":
             reader = cur.execute(sql).to_arrow_reader(EXPORT_BATCH)
@@ -814,10 +835,11 @@ def table_rows(project: str, table: str, offset: int, limit: int, user_id: int |
         rows = execute(project, f"SELECT * FROM {ch} ORDER BY {order} LIMIT {int(limit)} OFFSET {int(offset)}", asked,
                        user_id, live=table, over='SELECT COLUMNS(*)::VARCHAR FROM "__live"')
         return {"columns": [{"name": c, "type": dt} for c, dt in cols.items()], "total": total, "rows": rows}
-    cols = execute(project, f"DESCRIBE {t}", asked, user_id)
-    total = execute(project, f"SELECT count(*) FROM {t}", asked, user_id)[0][0]
+    # 1.2.6 M11 `raw`: the grid shows (and write-back edits) the source rows, never the resolved objects
+    cols = execute(project, f"DESCRIBE {t}", asked, user_id, raw=True)
+    total = execute(project, f"SELECT count(*) FROM {t}", asked, user_id, raw=True)[0][0]
     # ponytail: OFFSET scan relies on insertion order, which storage._commit keeps; key-based paging if deep pages get slow
-    rows = execute(project, f"SELECT COLUMNS(*)::VARCHAR FROM {t} LIMIT {int(limit)} OFFSET {int(offset)}", asked, user_id)
+    rows = execute(project, f"SELECT COLUMNS(*)::VARCHAR FROM {t} LIMIT {int(limit)} OFFSET {int(offset)}", asked, user_id, raw=True)
     return {"columns": [{"name": c[0], "type": c[1]} for c in cols], "total": total, "rows": rows}
 
 
@@ -921,7 +943,7 @@ def get_position(project: Project, table: str, user: Me, key: str) -> dict:
     # row_number() OVER () is a streaming window: it keeps insertion order, the order the grid's OFFSET pages follow
     try:
         found = execute(project, f"SELECT __pos FROM (SELECT row_number() OVER () - 1 AS __pos, * FROM {storage._q(table)})"
-                                 f" WHERE {where or 'false'} LIMIT 1", {"table": table, "position": k}, user.id)
+                                 f" WHERE {where or 'false'} LIMIT 1", {"table": table, "position": k}, user.id, raw=True)
     except duckdb.ConversionException as e:
         raise HTTPException(400, f"A key value doesn't fit its column: {e}")
     if not found and rls.restricted(project, user.id):  # SE-6: a hidden row and a gone one answer alike

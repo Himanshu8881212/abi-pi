@@ -281,7 +281,8 @@ export default async function abi(pi: ExtensionAPI) {
 		"data_quality", "list_reports", "list_tools", "list_agents", "list_flows", "ml_models", "changes", "visual_data", "dataset_data", "rls_rules",
 		"list_snapshots", "preview_steps", "edit_history", "edit_proposals", "flow_runs", "agent_runs", "history", "diff", "ml_history", "get_sharing",
 		"list_share_links", "shared_with_me", "test_tool", "run_tool", "test_agent", "sql_query", "project_locale", "remote_settings", "check_condition",
-		"load_runs", "ontology", "get_object", "list_objects", "object_history", "export_ontology", "propose_ontology"]);  // 1.2.6 M6
+		"load_runs", "ontology", "get_object", "list_objects", "object_history", "export_ontology", "propose_ontology",  // 1.2.6 M6
+		"find_same"]);  // 1.2.6 M11: proposes what looks the same, merges nothing
 	const READ_STEPS = new Set(["abi_tools", "abi_show", "abi_explore", "abi_sync", "abi_health", "abi_cli", "abi_prefs", "abi_vault", "read", "ls", "grep", "find", "subagent", "tool_search"]);
 	let readsFrom: string | undefined;
 	let modeAt = 0, modeNow = process.env.ABI_PI_MODE === "viewer" ? "viewer" : "developer";
