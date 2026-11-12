@@ -270,8 +270,14 @@ def _cols(project: str) -> dict:
 
 
 def check(project: str, files: dict) -> list[dict]:
-    """`references` against the project's lake; [] when `files` has no ontology (nothing read)."""
-    return references(files, _cols(project)) if FILE in files else []
+    """`references` against the project's lake; [] when `files` has no ontology (nothing read). 1.2.6 M11: `resolve`
+    on a live table is refused here too (records are compared and merged in loaded tables only)."""
+    if FILE not in files:
+        return []
+    return references(files, _cols(project)) + [
+        {"file": FILE, "path": f"$.objects[{i}].resolve", "error": f"Object type '{x['id']}': `resolve` works on loaded tables, and '{x['table']}' is a live table.",
+         "fix": "Take `resolve` off the type, or load the table (a source that imports it) instead of reading it live."}
+        for i, x in enumerate((files[FILE] or {}).get("objects", []) if isinstance(files[FILE], dict) else []) if "resolve" in x and live.is_live(project, x["table"])]
 
 
 def gaps(project: str) -> list[str]:
@@ -339,7 +345,7 @@ def describe(project: str, user_id: int | None) -> dict:
         ways = [{"link": ln["id"], "name": ln["name"], "to": ln["to"], "cardinality": ln["cardinality"]} for ln in links if ln["from"] == x["id"]]
         ways += [{"link": ln["id"], "name": ln.get("inverse") or f"{ln['name']} (inverse)", "to": ln["from"],
                   "cardinality": INVERSE.get(ln["cardinality"], ln["cardinality"]), "inverse": True} for ln in links if ln["to"] == x["id"]]
-        out.append(mask({**{k: v for k, v in x.items() if k != "properties"}, "key": keys.get(x["table"]),
+        out.append(mask({**{k: v for k, v in x.items() if k != "properties" and not (hide and k == "resolve")}, "key": keys.get(x["table"]),
                          "properties": [mask(p) for p in _properties(m, x, cols, hid)], "links": ways,
                          "actions": [a["id"] for a in o.get("actions", []) if a["object"] == x["id"]]}))
     return {"objects": out, "links": links, "actions": [mask(a) for a in o.get("actions", [])]}

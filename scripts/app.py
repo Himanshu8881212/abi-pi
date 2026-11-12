@@ -684,7 +684,7 @@ async function api(action,args){
  const post=(u,b)=>fetch(u,{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json());
  let r=await post('/api/'+action,{project:D.project,...args});
  if(action==='run_object_action')ASK_WHAT='';  // an action on an object is never a project delete, whatever it is called
- if(r.confirm){if(!await ask(action==='run_object_action'?{...actAsk(r.confirm),plain:true}:action==='decide_same'?{...r.confirm,plain:true}:r.confirm))throw new Error('You declined. Nothing changed.');r=await post('/confirm/'+r.confirm.id)}
+ if(r.confirm){if(!await ask(action==='run_object_action'?{...actAsk(r.confirm),plain:true}:action==='decide_same'?{...r.confirm,plain:true,preview:''}:r.confirm))throw new Error('You declined. Nothing changed.');r=await post('/confirm/'+r.confirm.id)}
   if(r.error)throw Object.assign(new Error(plainErr(r.error)),{fields:r.fields});if(/^(set_|save_|delete_|add_|remove_|enable_|create_|edit_|approve_|reject_|undo|commit|publish_|train_|score_|decide_)/.test(action))refreshPending();return r.result}
 let PEND_T=null;function refreshPending(){clearTimeout(PEND_T);PEND_T=setTimeout(async()=>{try{D.pending=await (await fetch('/api/changes',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({project:D.project})})).json().then(x=>x.result||D.pending);vc();const cb=$('#changes');cb.classList.remove('pulse');void cb.offsetWidth;if(D.pending?.files?.length)cb.classList.add('pulse')}catch(e){}},400)}
 let ASK_WHAT='';  // what the person is deleting, for ABI's confirmation
@@ -948,7 +948,7 @@ function datasets(box){const g=h('div','cards');const bar=h('div','row bar top')
 
 // ---------- Model ----------
 // Edits: ABI's write-back on the gold tables (edit_cells; history, undo, proposals, input tables)
-function editsPage(box){const T=D.model?.tables||{},keyed=Object.keys(T).filter(t=>(T[t].key||[]).length&&!t.startsWith('ml_')&&t!==(D.model?.date_table?.table||'calendar')).sort();  // ABI makes the date table: nothing to edit
+function editsPage(box){const T=D.model?.tables||{},keyed=Object.keys(T).filter(t=>(T[t].key||[]).length&&!t.startsWith('ml_')&&!(t.startsWith('same_as_')&&OT().some(o=>o.resolve&&o.table===t.slice(8)))&&t!==(D.model?.date_table?.table||'calendar')).sort();  // ABI makes the date table: nothing to edit; decisions about the same objects are made on their list
  const top=h('div','row'),sel=h('select','f');keyed.forEach(t=>sel.append(new Option(`${t} (${T[t].kind||''})`,t)));top.append(h('label','l','Table'),sel);box.append(top);
  const grid=card('Rows','the edited table, as every query sees it'),hist=card('Edit history','who changed what; undo a batch'),prop=card('Waiting for approval','edits the agent proposed'),g=h('div','cards');
  grid.style.gridColumn=hist.style.gridColumn=prop.style.gridColumn='1/-1';g.append(grid,prop,hist);box.append(g);let off=0,staged=[];
@@ -1666,7 +1666,7 @@ function objectsPage(box,T){objBar(box,'obj:'+T.id);if(T.description&&T.descript
 // 1.2.6 M11: objects that look like the same one. ABI proposes them with why (find_same) and merges nothing; the person
 // decides (decide_same, through ABI's confirmation: the page never confirms by itself) and can take a decision back.
 // For Editors and Owners in Developer. Business names only: never a key, a table or a column. `key`: one object's page
-function sameCard(box,T,key){if(!T.resolve||MODE==='viewer'||myRank()<2)return;const c=card(key?`Records of this ${low(T)}`:'Possible duplicates'),many=T.plural.toLowerCase();c.classList.add('wide');c.hidden=true;box.append(c);
+function sameCard(box,T,key){if(!T.resolve||MODE==='viewer'||myRank()<2)return;const c=card('Possible duplicates'),many=T.plural.toLowerCase();c.classList.add('wide');c.hidden=true;box.append(c);
  const nm=o=>{const b=h('button','flink oopen',String(o.title??'(no name)'));b.onclick=()=>openObj(T.id,[o.key]);return b},
   line=(lead,os)=>{const d=h('div','txt');d.append(lead);os.forEach((o,i)=>d.append(i?(i===os.length-1?' and ':', '):' ',nm(o)));return d},
   go=async(args,done,action)=>{try{await api(action||'decide_same',args);toast(done);show(CUR)}catch(e){toast(e.message,!/^You declined/.test(e.message))}};
@@ -1677,7 +1677,7 @@ function sameCard(box,T,key){if(!T.resolve||MODE==='viewer'||myRank()<2)return;c
    a.append(btn(`Same ${low(T)}`,()=>go({type:T.id,keys,decision:'same'},`They count as one ${low(T)} now. Undo it under Decided.`),!gi),btn('Not the same',()=>go({type:T.id,keys,decision:'different'},'They won\'t be proposed again. Undo it under Decided.')));d.append(a);c.append(d)});
   if(r.more)c.append(h('p','file','There are more: decide these and the next ones show.'));
   if(r.note)c.append(h('p','file',`Some ${many} share a very common detail (an empty postcode, say) and weren't compared through it.`));
-  if((r.records||[]).length>1){c.append(h('h4','sub',`Made of ${r.records.length} records`));r.records.forEach(o=>{const d=h('div','item'),a=h('div','row acts');d.append(h('div','txt',[o.title,o.source].filter(Boolean).join(' · ')));
+  if((r.records||[]).length>1){if(!r.groups.length)c.querySelector('h3').lastChild.textContent=`Records of this ${low(T)}`;c.append(h('h4','sub',`Made of ${r.records.length} records`));r.records.forEach(o=>{const d=h('div','item'),a=h('div','row acts');d.append(h('div','txt',[o.title,o.source].filter(Boolean).join(' · ')));
     a.append(btn('Take out',()=>go({type:T.id,keys:[o.key],decision:'split'},`It is its own ${low(T)} again. Undo it under Decided.`)));d.append(a);c.append(d)})}
   if(r.decisions.length){c.append(h('h4','sub','Decided'));if(!key&&r.decisions.length>5)c.append(h('p','file',`The latest 5. Each ${low(T)}'s page lists the decisions about it.`));r.decisions.slice(0,key?20:5).forEach(x=>{const d=h('div','item');
     d.append(h('div','file',[cell(String(x.at).replace(' ','T')+'Z'),x.user,x.undone?'undone':''].filter(Boolean).join(' · ')),line({same:'The same one:',different:'Not the same:',split:'Taken out:'}[x.decision]||'Changed by hand:',x.objects));

@@ -27,7 +27,7 @@ from test_pages import sure
 
 import abi
 
-P, BIG = "pi_er", "pi_er_big"
+P, BIG, KEYS = "pi_er", "pi_er_big", "pi_er_keys"
 S = "same_as_customers"
 CUSTOMERS = """customer_id,name,vat,email,phone,postcode,address,region,source
 101,Acme GmbH,DE 123 456 789,sales@acme.example,+49 30 1234567,10115,Hauptstr. 1,North,crm
@@ -97,6 +97,31 @@ print(json.dumps(out))
 """
 
 
+# an agent's undo of a decision: ABI's question, in the person's words
+UNDO = r"""
+import json, sys
+import abi.app  # noqa: F401
+from abi import actions, db, security
+a = json.loads(sys.stdin.read())
+with db.connect() as c:
+    u = security.user(c, c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"])
+try:
+    actions.run("undo_edits", a, u, "agent")
+    print(json.dumps("ran"))
+except actions.ActionFailed as e:
+    print(json.dumps([e.status, "confirm_token" in e.body, e.body["message"]]))
+"""
+PEOPLE = """person_id,name,phone,email,vat
+1,Ann Lee,(212) 555-0123,,
+2,Bob Ray,(312) 555-0123,,
+3,Cy Dole,+1 212 555 0123,,
+4,Dee Fox,,d@x.example,DE111
+5,Dee Foxx,,d@x.example,DE222
+6,Eve Hall,0049 30 1234567,,
+7,Eva Hull,030 1234567,,
+"""
+
+
 def call(action: str, **args):
     return abi.call(action, project=P, **args)
 
@@ -144,9 +169,9 @@ def keys_of(rows: dict) -> list:
 
 
 @pytest.fixture(scope="module")
-def er(tmp_path_factory):
+def _er(tmp_path_factory):
     """P: the customers and orders above, a North-region Viewer (a row rule on customers.region), the measures and the
-    ontology with `resolve`. Nothing is merged: each test makes the decisions it needs."""
+    ontology with `resolve`."""
     d = tmp_path_factory.mktemp("er")
     (d / "customers.csv").write_text(CUSTOMERS)
     (d / "orders.csv").write_text(ORDERS)
@@ -170,6 +195,19 @@ def er(tmp_path_factory):
     finally:
         sure("delete_user", name=name)
         drop([P])
+
+
+@pytest.fixture
+def er(_er):
+    """P with nothing merged: every decision an earlier test left is undone first, so a test runs alone or in any order."""
+    try:
+        h = call("edit_history", table=S, limit=1000)
+    except abi.ActionError:  # no decision yet: no table
+        return _er
+    at = h["columns"].index
+    for b in dict.fromkeys(r[at("batch_id")] for r in h["entries"] if r[at("status")] == "active"):
+        call("undo_edits", table=S, batch=b)
+    return _er
 
 
 def mine(er, action: str, **args):
@@ -226,6 +264,7 @@ def test_er_exact_key_merges(er):
     assert got["key"] == [101] and got["title"] == "Acme GmbH"
     assert ["101", "902"] not in found()[1]
     one_ = call("find_same", type="customer", key=101)
+    one_["decisions"] = [d for d in one_["decisions"] if not d["undone"]]  # (an earlier test's, undone by the fixture)
     assert [(x["key"], x["title"], x["source"]) for x in one_["records"]] == [("101", "Acme GmbH", "crm"), ("902", "ACME Gmbh", "erp")]
     assert [(d["decision"], [o["title"] for o in d["objects"]], d["undone"]) for d in one_["decisions"]] == [("same", ["Acme GmbH", "ACME Gmbh"], False)]
     # the grid keeps the source rows
@@ -314,18 +353,18 @@ def test_er_reject_and_undo(er):
     record that carries the ID leaves, the rest go on under the first of them. Every decision is listed with who, when
     and what, undone ones too. Refusals say what to do next."""
     grp = lambda: [g for g in found()[1] if set(g) & {"109", "110", "112"}]  # noqa: E731
+    old = {d["batch"] for d in found(limit=1)[0]["decisions"]}  # decisions of earlier tests (undone by the fixture)
     assert grp() == [["109", "110", "112"]]
     no = decide("different", 110, 112)
-    assert grp() == [["109", "110", "112"]], "still one group through 109, which is like both"
+    assert grp() == [["109", "110"]], "112 is like 109 too, but never in one group with 110"
     assert not [p for g in found()[0]["groups"] for p in g["pairs"] if {p["a"], p["b"]} == {"110", "112"}], "the pair itself is gone"
     no2 = decide("different", 109, 110)
     assert grp() == [["109", "112"]]
     with pytest.raises(abi.ActionError) as e:
         decide("different", 109, 110)
     assert e.value.status == 409 and "marked as different already" in e.value.body["message"]
-    call("undo_edits", table=S, batch=no2["batch"])
+    [call("undo_edits", table=S, batch=x["batch"]) for x in (no2, no)]
     assert grp() == [["109", "110", "112"]], "undone: proposed again"
-    call("undo_edits", table=S, batch=no["batch"])
     # a merge and its undo
     before, n = by("revenue"), total("customers_n")
     yes = decide("same", 109, 110)
@@ -344,9 +383,12 @@ def test_er_reject_and_undo(er):
         decide("different", 109, 112)
     assert e.value.status == 409 and "'split' first" in e.value.body["message"]
     # split: one record out; then the one that carries the ID out
-    decide("split", 112)
+    out = decide("split", 112)
     assert by("revenue")[109] == 20 and by("revenue")[112] == 13 and grp() == [], "taken out, and not proposed again"
-    decide("same", 109, 112)
+    with pytest.raises(abi.ActionError) as e:  # taking out says "not this one": merging it back needs that undone
+        decide("same", 109, 112)
+    assert e.value.status == 409 and "“Kaffee Kontor” and “Kaffee-Kontor” were marked as not the same customer" in e.value.body["message"]
+    call("undo_edits", table=S, batch=out["batch"])
     decide("split", 109)
     rev = by("revenue")
     assert rev[109] == 9 and rev[110] == 24 and 112 not in rev, "110 and 112 go on as one, under the first of them"
@@ -359,10 +401,10 @@ def test_er_reject_and_undo(er):
         decide("same", 109, 4242)
     assert e.value.status == 404 and "use the keys find_same lists" in e.value.body["message"]
     # the history: every decision, newest first, with who and when; the undone ones say so
-    hist = [d for d in found()[0]["decisions"] if {o["key"] for o in d["objects"]} & {"109", "110", "112"}]
-    assert [d["decision"] for d in hist] == ["split", "split", "same", "split", "same", "same", "same", "different", "different"]
+    hist = [d for d in found()[0]["decisions"] if {o["key"] for o in d["objects"]} & {"109", "110", "112"} and d["batch"] not in old]
+    assert [d["decision"] for d in hist] == ["split", "split", "split", "same", "same", "same", "different", "different"]
     assert len({d["user"] for d in hist}) == 1 and hist[0]["user"] and all(re.match(r"\d{4}-\d\d-\d\d \d\d:", d["at"]) for d in hist)
-    assert [d["undone"] for d in hist] == [False] * 6 + [True] * 3
+    assert [d["undone"] for d in hist] == [False, False, True, False, False, True, True, True]
     assert {o["title"] for o in hist[-1]["objects"]} == {"Kaffee Kontor GmbH", "Kaffee-Kontor"}
     raw = call("edit_history", table=S, limit=1000)
     assert {r[raw["columns"].index("batch_id")] for r in raw["rows"]} >= {no["batch"], yes["batch"]}, "the same log write-back keeps"
@@ -413,16 +455,15 @@ def test_er_rls_hides_source_rows(er):
     assert mine(er, "semantic_query", measures=["customers_n"])["rows"][0][0] == len(listed) == theirs("SELECT count(*) FROM customers")[0][0]
     assert {k: v for k, v in rev.items() if k not in (114,)} == {k: v for k, v in was.items() if k not in (114, 115)}
     assert rev[114] == was[114] + was[115] and sum(rev.values()) == sum(was.values())
-    # the decisions table: only pairs whose two records they see (none of them names a South record)
-    pairs, hidden = stored(er["token"]), {77, 902, 905, 906}
-    assert (103, 104, True) in pairs and not hidden & {x for p in pairs for x in p[:2]}, pairs
+    # the decisions table holds the customers' key values: a restricted Viewer reads no row of it, in the grid ...
+    pairs = stored(er["token"])
+    assert pairs == [] and (103, 104, True) in stored(), pairs
     assert {(77, 114, True), (77, 115, True), (101, 902, True)} <= set(stored()), "the owner reads them all"
     with pytest.raises(abi.ActionError) as e:
         theirs(f"SELECT * FROM {S}")
     assert e.value.status == 403
-    hist = mine(er, "edit_history", table=S, limit=1000)["entries"]
-    logged = {v for r in hist for v in json.loads(r[0]).values()}
-    assert {103, 104} <= logged and not hidden & logged, "no decision about a record they can't see"
+    hist = mine(er, "edit_history", table=S, limit=1000)["entries"]  # ... and in its history
+    assert hist == [] and len(call("edit_history", table=S, limit=1000)["entries"]) >= 4, "no decision at all, about anyone"
     # the grid: their source rows, the merged ones too (115 is a row of its own there)
     grid = abi_rows(er, "customers")
     ids = sorted(int(r[[c["name"] for c in grid["columns"]].index("customer_id")]) for r in grid["rows"])
@@ -433,7 +474,17 @@ def test_er_rls_hides_source_rows(er):
     assert stored(er["token"]) == [] and len(stored()) >= 4 and vby("revenue") == rev
     for c in "ab":
         call("add_relationship", **{"from": f"{S}.{c}", "to": "customers.customer_id"})
-    assert (103, 104, True) in stored(er["token"]) and vby("revenue") == rev
+    assert stored(er["token"]) == [] and (103, 104, True) in stored() and vby("revenue") == rev
+    # ... nor when the customers' key is hidden from Viewers (its values are this table's a and b), nor with one relationship gone
+    sure("set_column_rule", project=P, id="no_key", table="customers", columns=["customer_id"])
+    sure("remove_relationship", project=P, id=f"{S}-a")
+    try:
+        assert stored(er["token"]) == [] and mine(er, "edit_history", table=S, limit=1000)["entries"] == []
+    finally:
+        sure("delete_rls_rule", project=P, id="no_key")
+        call("add_relationship", **{"from": f"{S}.a", "to": "customers.customer_id"})
+    # the type's rules name columns: a restricted Viewer's `ontology` leaves them out
+    assert "resolve" not in mine(er, "ontology")["objects"][0] and call("ontology")["objects"][0]["resolve"] == RESOLVE
     assert not [g for g in call("readiness")["missing"] if "same_as" in g], "the decisions table is no gap of the model"
     # proposing and deciding are an Editor's: a Viewer gets neither the list, the evidence nor the history
     for action, args in (("find_same", {}), ("find_same", {"key": 101}), ("decide_same", {"keys": [107, 108], "decision": "same"})):
@@ -445,6 +496,127 @@ def test_er_rls_hides_source_rows(er):
 def abi_rows(er, table: str) -> dict:
     with abi.as_user(er["token"]):
         return abi._open("GET", f"/api/projects/{P}/tables/{table}/rows?offset=0&limit=100")[1]
+
+
+# ---------- round 2: "not the same" holds, chains, the decisions table is decide_same's only ----------
+
+def test_er_different_blocks_a_merge(er):
+    """"Not the same" holds until it is undone: the two can't be merged, directly or through a record one of them was
+    merged with since, and the refusal names both and says what to do. Once it is undone, they can."""
+    no = decide("different", 109, 110)
+    with pytest.raises(abi.ActionError) as e:
+        decide("same", 109, 110)
+    said = e.value.body["message"]
+    assert e.value.status == 409 and "“Kaffee Kontor” and “Kaffee Kontor GmbH” were marked as not the same customer" in said
+    assert "Undo that decision first (under Decided" in said and not re.search(r"same_as|\b109\b|\b110\b", said)
+    assert decide("same", 110, 112)["id"] == "110", "110 and 112 were never marked as different"
+    for keys in ((109, 110), (109, 112), (112, 109, 107)):  # through 110's group, whichever record is named
+        with pytest.raises(abi.ActionError) as e:
+            decide("same", *keys)
+        assert e.value.status == 409 and "“Kaffee Kontor” and “Kaffee Kontor GmbH” were marked as not the same" in e.value.body["message"], keys
+    assert not [g for g in found()[1] if "109" in g], "and no proposal puts them in one group"
+    assert by("revenue")[109] == 9 and by("revenue")[110] == 24
+    call("undo_edits", table=S, batch=no["batch"])
+    assert decide("same", 109, 112)["id"] == "110" and by("revenue")[110] == 33, "undone: one customer, under the ID there already"
+
+
+def test_er_undo_under_a_newer_decision(er):
+    """Merge 109 + 110, take 110 out, merge 110 + 112, undo the take-out: 110 is a record of 109 again and 112 a record
+    of 110, so all three are one customer, as Decided lists them (two merges in force). The numbers, the page and the
+    records agree; taking one out of the chain leaves the other two together."""
+    n = total("customers_n")
+    decide("same", 109, 110)
+    out = decide("split", 110)
+    assert decide("same", 110, 112)["id"] == "110" and by("revenue")[110] == 24 and by("revenue")[109] == 9
+    call("undo_edits", table=S, batch=out["batch"])
+    assert {(a, b) for a, b, yes in stored() if yes} == {(109, 110), (110, 112)}, "a chain: 112 under 110 under 109"
+    rev = by("revenue")
+    assert rev[109] == 33 and 110 not in rev and 112 not in rev and total("customers_n") == n - 2
+    assert call("get_object", type="customer", key=[112])["key"] == [109]
+    one_ = call("find_same", type="customer", key=112)
+    assert [x["key"] for x in one_["records"]] == ["109", "110", "112"]
+    assert [(d["decision"], d["undone"]) for d in one_["decisions"] if not d["undone"]] == [("same", False), ("same", False)]
+    assert sorted(r[0] for r in call("get_object", type="customer", key=[109], links=["order_customer"])["links"][0]["rows"]) == [9, 10, 11]
+    decide("split", 112)
+    assert by("revenue")[109] == 20 and by("revenue")[112] == 13 and total("customers_n") == n - 1
+
+
+def test_er_only_decide_same_writes_decisions(er):
+    """The decisions table is changed by decide_same only. edit_cells and propose_edit refuse it and say what to use; a
+    flow's step can neither merge by writing it nor take a decision back, and nothing changes; an agent's undo asks the
+    person in business words. The person's own undo is one click. A confirmation is for the change it showed: after
+    another decision landed, the old token asks again."""
+    yes = decide("same", 120, 121)
+    was = stored()
+    row = {"table": S, "add": [{"a": 107, "b": 108, "same": True}]}
+    for action in ("edit_cells", "propose_edit"):
+        with pytest.raises(abi.ActionError) as e:
+            call(action, **row)
+        assert e.value.status == 409 and "Decide with decide_same" in e.value.body["message"] and "Possible duplicates" in e.value.body["message"]
+    for i, (action, args, why) in enumerate((("edit_cells", row, "Decide with decide_same"),
+                                             ("undo_edits", {"table": S, "batch": yes["batch"]}, "a flow can't take a decision back"))):
+        sure("save_flow", project=P, flow={"id": f"sneak{i}", "name": f"Sneak {i}", "enabled": False, "trigger": {"type": "manual"},
+                                           "steps": [{"id": "s", "type": "action", "action": action, "input": args}]})
+        run, end = call("run_flow", flow=f"sneak{i}")["run"], time.monotonic() + 300
+        while (x := call("flow_runs", run=run)["runs"][0])["status"] in ("queued", "running"):
+            assert time.monotonic() < end, x
+            time.sleep(1)
+        assert x["status"] == "failed" and why in json.dumps(x), x
+        sure("delete_flow", project=P, flow=f"sneak{i}")
+    assert stored() == was and by("revenue")[120] == 31 and 108 in by("revenue"), "nothing changed"
+    r = engine(UNDO, timeout=120, stdin=json.dumps({"project": P, "table": S, "batch": yes["batch"]}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert json.loads(r.stdout.splitlines()[-1]) == [409, True, "Undo: Tee Haus and Teehaus Frankfurt are the same customer. Confirm to proceed."]
+    assert stored() == was
+    # the token signs the rows the decision changes
+    with pytest.raises(abi.ActionError) as e:
+        call("decide_same", type="customer", keys=[103, 104, 120], decision="same")
+    token = e.value.body["confirm_token"]
+    call("undo_edits", table=S, batch=yes["batch"])  # the person's own undo: no question
+    assert stored() == [] and by("revenue")[121] == 16
+    with pytest.raises(abi.ActionError) as e:
+        abi.call("decide_same", confirm=token, project=P, type="customer", keys=[103, 104, 120], decision="same")
+    assert e.value.status == 409 and e.value.body["confirm_token"] != token and stored() == [], "what it showed is no longer what it would do"
+
+
+def test_er_phone_conflicting_keys_and_production(tmp_path):
+    """Its own small project. Two phones are the same with and without the country code or the leading zeros, never
+    when they differ in their first digits (the last 9 digits alone would say so). The same email under two VAT numbers
+    is still proposed, after the clear groups, and its evidence says what differs. In a production environment the
+    first decision is refused with the right next step (its table comes by a promote); once the table is there,
+    decisions are made in production."""
+    (tmp_path / "people.csv").write_text(PEOPLE)
+    if KEYS in {x["project"] for x in abi.call("list_projects")["projects"]}:
+        drop([KEYS])
+    k = lambda action, **a: abi.call(action, project=KEYS, **a)  # noqa: E731
+    try:
+        abi.load("demo", KEYS, parquet(tmp_path / "people.csv"))
+        k("set_table", table="people", key=["person_id"])
+        sure("save_ontology", project=KEYS, ontology={"objects": [{
+            "id": "person", "table": "people", "name": "Person", "plural": "People", "title": "name",
+            "properties": [{"column": "vat", "name": "VAT number"}],
+            "resolve": {"exact": [{"column": "phone", "as": "phone"}, {"column": "email", "as": "email"}, {"column": "vat"}]}}]})
+        r = k("find_same", type="person")
+        groups = [sorted(o["key"] for o in g["objects"]) for g in r["groups"]]
+        assert groups == [["1", "3"], ["6", "7"], ["4", "5"]], "Bob's number differs in its area code; the doubtful group is last"
+        assert [g["pairs"][0]["why"] for g in r["groups"]] == [["same phone"], ["same phone"], ["same email", "different VAT number"]]
+        sure("set_environment", project=KEYS, branch="main", production=True)
+        with pytest.raises(abi.ActionError) as e:
+            k("decide_same", type="person", keys=[1, 3], decision="same")
+        assert e.value.status == 409 and "make the first decision in the development project and promote it" in e.value.body["message"]
+        assert "confirm_token" not in e.value.body and len(k("list_objects", type="person")["rows"]) == 7
+        sure("set_environment", project=KEYS, branch="main", production=False)
+        assert sure("decide_same", project=KEYS, type="person", keys=[1, 3], decision="same")["id"] == "1"
+        sure("set_environment", project=KEYS, branch="main", production=True)
+        assert sure("decide_same", project=KEYS, type="person", keys=[6, 7], decision="same")["id"] == "6", "decisions are data: made in production"
+        assert len(k("list_objects", type="person")["rows"]) == 5 and [g["pairs"][0]["why"] for g in k("find_same", type="person")["groups"]] == [
+            ["same email", "different VAT number"]]
+        with pytest.raises(abi.ActionError) as e:  # the design stays dev's
+            k("save_ontology", ontology={"objects": []})
+        assert e.value.status == 403 and "production environment" in e.value.body["message"]
+    finally:
+        sure("set_environment", project=KEYS, branch="main", production=False)
+        drop([KEYS])
 
 
 # ---------- the app: Possible duplicates on a type's list, the records on a customer's page ----------
@@ -531,11 +703,16 @@ def test_er_blocking_scales(tmp_path, record_property):
         SELECT {n - dup} + i, CASE WHEN i % 2 = 0 THEN substr(w, 1, 6) || ' ' || substr(w, 7, 3) || ' GmbH' ELSE 'zz ' || reverse(w) END,
                CASE WHEN i % 2 = 1 THEN 'de ' || (100000000 + i) END, postcode + i % 2 FROM base WHERE i < {dup}
         ORDER BY 1) TO '{f}' (FORMAT parquet)""")
+    g = tmp_path / "orders.parquet"  # 1,000,000 orders of those companies
+    duckdb.sql(f"COPY (SELECT i AS order_id, (i * 7919) % {n} AS company_id, 1 + i % 97 AS amount FROM range(1000000) t(i)) TO '{g}' (FORMAT parquet)")
     if BIG in {x["project"] for x in abi.call("list_projects")["projects"]}:
         drop([BIG])
     try:
-        abi.load("demo", BIG, [str(f)])
+        abi.load("demo", BIG, [str(f), str(g)])
         abi.call("set_table", project=BIG, table="companies", key=["company_id"])
+        abi.call("set_table", project=BIG, table="orders", key=["order_id"])
+        abi.call("add_relationship", project=BIG, **{"from": "orders.company_id", "to": "companies.company_id"})
+        abi.call("set_measure", project=BIG, id="sales", name="Sales", expression="SUM(orders.amount)")
         sure("save_ontology", project=BIG, ontology={"objects": [{
             "id": "company", "table": "companies", "name": "Company", "plural": "Companies", "title": "name",
             "resolve": {"exact": [{"column": "vat"}], "fuzzy": [{"column": "name", "threshold": 0.92}], "block": ["postcode"]}}]})
@@ -551,6 +728,22 @@ def test_er_blocking_scales(tmp_path, record_property):
         assert len(why) < 1.1 * dup, f"{len(why)} pairs: few beside the planted ones (random names that happen to be alike)"
         assert r["compared"] < 50 * n, "blocking: far fewer than every pair"
         assert re.fullmatch(r"name 9\d% alike", why[0, n - dup][0]) and why[1, n - dup + 1][0] == "same vat"
+        # C6, measured: the same aggregate (sales by postcode, 1,000,000 orders joined to 100,000 companies) before any
+        # decision, with one merge in force (the tables then read through the resolved views, without query copies), and
+        # after that merge is undone (as before again). Each is a first, uncached read of its snapshot
+        def timed() -> tuple[float, dict]:
+            t0 = time.perf_counter()
+            rows = abi.call("semantic_query", project=BIG, measures=["sales"], dimensions=["companies.postcode"])["rows"]
+            return time.perf_counter() - t0, {r[0]: r[1] for r in rows}
+        (t_before, before), yes = timed(), sure("decide_same", project=BIG, type="company", keys=[0, n - dup], decision="same")
+        t_merged, merged = timed()
+        abi.call("undo_edits", project=BIG, table="same_as_companies", batch=yes["batch"])
+        t_undone, undone = timed()
+        print(f"M11 C6 measurement: sales by postcode over 1,000,000 orders: {t_before:.2f} s before any decision,"
+              f" {t_merged:.2f} s with one merge in force, {t_undone:.2f} s after it is undone")
+        record_property("er_views_cost", {"before": round(t_before, 2), "merged": round(t_merged, 2), "undone": round(t_undone, 2)})
+        assert merged == before == undone and sum(before.values()) == sum(1 + i % 97 for i in range(1000000)), "the pair shares a postcode: same figures"
+        assert t_merged < 5, f"{t_merged:.2f} s"
     finally:
         drop([BIG])
 

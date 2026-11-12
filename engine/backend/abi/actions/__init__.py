@@ -268,6 +268,7 @@ PRODUCTION_OK = PRODUCTION_READS | PRODUCTION_ACCESS | {
     "set_role", "remove_role", "set_project_tenant", "set_environment", "set_remote",  # access/environment admin
     "edit_cells", "edit_total", "propose_edit", "approve_edit", "reject_edit", "undo_edits", "sync_edits",  # D-57
     "run_object_action",  # 1.2.6 M4: a write-back like edit_cells (D-57)
+    "decide_same",  # 1.2.6 M11: a decision is data of the environment (it refuses to make its table here: that comes by promote)
 }
 
 

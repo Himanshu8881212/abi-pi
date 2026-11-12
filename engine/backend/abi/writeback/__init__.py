@@ -336,9 +336,21 @@ def _changes(log) -> list[dict]:
     return [{"row": json.loads(k), "column": c, "old": o, "new": n} for k, c, o, n, *_ in log]
 
 
+def _not_decisions(project: str, t: str) -> None:
+    """1.2.6 M11: a table that keeps a type's same-as decisions is changed by decide_same only (a person's confirmed
+    decision, checked against the others): never by hand, a proposal, an agent or a flow's step."""
+    from abi.semantic import same  # not at top: the semantic package imports this module
+
+    if x := same.kept(project, t):
+        raise ActionFailed(409, f"Table '{t}' keeps the decisions about which {x['plural']} are the same one. Decide with decide_same"
+                                f" (in the app: Possible duplicates on the {x['plural']} list, or a {x['name']}'s page), which asks the"
+                                " person; take a decision back with undo_edits.")
+
+
 @action(Role.editor)  # SC-2: Editor = build, write-back
 def edit_cells(conn, user: User, args: Edits) -> dict:
     """Changes a keyed table as one batch (one data snapshot): edits cells (found by row key), adds rows and deletes rows. Each change is logged with old and new value, user, time, comment and batch ID, and every query then reads the result. Tables without a key are read-only. When the Main Agent calls it, the batch is stored as a proposal the user approves (like propose_edit)."""
+    _not_decisions(args.project, args.table)
     out = _batch(user, args, "proposed" if actions.by_agent() else "active")
     if out["status"] == "active":
         _fire(args.project, args.table, out["snapshot"])
@@ -362,6 +374,7 @@ def propose_edit(conn, user: User, args: Edits) -> dict:
         raise ActionFailed(403, "An alert for one object can't propose an edit: a proposal shows its values to everyone who reviews"
                                 " edits, and the alert reaches only project members who see that object. Post to the Inbox instead"
                                 " (post_message), and let the person propose the edit.")
+    _not_decisions(args.project, args.table)
     return _batch(user, args, "proposed")
 
 
@@ -502,7 +515,15 @@ def create_tables(project: str, tables: dict[str, list[dict]], author: str) -> i
 @action(Role.editor)
 def undo_edits(conn, user: User, args: Proposal) -> dict:
     """Undoes one applied edit batch as one data snapshot: its changes stop applying, and each cell or row shows its previous edit or the source value again. The batch stays in the history as 'undone'. Proposals are not undone (they never applied)."""
-    if actions.by_agent():  # WB-9: an agent changes data only after the user's click
+    from abi import flows  # not at top: flows imports the semantic package, which imports this module
+    from abi.semantic import same
+
+    if words := same.undo_words(conn, user, args.project, args.table, args.batch):  # 1.2.6 M11: a decision is a person's, its undo too
+        if actions.VIA.get() == "flow" or flows.IN_FLOW.get():
+            raise ActionFailed(403, f"{words}: a flow can't take a decision back. A person does, under Decided on the list.")
+        if actions.VIA.get() != "rest":  # anyone but the person's own click asks them, in their words
+            actions.require_confirmation(words + ".")
+    elif actions.by_agent():  # WB-9: an agent changes data only after the user's click
         actions.require_confirmation(f"Undo edit batch {args.batch} of '{args.table}'.")
     t, con = args.table, storage.lake(args.project)
 

@@ -230,10 +230,12 @@ records are the same one; a person decides. The example is a `customers` table k
 ```
 
 - `exact` columns are compared after normalising: `id` keeps letters and digits (a VAT number), `email` trims and
-  lower-cases, `phone` keeps the last 9 digits. `fuzzy` columns are text: `threshold` is how alike two values must be,
+  lower-cases. Two `phone` values are the same when, without spaces, signs and leading zeros, the shorter one (7
+  digits or more) ends the longer one: a number with and without its country code. `fuzzy` columns are text: `threshold` is how alike two values must be,
   from 0 to 1 (`method`: `jaro_winkler`, the default, or `levenshtein`).
 - Two records are proposed as the same when an exact column is equal, or when every fuzzy column reaches its threshold
-  and no exact column differs. ABI never compares every pair: only records that share an exact value, a `block`
+  and no exact column differs. A pair with one exact column the same and another different (the same email under two
+  VAT numbers) is still proposed, after the clear ones, and its evidence says "different VAT number". ABI never compares every pair: only records that share an exact value, a `block`
   value (the same postcode) or the first 4 letters of the first fuzzy column. A value shared by more than 200
   records (an empty-like postcode) is skipped, and the answer says so.
 - Nothing is merged by itself. The type's list shows **Possible duplicates** to Editors and Owners: "These 2 customers
@@ -243,11 +245,28 @@ records are the same one; a person decides. The example is a `customers` table k
   measures, the customer's page, flows and ML models count it once and show its orders together. The Data grid still
   shows the source rows. A merged customer's page lists its records; **Take out** splits one off again.
 - Every decision is listed under **Decided** with who and when, and **Undo** takes it back. Decisions are kept in the
-  input table `same_as_customers` (hidden from the model; one logged edit batch each, as under Data › Edits).
+  input table `same_as_customers` (hidden from the model; one logged edit batch each). Only `decide_same` writes it:
+  `edit_cells` and `propose_edit` refuse it, Data › Edits doesn't offer it, a flow can't undo a decision and an agent's
+  undo asks the person.
+- **Not the same** holds until it is undone: the two are not proposed together again, a proposed group never contains
+  both, and a merge that would make them one, directly or through other records, is refused with their names.
+- The group's ID stays the key of its first record while that record is in it. It moves to the first of the rest when
+  that record is taken out, and the group shows under the first remaining record when it disappears from the source.
+- A table with one row per record (predictions, an input table keyed like the type) shows the row of the record the
+  group shows under. Write-back (the Data grid, an action's write) edits a source record, never the group.
 - Row-level security: a restricted Viewer sees a merged customer only when they may see at least one of its records,
   and then only those records' values, orders and counts. Where the record carrying the group's ID is hidden from
-  them, the customer shows under the first record they see. Proposals and decisions are for Editors and Owners.
-- The published version carries the loaded data, not decisions: merge in the working project.
+  them, the customer shows under the first record they see. Proposals and decisions are for Editors and Owners; a
+  restricted Viewer reads nothing of the decisions table. On a phone the app is read-only: it shows the merged list
+  and no **Possible duplicates** card.
+- Decisions are data of one environment, like edits: a promote, a project export or import and the published version
+  carry the table's definition and none of its rows. In a production environment `decide_same` works once the table
+  came by a promote (make the first decision in dev, promote, then decide in production).
+- Speed: while a type has at least one merged record, queries on its table and on every table pointing at it read
+  through views instead of ABI's query copies and shared partials. One measurement on pve1 (100,000 companies,
+  1,000,000 orders, sales by postcode, first read of a snapshot): 0.17 s before any decision, 0.28 s with one merge
+  in force, 0.17 s after it was undone (`test_er_blocking_scales` records it on every run). Bigger tables and wider
+  dimensions were not measured.
 - Wrong references are refused when the ontology is saved, with the file, the field and the fix, for example
   `model/ontology.json $.objects[0].resolve.fuzzy[0].column: Object type 'customer': table 'customers' has no column 'nam'.`
 - Limits in 1.2.6: the records of a type live in one table (append the systems' tables first, in Data), that table

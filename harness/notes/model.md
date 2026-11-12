@@ -31,13 +31,15 @@
   "address", "threshold": 0.85}], "block": ["postcode"], "source": "source_system"}` (all columns of the type's table;
   save it with `save_ontology`). Two records are proposed when an exact column is equal, or every fuzzy column reaches
   its threshold and no exact column differs. Only records sharing an exact value, a block value or the first letters
-  of the first fuzzy column are compared.
+  of the first fuzzy column are compared. Evidence can say "different VAT number": say that too.
 - `find_same {type}` (Editor) proposes groups with each pair's evidence and merges nothing; `{type, key}` shows one
   object: what looks like it, the records it is made of, the decisions about it. Say it in the person's words ("These
   3 customers look like the same one: …, because …"), with names from its rows, never keys or table names.
 - `decide_same {type, keys, decision}`: `same` (they count as one from now on), `different` (never proposed together
   again), `split` (take records out of the object they were merged into). ABI always asks the person to confirm; you
-  never decide for them, and never call it for a whole list unasked: propose, then let them pick.
+  never decide for them, and never call it for a whole list unasked: propose, then let them pick. A merge against an
+  earlier "different" answers 409 with both names: the person undoes that first. Never write the decisions table
+  with edit_cells or propose_edit (refused).
 - After `same`, every query, measure, object page, flow and ML model counts the group once, under one stable ID (the
   key of its first record). Undo a decision: `undo_edits {table, batch}` with the values `decide_same` or
   `find_same.decisions` gave. A restricted Viewer sees a merged object only through the records they may see.
