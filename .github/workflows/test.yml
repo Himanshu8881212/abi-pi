@@ -12,7 +12,7 @@ permissions:
 jobs:
   offline:
     runs-on: ubuntu-24.04  # the Postgres, Playwright and uv steps are proven there; move after a 26.04 run passes
-    timeout-minutes: 30
+    timeout-minutes: 50  # the suite takes about 30 minutes here since 1.2.6 M8
     env:
       PGBIN: /usr/lib/postgresql/17/bin  # scripts/engine.sh's Postgres, as in the Dockerfile
     steps:
@@ -65,5 +65,6 @@ jobs:
         with:
           name: logs
           path: |
+            pytest.out
             data/logs
             logs
