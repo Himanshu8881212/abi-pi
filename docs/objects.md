@@ -146,6 +146,49 @@ relationship onto `cafes`) and the café type lists it as a property with a mean
 - In the app, **Monitor › New monitor** makes the same flow: choose "each café" under Check and who it is for under
   Send to. On the Monitor card and in the Inbox, a café's name opens its page.
 
+## A prediction on an object
+
+An ML model can predict something for each object of a type: the revenue to expect from a café, how likely a customer
+is to leave. Add `object` to the model and its prediction becomes a property of the type. The example predicts each
+café's revenue from its seats, format and region. First a dataset with one row per café, `datasets[]` in
+`model/datasets.json`:
+
+```json dataset
+{"id": "cafe_features", "name": "Café features",
+ "query": {"measures": ["revenue"], "dimensions": ["cafes.cafe_id", "cafes.seats", "cafes.format", "cafes.region"]}}
+```
+
+Then the model, `ml/expected_revenue.json`:
+
+```json ml
+{
+  "$schema": "https://schema.abi.invalid/v1/ml.json",
+  "id": "expected_revenue", "name": "Expected revenue",
+  "task": "regression", "dataset": "cafe_features", "object": "cafe",
+  "target": "revenue", "features": ["cafes.seats", "cafes.format", "cafes.region"]
+}
+```
+
+- `object` is the object type's `id`; the type has one key column. The dataset's dimensions are that key
+  (`cafes.cafe_id`) and other columns of the type's table, and no date columns: one row, so one prediction, per café.
+- A feature from another type is a measure reached through a link: name the link in the dataset query's `links`
+  (the number of customers who visited each café: `"links": ["visited"]`).
+- Train it, then score it (in chat, or **Train** and **Score** on the model's card under ML models). Scoring adds the
+  property to the type and every café's page shows **Expected revenue**. The name is the model's `name`; rename it or
+  change its meaning in the ontology and later scorings keep your change.
+- What the property is depends on the `task`: `classification` with two outcomes gives the probability of the second
+  (for a yes/no column: of yes), `regression` the number, `clustering` the group, `anomaly` a Yes/No and a score. A
+  `forecast` keeps the dataset's date columns and `time`, and forecasts one series per café: its total ahead shows
+  among the café's measures.
+- A person sees a prediction only when they see its object. Where the model learned from rows a person's row rules
+  don't reach through the type itself (other types' rows, reached through a link), restricted Viewers see no
+  prediction at all until the predictions table gets a row rule of its own (Security).
+- An alert on it is "An alert per object" above with the prediction's measure: `expected_revenue_prediction` here,
+  `<id>_probability` for a probability. A flow with trigger `{"type": "after_refresh", "tables": ["ml_expected_revenue"]}`
+  runs after each scoring.
+- Wrong references are refused when the model is saved, with the file, the field and the fix, for example
+  `ml/expected_revenue.json $.object: Dataset 'cafe_features' isn't grouped by cafes.cafe_id, the key of object type 'cafe'.`
+
 ## Who can use a form
 
 In 1.2.6 the app's action buttons and form cards are for **Editors and Owners, in Developer mode**. Viewer mode and

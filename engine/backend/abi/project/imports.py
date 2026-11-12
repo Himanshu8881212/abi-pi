@@ -514,7 +514,13 @@ def impact(old: dict, new: dict) -> dict:
     hit |= set(lineage.reach(g, hit, "downstream"))
     ms = [{m["id"]: m for m in (f.get(MEASURES) or {}).get("measures", [])} for f in (old, new)]
     changed = {f"measure:{m}" for m in ms[0].keys() | ms[1].keys() if ms[0].get(m) != ms[1].get(m)}
-    return {"refresh": [n[6:] for n in TopologicalSorter(g).static_order() if n in hit and n.startswith("table:")],
+    try:
+        order = list(TopologicalSorter(g).static_order())
+    except CycleError:  # 1.2.6 M9: an object type shows a prediction (a property, a measure) made from rows a dataset
+        # reaches through one of that type's links. What a type shows orders no refresh: only its own table does
+        order = list(TopologicalSorter({n: [u for u, via in ups.items() if not n.startswith("object:") or "object" in via]
+                                        for n, ups in g.items()}).static_order())
+    return {"refresh": [n[6:] for n in order if n in hit and n.startswith("table:")],
             "removed": removed(old, new),
             "reports": sorted(n[7:] for n in hit | set(lineage.reach(g, changed, "downstream")) if n.startswith("report:"))}
 

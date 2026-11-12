@@ -13,6 +13,7 @@
     "description": {"type": "string"},
     "task": {"enum": ["forecast", "classification", "regression", "clustering", "anomaly"]},
     "dataset": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$", "description": "Dataset ID in model/datasets.json: the training rows"},
+    "object": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$", "description": "1.2.6: an object type ID of model/ontology.json with one key column. The model then predicts once per object: the dataset's dimensions are the type's key (table.column) and other columns of its table, with no date columns (a forecast: the key and the date columns, one series per object); its measures may reach other tables through the dataset query's `links`. Scoring keys ml_<id> by the type's key and adds the prediction to the type as a property named like the model (classification with two classes: the probability of the second; regression: the number; clustering: the group; anomaly: a flag and a score; a forecast: its measure among the type's measures). A prediction is visible only to people who see its object"},
     "target": {"type": "string", "minLength": 1, "description": "What to predict: a measure ID or a table.column dimension of the dataset's query. Required, except for clustering and anomaly, which have none"},
     "features": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1},
                  "description": "Measure IDs and table.column dimensions of the dataset's query to learn from; default: all its other columns (clustering and anomaly: all but row identity, i.e. a table's key and date-table columns). Not for forecast, which forecasts the target alone for each combination of the query's other dimensions"},
@@ -115,6 +116,8 @@
      "params": {"lightgbm": {"num_leaves": 63, "learning_rate": 0.05}}},
     {"$schema": "https://schema.abi.invalid/v1/ml.json", "id": "customer-groups", "name": "Customer groups", "task": "clustering",
      "dataset": "customer-month", "features": ["sales", "orders", "customers.segment"], "method": "gmm"},
+    {"$schema": "https://schema.abi.invalid/v1/ml.json", "id": "churn-risk", "name": "Churn risk", "task": "classification",
+     "dataset": "customers", "object": "customer", "target": "customers.churned", "features": ["sales", "orders", "customers.segment"]},
     {"$schema": "https://schema.abi.invalid/v1/ml.json", "id": "unusual-demand", "name": "Unusual demand", "task": "anomaly",
      "dataset": "monthly-demand", "time": "calendar.month", "method": "seasonal"}
   ]

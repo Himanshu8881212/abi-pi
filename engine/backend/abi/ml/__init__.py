@@ -13,7 +13,11 @@ forecast into an input table through edit_cells. ML-6 (work/validation/X-01.4.md
 queues one scoring per snapshot for the models reading the table (`after_refresh`); every score checks drift (PSI vs
 the training profile; a forecast's recent vs backtest error) and posts a change of drift state to the feed.
 Clustering and anomaly detection (no target): abi.ml.unsupervised (E-04.1). ML-ZOO.1 (D-135): a model's `search`/`space`
-tunes each candidate on folds of the training part before they are compared (abi.ml.search; trials in `ml_trials`). scikit-learn, LightGBM and statsforecast are imported inside the functions that fit (cold import ~seconds).
+tunes each candidate on folds of the training part before they are compared (abi.ml.search; trials in `ml_trials`).
+1.2.6 M9: a model with `object` predicts once per object of that type: ml_<id> is keyed by the type's key (a forecast: key
+and period), so it is one-to-one with the type's table, its prediction becomes a property of the type (`_on_object`)
+and its rows follow the object's row-level security through that relationship (rls.conditions); a new scoring starts
+the flows that trigger on ml_<id>. scikit-learn, LightGBM and statsforecast are imported inside the functions that fit (cold import ~seconds).
 """
 
 import contextvars
@@ -36,7 +40,7 @@ from abi.ml import forecast, search, unsupervised
 from abi.project import ID, SCHEMA, git, imports
 from abi.project.bundle import bundle
 from abi.security import Role, User, credentials, role_in
-from abi.semantic import lineage
+from abi.semantic import lineage, ontology
 from abi.semantic import model as semantic_model
 
 ROWS = 100_000  # D-17: the most training rows (the dataset schema's own `limit` cap)
@@ -74,6 +78,23 @@ def references(rel: str, m: dict, files: dict) -> list[dict]:
              for k, ps in m.get("space", {}).items() for p, r in ps.items() if isinstance(r, dict) and r["min"] > r["max"]]
     errs += [err(rel, f"$.params.{k}", f"The fixed setting is for {k}, but method is {m.get('method')}.", f"Set method to {k}.")
              for k in m.get("params", {}) if k != m.get("method")]
+    if (oid := m.get("object")) is not None:  # 1.2.6 M9: one prediction per object, so one dataset row per object
+        o, mj = files.get("model/ontology.json") or {}, files.get("model/model.json") or {}
+        got = ontology.keyed(o, mj, oid)
+        if got is None:
+            errs.append(err(rel, "$.object", f"Unknown object type '{oid}'.", "Use an object type of model/ontology.json: "
+                            f"{', '.join(sorted(x['id'] for x in o.get('objects', []))) or 'none yet (save_ontology first)'}."))
+        elif len(key := got[1]) != 1:  # ponytail: one key column; a relationship per key column when a type with more needs a model
+            errs.append(err(rel, "$.object", f"Object type '{oid}' is identified by {len(key)} columns ({', '.join(key)}); an ML model"
+                                             " predicts for types with one key column.", "Use a type with one key column, or remove `object`."))
+        else:
+            if key[0] not in dims:
+                errs.append(err(rel, "$.object", f"Dataset '{d['id']}' isn't grouped by {key[0]}, the key of object type '{oid}'.",
+                                f"Add {key[0]} to the dataset's dimensions (save_dataset), or remove `object`."))
+            if m.get("task") != "forecast" and (bad := [c for c in dims if c.split(".", 1)[0] == date] + ([t] if t else [])):
+                errs.append(err(rel, "$.object", f"A {m.get('task')} on object type '{oid}' predicts once per {got[0]['name']}, but dataset"
+                                                 f" '{d['id']}' has a row per {bad[0]} too.", f"Use a dataset without date columns and remove"
+                                                 " `time`; only a forecast on an object keeps them (one series per object)."))
     return errs
 
 
@@ -544,8 +565,9 @@ def _restore(fitted: str) -> dict:
     return f
 
 
-def predict(fitted: str, data: dict) -> list:
-    """Predictions of a registry model for `data` ({column: values}): class labels or numbers."""
+def predict(fitted: str, data: dict, proba: bool = False) -> list | tuple:
+    """Predictions of a registry model for `data` ({column: values}): class labels or numbers. `proba` (1.2.6 M9, a
+    classification): (the labels, each row's probability of the second class when there are two classes, else None)."""
     f = _restore(fitted)
     X = encode(f["features"], data)
     if f["method"] == "linear":
@@ -564,7 +586,13 @@ def predict(fitted: str, data: dict) -> list:
     if f["task"] == "regression":
         return z[:, 0].tolist()
     idx = z.argmax(1) if z.shape[1] > 1 else (z[:, 0] > (0 if f["method"] == "linear" else 0.5)).astype(int)
-    return [f["classes"][i] for i in idx]
+    labels = [f["classes"][i] for i in idx]
+    if not proba:
+        return labels
+    if len(f["classes"]) != 2:
+        return labels, None
+    p = z[:, 1] if z.shape[1] > 1 else 1 / (1 + np.exp(-z[:, 0])) if f["method"] == "linear" else z[:, 0]
+    return labels, p.tolist()
 
 
 # --- registry and actions -------------------------------------------------------------------------------------------
@@ -735,7 +763,9 @@ def _in_place(old: list[dict], new: list[dict], gone) -> list[dict]:
 
 def _predictions(project: str, m: dict, trained: str, query: dict, user: User) -> dict:
     """Predict on fresh dataset rows with a stored training run and write them as model table ml_<id> (one snapshot),
-    a fact related to the dataset's keyed dimensions (and the date table for a forecast), with measure <id>_prediction."""
+    a fact related to the dataset's keyed dimensions (and the date table for a forecast), with measure <id>_prediction.
+    1.2.6 M9, a model on an object type: one row per object (a forecast: per object and period), keyed so, and the
+    prediction a property of the type (`_on_object`); then the flows that trigger on ml_<id> start (not inside a flow)."""
     with db.connect() as conn:
         run = conn.execute("SELECT fitted, profile, metrics FROM ml_runs WHERE id = %s", [trained]).fetchone()
     fitted = run["fitted"]
@@ -748,16 +778,28 @@ def _predictions(project: str, m: dict, trained: str, query: dict, user: User) -
         elif m["task"] in unsupervised.TASKS:
             preds = {c: data[c] for c in query.get("dimensions", [])} | unsupervised.predict(m, query, data, dt, fitted)
         else:
-            preds = {c: data[c] for c in query.get("dimensions", [])} | {"prediction": predict(fitted, data)}
+            labels, p = predict(fitted, data, True) if m["task"] == "classification" else (predict(fitted, data), None)
+            preds = {c: data[c] for c in query.get("dimensions", [])} | {"prediction": labels} | ({} if p is None or not m.get("object") else {"probability": p})
         n = len(next(iter(preds.values())))
         drift = _drift(m, run, query, data, dt, preds) if n else {}
     except ValueError as e:  # an invalid stored model, or one to retrain
         raise ActionFailed(400, str(e))
+    if obj := _object(project, m):
+        x, kc = obj
+        if kc not in preds:
+            raise ActionFailed(400, f"ML model '{m['id']}' was trained before its dataset was grouped by {kc}; train it again (train_model).")
+        keep = [v is not None for v in preds[kc]]  # a row of no object (an order without a customer) is nobody's prediction
+        preds = {c: [v for v, k in zip(vals, keep) if k] for c, vals in preds.items()}
+        ids = list(zip(preds[kc], preds["period"])) if "period" in preds else list(preds[kc])
+        if (n := len(ids)) > len(set(ids)):
+            raise ActionFailed(400, f"Dataset '{m['dataset']}' has several rows for one {x['name']}, so it would get several predictions."
+                                    f" Keep {kc} and columns of table '{x['table']}' as its only dimensions"
+                                    + (" besides the date columns." if "period" in preds else "."))
     if not n:
         raise ActionFailed(400, f"Dataset '{m['dataset']}' has no rows to score.")
     t, kind = table_of(m["id"]), "VARCHAR" if m["task"] == "classification" else "DOUBLE"
     name = {c: c.replace(".", "_", 1) for c in preds}  # a dataset dimension table.column → column table_column
-    sql = ", ".join(f"CAST(c{i} AS {types[c.split('.', 1)[0]][c.split('.', 1)[1]] if '.' in c else 'DATE' if c == 'period' else unsupervised.OUT.get(c, kind)})"
+    sql = ", ".join(f"CAST(c{i} AS {types[c.split('.', 1)[0]][c.split('.', 1)[1]] if '.' in c else 'DATE' if c == 'period' else 'DOUBLE' if c == 'probability' else unsupervised.OUT.get(c, kind)})"
                     f" AS {storage._q(name[c])}" for i, c in enumerate(preds))
     cols = {f"c{i}": np.array([None if v is None else str(v) for v in vals], dtype=object) for i, vals in enumerate(preds.values())}
 
@@ -771,6 +813,8 @@ def _predictions(project: str, m: dict, trained: str, query: dict, user: User) -
     kept = {k: old[k] for k in ("kind", "key")} if old.get("key") and set(old["key"]) <= set(name.values()) else {}
     mj["tables"][t] = {"kind": "fact", "key": None,
                        "description": f"Predictions of ML model '{m['name']}' ({m['task']}), written by score_model."} | kept
+    if obj:  # one row per object: its key is the table's (with the period, a forecast's), so the table is one-to-one with the type's
+        mj["tables"][t]["key"] = [name[kc], *(["period"] if "period" in preds else [])]
     rels = [semantic_model._rel(f"{t}.{name[c]}", c) for c in preds if "." in c and keys.get(c.split(".", 1)[0]) == [c.split(".", 1)[1]]]
     rels += [semantic_model._rel(f"{t}.period", f"{dt['table']}.{dt['column']}")] if "period" in preds and dt else []
     mj["relationships"] = _in_place(mj["relationships"], rels, lambda r: r["from"]["table"] == t)
@@ -783,13 +827,57 @@ def _predictions(project: str, m: dict, trained: str, query: dict, user: User) -
         new = [{"id": mid, "name": m["name"] if named else f"{m['name']} {noun}", "expression": f"{'COUNT' if kind == 'VARCHAR' else 'SUM'}({storage._q(t)}.prediction)",
                 "description": f"{'Number of predicted rows' if kind == 'VARCHAR' else 'Predicted ' + m['target']} of ML model '{m['id']}'."}]
         summary = f"Wrote {n:,} predictions to table {t} (measure {mid})."
+        if "probability" in preds:  # what a per-object alert compares: "above 0.8"
+            new.append({"id": f"{m['id'][:51]}_probability", "name": m["name"], "expression": f"AVG({storage._q(t)}.probability)",
+                        "description": f"Probability that {m['target']} is '{json.loads(fitted)['classes'][1]}', from ML model '{m['id']}'."})
     ms = _in_place(semantic_model._read(project, "measures.json").get("measures", []), new, lambda _: False)
     semantic_model._write(project, "measures.json", {"measures": ms})
     if "period" in preds:
         semantic_model.extend_calendar(project, t, user.name)  # IN-5: the date table covers the future periods
+    if obj:
+        _on_object(project, m, x["id"], t, preds, json.loads(fitted).get("classes"))
     _post_drift(project, m, drift["drifted"])
+    flows.after_refresh(project, t, snap)  # 1.2.6 M9: flows that trigger on ml_<id>; nothing inside a flow (D-23)
     return {"commit": str(git.repo(project).head.target), "snapshot": snap, "method": json.loads(fitted)["method"], "drift": drift,
             "summary": f"{summary} Training run: {trained}."}
+
+
+def _object(project: str, m: dict) -> tuple[dict, str] | None:
+    """1.2.6 M9: (the object type ML model `m` predicts for, its key as table.column); None without `object`."""
+    if not m.get("object"):
+        return None
+    got = ontology.keyed(ontology.read(project), semantic_model._read(project, "model.json"), m["object"])
+    if got is None or len(got[1]) != 1:
+        raise ActionFailed(409, f"ML model '{m['id']}' predicts for object type '{m['object']}', which is gone or no longer has one"
+                                f" key column; change `object` in ml/{m['id']}.json (save_ml_model), then train it again.")
+    return got[0], got[1][0]
+
+
+def _on_object(project: str, m: dict, oid: str, t: str, preds: dict, classes: list | None) -> None:
+    """1.2.6 M9: the prediction as a property of its object type, under the model's name: a probability (two classes),
+    else the predicted class; a regression's number; a clustering's group; an anomaly's flag and score. A forecast has a
+    row per period, so no property: its measure joins the type's measures (the total ahead, per object). Each is added
+    once: a name, meaning or description a person changed since stays, as model.json does on rescoring (`_in_place`)."""
+    o = ontology.read(project)
+    x = next(x for x in o["objects"] if x["id"] == oid)
+    names, tgt, one = _names(project), m.get("target", ""), x["name"].lower()
+    said = names.get(tgt) or ontology._label(tgt.rsplit(".", 1)[-1])
+    # ponytail: a regression is a quantity unless its target is a money property of the type; the person sets another meaning
+    money = next((p.get("meaning") for p in x.get("properties", []) if f"{x['table']}.{p['column']}" == tgt), None) == "money"
+    by = f"Written when the ML model {m['name']} is scored."
+    props = {"classification": [("probability", m["name"], "probability", f"How likely {said} is {classes[1]}, from 0 to 1. {by}")] if "probability" in preds
+             else [("prediction", m["name"], "category", f"The predicted {said}. {by}")],
+             "regression": [("prediction", m["name"], "money" if money else "quantity", f"The predicted {said}. {by}")],
+             "clustering": [("cluster", m["name"], "category", f"The group of similar {x['plural'].lower()} this {one} is in. {by}")],
+             "anomaly": [("anomaly", m["name"], "flag", f"Whether this {one} is unusual. {by}"),
+                         ("score", f"{m['name']} score"[:200], "quantity", f"How unusual this {one} is: higher is more unusual. {by}")],
+             "forecast": []}[m["task"]]
+    have = {p["column"] for p in x.get("properties", [])}
+    add = [{"column": f"{t}.{c}", "name": n[:200], "meaning": mean, "description": d[:2000]} for c, n, mean, d in props if f"{t}.{c}" not in have]
+    ms = [measure_of(m["id"])] if m["task"] == "forecast" and measure_of(m["id"]) not in x.get("measures", []) else []
+    if add or ms:
+        x |= {k: x.get(k, []) + v for k, v in (("properties", add), ("measures", ms)) if v}
+        semantic_model._write(project, "ontology.json", {k: v for k, v in o.items() if k != "$schema"})
 
 
 def after_refresh(project: str, table: str, snapshot: int) -> None:
@@ -840,7 +928,10 @@ class SaveModel(storage.ProjectRef):
         " try, each a list of values or {min, max, log?}: lightgbm num_leaves, learning_rate, n_estimators, min_child_samples,"
         " reg_lambda; random_forest n_estimators, max_depth, min_samples_leaf, max_features; ets model, damped; a candidate not"
         " named searches its default space), params? ({<method>: {setting: value}}: a fixed setting of a non-auto method, no"
-        " search; use_ml_trial writes it from a trial)}."))
+        " search; use_ml_trial writes it from a trial), object? (an object type ID from `ontology`, one key column: one prediction per"
+        " object, shown on its page as a property named like the model. The dataset's dimensions are the type's key (table.column) and"
+        " other columns of its table, with no date columns; a forecast: the key and the date columns, one series per object. Measures"
+        " may reach other tables through the dataset query's `links`)}."))
 
 
 @action(Role.editor, definition=True)
@@ -873,7 +964,7 @@ def train_model(conn, user: User, args: ModelRef) -> dict:
 
 @action(Role.editor, definition=True)
 def score_model(conn, user: User, args: ModelRef) -> dict:
-    """Scores an ML model with its latest successful training run on its dataset's current rows (read with your permissions), in the worker: returns the registry run ID; follow it with ml_models. The predictions become model table ml_<id> (a forecast: the next periods per series) with measure <id>_prediction, so reports, tools and flows query them like any data; a classification's predicted class is the dimension column ml_<id>.prediction."""
+    """Scores an ML model with its latest successful training run on its dataset's current rows (read with your permissions), in the worker: returns the registry run ID; follow it with ml_models. The predictions become model table ml_<id> (a forecast: the next periods per series) with measure <id>_prediction, so reports, tools and flows query them like any data; a classification's predicted class is the dimension column ml_<id>.prediction. A model with `object` writes one row per object, and the prediction becomes a property of the object type under the model's name (two classes: the probability of the second, with measure <id>_probability; regression: the number; clustering: the group; anomaly: a flag and a score; a forecast: its measure among the type's measures), visible only with its object; flows that trigger after_refresh on ml_<id> start, and a data_condition with `per` can compare the measure."""
     m = imports.load(args.project, "ML model", args.model)
     t = _trained(conn, args.project, m["id"])
     q = t["query"] or _query(args.project, m)  # an X-01.1-era run kept no query

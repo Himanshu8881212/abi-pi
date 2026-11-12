@@ -83,6 +83,15 @@ def _hidden(project: str, user_id: int | None) -> dict[str, set[str]]:
     if restricted(project, user_id):
         for r in _file(project).get("columns", []):
             out.setdefault(r["table"], set()).update(c.lower() for c in r["columns"])
+    if out:  # 1.2.6 M9: a predictions table's copy of a hidden key (ml_<id>.<table>_<key>) is hidden with it
+        from abi.semantic import model  # not at top: model imports the semantic package
+
+        for r in model._read(project, "model.json").get("relationships", []):
+            t = r["from"]["table"]
+            if t.startswith("ml_") and (git.path(project) / "ml" / f"{t[3:]}.json").is_file():
+                out.setdefault(t, set()).update(f.lower() for f, c in zip(r["from"]["columns"], r["to"]["columns"])
+                                                if c.lower() in out.get(r["to"]["table"], ()))
+        out = {t: cs for t, cs in out.items() if cs}
     return out
 
 

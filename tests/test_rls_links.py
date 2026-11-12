@@ -751,6 +751,159 @@ def test_key_columns_at_fixpoint_cap(links):
     assert {"cafes", "customers", "orders", "ml_churn"} <= set(out["filtered"])
 
 
+# ---------- 1.2.6 M9: a prediction on an object is seen only with its object ----------
+
+def ml_run(model: str, action: str) -> dict:
+    """train_model or score_model of `model`, once its run ended; it must have worked."""
+    run, kind = abi.call(action, project=P, model=model)["run"], {"train_model": "latest_run", "score_model": "latest_score"}[action]
+    end = time.monotonic() + 900
+    while True:
+        r = next(m for m in abi.call("ml_models", project=P)["models"] if m["id"] == model)[kind]
+        if r and r["run"] == run and r["status"] in ("ok", "failed"):
+            assert r["status"] == "ok", r["error"]
+            return r
+        assert time.monotonic() < end, r
+        time.sleep(1)
+
+
+def refused(fx, status: int, action: str, **args) -> dict:
+    with pytest.raises(abi.ActionError) as e:
+        mine(fx, action, **args)
+    assert e.value.status == status, e.value.body
+    return e.value.body
+
+
+def test_prediction_hidden_with_object(links):
+    """A regression on cafés (the rule is on cafes.region) and one on customers (who follow the cafés rule), trained
+    and scored by the Owner. The North Viewer reads a North café's prediction on every path and a South café's on
+    none: the café's page (get_object), the list, semantic_query and SQL on the predictions table, a report, and an
+    alert per café. The customers' predictions come from rows the Viewer's rule filters through a link, so they stay
+    denied to restricted Viewers altogether (a follow link never opens a derived table). A hidden key column hides
+    the table (its copy of the key too, once the Owner gives the table a column rule of its own)."""
+    from test_object_flows import TICK
+
+    names = dict(sql("SELECT cafe_id, cafe_name FROM cafes"))
+    north = sorted(x[0] for x in sql("SELECT cafe_id FROM cafes WHERE region = 'North'"))
+    n1 = north[0]
+    s1 = next(k for k, in sql("SELECT cafe_id FROM cafes WHERE region = 'South' ORDER BY 1") if names[k] not in {names[x] for x in north})
+    value = lambda r, col: dict(zip(r["columns"], r["rows"][0]))[col]  # noqa: E731
+    try:
+        abi.call("save_dataset", project=P, id="cafe_vals", name="Café values", query={
+            "measures": ["revenue", "orders_rows"], "dimensions": ["cafes.cafe_id", "cafes.seats"]})
+        abi.call("save_ml_model", project=P, ml={"id": "cafe_value", "name": "Expected revenue", "task": "regression", "dataset": "cafe_vals",
+                                                 "object": "cafe", "target": "revenue", "features": ["orders_rows", "cafes.seats"]})
+        ml_run("cafe_value", "train_model")
+        ml_run("cafe_value", "score_model")
+        preds = dict(sql("SELECT cafes_cafe_id, prediction FROM ml_cafe_value"))
+        assert set(north) < set(preds) and s1 in preds and all(v is not None for v in preds.values())
+        s = state(links, tables=["ml_cafe_value"])
+        assert "ml_cafe_value" in s["filtered"] and "ml_cafe_value" not in s["denied"] and s["keys"]["ml_cafe_value"] == ["cafes_cafe_id"]
+        assert "-- ml_cafe_value: only rows whose cafes_cafe_id is a row of cafes you may see" in s["explain"].splitlines()
+
+        # 1. the café's page reads get_object as the person: the property with its café, a hidden café like a missing one
+        mineo = mine(links, "ontology")["objects"][0]
+        assert {"column": "ml_cafe_value.prediction", "type": "DOUBLE", "name": "Expected revenue", "meaning": "quantity"}.items() <= next(
+            p for p in mineo["properties"] if p["column"] == "ml_cafe_value.prediction").items()
+        assert value(mine(links, "get_object", type="cafe", key=[n1]), "ml_cafe_value.prediction") == pytest.approx(preds[n1])
+        assert value(abi.call("get_object", project=P, type="cafe", key=[s1]), "ml_cafe_value.prediction") == pytest.approx(preds[s1]), "the Owner sees it"
+        hidden, missing = refused(links, 404, "get_object", type="cafe", key=[s1]), refused(links, 404, "get_object", type="cafe", key=["CF-NONE"])
+        assert hidden["message"].replace(s1, "?") == missing["message"].replace("CF-NONE", "?") and str(preds[s1]) not in json.dumps(hidden)
+
+        # 2. the list: North cafés only; a prediction is no column of it and no filter
+        listed = mine(links, "list_objects", type="cafe", limit=1000)
+        assert sorted(dict(zip(listed["columns"], r))["cafe_id"] for r in listed["rows"]) == north and not [c for c in listed["columns"] if "ml_" in c]
+        refused(links, 400, "list_objects", type="cafe", filters=[{"property": "ml_cafe_value.prediction", "op": ">", "value": 0}])
+
+        # 3. the predictions table itself, through the semantic engine and in SQL
+        by_key = mine(links, "semantic_query", measures=["cafe_value_prediction"], dimensions=["ml_cafe_value.cafes_cafe_id"])["rows"]
+        assert dict(map(tuple, by_key)) == pytest.approx({k: preds[k] for k in north})
+        [[total]] = mine(links, "semantic_query", measures=["cafe_value_prediction"])["rows"]
+        assert total == pytest.approx(sum(preds[k] for k in north)) and total < sum(preds.values())
+        by_name = mine(links, "semantic_query", measures=["cafe_value_prediction"], dimensions=["cafes.cafe_name"])["rows"]
+        assert {r[0] for r in by_name} == {names[k] for k in north}
+        assert dict(map(tuple, mine(links, "sql_query", sql="SELECT cafes_cafe_id, prediction FROM ml_cafe_value")["rows"])) == {k: preds[k] for k in north}
+        assert mine(links, "sql_query", sql=f"SELECT count(*) FROM ml_cafe_value WHERE cafes_cafe_id = '{s1}'")["rows"] == [[0]]
+
+        # 4. a report over the prediction
+        sure("save_report", project=P, report={"id": "values", "name": "Values", "pages": [{"id": "main", "name": "Main", "visuals": [
+            {"id": "by-cafe", "type": "table", "title": "Expected revenue by café", "layout": {"x": 0, "y": 0, "w": 12, "h": 6},
+             "query": {"measures": ["cafe_value_prediction"], "dimensions": ["cafes.cafe_id", "cafes.cafe_name"]}}]}]})
+        theirs, all_ = mine(links, "visual_data", report="values", page="main")["visuals"][0], abi.call("visual_data", project=P, report="values", page="main")["visuals"][0]
+        assert sorted(r[0] for r in theirs["rows"]) == north and {r[0]: r[2] for r in theirs["rows"]} == pytest.approx({k: preds[k] for k in north})
+        assert s1 in {r[0] for r in all_["rows"]} and names[s1] not in json.dumps(theirs)
+
+        # 5. an alert per café on the prediction: both cafés meet it; the Viewer hears of the North one only
+        was = len(mine(links, "inbox")["messages"])
+        sure("save_flow", project=P, flow={"id": "value_alert", "name": "Value alert", "enabled": False, "trigger": {
+            "type": "data_condition", "per": "cafe", "measure": "cafe_value_prediction", "op": ">", "value": min(preds[n1], preds[s1]) / 2,
+            "query": {"measures": ["cafe_value_prediction"], "filters": [{"column": "cafes.cafe_id", "op": "in", "value": [n1, s1]}]}},
+            "steps": [{"id": "post", "type": "action", "action": "post_message", "input": {
+                "channel": "inbox", "text": "Expected revenue of {{ data.trigger.title }}: {{ data.trigger.object.ml_cafe_value.prediction }}",
+                "data": {"measures": ["cafe_value_prediction"], "dimensions": ["cafes.cafe_name"]}}}]})
+        r = engine(TICK, timeout=600, stdin=json.dumps({"project": P, "flows": ["value_alert"], "state": "value_alert", "ahead": 0}))
+        assert r.returncode == 0, r.stderr[-2000:]
+        end = time.monotonic() + 300
+        while True:
+            runs = abi.call("flow_runs", project=P, flow="value_alert")["runs"]
+            if len(runs) == 2 and all(x["status"] not in ("queued", "running") for x in runs):
+                break
+            assert time.monotonic() < end, runs
+            time.sleep(1)
+        assert {x["status"] for x in runs} == {"ok"} and sorted(x["object"]["key"][0] for x in runs) == sorted([n1, s1])
+        said = lambda ms: {m["text"].split(" of ", 1)[1].rsplit(": ", 1)[0]: float(m["text"].rsplit(": ", 1)[1])  # noqa: E731
+                           for m in ms if m["text"].startswith("Expected revenue of ")}
+        assert said(abi.call("inbox", project=P)["messages"]) == pytest.approx({names[k]: preds[k] for k in (n1, s1)})
+        got = mine(links, "inbox")["messages"]
+        got = got[:len(got) - was]  # newest first: the ones since
+        assert len(got) == 1 and said(got) == pytest.approx({names[n1]: preds[n1]}), got
+        assert got[0]["data"]["rows"] == [{"cafes.cafe_name": names[n1], "cafe_value_prediction": pytest.approx(preds[n1])}], got
+        assert names[s1] not in json.dumps(got) and str(preds[s1])[:10] not in json.dumps(got)
+        assert mine(links, "flow_runs", flow="value_alert")["runs"] == [], "nor does the run history say which cafés met it"
+
+        # 6. predictions on customers, who follow the cafés rule: made from rows the rule filters through a link, so no
+        # restricted Viewer sees any of them, with the customer visible or not (M3: a follow link only ever adds denials)
+        abi.call("save_ml_model", project=P, ml={"id": "cust_value", "name": "Customer value", "task": "regression", "dataset": "custs",
+                                                 "object": "customer", "target": "revenue", "features": ["customers.segment"]})
+        ml_run("cust_value", "train_model")
+        ml_run("cust_value", "score_model")
+        cust = sql(VISITED)[0][0]
+        assert value(abi.call("get_object", project=P, type="customer", key=[cust]), "ml_cust_value.prediction") is not None
+        seen = mine(links, "get_object", type="customer", key=[cust])
+        assert seen["key"] == [cust] and value(seen, "ml_cust_value.prediction") is None, "the customer shows, its prediction doesn't"
+        assert "ml_cust_value" in state(links, tables=["ml_cust_value"])["denied"]
+        assert mine(links, "sql_query", sql="SELECT count(*) FROM ml_cust_value")["rows"] == [[0]]
+        assert mine(links, "semantic_query", measures=["cust_value_prediction"])["rows"] in ([], [[None]])
+        with saved({**ONTO, "links": [{k: v for k, v in ln.items() if k != "rls"} for ln in ONTO["links"]]}):  # the fixture's types: no property
+            assert mine(links, "sql_query", sql="SELECT count(*) FROM ml_cust_value")["rows"] == [[0]], "denied without the link too"
+            assert mine(links, "sql_query", sql="SELECT count(*) FROM ml_cafe_value")["rows"] == [[len(north)]]
+
+        # 7. the café's key hidden from Viewers: the predictions table is denied (D-110); once the Owner gives it a
+        # column rule of its own its rows show again, but never its copy of the hidden key
+        sure("set_column_rule", project=P, id="pi_key", table="cafes", columns=["cafe_id"])
+        try:
+            assert "ml_cafe_value" in state(links, tables=["ml_cafe_value"])["denied"]
+            assert mine(links, "sql_query", sql="SELECT count(*) FROM ml_cafe_value")["rows"] == [[0]]
+            refused(links, 403, "get_object", type="cafe", key=[n1])
+            sure("set_column_rule", project=P, id="pi_own", table="ml_cafe_value", columns=["cafes_seats"])
+            try:
+                assert mine(links, "sql_query", sql="SELECT count(*) FROM ml_cafe_value")["rows"] == [[len(north)]]
+                assert "cafes_cafe_id" not in mine(links, "sql_query", sql="SELECT * FROM ml_cafe_value LIMIT 1")["columns"]
+                with pytest.raises(abi.ActionError) as e:
+                    mine(links, "sql_query", sql="SELECT cafes_cafe_id FROM ml_cafe_value")
+                assert e.value.status in (400, 403) and n1 not in json.dumps(e.value.body), e.value.body
+                assert abi.call("sql_query", project=P, sql="SELECT cafes_cafe_id FROM ml_cafe_value LIMIT 1")["columns"] == ["cafes_cafe_id"], "the Owner reads it"
+            finally:
+                sure("delete_rls_rule", project=P, id="pi_own")
+        finally:
+            sure("delete_rls_rule", project=P, id="pi_key")
+    finally:  # the tests after this one find the fixture's project: no model that a reload of customers would score
+        for act, args in (("delete_flow", {"flow": "value_alert"}), ("delete_report", {"report": "values"}),
+                          ("delete_ml_model", {"model": "cafe_value"}), ("delete_ml_model", {"model": "cust_value"})):
+            with contextlib.suppress(abi.ActionError):
+                sure(act, project=P, **args)
+        sure("save_ontology", project=P, ontology=ONTO)
+
+
 def test_follow_audience_counts_column_rules(links):
     """M3 follow-up: with only a column rule (no row rule) the Viewer is restricted (D-110), so a follow change's
     confirmation names them among those who will see other rows."""

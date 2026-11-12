@@ -2605,8 +2605,8 @@ def viewer_docs(docs: dict | None) -> dict | None:
 
 
 def owner_only(bundle: dict) -> None:
-    """Leave out of the published copy what it can't hold: an ML model's prediction table (ml_<model>), its joins and
-    the measures over it. The copy never scores, so the table is never loaded there, and its rows come from filtered
+    """Leave out of the published copy what it can't hold: an ML model's prediction table (ml_<model>), its joins, the
+    measures over it and the object type properties read from it. The copy never scores, so the table is never loaded there, and its rows come from filtered
     data with no row rule of its own: a restricted viewer got an engine error on ML, four owner-only readiness gaps on
     Home and Monitor, and a forecast chip in Explore (R4). The ML model's definition stays (its page draws the actuals)."""
     outs = {f"ml_{b['id']}" for rel, b in bundle.items() if rel.startswith("ml/") and isinstance(b, dict) and b.get("id")}
@@ -2614,7 +2614,13 @@ def owner_only(bundle: dict) -> None:
     if not outs or not isinstance(m, dict):
         return
     m["tables"] = [t for t in m.get("tables") or [] if t.get("table") not in outs]
+    if m.get("entities"):  # its key (1.2.6 M9: a model on an object type keys its table)
+        m["entities"] = [e for e in m["entities"] if e.get("table") not in outs]
     m["relationships"] = [r for r in m.get("relationships") or [] if not {r["from"]["table"], r["to"]["table"]} & outs]
+    types = [x for x in (o.get("objects") or [])] if isinstance(o := bundle.get("model/ontology.json"), dict) else []
+    for x in types:  # 1.2.6 M9: a prediction shown as a property of an object type goes with its table
+        if "properties" in x:
+            x["properties"] = [p for p in x["properties"] if p["column"].rpartition(".")[0] not in outs]
     if isinstance(ms, dict):
         hit = re.compile(r'(?<!\w)"?(' + "|".join(map(re.escape, sorted(outs))) + r')"?\.')
         gone = {x["id"] for x in ms.get("measures") or [] if hit.search(x.get("expression") or "")}
@@ -2622,6 +2628,9 @@ def owner_only(bundle: dict) -> None:
         g = bundle.get("model/glossary.json")
         for t in (g or {}).get("terms") or [] if isinstance(g, dict) else []:
             t["measures"] = [x for x in t.get("measures") or [] if x not in gone]
+        for x in types:  # a forecast's measure among a type's measures
+            if "measures" in x:
+                x["measures"] = [i for i in x["measures"] if i not in gone]
 
 
 def read_only(bundle: dict) -> None:
