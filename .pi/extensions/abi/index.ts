@@ -282,7 +282,8 @@ export default async function abi(pi: ExtensionAPI) {
 		"list_snapshots", "preview_steps", "edit_history", "edit_proposals", "flow_runs", "agent_runs", "history", "diff", "ml_history", "get_sharing",
 		"list_share_links", "shared_with_me", "test_tool", "run_tool", "test_agent", "sql_query", "project_locale", "remote_settings", "check_condition",
 		"load_runs", "ontology", "get_object", "list_objects", "object_history", "export_ontology", "propose_ontology",  // 1.2.6 M6
-		"find_same"]);  // 1.2.6 M11: proposes what looks the same, merges nothing
+		"find_same",  // 1.2.6 M11: proposes what looks the same, merges nothing
+		"optimizers"]);  // 1.2.6 M12: the plans as the person may read them (run_optimizer makes a proposal: a change)
 	const READ_STEPS = new Set(["abi_tools", "abi_show", "abi_explore", "abi_sync", "abi_health", "abi_cli", "abi_prefs", "abi_vault", "read", "ls", "grep", "find", "subagent", "tool_search"]);
 	let readsFrom: string | undefined;
 	let modeAt = 0, modeNow = process.env.ABI_PI_MODE === "viewer" ? "viewer" : "developer";
@@ -298,7 +299,7 @@ export default async function abi(pi: ExtensionAPI) {
 		} catch {}
 		return modeNow;
 	}
-	const PAGES = ["home", "report", "reports", "monitor", "inbox", "vault", "datasets", "measures", "model", "glossary", "explore", "sources", "staged", "tables", "flows", "ml", "tools", "agents", "docs", "security", "environments", "history"];
+	const PAGES = ["home", "report", "reports", "monitor", "inbox", "vault", "datasets", "measures", "model", "glossary", "explore", "sources", "staged", "tables", "flows", "ml", "plans", "tools", "agents", "docs", "security", "environments", "history"];
 	pi.registerTool({
 		name: "abi_show",
 		label: "Show in the app",

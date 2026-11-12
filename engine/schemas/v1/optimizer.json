@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.abi.invalid/v1/optimizer.json",
+  "title": "Optimiser",
+  "description": "optimizers/<id>.json (1.2.6 M12): the question \"what is the best plan?\" as data. One number is decided per object of a type (`over`, `decide`), so that a total (`objective`) is as high or as low as it can be while every limit (`limits`) holds. A number in the file is a constant, {property} a numeric column of the type's table and {measure} a measure read per object; all are read as the person who runs it (row-level security applies). No code and no industry built in: the examples are suggestions. A run (run_optimizer, or a flow step) never changes data: its plan is stored as a write-back proposal on `decide.write` that a person approves. Runs live in the registry, not in Git.",
+  "type": "object",
+  "required": ["$schema", "id", "name", "over", "decide", "objective"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {"const": "https://schema.abi.invalid/v1/optimizer.json"},
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$", "description": "Equals the file name"},
+    "name": {"type": "string", "minLength": 1, "maxLength": 200, "description": "Display name, shown to users"},
+    "description": {"type": "string", "maxLength": 2000},
+    "over": {
+      "type": "object", "required": ["type"], "additionalProperties": false,
+      "description": "The objects a number is decided for: every object of the type the person sees, or those matching `filters`",
+      "properties": {
+        "type": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$", "description": "An object type ID of model/ontology.json"},
+        "filters": {"type": "array", "maxItems": 20, "description": "list_objects' filters: all must hold",
+                    "items": {"type": "object", "required": ["property", "op", "value"], "additionalProperties": false, "properties": {
+                      "property": {"type": "string", "minLength": 1}, "op": {"enum": ["=", "<>", "<", "<=", ">", ">=", "in"]},
+                      "value": {"type": ["string", "number", "boolean", "array"]}, "link": {"type": "string"}}}}
+      }
+    },
+    "decide": {
+      "type": "object", "required": ["name", "write"], "additionalProperties": false,
+      "description": "The number decided for each object",
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 100, "description": "What the number is, in the business's words (Hours, Units)"},
+        "write": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$", "description": "The column of the type's table the plan is proposed for (not a key column); its current values are the plan's `now`"},
+        "min": {"$ref": "#/$defs/value", "description": "The least per object (default 0)"},
+        "max": {"$ref": "#/$defs/value", "description": "The most per object (default: no upper end)"},
+        "integer": {"type": "boolean", "description": "Whole numbers only (default false)"}
+      }
+    },
+    "objective": {
+      "type": "object", "required": ["goal", "per_unit"], "additionalProperties": false,
+      "description": "The total to make as high or as low as possible: the sum over the objects of `per_unit` times the decided number",
+      "properties": {
+        "goal": {"enum": ["maximize", "minimize"]},
+        "name": {"type": "string", "minLength": 1, "maxLength": 100, "description": "What the total is, in the business's words (Revenue, Cost)"},
+        "per_unit": {"$ref": "#/$defs/value"}
+      }
+    },
+    "limits": {
+      "type": "array", "maxItems": 50,
+      "items": {
+        "type": "object", "required": ["name"], "additionalProperties": false,
+        "anyOf": [{"required": ["max"]}, {"required": ["min"]}, {"required": ["equal"]}],
+        "description": "A limit on the sum over the objects of `per_unit` (default 1) times the decided number; with `group`, on that sum within each value of a property",
+        "properties": {
+          "name": {"type": "string", "minLength": 1, "maxLength": 100, "description": "The limit in the business's words (Total hours, Wage budget)"},
+          "per_unit": {"$ref": "#/$defs/value"},
+          "group": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$", "description": "A column of the type's table: the limit holds for each of its values"},
+          "min": {"type": "number"}, "max": {"type": "number"}, "equal": {"type": "number"}
+        }
+      }
+    },
+    "time_limit_s": {"type": "integer", "minimum": 1, "maximum": 600, "description": "The most seconds a run may take (default 60)"}
+  },
+  "$defs": {
+    "value": {
+      "description": "A constant, a numeric column of the type's table, or a measure read per object",
+      "anyOf": [
+        {"type": "number"},
+        {"type": "object", "required": ["property"], "additionalProperties": false, "properties": {"property": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$"}}},
+        {"type": "object", "required": ["measure"], "additionalProperties": false, "properties": {"measure": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$"}}}
+      ]
+    }
+  },
+  "examples": [
+    {
+      "$schema": "https://schema.abi.invalid/v1/optimizer.json", "id": "stock-allocation", "name": "Stock per warehouse",
+      "description": "Template, allocation: how many units each warehouse gets so that the expected margin is highest, within what is in stock and what each warehouse holds.",
+      "over": {"type": "warehouse"},
+      "decide": {"name": "Units", "write": "planned_units", "max": {"property": "capacity"}, "integer": true},
+      "objective": {"goal": "maximize", "name": "Margin", "per_unit": {"property": "margin_per_unit"}},
+      "limits": [{"name": "Units in stock", "max": 10000}]
+    },
+    {
+      "$schema": "https://schema.abi.invalid/v1/optimizer.json", "id": "staffing", "name": "Hours per café",
+      "description": "Template, staffing: the staff hours each café gets next week at the lowest wage cost, with enough hours for its demand.",
+      "over": {"type": "cafe", "filters": [{"property": "open", "op": "=", "value": true}]},
+      "decide": {"name": "Hours", "write": "planned_hours", "min": {"property": "hours_needed"}, "max": 400},
+      "objective": {"goal": "minimize", "name": "Wage cost", "per_unit": {"property": "hourly_wage"}},
+      "limits": [{"name": "Hours per region", "group": "region", "max": 1200}, {"name": "Wage budget", "per_unit": {"property": "hourly_wage"}, "max": 50000}]
+    },
+    {
+      "$schema": "https://schema.abi.invalid/v1/optimizer.json", "id": "maintenance-slots", "name": "Maintenance slots",
+      "description": "Template, maintenance slots: which machine-and-week slots are used (1) or not (0) so that the least output is lost, with every machine serviced once and at most three machines in one week.",
+      "over": {"type": "maintenance_slot"},
+      "decide": {"name": "Slot used", "write": "planned", "max": 1, "integer": true},
+      "objective": {"goal": "minimize", "name": "Output lost", "per_unit": {"measure": "output_per_slot"}},
+      "limits": [{"name": "Each machine once", "group": "machine_id", "equal": 1}, {"name": "Machines per week", "group": "week", "max": 3}],
+      "time_limit_s": 120
+    }
+  ]
+}

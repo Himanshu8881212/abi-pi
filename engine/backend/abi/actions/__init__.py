@@ -253,6 +253,7 @@ PRODUCTION_READS = frozenset({
     "ontology", "export_ontology", "object_history",  # 1.2.6: definitions only; an object's history
     "get_object", "list_objects", "propose_ontology",  # 1.2.6 M6: objects as the caller sees them; a draft that saves nothing
     "find_same",  # 1.2.6 M11: proposes which objects look the same; merges nothing
+    "optimizers",  # 1.2.6 M12: the optimisers and the caller's latest plans
     "project_locale", "readiness", "remote_branches", "remote_settings", "report_snapshot", "rls_rules", "run_agent",
     "run_tool", "semantic_model", "semantic_query", "sql_query", "visual_data",
 })
@@ -269,6 +270,7 @@ PRODUCTION_OK = PRODUCTION_READS | PRODUCTION_ACCESS | {
     "edit_cells", "edit_total", "propose_edit", "approve_edit", "reject_edit", "undo_edits", "sync_edits",  # D-57
     "run_object_action",  # 1.2.6 M4: a write-back like edit_cells (D-57)
     "decide_same",  # 1.2.6 M11: a decision is data of the environment (it refuses to make its table here: that comes by promote)
+    "run_optimizer",  # 1.2.6 M12: its plan is a write-back proposal, like propose_edit (D-57)
 }
 
 

@@ -33,6 +33,7 @@ dependencies = [
     "wasmtime>=49,<50",
     "pyjwt[crypto]>=2.15,<2.16",  # SC-1 OIDC ID tokens (E-01.1); already locked via mcp
     "python-pptx>=1.0.2,<1.1",
+    "highspy>=1.16,<1.17",  # 1.2.6 M12: HiGHS (MIT), the optimisers' solver, behind abi.optimize.solve
 ]
 
 [dependency-groups]

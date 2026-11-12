@@ -20,6 +20,7 @@ from abi import (
     flows,  # noqa: F401  registers the flow actions
     ingest,
     ml,  # noqa: F401  registers the ML actions
+    optimize,  # noqa: F401  registers the optimiser actions
     ops,
     reports,  # noqa: F401  registers the report actions
     semantic,

@@ -34,7 +34,8 @@ LAYOUT = {  # §6.6 paths that have a published schema (M-04); other object type
     r"security/roles\.json": "roles", r"security/rls\.json": "rls", r"reports/[^/]+\.json": "report", r"tools/[^/]+\.json": "tool",
     r"docs/descriptions\.json": "descriptions", r"flows/[^/]+\.json": "flow",
     r"agents/[^/]+\.eval\.json": "eval", r"agents/[^/]+\.json": "agent",  # eval first: agents/x.eval.json matches both
-    r"ml/[^/]+\.json": "ml", r"environments/[a-z0-9][a-z0-9_-]{0,62}\.json": "environment",  # PC-9, file name = branch
+    r"ml/[^/]+\.json": "ml", r"optimizers/[^/]+\.json": "optimizer",  # 1.2.6 M12
+    r"environments/[a-z0-9][a-z0-9_-]{0,62}\.json": "environment",  # PC-9, file name = branch
 }
 CI, CI_MAX = r"\.github/workflows/[^/]+\.ya?ml|\.gitlab-ci\.yml", 64_000  # PC-13 (X-04.6)
 NAMES = {"project": "project settings", "model": "semantic model", "roles": "role assignments", "rls": "row-level security rules"}  # else the kind
@@ -205,7 +206,7 @@ def _schema(conn, project: str, files: dict) -> list[dict]:
             errs.append(_err(rel, "$", "No object type is stored at this path.",
                              "Move it to a §6.6 layout path (project.json, sources/<id>.json, tables/<id>.json, model/model.json,"
                              " model/glossary.json, model/measures.json, model/datasets.json, model/models.json, model/ontology.json, reports/<id>.json, tools/<id>.json, flows/<id>.json,"
-                             " agents/<id>.json, agents/<id>.eval.json, ml/<id>.json, environments/<branch>.json,"
+                             " agents/<id>.json, agents/<id>.eval.json, ml/<id>.json, optimizers/<id>.json, environments/<branch>.json,"
                              " security/roles.json, security/rls.json, docs/, .github/workflows/<name>.yml, .gitlab-ci.yml) or remove it."))
     return errs
 
@@ -311,7 +312,7 @@ def _references(conn, project: str, files: dict) -> list[dict]:
              for rel, c in files.items() if _kind(rel) == "report" and "owner" in c and c["owner"] not in users]
     errs += [_err("model/datasets.json", f"$.datasets[{i}].owner", f"No user with ID {d['owner']}.", "Use the ID of an existing account.")
              for i, d in enumerate((files.get("model/datasets.json") or {}).get("datasets", [])) if "owner" in d and d["owner"] not in users]
-    from abi import flows, ml  # not at top: they import this module
+    from abi import flows, ml, optimize  # not at top: they import this module
     from abi.agents import studio  # same
 
     old = bundle.bundle(git.path(project))
@@ -320,6 +321,7 @@ def _references(conn, project: str, files: dict) -> list[dict]:
     members = {u for u, wo in users.items() if wo} | (files.get(ROLES) or {}).keys()  # a workspace owner is in every project
     errs += [e for rel, c in files.items() if _kind(rel) == "flow" for e in flows.references(rel, c, members, files)]
     errs += [e for rel, c in files.items() if _kind(rel) == "ml" for e in ml.references(rel, c, files)]
+    errs += optimize.references(project, files)  # 1.2.6 M12: none without optimizers/
     for rel, c in files.items():  # PC-9: an overlay merged over its source file passes the source schema (SC-4 secret-only)
         for sid, part in c["sources"].items() if _kind(rel) == "environment" else ():
             if not isinstance(src := files.get(f"sources/{sid}.json"), dict):
@@ -488,7 +490,7 @@ def diff(old: dict, new: dict) -> list[str]:
         if a == b:
             continue
         kind = _kind(rel)
-        what = f"{kind} '{_id(rel)}'" if kind in ("source", "table", "report", "tool", "flow", "agent", "ml", "environment") else NAMES.get(kind, kind or f"file {rel}")
+        what = f"{kind} '{_id(rel)}'" if kind in ("source", "table", "report", "tool", "flow", "agent", "ml", "optimizer", "environment") else NAMES.get(kind, kind or f"file {rel}")
         if a is None or b is None:
             out.append(f"{'Adds' if a is None else 'Removes'} {what}.")
         elif kind == "roles":

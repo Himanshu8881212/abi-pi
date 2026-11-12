@@ -369,6 +369,24 @@ CREATE TABLE IF NOT EXISTS ml_trials (
   chosen boolean NOT NULL,
   PRIMARY KEY (run, position)
 );
+-- 1.2.6 M12: one row per optimiser run; `spec` is optimizers/<id>.json as run, `result` the outcome, made of the rows the
+-- person who ran it sees: `restricted` runs (row-level security applied to them) are read by that person only. Not in Git.
+-- ponytail: no schema number bump. The table is only added (code of schema 7 runs on it unharmed, so nothing needs
+-- refusing), and tests/test_object_flows.py pins 7; bump with the next change that older code can't run on.
+CREATE TABLE IF NOT EXISTS optimizer_runs (
+  id uuid PRIMARY KEY,
+  project text NOT NULL,
+  optimizer text NOT NULL,
+  user_id bigint NOT NULL REFERENCES users ON DELETE CASCADE,
+  restricted boolean NOT NULL,
+  spec jsonb NOT NULL,
+  status text NOT NULL CHECK (status IN ('queued', 'running', 'ok', 'failed')),
+  created timestamptz NOT NULL DEFAULT clock_timestamp(),
+  finished timestamptz,
+  result jsonb,
+  error text
+);
+CREATE INDEX IF NOT EXISTS optimizer_runs_latest ON optimizer_runs (project, optimizer, created DESC);
 -- SC-7 (X-02.1): inbound channel senders → user accounts; kind slack 'team_id:user_id', teams aadObjectId, email address.
 CREATE TABLE IF NOT EXISTS channel_senders (
   kind text NOT NULL CHECK (kind IN ('slack', 'teams', 'email')),

@@ -345,7 +345,7 @@ def start(project: str, flow: str, key: str, trigger: dict | None = None, by: Us
     return run_id
 
 
-HEAVY = {"refresh", "add_data", "set_steps", "train_model", "score_model", "report_snapshot"}  # loads, ML, renders
+HEAVY = {"refresh", "add_data", "set_steps", "train_model", "score_model", "report_snapshot", "run_optimizer"}  # loads, ML, renders, plans
 
 
 def _queue(run_id: str) -> str:

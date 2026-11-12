@@ -34,6 +34,11 @@ python-pptx 1.0.2 (Python package), writes PowerPoint report exports (PRD RP-6, 
   libxml2 and libxslt, MIT), XlsxWriter 3 (BSD-2-Clause).
   Portions of this software are copyright © The FreeType Project (www.freetype.org). All rights reserved.
 
+HiGHS 1.16 (Python package `highspy`), the solver of the optimisers (1.2.6 M12; linear and integer programs)
+  License: MIT (https://github.com/ERGO-Code/HiGHS/blob/master/LICENSE.txt). Source: https://github.com/ERGO-Code/HiGHS
+  The wheel carries the solver's compiled code; its licence text ships in its *.dist-info. It is the only solver:
+  no GPL, AGPL or paid one is used. The project's code calls it in one function (abi/optimize.py `solve`).
+
 Every other component is under a licence compatible with the AGPL v3.0 (MIT, BSD, ISC, Apache-2.0, MPL-2.0, PSF,
 LGPL, GPL-2.0 with the libgit2 linking exception; audit in work/validation/LICENSE-AGPL.md). Their licence texts ship
 with them: each Python package's in its *.dist-info folder under /app/backend/.venv, and the web UI's bundled

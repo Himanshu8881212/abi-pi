@@ -19,3 +19,23 @@
   seen only by people who see the object; a monitor with `per` can alert on it (measure <id>_probability, <id>_prediction).
   A dataset column from another table is refused: make it a measure. A flow with trigger after_refresh on `ml_<id>` runs
   after each scoring. Removing a property from the type keeps it out; taking `object` off the model removes it.
+- "What is the best plan?" (hours per café, units per warehouse, which slots to use) is an optimiser, not a model:
+  read `ontology` for the object type and `semantic_model` for measures, then `save_optimizer {optimizer: {id, name,
+  over: {type, filters?}, decide: {name, write, min?, max?, integer?}, objective: {goal: maximize|minimize, name,
+  per_unit}, limits?: [{name, per_unit?, group?, max? | min? | equal?}], time_limit_s?}}`. One number is decided per
+  object; `write` is the column of the type's table the plan is proposed for (whole-number column: `integer: true`).
+  `per_unit`, `decide.min` and `decide.max` are a number, `{property: <numeric column>}` or `{measure: <id>}` (read per
+  object; one key column). A limit bounds the sum of per_unit × the decided number (per_unit default 1); `group`
+  makes it hold within each value of a column. Names (`decide.name`, `objective.name`, each limit's `name`) are the
+  person's business words: the plan's text uses them. Shapes to start from, never a rule: allocation (units per
+  warehouse, max = capacity, one total limit), staffing (hours per café, min = hours needed, a limit per region, a
+  budget), maintenance slots (0/1 per slot with integer and max 1, `equal: 1` per machine, a limit per week). Say the
+  goal, what is decided and each limit in words and save once the person agrees.
+- `run_optimizer {optimizer}` queues the run (default 60 s, at most 1,000 objects); read it with `optimizers
+  {optimizer}` (at most twice; still queued or running: say it is being worked out). State the plan, the total and
+  the limits only from its rows (`what`: Total, Limit, Limit fully used, Limit in conflict, else the object's type;
+  `plan`, `now`, `limit`); relay `text` for what happened. A plan is never applied: an Editor's run stores it as a
+  proposal (`proposal`), which the person approves under Data > Edits (`approve_edit` asks them); a Viewer's run only
+  shows the plan for what they see. "No plan fits": name the limits in conflict and ask which one to relax; never
+  loosen a limit yourself. On a schedule: a flow step `{type: action, action: run_optimizer, input: {optimizer}}`;
+  each run adds a proposal, never a change.

@@ -52,7 +52,8 @@ import video  # noqa: E402
 KEY_SLOT = "__ABI_APP_KEY__"
 ME_SLOT = "null/*__ABI_ME__*/"
 VERSION = tomllib.loads((abi.ROOT / "pyproject.toml").read_text())["project"]["version"]
-READS_ONLY ={"run_flow", "run_agent"}  # not changes to the project, but they act (send, call tools): Developer only
+READS_ONLY ={"run_flow", "run_agent",  # not changes to the project, but they act (send, call tools): Developer only
+             "run_optimizer"}  # 1.2.6 M12: works out a plan and stores it as a proposal a person approves
 WRITES = {"set_rls_rule", "set_measure", "delete_measure", "set_glossary_term", "delete_glossary_term", "save_model", "delete_model", "enable_flow", "train_model", "score_model", "refresh",
           "commit", "undo", "add_data", "delete_source", "delete_table", "set_table", "add_relationship", "remove_relationship",
           "save_dataset", "delete_dataset", "save_report", "delete_report", "save_flow", "delete_flow", "save_ml_model",
@@ -63,7 +64,8 @@ READS = {"changes", "check_condition", "data_quality", "dataset_data", "docs", "
          "flow_runs", "history", "how_calculated", "list_agents", "list_flows", "list_reports", "list_tools", "load_runs",
          "ml_models", "preview_steps", "readiness", "report_snapshot", "rls_rules", "run_tool", "semantic_model",
          "semantic_query", "test_agent", "test_tool", "visual_data", "ontology", "get_object", "list_objects", "object_history",  # 1.2.6 M6, M7: object reads
-         "find_same"}  # 1.2.6 M11: what looks like the same object (Editors and Owners; it merges nothing)
+         "find_same",  # 1.2.6 M11: what looks like the same object (Editors and Owners; it merges nothing)
+         "optimizers"}  # 1.2.6 M12: the plans and each one's latest run, as this person may read it
 ALLOWED = READS | WRITES | READS_ONLY  # the page's actions; every other one is ABI's app's
 ACCOUNT = {"set_password", "create_personal_token", "revoke_personal_token", "start_mfa", "confirm_mfa", "disable_mfa"}  # the confirmations Viewer mode still redeems: account work (a password, personal tokens, two-step sign-in), your own or, as an Owner, another person's
 
@@ -635,7 +637,7 @@ const IC={home:'M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3z',chat:'M21 12a8 8 0 0 1-11.6 
  explore:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM15.5 8.5l-2 5-5 2 2-5z',boardpack:'M3 7h18v13H3zM8 7V4h8v3M3 12h18',documents:'M6 3h8l5 5v13H6zM14 3v5h5M9 13h7M9 17h7',
  onepager:'M6 3h12v18H6zM9 7h6M9 11h6M9 15h3',dataexport:'M12 3v12M7 10l5 5 5-5M4 20h16',video:'M3 5h18v14H3zM10 9l5 3-5 3z',
  transfer:'M3 7.5 12 3l9 4.5v9L12 21l-9-4.5zM3 7.5l9 4.5 9-4.5M12 12v9',flows:'M4 4h6v6H4zM14 14h6v6h-6zM7 10v4a3 3 0 0 0 3 3h4',
- ml:'M6 6h12v12H6zM10 10h4v4h-4zM9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4',tools:'M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0M16 4v4M10 10v4M18 16v4',
+ ml:'M6 6h12v12H6zM10 10h4v4h-4zM9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4',plans:'M4 20V10M10 20V4M16 20v-7M22 20H2M14 8l2-2 2 2',tools:'M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0M16 4v4M10 10v4M18 16v4',
  agents:'M5 8h14v11H5zM12 4v4M9.5 13h0M14.5 13h0M2 13h3M19 13h3',vault:'M3 4h18v4H3zM5 8v12h14V8M10 12h4',
  docs:'M3 5h6a3 3 0 0 1 3 3v12a2 2 0 0 0-2-2H3zM21 5h-6a3 3 0 0 0-3 3v12a2 2 0 0 1 2-2h7z',security:'M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6z',
  environments:'M4 4h16v6H4zM4 14h16v6H4zM8 7h0M8 17h0',history:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2',
@@ -2069,6 +2071,26 @@ function ml(box){newBtn(box,'ml');const g=h('div','cards');box.append(g);if(!D.m
    for(let i=0;i<60;i++){await wait(3000);const x=(await api('ml_models',{})).models.find(y=>y.id===m.id);if(x){Object.assign(m,x);lr()}
     if(['ok','failed'].includes(m.latest_run?.status)&&m.latest_run?.finished)return `${m.latest_run.kind}: ${m.latest_run.status}`}return 'still running'};
   act(c,'Train',m2=>follow('train_model',m2),1);act(c,'Score',m2=>follow('score_model',m2));editBtns(c,'ml',m);g.append(c)})}
+// 1.2.6 M12: Plans. ABI works out the best plan over what this person sees (run_optimizer, in the worker) and stores it as
+// changes waiting for approval (Data > Edits); the page never applies one. Business names only: no id, table or column.
+function plans(box){const g=h('div','cards');box.append(g);
+ D.optimizers.forEach((o,i)=>{const T=otype(o.over.type),c=card(o.name||o.id),out=h('div','plan');c.classList.add('wide');
+  c.append(h('p','mtext',`Decides ${o.decide.name} for each ${T?low(T):'one'} so that ${o.objective.name||'the total'} is as ${o.objective.goal==='maximize'?'high':'low'} as it can be${(o.limits||[]).length?', within these limits: '+o.limits.map(l=>l.name).join(', '):''}.`),out);
+  const draw=()=>{const r=o.latest_run;out.innerHTML='';
+   if(!r){out.append(h('p','empty',MODE==='developer'?'Not worked out yet.':'No plan to show yet.'));return}
+   if(['queued','running'].includes(r.status)){out.append(h('p','file','Working it out…'));return}
+   if(r.status==='failed'){out.append(h('p','bad',r.error||'It could not be worked out.'));return}
+   out.append(h('p','txt',r.text||''));const rows=r.rows||[],objs=rows.filter(x=>x[5]);
+   rows.filter(x=>/^Limit( fully used)?$/.test(x[0])).forEach(x=>out.append(h('div','file',`${x[1]}: ${fmt(x[2])}${x[4]===null?'':' of '+fmt(x[4])}${x[0]==='Limit fully used'?' (fully used)':''}`)));
+   if(objs.length){const tb=h('table'),hd=tb.createTHead().insertRow(),bd=tb.createTBody();[T?T.name:'Name','Now',o.decide.name,''].forEach(t=>hd.append(h('th','',t)));
+    objs.slice(0,200).forEach(x=>{const tr=bd.insertRow(),nm=h('button','flink oopen',String(x[1]));nm.onclick=()=>openObj(r.type,x[5]);tr.insertCell().append(nm);[x[3]===null?'—':fmt(x[3]),fmt(x[2]),x[4]||''].forEach(v=>tr.insertCell().textContent=v)});
+    const sc=h('div','scroll');sc.append(tb);out.append(sc);if(objs.length>200)out.append(h('p','file','The first 200 are shown.'))}
+   if(r.proposal&&MODE==='developer'&&PAGES.edits)out.append(btn('Review the changes',()=>show('edits')))};
+  draw();
+  if(MODE==='developer')act(c,'Find the best plan',async m=>{await api('run_optimizer',{optimizer:o.id});say(m,'Working it out…');
+   for(let k=0;k<330;k++){await wait(2000);const x=(await api('optimizers',{})).optimizers.find(y=>y.id===o.id);if(x){o.latest_run=x.latest_run;draw()}
+    if(['ok','failed'].includes(o.latest_run?.status))return o.latest_run.status==='ok'?'Done.':'It could not be worked out.'}return 'Still working: open this page again in a moment.'},!i);
+  g.append(c)})}
 function tools(box){newBtn(box,'tool');const g=h('div','cards');box.append(g);if(!D.tools.length)box.append(emptyBox('tools','No tools yet',MODE==='viewer'?vEmpty('A tool is a calculation the agents can call. The project\'s builders set them up.'):'A tool is a calculation your agents can call with inputs, such as store KPIs for a month. It has tests and is published when they pass.',MODE==='developer'?['New tool',()=>$('main .bar.top .btn.pri')?.click()]:['Ask the agent',()=>openChat(true)]));
  D.tools.forEach(t=>{const c=card(t.name||t.id,`tools/${t.id}.json · ${t.status||''}`);c.append(h('div','',t.description||''));const ins={};
   Object.entries(t.inputs?.properties||{}).forEach(([k,s])=>{const i=h('input','f');i.placeholder=s.description||'';ins[k]=i;c.append(h('label','l',k),i)});
@@ -2174,14 +2196,14 @@ const LEDE={vault:'Your business definitions, finance rules and KPI specs. The a
  measures:'The business numbers. Edit a formula and ABI checks it before it saves; Test shows the total.',model:'Your data models: the whole model and each named model. Open one to see its tables and how they join.',
  chat:'Ask a question, ask where something is, or ask for a change. The agent can open pages for you.',boardpack:'The documents, data and video a review needs, made by the board-pack agent and checked first.',documents:'A report, some of its pages or one view, as ABI renders it: PDF, PNG or PowerPoint.',onepager:'One page for the board: headline numbers, two charts and the caveats, built by the agent.',dataexport:'The rows behind any view, as CSV or Excel, or a query\'s rows as CSV.',video:'A silent explainer of report views, animated from ABI\'s numbers, one caption per slide.',settings:'The agent\'s model and effort, and the providers it may use. Keys are stored encrypted.',people:'Who may sign in, as Viewer, Editor or Owner, and which sections and reports each person sees.',transfer:'The whole project as one zip, to keep, move or rebuild. Imports are checked and undoable.',edits:'Corrections and new rows on the gold tables, kept on top of the loaded data and undoable.',reports:'The saved reports of this project. Open one to filter it and click through.',monitor:'Is anything wrong right now: data freshness, model readiness, ML runs and flows.',inbox:'Alerts and posts from Monitor and flows, with their figures, and the project\'s own alerts.',explore:'Your own analysis on the governed model: the numbers match the reports. Keep the ones you want.',glossary:'What the business words mean and which measures implement them.',sources:'Bronze: the data as it landed, one source per file or bucket folder. Reload, add or delete a source.',
  staged:'Silver: cleaned and combined tables between the sources and the final tables, hidden from the model.',tables:'Gold: the final business tables the model and measures are built on. Edit kind, key, description and steps.',flows:'Automations. Run one now and follow its steps, or switch it on or off.',
- ml:'Forecasts, segments and anomaly models. Train, score and read the latest run.',tools:'Calculations your agents can call. Run one with inputs or run its tests.',
+ ml:'Forecasts, segments and anomaly models. Train, score and read the latest run.',plans:'The best plan within your limits: hours, units or slots. Working one out changes nothing: it waits for approval under Edits.',tools:'Calculations your agents can call. Run one with inputs or run its tests.',
  agents:'Custom agents for this project. Ask one a question or run its evaluation set.',docs:'The project documentation ABI writes from its definitions.',
  objects:'The things the business works with (a café, a customer): what each one is, its numbers, what it connects to and what you can do with it.',
  security:'Who sees which rows. Roles are set in ABI itself.',environments:'Where each environment reads its data from.',history:'Every change is a commit in ABI. Newest first.'};let PAGES={},CUR='home';const side=$('aside');
 // what a page is for, said to a Viewer (who reads, and does not build)
 const VLEDE={objects:'The things the business works with (a café, a customer): what each one is, its numbers and what it connects to.',sources:'Bronze: the data as it landed, one source per file or bucket folder, and when each last loaded.',staged:'Silver: the cleaned and combined tables between the sources and the final tables.',
  tables:'Gold: the final business tables the model and measures are built on.',measures:'The business numbers and how each one is calculated.',flows:'Automations and their last runs.',
- ml:'Forecasts, segments and anomaly models, with their latest runs.',tools:'Calculations your agents can call.',agents:'Custom agents for this project: ask one a question.',
+ ml:'Forecasts, segments and anomaly models, with their latest runs.',plans:'The best plan within the limits, as last worked out for what you see.',tools:'Calculations your agents can call.',agents:'Custom agents for this project: ask one a question.',
  edits:'Corrections to the gold tables, applied on top of the loaded data; every query sees them.',glossary:'What the business words mean and which measures implement them.',
  datasets:'Saved questions to the model (measures by dimensions, with filters): each run returns a fresh table.',model:'The data models: open one to see its tables and how they join.'};
 function nav(){const all=navAll(),me=window.ME||{admin:true};return all.filter(([g,items])=>items.length&&(g==='Start'||!me.sections||me.sections.includes(g)))}
@@ -2191,7 +2213,7 @@ function navAll(){return [['Start',[['home','Home',home],['chat','Chat',chatPage
  ['glossary','Glossary',glossary,D.glossary.length],['datasets','Queries',datasets,D.datasets.length]]],
  ['Visualizations',[['reports','Reports',reportsPage,D.reports.length],['monitor','Monitor',monitorPage],['inbox','Inbox',inboxPage,INBOXN],['explore','Explore',explore,MINE.length||'']]],
  ['Export',[['boardpack','Board pack',boardPage,(D.app?.packs||[]).length],['documents','Documents',documentsPage],['onepager','One-pager',onePagerPage],['dataexport','Data',dataExportPage],['video','Video',videoPage],['transfer','Project',transferPage]]],
- ['Automate',[['flows','Flows',flows,D.flows.length],['ml','ML models',ml,D.ml.length],['tools','Tools',tools,D.tools.length],['agents','Agents',agents,D.agents.length]].filter(x=>MODE!=='viewer'||x[3])],
+ ['Automate',[['flows','Flows',flows,D.flows.length],['ml','ML models',ml,D.ml.length],...(D.optimizers.length?[['plans','Plans',plans,D.optimizers.length]]:[]),['tools','Tools',tools,D.tools.length],['agents','Agents',agents,D.agents.length]].filter(x=>MODE!=='viewer'||x[3])],
  ['Knowledge',[['vault','Vault',vaultPage,(VAULT||[]).length],['docs','Docs',docs]]],
  ['Govern',[['security','Security',security],['environments','Environments',b=>{const x=(D.sections.Environments||'').trim(),tmp=h('div');tmp.insertAdjacentHTML('beforeend',x);const has=tmp.innerText.trim().replace(/none yet\.?/i,'').length>10;if(has)b.insertAdjacentHTML('beforeend',x);else b.append(emptyBox('environments','No environments yet','A dev and prod pair lets you try a change on dev data before it reaches production. Each environment says where its sources read from.',MODE==='developer'?['Ask the agent',()=>{openChat(true);inp.value='Set up a dev and a prod environment for this project in ABI.';inp.focus()}]:null))}],['history','History',commits,(D.history||[]).length],...((window.ME||{admin:true}).admin&&!MOBILE?[['people','Users & access',usersPage],['settings','Settings',settingsPage]]:[])]]]}
 let MODE='developer',VAULT=[],MODEL='';
@@ -2518,7 +2540,7 @@ def app_save(project: str, name: str, data, by: str = "") -> None:
 
 AT_ONCE = 6  # ABI calls one page's data has under way at once: the page's lists and its visuals (M3.3)
 ASKED = ("changes", "semantic_model", "list_reports", "list_flows", "ml_models", "list_tools", "list_agents", "readiness",
-         "data_quality", "rls_rules", "history", "ontology")  # not docs: its worked examples run a query per measure, so the Docs page asks
+         "data_quality", "rls_rules", "history", "ontology", "optimizers")  # not docs: its worked examples run a query per measure, so the Docs page asks
 
 
 class Reads(ThreadPoolExecutor):
@@ -2584,7 +2606,8 @@ def _snapshot(dest: Path, project: str, pending: dict | None, ask, ex: Reads | N
     sections["Model"] = f"<div class=card>{render.diagram(model, kinds)}</div>"
     ont = ask("ontology") or {}  # 1.2.6 M7: object types, links and action types as this person reads them (none: as before)
     out = {"project": project, "measures": measures, "reports": reports, "dims": dims, "flows": live("list_flows", "flows", "flows"),
-           "ml": live("ml_models", "models", "ml"), "tools": live("list_tools", "tools", "tools"),
+           "ml": live("ml_models", "models", "ml"), "optimizers": (ask("optimizers") or {}).get("optimizers") or [],  # 1.2.6 M12: none, as before
+           "tools": live("list_tools", "tools", "tools"),
            "agents": live("list_agents", "agents", "agents"),
            "agent_evals": {f.name.removesuffix(".eval.json"): (j(f, {}) or {}).get("cases", []) for f in sorted((dest / "agents").glob("*.eval.json"))}, "glossary": sm.get("glossary") or [], "models": sm.get("models") or [],
            "datasets": [queries.get(d["id"], {}) | d for d in sm.get("datasets") or []], "model": model,
@@ -3248,7 +3271,7 @@ REPORT_ACTIONS = {"visual_data", "report_snapshot", "export_visual", "save_repor
 _SEC = {"Data": "add_data delete_source delete_table set_steps preview_steps refresh edit_cells approve_edit reject_edit undo_edits create_input_table",
         "Data Model": "add_relationship remove_relationship set_measure delete_measure set_glossary_term delete_glossary_term save_dataset delete_dataset save_model delete_model decide_same",
         "Visualizations": "save_report delete_report", "Export": "export_visual report_snapshot", "Govern": "commit undo set_rls_rule",
-        "Automate": "save_flow delete_flow enable_flow run_flow save_ml_model delete_ml_model train_model score_model save_tool publish_tool"
+        "Automate": "save_flow delete_flow enable_flow run_flow save_ml_model delete_ml_model train_model score_model run_optimizer save_tool publish_tool"
                     " delete_tool run_tool test_tool save_agent publish_agent delete_agent run_agent test_agent"}
 ACTION_SECTION: dict[str, tuple] = {a: (sec,) for sec, acts in _SEC.items() for a in acts.split()} | {
     "set_table": ("Data", "Data Model"), "run_object_action": ("Data Model", "Visualizations")}  # an object page's button, a report's form card

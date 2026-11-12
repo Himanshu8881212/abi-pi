@@ -191,9 +191,9 @@ AREAS = {  # area: (what it holds, action module or module.action prefixes (long
               ("abi.flows", "abi.semantic.subscriptions", "abi.tools.builtin"),
               ("flow|task|schedul|every|daily|weekly|monthly|hourly|monday|tuesday|wednesday|thursday|friday|morning|email|"
                "e-mail|mail|send|post(?!gres)|message|inbox|slack|teams|webhook|alert|subscri|notify|condition|trigger|run")),
-    "ml": ("ML models: forecast, classify, predict, cluster, anomalies; train, score, pre-fill", ("abi.ml",),
+    "ml": ("ML models: forecast, classify, predict, cluster, anomalies; train, score, pre-fill; optimisers: the best plan", ("abi.ml", "abi.optimize"),
            ("forecast|predict|churn|classif|cluster|segment|anomal|unusual|outlier|train|score|machine learning|ml|"
-            "next (year|quarter|month|week)|future|tun|hyperparam|trial")),
+            "next (year|quarter|month|week)|future|tun|hyperparam|trial|optimi|best plan|allocat|staffing|maintenance slot")),
     "docs": ("documentation: generate, draft and review descriptions", ("abi.docs",),
              "doc|describ|description|explain|what does|meaning"),
     "project": ("projects, project JSON import, commits, undo, revert, history, diffs, remotes, push/pull, environments, locale",

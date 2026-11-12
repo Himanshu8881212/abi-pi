@@ -171,15 +171,19 @@
       ]
     },
     "ml": {
-      "about": "ML models: forecast, classify, predict, cluster, anomalies; train, score, pre-fill",
-      "words": "forecast|predict|churn|classif|cluster|segment|anomal|unusual|outlier|train|score|machine learning|ml|next (year|quarter|month|week)|future|tun|hyperparam|trial",
+      "about": "ML models: forecast, classify, predict, cluster, anomalies; train, score, pre-fill; optimisers: the best plan",
+      "words": "forecast|predict|churn|classif|cluster|segment|anomal|unusual|outlier|train|score|machine learning|ml|next (year|quarter|month|week)|future|tun|hyperparam|trial|optimi|best plan|allocat|staffing|maintenance slot",
       "tools": [
         "delete_ml_model",
+        "delete_optimizer",
         "ml_history",
         "ml_trials",
+        "optimizers",
         "pin_ml_run",
         "prefill_input_table",
+        "run_optimizer",
         "save_ml_model",
+        "save_optimizer",
         "score_model",
         "train_model",
         "use_ml_trial"
