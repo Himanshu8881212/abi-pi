@@ -406,7 +406,10 @@ def check(project: str) -> list[str]:
         gaps.append("A measure uses CONVERT but the model has no rates table; declare one with set_rates_table.")
 
     gaps += [f"Table '{t}' has no description." for t, i in tables.items() if not i["description"]]
-    gaps += [f"Table '{t}' {'holds ML predictions' if t.startswith('ml_') else 'is built by steps'} made from rows that"
+    gone = lambda t: t.startswith("ml_") and not (git.path(project) / "ml" / f"{t[3:]}.json").is_file()  # noqa: E731
+    gaps += [f"Table '{t}' holds the predictions of an ML model that is gone; restricted Viewers see none of its rows until it gets"
+             " a row rule of its own (set_rls_rule)." if gone(t) else
+             f"Table '{t}' {'holds ML predictions' if t.startswith('ml_') else 'is built by steps'} made from rows that"
              " row-level security rules filter; restricted Viewers see none of its rows until a rule on it (or a"
              " relationship to each filtered table it is made from) filters it."
              for t in semantic.rls.unfiltered_outputs(project)]  # model tables or not: SQL and grids read them too

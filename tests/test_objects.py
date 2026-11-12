@@ -685,6 +685,10 @@ def test_object_page_shows_the_prediction(objs, tmp_path):
             app.HUBS.pop(k, None)
 
 
+def PROPS_OF_SIDE() -> list:  # noqa: N802
+    return [p["column"] for p in otype("cafe")["properties"] if p["column"].startswith("ml_side.")]
+
+
 def test_a_probability_says_which_outcome_it_is_for(objs):
     """A target with two outcomes that aren't yes/no (a café's region, North or South): without `positive` the save
     answers with a note naming the two, and scoring writes the predicted outcome only, no probability. A `positive`
@@ -763,10 +767,12 @@ def test_a_probability_says_which_outcome_it_is_for(objs):
     assert mine == [("ml_side.probability", "Region (predicted)")], "no second property: the outcome's is gone"
     # the model moves to another type on the same table: its property moves with it
     o = {k: v for k, v in json.loads((abi.ABI_PROJECTS / P / "model/ontology.json").read_text()).items() if k != "$schema"}
-    o["objects"].append({"id": "shop", "table": "cafes", "name": "Shop", "plural": "Shops", "title": "cafe_name"})
+    o["objects"].append({"id": "shop", "table": "cafes", "name": "Shop", "plural": "Shops", "title": "cafe_name",
+                         "properties": [{"column": "city", "name": "Region (predicted)"}]})
     sure("save_ontology", project=P, ontology=o)
     abi.call("save_ml_model", project=P, ml=ml | {"positive": "North", "object": "shop"})
     assert [p["column"] for p in otype("shop")["properties"] if p["column"].startswith("ml_side.")] == ["ml_side.probability"]
+    assert prop(otype("shop"), "ml_side.probability")["name"] == "Region (predicted) (predicted)", "moved under a name the type doesn't use yet"
     assert not [p for p in otype("cafe")["properties"] if p["column"].startswith("ml_side.")]
     score("side")
     assert row(abi.call("get_object", project=P, type="shop", key=[objs["north"]]))["ml_side.probability"] is not None
@@ -777,8 +783,21 @@ def test_a_probability_says_which_outcome_it_is_for(objs):
     assert r.returncode == 0 and r.stdout.split() == ["1.0", "True", "1", "None"], r.stderr[-2000:]
     assert not [x for x in abi.call("propose_ontology", project=P)["ontology"]["objects"] if x["table"].startswith("ml_")], "a predictions table is no object type"
     # off its object: the property leaves the type in the same change
+    theirs = lambda: viewer(objs, "sql_query", sql="SELECT count(*) FROM ml_side")["rows"]  # noqa: E731  the North Viewer's rows of it
+    north_n = sql("SELECT count(*) FROM ml_side JOIN cafes ON cafe_id = cafes_cafe_id WHERE region = 'North'")
+    assert theirs() == north_n and north_n[0][0] > 0
     abi.call("save_ml_model", project=P, ml={k: v for k, v in ml.items() if k != "object"})
     assert not [p for p in otype("cafe")["properties"] if p["column"].startswith("ml_side.")]
+    # ... and its table loses its key, not its join to cafés: the Viewer reads the rows they read before, no other
+    assert not [e for e in model_json()["entities"] if e["table"] == "ml_side"]
+    assert [r for r in model_json()["relationships"] if r["from"]["table"] == "ml_side" and r["to"]["table"] == "cafes"] and theirs() == north_n
+    # put on cafés again: the next scoring gives it its property again, and the café shows it
+    abi.call("save_ml_model", project=P, ml=ml | {"positive": "North"})
+    score("side")
+    assert PROPS_OF_SIDE() == ["ml_side.probability"] and row(abi.call("get_object", project=P, type="cafe", key=[objs["north"]]))["ml_side.probability"] is not None
+    abi.call("save_ml_model", project=P, ml={k: v for k, v in ml.items() if k != "object"})  # off again, for what follows
+    assert PROPS_OF_SIDE() == [] and theirs() == north_n
+    abi.call("set_table", project=P, table="ml_side", key=["cafes_cafe_id"])  # a key set by hand, as before 1.2.6
     # a property a person lists on the table by hand goes when the table stops being one row per café (the dataset regrouped)
     o = {k: v for k, v in json.loads((abi.ABI_PROJECTS / P / "model/ontology.json").read_text()).items() if k != "$schema"}
     next(x for x in o["objects"] if x["id"] == "cafe")["properties"].append({"column": "ml_side.prediction", "name": "Side by hand"})
@@ -800,3 +819,13 @@ def test_a_probability_says_which_outcome_it_is_for(objs):
     assert {p["column"] for p in otype("cafe")["properties"] if p["column"].startswith("ml_side.")} == {"ml_side.probability"}
     sure("delete_ml_model", project=P, model="side")
     assert not [p for p in otype("cafe")["properties"] if p["column"].startswith("ml_side.")]
+    # the deleted model's table shows the Viewer nothing; the model made again under the same ID gets its property again
+    assert theirs() == [[0]]
+    abi.call("save_ml_model", project=P, ml=ml | {"positive": "North"})
+    r = ended("side", "latest_run", abi.call("train_model", project=P, model="side")["run"])
+    assert r["status"] == "ok", r["error"]
+    score("side")
+    assert PROPS_OF_SIDE() == ["ml_side.probability"] and row(abi.call("get_object", project=P, type="cafe", key=[objs["north"]]))["ml_side.probability"] is not None
+    assert theirs() == north_n, "and the Viewer their cafés' rows again, no other"
+    sure("delete_ml_model", project=P, model="side")
+    assert PROPS_OF_SIDE() == [] and theirs() == [[0]]

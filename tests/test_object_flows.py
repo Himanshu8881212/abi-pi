@@ -895,12 +895,16 @@ def test_a_restricted_recipient_gets_the_alert_of_the_period_the_flow_checked(w)
     was, sent = len(inbox(w["tok"]["north"])), len(mails(w))
     sure("save_flow", project=P, flow=flow("visits_last_month", [
         POST | {"input": {"channel": "inbox", "text": "Visits at {{ data.trigger.title }} last month", "data": cond}},
-        MAIL | {"input": MAIL["input"] | {"subject": "Visits at {{ data.trigger.title }} last month", "data": cond}}],
+        MAIL | {"input": MAIL["input"] | {"subject": "Visits at {{ data.trigger.title }} last month", "data": cond}},
+        # round 4: a step that attaches the month's change (one total, no dimensions) still runs, filtered to its café
+        POST | {"id": "trend", "input": {"channel": "inbox", "text": "Trend at {{ data.trigger.title }}", "data": {
+            "query": {"measures": ["visits_n"]}, "measure": "visits_n", "op": ">", "value": -1000, "period": "calendar.month", "change": True}}}],
         **cond, recipients={"property": "cafe_contacts.manager"}))
     tick("visits_last_month")
     by = {r["object"]["key"][0]: r for r in runs("visits_last_month", 2)}
     assert set(by) == {a, b} and by[a]["status"] == "ok", by
     assert step(by[a], "post")["output"] == {"sent": True, "channel": "inbox"} and step(by[a], "mail")["output"]["to"] == [north], by[a]["steps"]
+    assert step(by[a], "trend")["status"] == "ok" and step(by[a], "trend")["output"]["sent"] is True, step(by[a], "trend")
     november = [{"calendar.year": 2025, "calendar.month": 11, "visits_n": 5}]
     theirs = [m for m in inbox(w["tok"]["north"])[was:] if m["text"].startswith("Visits at ")]
     assert [m["text"] for m in theirs] == [f"Visits at {w['names'][a]} last month"] and theirs[0]["data"]["rows"] == november, theirs

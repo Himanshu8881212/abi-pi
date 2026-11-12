@@ -17,3 +17,5 @@
   the date columns: one series per object). Say the type, target, features, task and method you chose, then train once
   the person agrees. After `score_model` the prediction is a property on each object's page under the model's name,
   seen only by people who see the object; a monitor with `per` can alert on it (measure <id>_probability, <id>_prediction).
+  A dataset column from another table is refused: make it a measure. A flow with trigger after_refresh on `ml_<id>` runs
+  after each scoring. Removing a property from the type keeps it out; taking `object` off the model removes it.

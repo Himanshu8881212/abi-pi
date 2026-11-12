@@ -486,7 +486,7 @@ def _data(conn, user: User, project: str, data: ToolCall | SemanticQuery | Check
         out = tools.run_tool(conn, user, tools.RunTool(project=project, tool=data.tool, inputs=data.inputs))
     elif data:
         q = data.model_dump(mode="json")
-        if isinstance(data, Check) and data.period and (ob := flows.OBJECT.get()):  # M9: its period is every object's (`_for_object`)
+        if isinstance(data, Check) and data.period and not data.change and (ob := flows.OBJECT.get()):  # M9: its period is every object's (`_for_object`)
             keys = ontology.keyed(ontology.read(project), model._read(project, "model.json"), ob["type"])[1]
             out = _for_object(project, q, keys, ob["key"], user.id)
             at = [i for i, c in enumerate(out["columns"]) if c not in keys or c in q["query"].get("dimensions", [])]  # as it was asked
@@ -528,7 +528,7 @@ def _for_object(project: str, c: dict, keys: list[str], key: list, user_id: int 
     """1.2.6 M9: `evaluate` of condition `c` for the one object `key` of a per-object run, as `user_id`. With `period`
     the query is grouped by the type's key and not filtered, as the flow's own check is (flows._per_object): the latest
     period is the latest of every object the person reads, never this object's own last one. Rows: this object's."""
-    if not c.get("period"):  # no period to shift: filtered to the object
+    if not c.get("period") or c.get("change"):  # no period to shift, or a change (one total, no dimensions): filtered to the object
         q = c["query"] | {"filters": [*(c["query"].get("filters") or []), *({"column": k, "op": "=", "value": v} for k, v in zip(keys, key))]}
         return evaluate(project, c | {"query": q}, user_id)
     # ponytail: the whole grouped query once per restricted recipient and attachment; cache per run if alerts get many
@@ -549,7 +549,7 @@ def _only(project: str, ob: dict, args) -> SemanticQuery | Check | None:
         raise ActionFailed(409, f"Object type '{ob['type']}' is gone, so this alert can't be filtered to its object: save the flow again.")
     if args.data is None:
         return None
-    if isinstance(args.data, Check) and args.data.period:
+    if isinstance(args.data, Check) and args.data.period and not args.data.change:
         return args.data  # `_data` reads it for the object without shifting its period
     q = args.data.query if isinstance(args.data, Check) else args.data
     q = q.model_copy(update={"filters": [*q.filters, *(Filter(column=c, op="=", value=v) for c, v in zip(got[1], ob["key"]))]})
@@ -677,8 +677,8 @@ def post_message(conn, user: User, args: PostMessage) -> dict:
                 got = _seeing(conn, args.project, ob, "TRUE", [], req, {"text": args.text}, True, left) if rls.rules(args.project) else []
             for u, t, own, o in got:
                 _inbox(conn, args.project, user, t["text"], (own or none) | {"object": o}, None, u["id"])
-            if left:  # M9: who sees the object but not that the condition holds, in the step's trace
-                return {"sent": bool(got) or "members" not in ob, "channel": args.channel, "skipped": left}
+            # M9: not sent when it names members and reached none of them; `skipped`: who sees the object but not that the condition holds
+            return {"sent": bool(got) or "members" not in ob, "channel": args.channel} | ({"skipped": left} if left else {})
         elif args.channel == INBOX:
             _inbox(conn, args.project, user, args.text, data, snap)
             _restricted_copies(conn, args.project, user, _authored(args.text), args.data)
