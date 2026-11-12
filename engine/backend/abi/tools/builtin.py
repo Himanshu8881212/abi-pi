@@ -535,13 +535,17 @@ def _only(project: str, ob: dict, args) -> SemanticQuery | Check | None:
 
 
 def _seeing(conn, project: str, ob: dict, where: str, values: list, request: SemanticQuery | Check | None, filled: dict,
-            restricted: bool = False) -> list[tuple]:
+            restricted: bool = False, skipped: list | None = None) -> list[tuple]:
     """1.2.6 M8 (owner, 6 Nov 2026): the project members matching `where` who see a per-object run's object themselves
     (get_object as each; anyone else gets nothing and learns nothing), each with what is theirs: (the account; the texts:
     an unrestricted member's as the run filled them, a restricted Viewer's the authored text with {{ data.trigger.title }}
     and {{ data.trigger.object.* }} from the object as they see it and every other value masked, D-47; the attached
-    request's rows read as them, or None; the object as they see it: type, key, title). `restricted`: restricted Viewers only."""
+    request's rows read as them, or None; the object as they see it: type, key, title). `restricted`: restricted Viewers only.
+    1.2.6 M9: a restricted Viewer is one of them only when the alert's condition holds for the object in the rows they
+    may read themselves (checked again as them): an alert never says that a figure they can't read met it. Those left
+    out for that are named in `skipped` (the step's trace)."""
     raw, out = flows.RAW.get() or {}, []
+    keys = (ontology.keyed(ontology.read(project), model._read(project, "model.json"), ob["type"]) or (None, []))[1]
     for u in conn.execute(f"SELECT id, name, workspace_owner, email FROM users WHERE {where} AND {security.IN_PROJECT} ORDER BY id",
                           [*values, project]).fetchall():
         me = User(u["id"], u["name"], u["workspace_owner"])
@@ -551,6 +555,16 @@ def _seeing(conn, project: str, ob: dict, where: str, values: list, request: Sem
             got = ontology.get_object(conn, me, ontology.Get(project=project, type=ob["type"], key=ob["key"]))
         except ActionFailed:
             continue
+        if (c := ob.get("condition")) and rls.restricted(project, me.id):  # ponytail: one more query per restricted recipient
+            try:
+                q = c["query"] | {"filters": [*c["query"].get("filters", []), *({"column": k, "op": "=", "value": v} for k, v in zip(keys, ob["key"]))]}
+                holds = len(keys) == len(ob["key"]) and evaluate(project, c | {"query": q}, me.id)["holds"]
+            except ActionFailed:
+                holds = False
+            if not holds:
+                if skipped is not None:
+                    skipped.append(u["name"])
+                continue
         try:
             own = _data(conn, me, project, request)
         except ActionFailed:
@@ -597,7 +611,7 @@ def send_email(conn, user: User, args: SendEmail) -> dict:
         if ob and test is None:  # 1.2.6 M8: one mail each, to the account's own address; an address that names no such member gets none
             # ponytail: a mail server failing part-way fails the step, and its retry sends to the first ones again
             to = [a.lower() for a in args.to]
-            got = _seeing(conn, args.project, ob, "email = ANY(%s::text[])", [to], req, {"subject": args.subject, "body": args.body})
+            got = _seeing(conn, args.project, ob, "email = ANY(%s::text[])", [to], req, {"subject": args.subject, "body": args.body})  # the rest: `skipped`
             for u, t, own, _ in got:
                 deliver_email(conn, args.project, [u["email"]], t["subject"], t["body"], own, None)
             sent = [u["email"] for u, *_ in got]
@@ -634,14 +648,16 @@ def post_message(conn, user: User, args: PostMessage) -> dict:
         if test is not None:
             _inbox(conn, args.project, user, f"Test run: message to channel {args.channel}\n\n{args.text}", data, snap, test)
         elif ob:  # 1.2.6 M8: the object goes with the post, so its title opens the object's page
-            none = {"columns": [], "rows": []}
+            none, left = {"columns": [], "rows": []}, []
             if "members" in ob:  # the people its recipients name
-                got = _seeing(conn, args.project, ob, "id = ANY(%s::bigint[])", [ob["members"]], req, {"text": args.text})
+                got = _seeing(conn, args.project, ob, "id = ANY(%s::bigint[])", [ob["members"]], req, {"text": args.text}, skipped=left)
             else:  # everyone who sees it: unrestricted members see every object (one post), restricted Viewers a copy each
                 _inbox(conn, args.project, user, args.text, (data or none) | {"object": {k: ob[k] for k in ("type", "key", "title")}}, None)
-                got = _seeing(conn, args.project, ob, "TRUE", [], req, {"text": args.text}, True) if rls.rules(args.project) else []
+                got = _seeing(conn, args.project, ob, "TRUE", [], req, {"text": args.text}, True, left) if rls.rules(args.project) else []
             for u, t, own, o in got:
                 _inbox(conn, args.project, user, t["text"], (own or none) | {"object": o}, None, u["id"])
+            if left:  # M9: who sees the object but not that the condition holds, in the step's trace
+                return {"sent": True, "channel": args.channel, "skipped": left}
         elif args.channel == INBOX:
             _inbox(conn, args.project, user, args.text, data, snap)
             _restricted_copies(conn, args.project, user, _authored(args.text), args.data)

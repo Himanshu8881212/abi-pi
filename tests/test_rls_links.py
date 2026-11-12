@@ -21,6 +21,7 @@ from test_pages import sure
 import abi
 
 P = "pi_rls_links"
+MARK = "[hidden by row-level security]"
 ONTO = {
     "objects": [
         {"id": "cafe", "table": "cafes", "name": "Café", "plural": "Cafés", "title": "cafe_name"},
@@ -824,6 +825,34 @@ def test_prediction_hidden_with_object(links):
         assert dict(map(tuple, mine(links, "sql_query", sql="SELECT cafes_cafe_id, prediction FROM ml_cafe_value")["rows"])) == {k: preds[k] for k in north}
         assert mine(links, "sql_query", sql=f"SELECT count(*) FROM ml_cafe_value WHERE cafes_cafe_id = '{s1}'")["rows"] == [[0]]
 
+        # 3b. the other kinds of prediction on cafés, each read as the Viewer: a probability, a group, a flag and a score,
+        # a forecast's measure. A North café's are the Owner's; no row of another café shows in any of their tables
+        sides = {"measures": ["revenue", "orders_rows"], "dimensions": ["cafes.cafe_id", "cafes.seats", "cafes.region"],
+                 "filters": [{"column": "cafes.region", "op": "in", "value": ["North", "South"]}]}
+        for ds, q in (("cafe_sides", sides), ("cafe_months", {"measures": ["revenue"], "dimensions": ["cafes.cafe_id", "calendar.year", "calendar.month"]})):
+            abi.call("save_dataset", project=P, id=ds, name=ds, query=q)
+        more = [{"id": "cafe_north", "name": "Northern", "task": "classification", "dataset": "cafe_sides", "target": "cafes.region", "positive": "North",
+                 "features": ["revenue", "cafes.seats"]},
+                {"id": "cafe_kind", "name": "Café group", "task": "clustering", "dataset": "cafe_vals", "features": ["revenue", "cafes.seats"], "k": 3},
+                {"id": "cafe_odd", "name": "Unusual café", "task": "anomaly", "dataset": "cafe_vals", "features": ["revenue", "orders_rows"], "method": "isolation_forest"},
+                {"id": "cafe_ahead", "name": "Revenue outlook", "task": "forecast", "dataset": "cafe_months", "target": "revenue", "time": "calendar.month",
+                 "horizon": 3, "method": "lightgbm"}]
+        for ml in more:
+            abi.call("save_ml_model", project=P, ml=ml | {"object": "cafe"})
+            ml_run(ml["id"], "train_model")
+            ml_run(ml["id"], "score_model")
+        theirs, all_ = (dict(zip(r["columns"], r["rows"][0])) for r in (mine(links, "get_object", type="cafe", key=[n1]), abi.call("get_object", project=P, type="cafe", key=[n1])))
+        shown = ["ml_cafe_north.probability", "ml_cafe_kind.cluster", "ml_cafe_odd.anomaly", "ml_cafe_odd.score", "cafe_ahead_prediction"]
+        assert all(all_[c] is not None for c in shown) and [theirs[c] for c in shown] == [all_[c] for c in shown], (theirs, all_)
+        for t in ("ml_cafe_north", "ml_cafe_kind", "ml_cafe_odd", "ml_cafe_ahead"):
+            assert s1 in {x[0] for x in sql(f"SELECT DISTINCT cafes_cafe_id FROM {t}")}, t
+            got = {x[0] for x in mine(links, "sql_query", sql=f"SELECT DISTINCT cafes_cafe_id FROM {t}")["rows"]}
+            assert got == set(north), (t, got)
+        ahead = mine(links, "semantic_query", measures=["cafe_ahead_prediction"], dimensions=["cafes.cafe_id"])["rows"]
+        assert {r[0] for r in ahead if r[1] is not None} == set(north)
+        chance = mine(links, "semantic_query", measures=["cafe_north_probability"], dimensions=["cafes.cafe_id"])["rows"]
+        assert {r[0] for r in chance if r[1] is not None} == set(north)
+
         # 4. a report over the prediction
         sure("save_report", project=P, report={"id": "values", "name": "Values", "pages": [{"id": "main", "name": "Main", "visuals": [
             {"id": "by-cafe", "type": "table", "title": "Expected revenue by café", "layout": {"x": 0, "y": 0, "w": 12, "h": 6},
@@ -869,7 +898,29 @@ def test_prediction_hidden_with_object(links):
         cust = sql(VISITED)[0][0]
         assert value(abi.call("get_object", project=P, type="customer", key=[cust]), "ml_cust_value.prediction") is not None
         seen = mine(links, "get_object", type="customer", key=[cust])
-        assert seen["key"] == [cust] and value(seen, "ml_cust_value.prediction") is None, "the customer shows, its prediction doesn't"
+        assert seen["key"] == [cust] and value(seen, "ml_cust_value.prediction") == MARK, "the customer shows; its prediction is hidden, and said so"
+        # an alert per customer on that prediction: the Owner hears of it; the Viewer, who sees the customer but may not
+        # read its prediction, is left out (named in the step's trace) and never learns that it is above the value.
+        # An alert on a figure they do read (the customer's revenue) reaches them, the prediction in its text hidden
+        was = len(mine(links, "inbox")["messages"])
+        only = [{"column": "customers.customer_id", "op": "=", "value": cust}]
+        for fid, measure in (("cust_alert", "cust_value_prediction"), ("cust_note", "revenue")):
+            sure("save_flow", project=P, flow={"id": fid, "name": fid, "enabled": False, "trigger": {
+                "type": "data_condition", "per": "customer", "measure": measure, "op": ">", "value": 0, "query": {"measures": [measure], "filters": only}},
+                "steps": [{"id": "post", "type": "action", "action": "post_message", "input": {
+                    "channel": "inbox", "text": fid + " {{ data.trigger.title }}: {{ data.trigger.object.ml_cust_value.prediction }}"}}]})
+            r = engine(TICK, timeout=600, stdin=json.dumps({"project": P, "flows": [fid], "state": fid, "ahead": 0}))
+            assert r.returncode == 0, r.stderr[-2000:]
+        end, done = time.monotonic() + 300, {}
+        while len(done) < 2:
+            assert time.monotonic() < end, done
+            time.sleep(1)
+            done = {f: x[0] for f in ("cust_alert", "cust_note") if len(x := abi.call("flow_runs", project=P, flow=f)["runs"]) == 1 and x[0]["status"] == "ok"}
+        post = lambda f: next(x for x in done[f]["steps"] if x["step"] == "post")["output"]  # noqa: E731
+        assert post("cust_alert") == {"sent": True, "channel": "inbox", "skipped": [links["names"]["viewer"]]} and "skipped" not in post("cust_note")
+        assert sorted(m["text"].split(" ")[0] for m in abi.call("inbox", project=P)["messages"] if m["text"].startswith("cust_")) == ["cust_alert", "cust_note"]
+        got = mine(links, "inbox")["messages"]
+        assert [m["text"] for m in got[:len(got) - was]] == [f"cust_note {cust}: {MARK}"], got[:len(got) - was]
         assert "ml_cust_value" in state(links, tables=["ml_cust_value"])["denied"]
         assert mine(links, "sql_query", sql="SELECT count(*) FROM ml_cust_value")["rows"] == [[0]]
         assert mine(links, "semantic_query", measures=["cust_value_prediction"])["rows"] in ([], [[None]])
@@ -898,7 +949,8 @@ def test_prediction_hidden_with_object(links):
             sure("delete_rls_rule", project=P, id="pi_key")
     finally:  # the tests after this one find the fixture's project: no model that a reload of customers would score
         for act, args in (("delete_flow", {"flow": "value_alert"}), ("delete_report", {"report": "values"}),
-                          ("delete_ml_model", {"model": "cafe_value"}), ("delete_ml_model", {"model": "cust_value"})):
+                          ("delete_flow", {"flow": "cust_alert"}), ("delete_flow", {"flow": "cust_note"}),
+                          *(("delete_ml_model", {"model": x}) for x in ("cafe_value", "cust_value", "cafe_north", "cafe_kind", "cafe_odd", "cafe_ahead"))):
             with contextlib.suppress(abi.ActionError):
                 sure(act, project=P, **args)
         sure("save_ontology", project=P, ontology=ONTO)

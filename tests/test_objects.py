@@ -308,6 +308,7 @@ def test_two_column_relationship_walk():
 # ---------- 1.2.6 M9: ML on objects (needs the engine's heavy worker; trains small models, no LLM) ----------
 
 ROOT = abi.ROOT
+MARK = "[hidden by row-level security]"
 DOC = [json.loads(b) for b in re.findall(r"```json (?:dataset|ml)\n(.*?)\n```", (ROOT / "docs/objects.md").read_text(), re.S)]
 MADE: dict = {}  # model ID -> its object type after the first scoring: each model trains once per module
 
@@ -557,6 +558,12 @@ def test_ml_features_through_link(objs):
     assert one_per("ml_seats_fit", "cafes_cafe_id", "orders") > 100
     [(pred,)] = sql(f"SELECT prediction FROM ml_seats_fit WHERE cafes_cafe_id = '{c}'")
     assert row(abi.call("get_object", project=P, type="cafe", key=[c]))["ml_seats_fit.prediction"] == pytest.approx(pred)
+    # the North Viewer sees this café, but the model read customers (a hidden column, and rows their rule filters through
+    # the link): its prediction is hidden from them, said so, and the table shows them no row
+    theirs = viewer(objs, "get_object", type="cafe", key=[c])
+    assert theirs["key"] == [c] and row(theirs)["ml_seats_fit.prediction"] == MARK
+    assert viewer(objs, "sql_query", sql="SELECT count(*) FROM ml_seats_fit")["rows"] == [[0]]
+    assert all(r[1] is None for r in viewer(objs, "semantic_query", measures=["seats_fit_prediction"], dimensions=["cafes.cafe_id"])["rows"])
 
 
 AFTER = {"id": "after_scoring", "name": "After scoring", "enabled": True, "trigger": {"type": "after_refresh", "tables": ["ml_expected_revenue"]},
@@ -591,10 +598,11 @@ def test_score_in_flow_starts_nothing(objs):
         [run] = flow_runs("rescore", 1)
         out = next(s for s in run["steps"] if s["step"] == "score")["output"]
         assert run["status"] == "ok" and out["status"] == "ok" and out["run"] != before["run"] and out["snapshot"] > before["snapshot"], run
-        time.sleep(5)  # long enough for a queued run to show
         assert flow_runs("after_a_step", 0) == [], "the step's scoring started nothing"
+        # a flow starts before its scoring run ends, so the person's scoring below proves it: its run is there, and it is the only one
         snap = score("expected_revenue")["snapshot"]
         assert [r["id"].rsplit("/", 1)[1] for r in flow_runs("after_a_step", 1)] == [f"snapshot-{snap}"]
+        assert snap > out["snapshot"] and not [r for r in abi.call("flow_runs", project=P, flow="after_a_step")["runs"] if r["id"].endswith(f"/snapshot-{out['snapshot']}")]
     finally:
         for f in ("after_a_step", "rescore"):
             sure("delete_flow", project=P, flow=f)
@@ -603,7 +611,7 @@ def test_score_in_flow_starts_nothing(objs):
 def test_a_wrong_object_model_names_the_file_the_field_and_the_fix(objs):
     """Saving an ML model on an object checks it like an import: an unknown type, a type with a two-column key, a
     dataset not grouped by the type's key, and date columns outside a forecast are refused with file, field and fix.
-    A dataset with several rows per object passes the save (the rows decide) and is refused when it is scored."""
+    So is a dataset grouped by a column of another table (several rows per object): at the save, not when it is scored."""
     revenue()
     base = {"id": "bad", "name": "Bad", "task": "regression", "dataset": "cafe_features", "object": "cafe", "target": "revenue"}
 
@@ -628,22 +636,20 @@ def test_a_wrong_object_model_names_the_file_the_field_and_the_fix(objs):
     with pytest.raises(abi.ActionError) as e:  # an object type a model predicts for can't go
         sure("save_ontology", project=P, ontology=o | {"objects": [x for x in o["objects"] if x["id"] != "cafe"]})
     assert e.value.status == 422 and any(x["file"] == "ml/expected_revenue.json" and x["path"] == "$.object" for x in e.value.body["errors"]), e.value.body
-    # several rows per café (one per product category): saved, trained, and refused when scored, saying what to keep
+    # several rows per café (one per product category): refused at the save, saying what to keep
     abi.call("save_dataset", project=P, id="cafe_categories", name="Café categories",
              query={"measures": ["revenue"], "dimensions": ["cafes.cafe_id", "cafes.seats", "products.category"]})
-    abi.call("save_ml_model", project=P, ml=base | {"id": "per_category", "name": "Per category", "dataset": "cafe_categories"})
-    r = ended("per_category", "latest_run", abi.call("train_model", project=P, model="per_category")["run"])
-    assert r["status"] == "ok", r["error"]
-    r = ended("per_category", "latest_score", abi.call("score_model", project=P, model="per_category")["run"])
-    assert r["status"] == "failed" and "several rows for one Café" in r["error"] and "cafes.cafe_id and columns of table 'cafes'" in r["error"], r
+    [(f, path, err, fix)] = errors(id="per_category", name="Per category", dataset="cafe_categories")
+    assert (f, path) == ("ml/per_category.json", "$.object") and "also grouped by products.category, so it has several rows for one Café" in err, err
+    assert "Keep only columns of table 'cafes' as its dimensions" in fix and "is a measure" in fix, fix
     assert "ml_per_category" not in json.dumps(model_json()) and not [p for p in otype("cafe")["properties"] if "per_category" in p["column"]]
 
 
 def test_object_page_shows_the_prediction(objs, tmp_path):
     """The app: a café's page shows its predictions among its properties under the models' names (money as money), a
     customer's page the probability as a percentage; no table, column or model id anywhere. The North Viewer sees a
-    North café's prediction, a South café's page not at all, and a customer's prediction as a dash (made from rows
-    their rules filter). At a phone's width nothing overflows. Screenshots beside (tmp_path)."""
+    North café's prediction, a South café's page not at all, and a customer's prediction as "hidden for your access"
+    (made from rows their rules filter), never as an empty value. At a phone's width nothing overflows. Screenshots beside (tmp_path)."""
     import app
     from test_pages import OWNER, Browser, drive, okey
 
@@ -668,7 +674,7 @@ def test_object_page_shows_the_prediction(objs, tmp_path):
         assert narrow["props"][label] == cafe["props"][label] and narrow["wide"] is False
         theirs = drive(north, tmp_path, page("cafe", c, "viewer-cafe-1440.png"))
         assert theirs["props"][label] == cafe["props"][label], "a café they see: its prediction too"
-        assert drive(north, tmp_path, page("customer", cust, "viewer-customer-1440.png"))["props"]["Loyalty chance"] == "—"
+        assert drive(north, tmp_path, page("customer", cust, "viewer-customer-1440.png"))["props"]["Loyalty chance"] == "hidden for your access"
         gone = drive(north, tmp_path, [["show", okey("cafe", objs["south"])], ["wait", "main .emptyx"],
                                        ["get", "text", "document.querySelector('main').innerText"], ["shot", str(tmp_path / "viewer-hidden-390.png")]], width=390)
         assert "Not available" in gone["text"] and "Open cafés" in gone["text"] and not re.search(r"\d+\.\d\d", gone["text"]), gone["text"]
@@ -677,3 +683,79 @@ def test_object_page_shows_the_prediction(objs, tmp_path):
         srv.shutdown()
         for k in set(app.HUBS) - hubs:
             app.HUBS.pop(k, None)
+
+
+def test_a_probability_says_which_outcome_it_is_for(objs):
+    """A target with two outcomes that aren't yes/no (a café's region, North or South): without `positive` the save
+    answers with a note naming the two, and scoring writes the predicted outcome only, no probability. A `positive`
+    that is neither is refused. With it, the probability is that outcome's (the other one's is the rest to 1), named in
+    business words on the property and the measure. A model named like a property the type has gets another name; a
+    measure a person made under the probability's ID is not replaced; a property a person removed stays away; taking
+    `object` off the model, or regrouping its dataset, takes its property off the type. Its table is no object type."""
+    q = {"measures": ["revenue", "orders_rows"], "dimensions": ["cafes.cafe_id", "cafes.seats", "cafes.region"],
+         "filters": [{"column": "cafes.region", "op": "in", "value": ["North", "South"]}]}
+    ml = {"id": "side", "name": "Region", "task": "classification", "dataset": "cafe_sides", "object": "cafe", "target": "cafes.region",
+          "features": ["revenue", "cafes.seats"]}
+    abi.call("save_dataset", project=P, id="cafe_sides", name="Café sides", query=q)
+    note = abi.call("save_ml_model", project=P, ml=ml)["note"]
+    assert note.startswith("ml/side.json $.positive: ") and '"positive": "North" or "positive": "South"' in note, note
+    r = ended("side", "latest_run", abi.call("train_model", project=P, model="side")["run"])
+    assert r["status"] == "ok", r["error"]
+    score("side")
+    mine = [p for p in otype("cafe")["properties"] if p["column"].startswith("ml_side.")]
+    assert [(p["column"], p["name"], p["meaning"]) for p in mine] == [("ml_side.prediction", "Region (predicted)", "category")], \
+        "the outcome only, and not under the name the café's own region has"
+    assert "probability" not in abi.call("sql_query", project=P, sql="SELECT * FROM ml_side LIMIT 1")["columns"]
+    measures = lambda: {x["id"]: x for x in abi.call("semantic_model", project=P)["measures"]}  # noqa: E731
+    assert "side_probability" not in measures()
+    with pytest.raises(abi.ActionError) as e:
+        abi.call("save_ml_model", project=P, ml=ml | {"positive": "Paris"})
+    assert e.value.status == 400 and "ml/side.json $.positive: 'Paris' is not an outcome" in e.value.body["message"] and '"North" or "South"' in e.value.body["message"]
+    # a measure of the person's own under the ID the probability takes: scoring refuses, and replaces nothing
+    abi.call("set_measure", project=P, id="side_probability", name="Mine", expression="COUNT(cafes.cafe_id)")
+    assert "note" not in abi.call("save_ml_model", project=P, ml=ml | {"positive": "North"})
+    r = ended("side", "latest_score", abi.call("score_model", project=P, model="side")["run"])
+    assert r["status"] == "failed" and "measure 'side_probability' exists and isn't this model's probability" in r["error"], r
+    assert measures()["side_probability"]["expression"] == "COUNT(cafes.cafe_id)"
+    sure("delete_measure", project=P, id="side_probability")
+    # the person removes the outcome property; the next scoring adds the probability and leaves the removed one out
+    o = {k: v for k, v in json.loads((abi.ABI_PROJECTS / P / "model/ontology.json").read_text()).items() if k != "$schema"}
+    for x in o["objects"]:
+        x["properties"] = [p for p in x.get("properties", []) if p["column"] != "ml_side.prediction"]
+    sure("save_ontology", project=P, ontology=o)
+    score("side")
+    [p] = [p for p in otype("cafe")["properties"] if p["column"].startswith("ml_side.")]
+    assert (p["column"], p["name"], p["meaning"]) == ("ml_side.probability", "Region (predicted)", "probability")
+    assert p["description"].startswith("How likely Region is North, from 0 to 1.") and measures()["side_probability"]["description"] == "How likely Region is North, from 0 to 1."
+    north = dict(sql("SELECT cafes_cafe_id, probability FROM ml_side"))
+    assert sql("SELECT count(*) FROM ml_side WHERE (probability > 0.5 AND prediction <> 'North') OR (probability < 0.5 AND prediction = 'North')") == [[0]]
+    abi.call("save_ml_model", project=P, ml=ml | {"positive": "South"})
+    score("side")
+    south = dict(sql("SELECT cafes_cafe_id, probability FROM ml_side"))
+    assert south == pytest.approx({k: 1 - v for k, v in north.items()}) and len(set(north.values())) > 1, "the other outcome's probability"
+    assert measures()["side_probability"]["description"] == "How likely Region is South, from 0 to 1."
+    assert not [x for x in abi.call("propose_ontology", project=P)["ontology"]["objects"] if x["table"].startswith("ml_")], "a predictions table is no object type"
+    # off its object: the property leaves the type in the same change
+    abi.call("save_ml_model", project=P, ml={k: v for k, v in ml.items() if k != "object"})
+    assert not [p for p in otype("cafe")["properties"] if p["column"].startswith("ml_side.")]
+    # a property a person lists on the table by hand goes when the table stops being one row per café (the dataset regrouped)
+    o = {k: v for k, v in json.loads((abi.ABI_PROJECTS / P / "model/ontology.json").read_text()).items() if k != "$schema"}
+    next(x for x in o["objects"] if x["id"] == "cafe")["properties"].append({"column": "ml_side.prediction", "name": "Side by hand"})
+    sure("save_ontology", project=P, ontology=o)
+    assert row(abi.call("get_object", project=P, type="cafe", key=[objs["north"]]))["ml_side.prediction"] in ("North", "South")
+    abi.call("save_dataset", project=P, id="cafe_sides", name="Café sides", query=q | {"dimensions": ["cafes.seats", "cafes.region"]})
+    r = ended("side", "latest_run", abi.call("train_model", project=P, model="side")["run"])
+    assert r["status"] == "ok", r["error"]
+    score("side")
+    assert not [p for p in otype("cafe")["properties"] if p["column"].startswith("ml_side.")]
+    assert not [g for g in abi.call("readiness", project=P)["missing"] if "ml_side" in g and ("Ontology" in g or "compile" in g)], "nothing left dangling"
+    assert "side_probability" not in measures(), "nor its probability's measure"
+    # on cafés again, scored, then deleted: its property goes with the model
+    abi.call("save_dataset", project=P, id="cafe_sides", name="Café sides", query=q)
+    abi.call("save_ml_model", project=P, ml=ml | {"positive": "North"})
+    r = ended("side", "latest_run", abi.call("train_model", project=P, model="side")["run"])
+    assert r["status"] == "ok", r["error"]
+    score("side")
+    assert {p["column"] for p in otype("cafe")["properties"] if p["column"].startswith("ml_side.")} == {"ml_side.probability"}
+    sure("delete_ml_model", project=P, model="side")
+    assert not [p for p in otype("cafe")["properties"] if p["column"].startswith("ml_side.")]

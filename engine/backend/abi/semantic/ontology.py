@@ -406,8 +406,8 @@ def propose(project: str, user_id: int | None) -> dict:
     date, hid = (m["date_table"] or {}).get("table"), rls.hidden(project, user_id)
     objects, types = [], {}
     for t, i in m["tables"].items():
-        if not i["key"] or t == date or t not in cols:
-            continue
+        if not i["key"] or t == date or t not in cols or t.startswith("ml_") and (git.path(project) / "ml" / f"{t[3:]}.json").is_file():
+            continue  # M9: a model's predictions table is keyed like its object type, and is no type itself
         tc = {c: ty for c, ty in cols[t].items() if c.lower() not in hid.get(t, ())}  # D-110: never a hidden column
         text = [c for c, ty in tc.items() if ty == "VARCHAR"]
         rows, n = 0, []
@@ -750,7 +750,9 @@ def get_object(conn, user: User, args: Get) -> dict:
     for pt, pcs, r in ones:  # a second read each
         got = _read(args.project, f"SELECT {', '.join(map(storage._q, pcs))} FROM {storage._q(pt)} WHERE {_semi([(r, False)], t, where)}"
                                   " LIMIT 1", asked, user.id)
-        columns, row = columns + [f"{pt}.{c}" for c in pcs], row + list(got[0] if got else [None] * len(pcs))
+        # 1.2.6 M9: a table denied to the reader (predictions made from rows their rules filter) says "hidden", not "no value"
+        gap = rls.MARK if not got and rls.restricted(args.project, user.id) and pt in rls.unfiltered_outputs(args.project) else None
+        columns, row = columns + [f"{pt}.{c}" for c in pcs], row + list(got[0] if got else [gap] * len(pcs))
     out = {"type": x["id"], "name": x["name"], "key": [row[own.index(k)] if k in own else v for k, v in zip(keys, args.key)],
            "title": row[own.index(x["title"])] if x["title"] in own else None}
     if ms := x.get("measures"):

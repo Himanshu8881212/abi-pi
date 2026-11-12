@@ -128,8 +128,9 @@ relationship onto `cafes`) and the café type lists it as a property with a mean
   skipped: the run's trace (`flow_runs`) says who and why, and the flow's owner gets an Inbox message naming them and
   what to do (a workspace owner adds the person under Users & access with that email, or you change their access or
   the value). When nobody can be reached the run ends as stopped, and starts no cooldown.
-- The condition is checked with the flow owner's access. A recipient who can see the café but not all of its rows
-  (some of its orders, say) still learns that the café met the condition; the rows they get are only their own.
+- The condition is checked with the flow owner's access. For a recipient whose rows are restricted it is checked
+  again with their own access, for that café: they get the alert only when it holds in the rows they may read
+  themselves, with those rows. Otherwise they are skipped (the step's trace names them) and learn nothing.
 - `{{ data.trigger.recipients }}` is those members' account emails. When none of them has one, the email step's
   `when` (as above) skips it; without that `when` the run stops at the step, with the reason, and later steps don't
   run. The first email to a domain the project hasn't
@@ -170,24 +171,34 @@ Then the model, `ml/expected_revenue.json`:
 ```
 
 - `object` is the object type's `id`; the type has one key column. The dataset's dimensions are that key
-  (`cafes.cafe_id`) and other columns of the type's table, and no date columns: one row, so one prediction, per café.
+  (`cafes.cafe_id`) and other columns of the type's table only, and no date columns: one row, so one prediction, per café.
 - A feature from another type is a measure reached through a link: name the link in the dataset query's `links`
   (the number of customers who visited each café: `"links": ["visited"]`).
 - Train it, then score it (in chat, or **Train** and **Score** on the model's card under ML models). Scoring adds the
   property to the type and every café's page shows **Expected revenue**. The name is the model's `name`; rename it or
   change its meaning in the ontology and later scorings keep your change.
-- What the property is depends on the `task`: `classification` with two outcomes gives the probability of the second
-  (for a yes/no column: of yes), `regression` the number, `clustering` the group, `anomaly` a Yes/No and a score. A
-  `forecast` keeps the dataset's date columns and `time`, and forecasts one series per café: its total ahead shows
-  among the café's measures.
+- What the property is depends on the `task`: `regression` gives the number, `clustering` the group, `anomaly` a
+  Yes/No and a score. A `forecast` keeps the dataset's date columns and `time`, and forecasts one series per café:
+  its total ahead shows among the café's measures. Date columns are refused on every other task, so an anomaly per
+  café and season is not possible in 1.2.6.
+- A `classification` with two outcomes gives a probability. For a yes/no (or 0/1) target it is the probability of
+  yes. For any other pair, say which outcome it is for: `"positive": "Churned"`. Without `positive` the property is
+  the predicted outcome and there is no probability; saving the model answers with a note naming the two values.
+- Remove a property from the type and later scorings leave it out. Take `object` off the model, or delete the
+  model, and its property leaves the type with it.
 - A person sees a prediction only when they see its object. Where the model learned from rows a person's row rules
   don't reach through the type itself (other types' rows, reached through a link), restricted Viewers see no
-  prediction at all until the predictions table gets a row rule of its own (Security).
+  prediction at all until the predictions table gets a row rule of its own (Security). Such a prediction reads
+  "hidden for your access" on the object's page, not as an empty value.
+- The predictions table copies the dataset's dimension columns. Where a column is hidden from Viewers (Security),
+  the table is hidden from them too until its Owner gives it a column rule of its own; then only its copy of a
+  hidden key stays hidden automatically. List the other copied columns in that rule yourself.
 - An alert on it is "An alert per object" above with the prediction's measure: `expected_revenue_prediction` here,
   `<id>_probability` for a probability. A flow with trigger `{"type": "after_refresh", "tables": ["ml_expected_revenue"]}`
   runs after each scoring.
 - Wrong references are refused when the model is saved, with the file, the field and the fix, for example
   `ml/expected_revenue.json $.object: Dataset 'cafe_features' isn't grouped by cafes.cafe_id, the key of object type 'cafe'.`
+  A dataset grouped by a column of another table is refused the same way.
 
 ## Who can use a form
 

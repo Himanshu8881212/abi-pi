@@ -662,7 +662,7 @@ def execute(run_id: str, last: bool = True) -> None:
         inbound = actions.INBOUND.set(message)  # D-32: its steps' audit rows hold the text's length + hash only
         acted = ACTED.set(acting)
         # 1.2.6 M8: a per-object run (as the flow's owner): its sends reach only project members who see its object
-        per = OBJECT.set(run["trigger"] if alert else None)
+        per = OBJECT.set(run["trigger"] | {"condition": f["trigger"]} if alert else None)  # M9: the condition, for `_seeing`
         try:
             error, retry, halt = _graph(run_id, f, project, owner, data, done, skipped, sent)
         finally:
