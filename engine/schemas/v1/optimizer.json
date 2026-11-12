@@ -79,11 +79,11 @@
     },
     {
       "$schema": "https://schema.abi.invalid/v1/optimizer.json", "id": "staffing", "name": "Hours per café",
-      "description": "Template, staffing: the staff hours each café gets next week at the lowest wage cost, with enough hours for its demand.",
+      "description": "Template, staffing: the staff hours each open café gets next week so that the revenue those hours bring is highest. Every café gets at least the hours it needs to open and at most the hours it can use; the wage budget and the hours a region's staff can work decide which cafés get the hours in between.",
       "over": {"type": "cafe", "filters": [{"property": "open", "op": "=", "value": true}]},
-      "decide": {"name": "Hours", "write": "planned_hours", "min": {"property": "hours_needed"}, "max": 400},
-      "objective": {"goal": "minimize", "name": "Wage cost", "per_unit": {"property": "hourly_wage"}},
-      "limits": [{"name": "Hours per region", "group": "region", "max": 1200}, {"name": "Wage budget", "per_unit": {"property": "hourly_wage"}, "max": 50000}]
+      "decide": {"name": "Hours", "write": "planned_hours", "min": {"property": "hours_needed"}, "max": {"property": "hours_useful"}},
+      "objective": {"goal": "maximize", "name": "Expected revenue", "per_unit": {"measure": "revenue_per_staff_hour"}},
+      "limits": [{"name": "Wage budget", "per_unit": {"property": "hourly_wage"}, "max": 50000}, {"name": "Hours per region", "group": "region", "max": 1200}]
     },
     {
       "$schema": "https://schema.abi.invalid/v1/optimizer.json", "id": "maintenance-slots", "name": "Maintenance slots",

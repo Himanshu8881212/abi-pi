@@ -27,15 +27,20 @@
   `per_unit`, `decide.min` and `decide.max` are a number, `{property: <numeric column>}` or `{measure: <id>}` (read per
   object; one key column). A limit bounds the sum of per_unit × the decided number (per_unit default 1); `group`
   makes it hold within each value of a column. Names (`decide.name`, `objective.name`, each limit's `name`) are the
-  person's business words: the plan's text uses them. Shapes to start from, never a rule: allocation (units per
-  warehouse, max = capacity, one total limit), staffing (hours per café, min = hours needed, a limit per region, a
-  budget), maintenance slots (0/1 per slot with integer and max 1, `equal: 1` per machine, a limit per week). Say the
+  person's business words: the plan's text uses them. Every object needs a number for each property and measure
+  used: one without stops the run and is named (fill it in, or filter such objects out). Shapes to start from, never
+  a rule: allocation (units per warehouse, max = capacity, one total limit), staffing (hours per café between the
+  hours it needs and the hours it can use, the most revenue within a wage budget and a limit per region), maintenance
+  slots (0/1 per slot with integer and max 1, `equal: 1` per machine, a limit per week). Say the
   goal, what is decided and each limit in words and save once the person agrees.
 - `run_optimizer {optimizer}` queues the run (default 60 s, at most 1,000 objects); read it with `optimizers
   {optimizer}` (at most twice; still queued or running: say it is being worked out). State the plan, the total and
-  the limits only from its rows (`what`: Total, Limit, Limit fully used, Limit in conflict, else the object's type;
-  `plan`, `now`, `limit`); relay `text` for what happened. A plan is never applied: an Editor's run stores it as a
-  proposal (`proposal`), which the person approves under Data > Edits (`approve_edit` asks them); a Viewer's run only
-  shows the plan for what they see. "No plan fits": name the limits in conflict and ask which one to relax; never
-  loosen a limit yourself. On a schedule: a flow step `{type: action, action: run_optimizer, input: {optimizer}}`;
-  each run adds a proposal, never a change.
+  the limits only from its rows (`what`: Total; Limit and Limit fully used: at most `limit`, the plan uses `plan`; At
+  least and At least, just met; Exactly; Limit in conflict; else the object's type with `plan` and `now`); relay
+  `text` for what happened and add no count of your own. `outcome` found: the time ran out with a plan that may not be
+  the best; say so. A plan is never applied: an Editor's run stores it as a proposal (`proposal`), which the person
+  approves under Data > Edits (`approve_edit` asks them), and withdraws the proposal an earlier run of the same
+  optimiser left open; a Viewer's run only shows the plan for what they see. "No plan fits": name the limits in
+  conflict and ask which one to relax; never loosen a limit yourself. On a schedule: a flow step `{type: action,
+  action: run_optimizer, input: {optimizer}}`; a run that finds a plan leaves one proposal, never a change, and a run
+  that finds none fails the step with the reason. A published copy has no plans.

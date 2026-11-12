@@ -15,7 +15,7 @@
   "measures": "measures and glossary terms",
   "reports": "reports and dashboards",
   "analysis": "answering questions (read-only)",
-  "ml": "datasets for ML, ML models, training, scoring",
+  "ml": "datasets for ML, ML models, training, scoring; optimisers (the best plan within limits) and their runs",
   "flows": "flows, schedules, alerts, deliveries",
   "agents": "custom agents and tools",
   "review": "checking the others' work (read-only)",
@@ -91,7 +91,7 @@
    ]
   },
   "ml-engineer": {
-   "description": "Builds datasets for ML, forecasts, anomaly and segment models; trains and scores them; reports accuracy against the baseline.",
+   "description": "Builds datasets for ML, forecasts, anomaly and segment models; trains and scores them; reports accuracy against the baseline. Sets up optimisers (the best plan within limits: hours, units, slots) and runs them: a plan is a proposal the person approves.",
    "phase": "build",
    "areas": [
     "ml"

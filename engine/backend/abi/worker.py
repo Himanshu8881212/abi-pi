@@ -179,8 +179,11 @@ async def retry_stalled_runs(timestamp: int) -> None:
     for job in await app.job_manager.get_stalled_jobs(task_name=load.name):  # a load isn't resumed: its run fails
         await asyncio.to_thread(ingest.interrupted, job.task_kwargs["run"])
         await app.job_manager.finish_job(job, Status.FAILED, delete_job=False)
+    for job in await app.job_manager.get_stalled_jobs(task_name=run_optimizer.name):  # nor an optimiser's run (1.2.6 M12)
+        await asyncio.to_thread(optimize.interrupted, job.task_kwargs["run_id"])
+        await app.job_manager.finish_job(job, Status.FAILED, delete_job=False)
     # M4 review: the other heavy jobs end failed, so `doing` holds no lock (a 1.2 M4.1 job's) and the next one runs
-    for name in (refresh_changed.name, build_copies.name, train_model.name, score_model.name, run_optimizer.name, purge_archive.name):
+    for name in (refresh_changed.name, build_copies.name, train_model.name, score_model.name, purge_archive.name):
         for job in await app.job_manager.get_stalled_jobs(task_name=name):
             await app.job_manager.finish_job(job, Status.FAILED, delete_job=False)
 

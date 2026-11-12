@@ -292,7 +292,8 @@ def _gate(conn, project: str, p: Path, why: str, extra: dict) -> None:
     project's contents signed in its preview (D-04.1)."""
     busy = conn.execute("SELECT (SELECT count(*) FROM flow_runs WHERE project = %(p)s AND status IN ('queued', 'running'))"
                         " + (SELECT count(*) FROM ml_runs WHERE project = %(p)s AND status IN ('queued', 'running'))"
-                        " + (SELECT count(*) FROM load_runs WHERE project = %(p)s AND status IN ('queued', 'running')) AS n",
+                        " + (SELECT count(*) FROM load_runs WHERE project = %(p)s AND status IN ('queued', 'running'))"
+                        " + (SELECT count(*) FROM optimizer_runs WHERE project = %(p)s AND status IN ('queued', 'running')) AS n",
                         {"p": project}).fetchone()["n"]
     if busy:
         raise ActionFailed(409, f"Project '{project}' has {busy} flow, ML or load run(s) queued or running; try again once"

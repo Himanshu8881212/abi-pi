@@ -2081,11 +2081,13 @@ function plans(box){const g=h('div','cards');box.append(g);
    if(['queued','running'].includes(r.status)){out.append(h('p','file','Working it out…'));return}
    if(r.status==='failed'){out.append(h('p','bad',r.error||'It could not be worked out.'));return}
    out.append(h('p','txt',r.text||''));const rows=r.rows||[],objs=rows.filter(x=>x[5]);
-   rows.filter(x=>/^Limit( fully used)?$/.test(x[0])).forEach(x=>out.append(h('div','file',`${x[1]}: ${fmt(x[2])}${x[4]===null?'':' of '+fmt(x[4])}${x[0]==='Limit fully used'?' (fully used)':''}`)));
+   rows.filter(x=>/^(Limit|At least|Exactly)/.test(x[0])&&x[0]!=='Limit in conflict').forEach(x=>out.append(h('div','file',/^At least/.test(x[0])?`${x[1]}: at least ${fmt(x[4])}: ${fmt(x[2])}${/just met/.test(x[0])?' (just met)':''}`:
+    x[0]==='Exactly'?`${x[1]}: exactly ${fmt(x[4])}`:`${x[1]}: ${fmt(x[2])}${x[4]===null?'':' of '+fmt(x[4])}${x[0]==='Limit fully used'?' (fully used)':''}`)));
    if(objs.length){const tb=h('table'),hd=tb.createTHead().insertRow(),bd=tb.createTBody();[T?T.name:'Name','Now',o.decide.name,''].forEach(t=>hd.append(h('th','',t)));
     objs.slice(0,200).forEach(x=>{const tr=bd.insertRow(),nm=h('button','flink oopen',String(x[1]));nm.onclick=()=>openObj(r.type,x[5]);tr.insertCell().append(nm);[x[3]===null?'—':fmt(x[3]),fmt(x[2]),x[4]||''].forEach(v=>tr.insertCell().textContent=v)});
     const sc=h('div','scroll');sc.append(tb);out.append(sc);if(objs.length>200)out.append(h('p','file','The first 200 are shown.'))}
-   if(r.proposal&&MODE==='developer'&&PAGES.edits)out.append(btn('Review the changes',()=>show('edits')))};
+   // the changes wait under Edits until a person decides: once approved or rejected there is nothing left to review
+   if(r.proposal&&MODE==='developer'&&PAGES.edits)api('edit_proposals',{}).then(p=>{if(o.latest_run===r&&out.isConnected&&(p.proposals||[]).some(q=>q.batch===r.proposal.batch))out.append(btn('Review the changes',()=>show('edits')))}).catch(()=>{})};
   draw();
   if(MODE==='developer')act(c,'Find the best plan',async m=>{await api('run_optimizer',{optimizer:o.id});say(m,'Working it out…');
    for(let k=0;k<330;k++){await wait(2000);const x=(await api('optimizers',{})).optimizers.find(y=>y.id===o.id);if(x){o.latest_run=x.latest_run;draw()}
@@ -2213,7 +2215,7 @@ function navAll(){return [['Start',[['home','Home',home],['chat','Chat',chatPage
  ['glossary','Glossary',glossary,D.glossary.length],['datasets','Queries',datasets,D.datasets.length]]],
  ['Visualizations',[['reports','Reports',reportsPage,D.reports.length],['monitor','Monitor',monitorPage],['inbox','Inbox',inboxPage,INBOXN],['explore','Explore',explore,MINE.length||'']]],
  ['Export',[['boardpack','Board pack',boardPage,(D.app?.packs||[]).length],['documents','Documents',documentsPage],['onepager','One-pager',onePagerPage],['dataexport','Data',dataExportPage],['video','Video',videoPage],['transfer','Project',transferPage]]],
- ['Automate',[['flows','Flows',flows,D.flows.length],['ml','ML models',ml,D.ml.length],...(D.optimizers.length?[['plans','Plans',plans,D.optimizers.length]]:[]),['tools','Tools',tools,D.tools.length],['agents','Agents',agents,D.agents.length]].filter(x=>MODE!=='viewer'||x[3])],
+ ['Automate',[['flows','Flows',flows,D.flows.length],['ml','ML models',ml,D.ml.length],...(D.optimizers.length&&!COPY()?[['plans','Plans',plans,D.optimizers.length]]:[]),['tools','Tools',tools,D.tools.length],['agents','Agents',agents,D.agents.length]].filter(x=>MODE!=='viewer'||x[3])],
  ['Knowledge',[['vault','Vault',vaultPage,(VAULT||[]).length],['docs','Docs',docs]]],
  ['Govern',[['security','Security',security],['environments','Environments',b=>{const x=(D.sections.Environments||'').trim(),tmp=h('div');tmp.insertAdjacentHTML('beforeend',x);const has=tmp.innerText.trim().replace(/none yet\.?/i,'').length>10;if(has)b.insertAdjacentHTML('beforeend',x);else b.append(emptyBox('environments','No environments yet','A dev and prod pair lets you try a change on dev data before it reaches production. Each environment says where its sources read from.',MODE==='developer'?['Ask the agent',()=>{openChat(true);inp.value='Set up a dev and a prod environment for this project in ABI.';inp.focus()}]:null))}],['history','History',commits,(D.history||[]).length],...((window.ME||{admin:true}).admin&&!MOBILE?[['people','Users & access',usersPage],['settings','Settings',settingsPage]]:[])]]]}
 let MODE='developer',VAULT=[],MODEL='';
@@ -2707,8 +2709,9 @@ def publish_bundle(project: str) -> tuple[str, dict, str]:
     for f in sorted(dest.rglob("*")):
         rel = f.relative_to(dest).as_posix()
         # flows run once, in the project: the copy gets none (each schedule would email twice, each Monitor alert post
-        # twice), and the import needn't take a flow someone else saved in the publisher's name (it refuses that)
-        if f.is_file() and ".git" not in f.relative_to(dest).parts and f.name not in (".gitkeep", "app.html") and not rel.startswith("flows/"):
+        # twice), and the import needn't take a flow someone else saved in the publisher's name (it refuses that).
+        # 1.2.6 M12: nor plans (optimizers/): a plan is worked out and approved in the project, and its runs stay there
+        if f.is_file() and ".git" not in f.relative_to(dest).parts and f.name not in (".gitkeep", "app.html") and not rel.startswith(("flows/", "optimizers/")):
             bundle[rel] = json.loads(f.read_text()) if rel.endswith(".json") else f.read_text()
     owner_only(bundle)
     read_only(bundle)
