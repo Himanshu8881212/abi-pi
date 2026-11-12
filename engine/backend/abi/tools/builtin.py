@@ -69,7 +69,7 @@ from abi.agents import grounding
 from abi.project import bundle, git, imports, sharing
 from abi.security import Role, User, credentials, tenants, usage
 from abi.semantic import Filter, SemanticQuery, model, ontology, rls
-from abi.semantic.subscriptions import Check, evaluate
+from abi.semantic.subscriptions import Check, evaluate, held
 from abi.storage import ProjectRef
 
 EMAIL = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
@@ -486,7 +486,13 @@ def _data(conn, user: User, project: str, data: ToolCall | SemanticQuery | Check
         out = tools.run_tool(conn, user, tools.RunTool(project=project, tool=data.tool, inputs=data.inputs))
     elif data:
         q = data.model_dump(mode="json")
-        out = evaluate(project, q, user.id) if isinstance(data, Check) else semantic.query(project, q, user.id)
+        if isinstance(data, Check) and data.period and (ob := flows.OBJECT.get()):  # M9: its period is every object's (`_for_object`)
+            keys = ontology.keyed(ontology.read(project), model._read(project, "model.json"), ob["type"])[1]
+            out = _for_object(project, q, keys, ob["key"], user.id)
+            at = [i for i, c in enumerate(out["columns"]) if c not in keys or c in q["query"].get("dimensions", [])]  # as it was asked
+            out |= {"columns": [out["columns"][i] for i in at], "rows": [[r[i] for i in at] for r in out["rows"]]}
+        else:
+            out = evaluate(project, q, user.id) if isinstance(data, Check) else semantic.query(project, q, user.id)
         out["rows"] = [dict(zip(out["columns"], map(semantic.norm, r))) for r in out["rows"]]
     else:
         return None
@@ -518,6 +524,20 @@ def _first_send(conn, project: str, targets: set[str], preview: dict | None = No
             conn.execute("INSERT INTO send_targets VALUES (%s, %s) ON CONFLICT DO NOTHING", [project, t])
 
 
+def _for_object(project: str, c: dict, keys: list[str], key: list, user_id: int | None) -> dict:
+    """1.2.6 M9: `evaluate` of condition `c` for the one object `key` of a per-object run, as `user_id`. With `period`
+    the query is grouped by the type's key and not filtered, as the flow's own check is (flows._per_object): the latest
+    period is the latest of every object the person reads, never this object's own last one. Rows: this object's."""
+    if not c.get("period"):  # no period to shift: filtered to the object
+        q = c["query"] | {"filters": [*(c["query"].get("filters") or []), *({"column": k, "op": "=", "value": v} for k, v in zip(keys, key))]}
+        return evaluate(project, c | {"query": q}, user_id)
+    # ponytail: the whole grouped query once per restricted recipient and attachment; cache per run if alerts get many
+    r = evaluate(project, c | {"query": flows._grouped(c["query"], keys)}, user_id)
+    at = [r["columns"].index(k) for k in keys]
+    rows = [row for row in r["rows"] if ontology._json([row[i] for i in at]) == key]
+    return r | {"rows": rows, "holds": bool(held(c, r["columns"], rows))}
+
+
 def _only(project: str, ob: dict, args) -> SemanticQuery | Check | None:
     """1.2.6 M8: what a per-object run attaches, filtered to its object: a semantic query or a condition, with the
     object's key as filters. Refused: a published tool's result, a report, the docs (they can't be filtered to it)."""
@@ -529,6 +549,8 @@ def _only(project: str, ob: dict, args) -> SemanticQuery | Check | None:
         raise ActionFailed(409, f"Object type '{ob['type']}' is gone, so this alert can't be filtered to its object: save the flow again.")
     if args.data is None:
         return None
+    if isinstance(args.data, Check) and args.data.period:
+        return args.data  # `_data` reads it for the object without shifting its period
     q = args.data.query if isinstance(args.data, Check) else args.data
     q = q.model_copy(update={"filters": [*q.filters, *(Filter(column=c, op="=", value=v) for c, v in zip(got[1], ob["key"]))]})
     return args.data.model_copy(update={"query": q}) if isinstance(args.data, Check) else q
@@ -557,8 +579,7 @@ def _seeing(conn, project: str, ob: dict, where: str, values: list, request: Sem
             continue
         if (c := ob.get("condition")) and rls.restricted(project, me.id):  # ponytail: one more query per restricted recipient
             try:
-                q = c["query"] | {"filters": [*c["query"].get("filters", []), *({"column": k, "op": "=", "value": v} for k, v in zip(keys, ob["key"]))]}
-                holds = len(keys) == len(ob["key"]) and evaluate(project, c | {"query": q}, me.id)["holds"]
+                holds = len(keys) == len(ob["key"]) and _for_object(project, c, keys, ob["key"], me.id)["holds"]
             except ActionFailed:
                 holds = False
             if not holds:
@@ -657,7 +678,7 @@ def post_message(conn, user: User, args: PostMessage) -> dict:
             for u, t, own, o in got:
                 _inbox(conn, args.project, user, t["text"], (own or none) | {"object": o}, None, u["id"])
             if left:  # M9: who sees the object but not that the condition holds, in the step's trace
-                return {"sent": True, "channel": args.channel, "skipped": left}
+                return {"sent": bool(got) or "members" not in ob, "channel": args.channel, "skipped": left}
         elif args.channel == INBOX:
             _inbox(conn, args.project, user, args.text, data, snap)
             _restricted_copies(conn, args.project, user, _authored(args.text), args.data)

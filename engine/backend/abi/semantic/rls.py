@@ -88,7 +88,7 @@ def _hidden(project: str, user_id: int | None) -> dict[str, set[str]]:
 
         for r in model._read(project, "model.json").get("relationships", []):
             t = r["from"]["table"]
-            if t.startswith("ml_") and (git.path(project) / "ml" / f"{t[3:]}.json").is_file():
+            if t.startswith("ml_"):  # with its model or after it (a deleted model's table stays)
                 out.setdefault(t, set()).update(f.lower() for f, c in zip(r["from"]["columns"], r["to"]["columns"])
                                                 if c.lower() in out.get(r["to"]["table"], ()))
         out = {t: cs for t, cs in out.items() if cs}
@@ -448,7 +448,7 @@ def _sources(project: str) -> tuple[dict[str, dict], list[dict], list[dict]]:
 def unfiltered_outputs(project: str) -> list[str]:
     """Tables built from rows a rule filters but not filtered by those same rules: TR-1 tables whose merge/append steps
     read a filtered table or whose source step loads a filtered table's source (`source:<t>`, any depth,
-    H-01.4-fix-1) and ML predictions tables (ml_<id>, ML-5). A table with no rule of its own counts as filtered only
+    H-01.4-fix-1) and ML predictions tables (ml_<id>, ML-5; one whose model file is gone too, 1.2.6 M9). A table with no rule of its own counts as filtered only
     when its relationships reach every ruled table its inputs are filtered by (a relationship to another ruled table
     doesn't hide the input's rows). D-110: also every table built from a table with a column rule unless it has a
     column rule of its own (its Owner chose what it hides). Restricted Viewers see none of their rows (default deny);
@@ -490,8 +490,12 @@ def _unfiltered_outputs(project: str) -> list[str]:
         return seen & ruled
 
     ups = lambda n: {u.split(":", 1)[1] for u in lineage.reach(g, {n}, "upstream") if u.startswith(("table:", "source:"))}
+    # 1.2.6 M9: a predictions table whose model was deleted has no lineage left to say what it was made from: denied
+    # (fail closed), as is any other model table named ml_<x> with no ml/<x>.json, until it gets a row rule of its own
+    orphan = lambda t: t.startswith("ml_") and t not in ruled and not (git.path(project) / "ml" / f"{t[3:]}.json").is_file()  # noqa: E731
     return sorted(t for n in g if n.startswith("table:") and (
-        (t := n[6:]) not in ruled and set().union(*(roots(u, u != t) for u in ups(n))) - roots(t, False) or t not in cols and ups(n) & cols))
+        (t := n[6:]) not in ruled and set().union(*(roots(u, u != t) for u in ups(n))) - roots(t, False) or t not in cols and ups(n) & cols
+        or orphan(t)))
 
 
 def explain(project: str, user_id: int) -> str:

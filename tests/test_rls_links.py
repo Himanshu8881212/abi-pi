@@ -947,6 +947,18 @@ def test_prediction_hidden_with_object(links):
                 sure("delete_rls_rule", project=P, id="pi_own")
         finally:
             sure("delete_rls_rule", project=P, id="pi_key")
+
+        # 8. the model deleted: its table, key and measure stay in the model, but nothing says any more what it was made
+        # from, so it is denied to restricted Viewers: no row through SQL, the measure, or its copy of the key
+        assert mine(links, "sql_query", sql="SELECT count(*) FROM ml_cafe_value")["rows"] == [[len(north)]], "before: their cafés' rows"
+        sure("delete_ml_model", project=P, model="cafe_value")
+        assert "ml_cafe_value" in state(links, tables=["ml_cafe_value"])["denied"]
+        assert mine(links, "sql_query", sql="SELECT cafes_cafe_id, prediction FROM ml_cafe_value")["rows"] == []
+        assert all(r[-1] is None for q in ({}, {"dimensions": ["ml_cafe_value.cafes_cafe_id"]}, {"dimensions": ["cafes.cafe_id"]})
+                   for r in mine(links, "semantic_query", measures=["cafe_value_prediction"], **q)["rows"])
+        assert not mine(links, "semantic_query", measures=["cafe_value_prediction"], dimensions=["ml_cafe_value.cafes_cafe_id"])["rows"]
+        assert len(abi.call("sql_query", project=P, sql="SELECT cafes_cafe_id FROM ml_cafe_value")["rows"]) == len(preds), "the Owner still reads it"
+        assert any("ml_cafe_value" in g for g in abi.call("readiness", project=P)["missing"]), "and readiness says what to do"
     finally:  # the tests after this one find the fixture's project: no model that a reload of customers would score
         for act, args in (("delete_flow", {"flow": "value_alert"}), ("delete_report", {"report": "values"}),
                           ("delete_flow", {"flow": "cust_alert"}), ("delete_flow", {"flow": "cust_note"}),

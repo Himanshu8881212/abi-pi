@@ -734,6 +734,47 @@ def test_a_probability_says_which_outcome_it_is_for(objs):
     south = dict(sql("SELECT cafes_cafe_id, probability FROM ml_side"))
     assert south == pytest.approx({k: 1 - v for k, v in north.items()}) and len(set(north.values())) > 1, "the other outcome's probability"
     assert measures()["side_probability"]["description"] == "How likely Region is South, from 0 to 1."
+    # the person rewrites the probability's measure: scoring goes on and keeps their expression and name
+    abi.call("set_measure", project=P, id="side_probability", name="Mine", expression="MAX(ml_side.probability)")
+    score("side")
+    assert (measures()["side_probability"]["name"], measures()["side_probability"]["expression"]) == ("Mine", "MAX(ml_side.probability)")
+    # the model keeps its object type and loses its probability (`positive` taken out): the property and the measure go,
+    # the predicted outcome takes the property's place, and the café still opens
+    assert abi.call("save_ml_model", project=P, ml=ml)["note"].startswith("ml/side.json $.positive: ")
+    score("side")
+    mine = [(p["column"], p["name"], p["meaning"]) for p in otype("cafe")["properties"] if p["column"].startswith("ml_side.")]
+    assert mine == [("ml_side.prediction", "Region (predicted)", "category")] and "side_probability" not in measures(), mine
+    got = row(abi.call("get_object", project=P, type="cafe", key=[objs["north"]]))
+    assert got["ml_side.prediction"] in ("North", "South") and "ml_side.probability" not in got
+    # a property whose column is gone (listed by hand here) reads empty and never fails the café; readiness names it
+    r = engine("import json, sys\nfrom abi.semantic import model, ontology\nP = sys.stdin.read().strip()\no = ontology.read(P)\n"
+               "next(x for x in o['objects'] if x['id'] == 'cafe')['properties'].append({'column': 'ml_side.probability', 'name': 'Gone'})\n"
+               "model._write(P, 'ontology.json', {k: v for k, v in o.items() if k != '$schema'})", stdin=P)
+    assert r.returncode == 0, r.stderr[-2000:]
+    got = row(abi.call("get_object", project=P, type="cafe", key=[objs["north"]]))
+    assert got["ml_side.probability"] is None and got["ml_side.prediction"] in ("North", "South")
+    assert any("ml_side" in g and "probability" in g for g in abi.call("readiness", project=P)["missing"])
+    score("side")  # the next scoring takes the dead one off
+    assert [p["column"] for p in otype("cafe")["properties"] if p["column"].startswith("ml_side.")] == ["ml_side.prediction"]
+    # with `positive` again: one property, the probability, in the place of the outcome
+    abi.call("save_ml_model", project=P, ml=ml | {"positive": "North"})
+    score("side")
+    mine = [(p["column"], p["name"]) for p in otype("cafe")["properties"] if p["column"].startswith("ml_side.")]
+    assert mine == [("ml_side.probability", "Region (predicted)")], "no second property: the outcome's is gone"
+    # the model moves to another type on the same table: its property moves with it
+    o = {k: v for k, v in json.loads((abi.ABI_PROJECTS / P / "model/ontology.json").read_text()).items() if k != "$schema"}
+    o["objects"].append({"id": "shop", "table": "cafes", "name": "Shop", "plural": "Shops", "title": "cafe_name"})
+    sure("save_ontology", project=P, ontology=o)
+    abi.call("save_ml_model", project=P, ml=ml | {"positive": "North", "object": "shop"})
+    assert [p["column"] for p in otype("shop")["properties"] if p["column"].startswith("ml_side.")] == ["ml_side.probability"]
+    assert not [p for p in otype("cafe")["properties"] if p["column"].startswith("ml_side.")]
+    score("side")
+    assert row(abi.call("get_object", project=P, type="shop", key=[objs["north"]]))["ml_side.probability"] is not None
+    abi.call("save_ml_model", project=P, ml=ml | {"positive": "North"})  # and back
+    assert [p["column"] for p in otype("cafe")["properties"] if p["column"].startswith("ml_side.")] == ["ml_side.probability"]
+    # yes/no however it is stored: 1 of 0/1 also as 0.0/1.0; any other pair has no default
+    r = engine("from abi import ml\nprint(ml.positive({}, ['0.0', '1.0']), ml.positive({}, ['False', 'True']), ml.positive({}, ['0', '1']), ml.positive({}, ['A', 'B']))")
+    assert r.returncode == 0 and r.stdout.split() == ["1.0", "True", "1", "None"], r.stderr[-2000:]
     assert not [x for x in abi.call("propose_ontology", project=P)["ontology"]["objects"] if x["table"].startswith("ml_")], "a predictions table is no object type"
     # off its object: the property leaves the type in the same change
     abi.call("save_ml_model", project=P, ml={k: v for k, v in ml.items() if k != "object"})

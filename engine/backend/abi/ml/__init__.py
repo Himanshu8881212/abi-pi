@@ -797,10 +797,16 @@ def _predictions(project: str, m: dict, trained: str, query: dict, user: User) -
     said = _names(project).get(m.get("target")) or ontology._label(m.get("target", "").rsplit(".", 1)[-1])  # the target, in business words
     ours = {"id": f"{m['id'][:51]}_probability", "expression": f"AVG({storage._q(table_of(m['id']))}.probability)"}
     chance = ours | {"name": m["name"], "description": f"How likely {said} is {pos}, from 0 to 1."} if "probability" in preds else None
-    if chance and any(x["id"] == chance["id"] and x.get("expression") != chance["expression"]
-                      for x in semantic_model._read(project, "measures.json").get("measures", [])):  # before anything is written
+    # the measure with that ID is this model's when it reads this model's probability column: a person's own expression,
+    # name or description over it stays (only a description as scoring writes it follows a new `positive`)
+    made = lambda x: x["id"] == ours["id"] and f"{table_of(m['id'])}.probability" in (x.get("expression") or "").replace('"', "")  # noqa: E731
+    have = next((x for x in semantic_model._read(project, "measures.json").get("measures", []) if x["id"] == ours["id"]), None)
+    if chance and have and not made(have):  # before anything is written
         raise ActionFailed(409, f"model/measures.json: measure '{chance['id']}' exists and isn't this model's probability, which takes that"
                                 f" ID. Give that measure another ID (set_measure, delete_measure), or this model another `id` (ml/{m['id']}.json).")
+    if chance and have:
+        own = (have.get("description") or "").startswith("How likely ") and have["description"].endswith(", from 0 to 1.")
+        chance = have | ({"description": chance["description"]} if own else {})
     if obj := _object(project, m):
         x, kc = obj
         if kc not in preds:
@@ -848,7 +854,7 @@ def _predictions(project: str, m: dict, trained: str, query: dict, user: User) -
         new += [chance] if chance else []  # what a per-object alert compares: "above 0.8"
     # the model's own probability measure goes when this scoring made no probability (its column is gone)
     ms = _in_place(semantic_model._read(project, "measures.json").get("measures", []), new,
-                   lambda x: not chance and ours.items() <= x.items())
+                   lambda x: not chance and made(x))
     semantic_model._write(project, "measures.json", {"measures": ms})
     if "period" in preds:
         semantic_model.extend_calendar(project, t, user.name)  # IN-5: the date table covers the future periods
@@ -868,9 +874,17 @@ def positive(m: dict, classes: list | None) -> str | None:
         want = str(m["positive"]).lower()
         if (hit := next((c for c in classes if c.lower() == want), None)) is None:
             raise ActionFailed(400, f"ml/{m['id']}.json $.positive: '{m['positive']}' is not an outcome of {m['target']}."
-                                    f" Set positive to {json.dumps(classes[0])} or {json.dumps(classes[1])} (save_ml_model), then score again.")
+                                    f" Set positive to {json.dumps(classes[0])} or {json.dumps(classes[1])} (save_ml_model).")
         return hit
-    return classes[1] if {c.lower() for c in classes} in ({"false", "true"}, {"0", "1"}) else None
+    return next((c for c in classes if _yes_no(c)), None) if {_yes_no(c) for c in classes} == {True, False} else None
+
+
+def _yes_no(c: str) -> bool | None:
+    """A class label as yes or no: true/false, or the numbers 1 and 0 however they are written (1, 1.0); None: neither."""
+    try:
+        return {0.0: False, 1.0: True}.get(float(c))
+    except ValueError:
+        return {"true": True, "false": False}.get(c.lower())
 
 
 def _object(project: str, m: dict) -> tuple[dict, str] | None:
@@ -889,14 +903,19 @@ def _on_object(project: str, m: dict, oid: str | None, t: str, preds: dict, chan
     what it says, for the outcome `positive` chose), else the predicted class; a regression's number; a clustering's
     group; an anomaly's flag and score. A forecast has a row per period, so no property: its measure joins the type's
     measures (the total ahead, per object). A property is added when its column is new, or the table was not keyed
-    like this before (`was`: its key and columns before this scoring; None: no table): so one a person removed stays
-    away, and one they renamed keeps its name. Where table `t` is no longer one-to-one with a type (the dataset was
+    like this before (`was`: its key and columns before this scoring; None: no table), or it replaces one this
+    scoring dropped: so one a person removed stays away, and one they renamed keeps its name. Where table `t` is no longer one-to-one with a type (the dataset was
     regrouped), the type's properties on it go in the same change. The result is checked like a saved ontology."""
     o, mj = ontology.read(project), semantic_model._read(project, "model.json")
     key = next((e["key"] for e in mj.get("entities", []) if e["table"] == t), None)
     change = False
-    for x in o.get("objects", []):  # dangling: no longer one row per object of this type
-        keep = [p for p in x.get("properties", []) if p["column"].rpartition(".")[0] != t or ontology.one_to_one(mj, t, x["table"])]
+    cols = semantic_model.lake_columns(project).get(t, {})
+    for x in o.get("objects", []):
+        # dangling: no longer one row per object of this type, or a column this scoring no longer writes (a probability
+        # once `positive` is gone or a third outcome came). And one property per classification: the probability, once
+        # there is one, takes the place of the predicted outcome (a model first scored without `positive`)
+        keep = [p for p in x.get("properties", []) if (pt := p["column"].rpartition("."))[0] != t or ontology.one_to_one(mj, t, x["table"])
+                and pt[2] in cols and not (chance and x["id"] == oid and pt[2] == "prediction")]
         if len(keep) != len(x.get("properties", [])):
             x["properties"], change = keep, True
     if oid:
@@ -916,7 +935,7 @@ def _on_object(project: str, m: dict, oid: str | None, t: str, preds: dict, chan
         taken = {(p.get("name") or ontology._label(p["column"].rpartition(".")[2])).lower() for p in x.get("properties", [])} | {
             ontology._label(c).lower() for c in semantic_model.lake_columns(project).get(x["table"], {})}
         for c, mean, d in props:
-            if f"{t}.{c}" in have or not (fresh or c not in was[1]):
+            if f"{t}.{c}" in have or not (fresh or c not in was[1] or change):  # `change`: it takes the place of one just dropped
                 continue
             base = (m["name"] + (" score" if c == "score" else ""))[:180]
             name = next(n for n in (base, f"{base} (predicted)", *(f"{base} (predicted {i})" for i in range(2, 99)))
@@ -941,17 +960,24 @@ def _put_ontology(project: str, o: dict, rel: str) -> None:
     semantic_model._write(project, "ontology.json", o)
 
 
-def _off_object(project: str, oid: str, mid: str) -> None:
+def _off_object(project: str, oid: str, mid: str, to: str | None = None) -> None:
     """1.2.6 M9: a model taken off object type `oid` (its `object` removed or changed, or the model deleted) takes its
-    properties and its forecast measure off the type, in the same change."""
+    properties and its forecast measure off the type, in the same change. They move to type `to`, the model's new one,
+    when it is a type on the same table (the predictions table is one-to-one with both; a later scoring adds nothing)."""
     o, t = ontology.read(project), table_of(mid)
-    for x in o.get("objects", []):
-        if x["id"] == oid:
-            props = [p for p in x.get("properties", []) if p["column"].rpartition(".")[0] != t]
-            ms = [i for i in x.get("measures", []) if i != measure_of(mid)]
-            if len(props) != len(x.get("properties", [])) or len(ms) != len(x.get("measures", [])):
-                x |= {k: v for k, v in (("properties", props), ("measures", ms)) if k in x}
-                _put_ontology(project, o, f"ml/{mid}.json")
+    src, dst = (next((x for x in o.get("objects", []) if x["id"] == i), None) for i in (oid, to))
+    if src is None:
+        return
+    props = [p for p in src.get("properties", []) if p["column"].rpartition(".")[0] == t]
+    ms = [i for i in src.get("measures", []) if i == measure_of(mid)]
+    if not props and not ms:
+        return
+    src |= {k: [i for i in src[k] if i not in gone] for k, gone in (("properties", props), ("measures", ms)) if k in src}
+    if dst is not None and dst["table"] == src["table"]:
+        have = {p["column"] for p in dst.get("properties", [])}
+        dst |= {k: dst.get(k, []) + new for k, new in (("properties", [p for p in props if p["column"] not in have]),
+                                                       ("measures", [i for i in ms if i not in dst.get("measures", [])])) if new}
+    _put_ontology(project, o, f"ml/{mid}.json")
 
 
 def after_refresh(project: str, table: str, snapshot: int) -> None:
@@ -1020,7 +1046,7 @@ def save_ml_model(conn, user: User, args: SaveModel) -> dict:
     note = _outcomes(args.project, m, user.id)
     imports.write(args.project, {rel: m})
     if (was := (files.get(rel) or {}).get("object")) and was != m.get("object"):  # taken off its object type: its property goes too
-        _off_object(args.project, was, m["id"])
+        _off_object(args.project, was, m["id"], m.get("object"))
     return {"id": m["id"]} | ({"note": note} if note else {})
 
 
@@ -1029,13 +1055,17 @@ def _outcomes(project: str, m: dict, user_id: int) -> str | None:
     as the caller): a `positive` that is neither is refused (400: file, field, fix); without `positive`, and unless
     the target is yes/no, the note saying which two to choose from. None otherwise, and before there is data."""
     q = _dataset(project, m)["query"]
-    if not (m.get("object") and m["task"] == "classification" and m["target"] in q.get("dimensions", [])):
+    if not (m.get("object") and m["task"] == "classification"):
         return None
     try:
-        rows = semantic.query(project, {k: q[k] for k in ("measures", "filters", "links") if k in q} | {"dimensions": [m["target"]], "limit": 4}, user_id)["rows"]
+        if m["target"] in q.get("dimensions", []):
+            got = semantic.query(project, {k: q[k] for k in ("measures", "filters", "links") if k in q} | {"dimensions": [m["target"]], "limit": 4}, user_id)
+        else:  # ponytail: a measure target's outcomes are read from the dataset's first 10,000 rows; training reads them all
+            got = semantic.query(project, q | {"totals": [], "limit": 10_000}, user_id)
     except ActionFailed:
         return None
-    vals = sorted({str(r[0]) for r in rows if r[0] is not None})
+    at = got["columns"].index(m["target"])
+    vals = sorted({str(r[at]) for r in got["rows"] if r[at] is not None})
     if len(vals) != 2 or positive(m, vals):
         return None
     return (f"ml/{m['id']}.json $.positive: {m['target']} has the outcomes {json.dumps(vals[0])} and {json.dumps(vals[1])}, and the model doesn't say"

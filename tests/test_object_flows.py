@@ -875,3 +875,36 @@ def test_a_pending_step_stays_waiting_when_the_person_is_in_viewer_mode():
     stop = tool.index('if (String(r.status ?? "").startsWith("Viewer mode")) { out.push({ id: it.id, action: it.action, outcome: "waiting", detail: r }); break; }')
     assert tool.index("await confirmBridge(") < stop < tool.index('await runTeam(["pending", p.project, "done"')
     assert 'return { status: "Viewer mode: nothing changed.' in src
+
+
+def test_a_restricted_recipient_gets_the_alert_of_the_period_the_flow_checked(w):
+    """1.2.6 M9: a condition on the month before the latest (`period`, `skip_latest`), per café. Café a has visits in
+    November only, café b in November and December: the flow's check, grouped by café, takes December as the latest
+    month for every café and so checks November. The restricted recipient's own check, and the rows they get in the
+    Inbox and by mail, are of that same November, not of café a's own months (its latest is November, the one before
+    nothing: they would get no alert)."""
+    a, b, north = w["a"], w["b"], w["mail"]["north"]
+    sure("create_input_table", project=P, table="visits", key=["cafe_id", "day"],
+         columns=[{"name": "cafe_id", "type": "VARCHAR"}, {"name": "day", "type": "DATE"}, {"name": "n", "type": "INTEGER"}])
+    abi.call("add_relationship", project=P, **{"from": "visits.cafe_id", "to": "cafes.cafe_id"})
+    abi.call("add_relationship", project=P, **{"from": "visits.day", "to": "calendar.day"})
+    abi.call("edit_cells", project=P, table="visits", add=[{"cafe_id": a, "day": "2025-11-10", "n": 5}, {"cafe_id": b, "day": "2025-11-11", "n": 7},
+                                                           {"cafe_id": b, "day": "2025-12-02", "n": 1}])
+    abi.call("set_measure", project=P, id="visits_n", name="Visits", expression="SUM(visits.n)")
+    cond = {"query": {"measures": ["visits_n"]}, "measure": "visits_n", "op": ">", "value": 0, "period": "calendar.month", "skip_latest": True}
+    was, sent = len(inbox(w["tok"]["north"])), len(mails(w))
+    sure("save_flow", project=P, flow=flow("visits_last_month", [
+        POST | {"input": {"channel": "inbox", "text": "Visits at {{ data.trigger.title }} last month", "data": cond}},
+        MAIL | {"input": MAIL["input"] | {"subject": "Visits at {{ data.trigger.title }} last month", "data": cond}}],
+        **cond, recipients={"property": "cafe_contacts.manager"}))
+    tick("visits_last_month")
+    by = {r["object"]["key"][0]: r for r in runs("visits_last_month", 2)}
+    assert set(by) == {a, b} and by[a]["status"] == "ok", by
+    assert step(by[a], "post")["output"] == {"sent": True, "channel": "inbox"} and step(by[a], "mail")["output"]["to"] == [north], by[a]["steps"]
+    november = [{"calendar.year": 2025, "calendar.month": 11, "visits_n": 5}]
+    theirs = [m for m in inbox(w["tok"]["north"])[was:] if m["text"].startswith("Visits at ")]
+    assert [m["text"] for m in theirs] == [f"Visits at {w['names'][a]} last month"] and theirs[0]["data"]["rows"] == november, theirs
+    [mail] = [m for m in mails(w)[sent:] if m["Subject"].startswith("Visits at ")]
+    rows = list(csv.reader(io.StringIO(next(x.get_content() for x in mail.iter_attachments() if x.get_filename() == "data.csv"))))
+    assert mail["To"] == north and rows[0] == ["calendar.year", "calendar.month", "visits_n"] and [[float(v) for v in r] for r in rows[1:]] == [[2025, 11, 5]], rows
+    sure("delete_flow", project=P, flow="visits_last_month")

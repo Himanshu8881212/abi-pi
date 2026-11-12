@@ -662,7 +662,7 @@ def execute(run_id: str, last: bool = True) -> None:
         inbound = actions.INBOUND.set(message)  # D-32: its steps' audit rows hold the text's length + hash only
         acted = ACTED.set(acting)
         # 1.2.6 M8: a per-object run (as the flow's owner): its sends reach only project members who see its object
-        per = OBJECT.set(run["trigger"] | {"condition": f["trigger"]} if alert else None)  # M9: the condition, for `_seeing`
+        per = OBJECT.set({"condition": f["trigger"]} | run["trigger"] if alert else None)  # M9: a run started before 1.2.6 M9 r3 carries none
         try:
             error, retry, halt = _graph(run_id, f, project, owner, data, done, skipped, sent)
         finally:
@@ -885,7 +885,9 @@ def _per_object(project: str, f: dict, now: datetime, u: User) -> None:
                     raise
                 continue  # gone since the query read it: no alert, and no second try while its row holds
             trigger = {"type": x["id"], "key": json.loads(k), "title": ontology._json(obj["title"]),
-                       "object": ontology._json(ontology.nested(obj["columns"], obj["rows"][0]))}
+                       "object": ontology._json(ontology.nested(obj["columns"], obj["rows"][0])),
+                       # M9: the condition that started it, checked again for each restricted recipient (builtin._seeing)
+                       "condition": {c: t[c] for c in ("query", "measure", "op", "value", "other", "period", "skip_latest", "change") if c in t}}
             who = ontology.recipients(conn, project, obj, t["recipients"], u) if "recipients" in t else None
             if who:
                 trigger |= {"recipients": who["to"], "members": who["members"]}

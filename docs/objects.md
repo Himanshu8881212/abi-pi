@@ -130,7 +130,8 @@ relationship onto `cafes`) and the café type lists it as a property with a mean
   the value). When nobody can be reached the run ends as stopped, and starts no cooldown.
 - The condition is checked with the flow owner's access. For a recipient whose rows are restricted it is checked
   again with their own access, for that café: they get the alert only when it holds in the rows they may read
-  themselves, with those rows. Otherwise they are skipped (the step's trace names them) and learn nothing.
+  themselves, with those rows. Otherwise they are skipped (the step's trace names them) and learn nothing. That
+  second check uses the condition the run started with, on the data as it is when the alert is sent.
 - `{{ data.trigger.recipients }}` is those members' account emails. When none of them has one, the email step's
   `when` (as above) skips it; without that `when` the run stops at the step, with the reason, and later steps don't
   run. The first email to a domain the project hasn't
@@ -184,8 +185,11 @@ Then the model, `ml/expected_revenue.json`:
 - A `classification` with two outcomes gives a probability. For a yes/no (or 0/1) target it is the probability of
   yes. For any other pair, say which outcome it is for: `"positive": "Churned"`. Without `positive` the property is
   the predicted outcome and there is no probability; saving the model answers with a note naming the two values.
+  A model has one property: once it makes a probability, that takes the place of the predicted outcome.
 - Remove a property from the type and later scorings leave it out. Take `object` off the model, or delete the
-  model, and its property leaves the type with it.
+  model, and its property leaves the type with it. A deleted model's predictions table stays in the model, hidden
+  from restricted Viewers until it gets a row rule of its own (Security); so is any model table named `ml_<x>`
+  that has no ML model `<x>`.
 - A person sees a prediction only when they see its object. Where the model learned from rows a person's row rules
   don't reach through the type itself (other types' rows, reached through a link), restricted Viewers see no
   prediction at all until the predictions table gets a row rule of its own (Security). Such a prediction reads

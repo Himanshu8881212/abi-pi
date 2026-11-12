@@ -748,11 +748,13 @@ def get_object(conn, user: User, args: Get) -> dict:
         raise ActionFailed(404, f"No visible {x['name']} with key {json.dumps(args.key)} in project '{args.project}'.")
     columns, row = own, list(found[0])
     for pt, pcs, r in ones:  # a second read each
-        got = _read(args.project, f"SELECT {', '.join(map(storage._q, pcs))} FROM {storage._q(pt)} WHERE {_semi([(r, False)], t, where)}"
-                                  " LIMIT 1", asked, user.id)
+        there = [c for c in pcs if c in cols.get(pt, {})]  # a column that is gone reads empty (readiness names it), never fails the object
+        got = there and _read(args.project, f"SELECT {', '.join(map(storage._q, there))} FROM {storage._q(pt)} WHERE {_semi([(r, False)], t, where)}"
+                                            " LIMIT 1", asked, user.id)
         # 1.2.6 M9: a table denied to the reader (predictions made from rows their rules filter) says "hidden", not "no value"
         gap = rls.MARK if not got and rls.restricted(args.project, user.id) and pt in rls.unfiltered_outputs(args.project) else None
-        columns, row = columns + [f"{pt}.{c}" for c in pcs], row + list(got[0] if got else [gap] * len(pcs))
+        vals = dict(zip(there, got[0])) if got else {}
+        columns, row = columns + [f"{pt}.{c}" for c in pcs], row + [vals.get(c, gap if c in there else None) for c in pcs]
     out = {"type": x["id"], "name": x["name"], "key": [row[own.index(k)] if k in own else v for k, v in zip(keys, args.key)],
            "title": row[own.index(x["title"])] if x["title"] in own else None}
     if ms := x.get("measures"):
