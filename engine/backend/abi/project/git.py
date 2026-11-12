@@ -330,7 +330,9 @@ def delete_project(conn, user: User, args: ProjectRef) -> dict:
               " for good; its data and uploaded files are archived for 30 days.", {"delete": f"project:{args.project}"})
         for t in _keyed(conn):
             conn.execute(f'DELETE FROM "{t}" WHERE project = %s', [args.project])
-        gone = f"{storage.DELETED}{int(time.time())}_{args.project}"[:63]
+        at = int(time.time())
+        while conn.execute("SELECT 1 FROM pg_namespace WHERE nspname = %s", [gone := f"{storage.DELETED}{at}_{args.project}"[:63]]).fetchone():
+            at += 1  # deleted, made again and deleted within the same second: the archive's name is taken
         ingest.retain(p, gone)  # M3.5: before its history goes
         _move(conn, storage.move_lake(conn, args.project, gone))
         shutil.rmtree(p)
