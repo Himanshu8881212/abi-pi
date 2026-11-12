@@ -420,20 +420,26 @@ def _titles(project: str, x: dict, k: str, typ: str, keys, user_id: int | None) 
 KINDS = ("same", "different", "split")
 
 
-def _log(conn, user: User, project: str, x: dict) -> list[dict]:
-    """Every decision about type x's records, newest first, from the decisions table's edit history (M4): {batch, at,
-    user, decision (same, different, split; `edit`: not decide_same's), undone, keys (the records its rows name), rows
-    (its rows, as (a, b)), took ([[the object, the records taken out of it]], a split's)}. decide_same writes what it
-    was as the batch's comment."""
-    from abi import writeback  # not at top: it imports the semantic package
+WINDOW = 1000  # log rows Decided reads (some hundred decisions): older ones stay in force and are found by an undo, not listed
 
-    try:  # ponytail: the newest 1000 log entries (some hundred decisions); page the history when a type has more
-        h = writeback.edit_history(conn, user, writeback.History(project=project, table=table(x["table"]), limit=1000))
-    except ActionFailed:  # no decisions table yet
+
+def _log(project: str, s: str, window: int | None = WINDOW) -> list[dict]:
+    """The decisions kept in table s, newest first, from its edit log (M4), only the rows decide_same wrote (MARK):
+    {batch, at, user, decision (same, different, split), undone, keys (the records its rows name), rows (its rows, as
+    (a, b)), took ([[the object, the records taken out of it]], a split's)}. `window`: the newest so many log rows
+    (what Decided lists), without the batch the window cuts in two; None: all of them, which an undo and a merge check
+    against (ponytail: the whole marked log, a row or a few per decision; an index by record if a type gets tens of
+    thousands of decisions). A system read: its callers are Editors."""
+    try:
+        got = semantic.execute(project, f'SELECT row_key, "user", CAST("timestamp" AS VARCHAR), comment, batch_id, status FROM lake.edits.{_q(s)}'
+                                        f" WHERE reviewed_by = '{MARK}' ORDER BY coalesce(reviewed_at, \"timestamp\") DESC, batch_id DESC, row_key,"
+                                        f' "column" NULLS FIRST' + (f" LIMIT {window + 1}" if window else ""), {"same_as": s}, None, raw=True)
+    except duckdb.Error:  # no decisions table, or no edit log yet
         return []
+    cut = got[window][4] if window and len(got) > window else None  # never half a decision
     out: dict[str, dict] = {}
-    for row_key, _, _, _, _, who, at, comment, batch, status, by, *_ in h["entries"]:
-        if by != MARK:  # not a decision (decide_same's rows carry the mark; nothing else writes this table)
+    for row_key, who, at, comment, batch, status in got[:window]:
+        if batch == cut:
             continue
         kind, _, more = (comment or "").partition(" ")
         d = out.setdefault(batch, {"batch": batch, "at": at, "user": who, "decision": kind if kind in KINDS else "edit",
@@ -459,11 +465,12 @@ def _newer(log: list[dict], roots: dict, i: int) -> dict | None:
     return next((d for d in log[:i] if not d["undone"] and records & set(d["keys"])), None)
 
 
-def _decisions(conn, user: User, project: str, x: dict, k: str, typ: str, only: set[str] | None, limit: int = 20) -> list[dict]:
+def _decisions(conn, user: User, project: str, x: dict, k: str, typ: str, only: set[str] | None, limit: int = 20,
+               window: int | None = WINDOW) -> list[dict]:
     """`_log`'s newest `limit` decisions with the records' names: `objects` ({key, title}: the records it names), for
     a split also `out` (the records taken out) and `of` (the object they were taken out of), and `blocked` (in force
     under a newer decision: `_newer`, as an index into the answer, else None). `only`: those naming one of these keys."""
-    log = _log(conn, user, project, x)
+    log = _log(project, table(x["table"]), window)
     roots = _roots(_state(project, table(x["table"]), model.lake_columns(project)))
     kept = [(i, d) for i, d in enumerate(log) if only is None or only & set(d["keys"])][:limit]
     names = _titles(project, x, k, typ, [v for _, d in kept for v in d["keys"]] + [v for i, d in kept if not d["undone"]
@@ -497,20 +504,36 @@ def kept(project: str, t: str) -> dict | None:
     return next((x for x in _objects(project) if "resolve" in x and table(x["table"]) == t), None) if t.startswith("same_as_") else None
 
 
-def undo_words(conn, user: User, project: str, t: str, batch: str) -> tuple[str, str | None] | None:
-    """For a table named same_as_… (kept for decisions, whether or not a type resolves through it now): (what undoing
-    batch `batch` takes back, in the person's words; the newer decision to undo first, in words, or None: `_newer`).
-    writeback.undo_edits asks with the first and refuses with the second. None for any other table."""
-    if not t.startswith("same_as_"):
+def undo_words(conn, user: User, project: str, t: str, batch: str) -> tuple[str, str | None, str | None] | None:
+    """For a table that holds decisions (named same_as_…, with rows decide_same wrote), whether or not a type resolves
+    through it now: (what undoing batch `batch` takes back, in the person's words; the newer decision to undo first, in
+    words, or None: `_newer`; why it can't be undone at all now, or None). writeback.undo_edits asks with the first and
+    refuses with the others. Fail closed: read from the whole log, never a window of it, and a batch that can't be
+    checked is not undone. None for any other table (one of that name that never held a decision too)."""
+    if not t.startswith("same_as_") or not (log := _log(project, t, None)):
         return None
-    if (x := kept(project, t)) is None:
-        return "a decision about which records are the same one", None
+    if (x := kept(project, t)) is None:  # the newest-first rule needs the type: nothing is undone without it
+        return "a decision about which records are the same one", None, (
+            "These decisions belong to a type whose matching rules were removed: put the rules back first, then undo."
+            f" (For a developer: `resolve` on the object type over table '{t[8:]}' in model/ontology.json.)")
     cols, one = model.lake_columns(project), x["name"].lower()
     k = (ontology._keys(model._read(project, "model.json")).get(x["table"]) or [None])[0]
-    ds = _decisions(conn, user, project, x, k, cols[x["table"]][k], None, 1000) if k in cols.get(x["table"], {}) else []
-    if (d := next((d for d in ds if d["batch"] == batch), None)) is None:
-        return f"a decision about which {x['plural'].lower()} are the same one", None
-    return _words(d, one), d["blocked"] and _words(d["blocked"], one)
+    ds = _decisions(conn, user, project, x, k, cols[x["table"]][k], None, len(log), None) if k in cols.get(x["table"], {}) else []
+    if (d := next((d for d in ds if d["batch"] == batch), None)) is None:  # not a decision's batch, or the type's key is gone
+        return f"a decision about which {x['plural'].lower()} are the same one", None, (
+            f"This isn't a decision about {x['plural'].lower()} that can be undone: take one of those listed under Decided.")
+    return _words(d, one), d["blocked"] and _words(d["blocked"], one), None
+
+
+def unsound(state: dict) -> str | None:
+    """Why the decisions `state` ({(a, b): same}) can't stand, or None: a record of two objects at once, or records
+    chained deeper than the views follow. decide_same and an undo's transaction both refuse such a state."""
+    below = [b for (a, b), yes in state.items() if yes and a != b]
+    if len(below) > len(set(below)):
+        return "a record would be in two objects at once"
+    if None in _roots(state, True).values():
+        return f"records would be merged group by group more than {DEPTH} times on top of each other"
+    return None
 
 
 @action(Role.editor)
@@ -651,7 +674,7 @@ def decide_same(conn, user: User, args: Decide) -> dict:
         # never against an earlier "not the same": between any two records that would end in one group
         if no := next(((a, b) for (a, b), yes in state.items() if not yes and top(a) != top(b) and {top(a), top(b)} <= set(tops)), None):
             names |= {v: n[0] for v, n in _titles(p, x, k, typ, no, user.id).items()}
-            took = next((d["decision"] == "split" for d in _log(conn, user, p, x) if not d["undone"] and no in d["rows"]), False)
+            took = next((d["decision"] == "split" for d in _log(p, s, None) if not d["undone"] and no in d["rows"]), False)
             raise ActionFailed(409, (f"{said(no[1:])} was taken out of {said(no[:1])}, so " if took else "")
                                     + f"{said(no[:1])} and {said(no[1:])} were marked as not the same {one}, and this would make them one. "
                                     + ("Undo the take-out first (under Decided)" if took else "Undo that decision first (under Decided)")

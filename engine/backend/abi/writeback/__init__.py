@@ -544,6 +544,8 @@ def undo_edits(conn, user: User, args: Proposal) -> dict:
             raise ActionFailed(409, f"A newer decision builds on this one: undo “{decisions[1]}” first.")
         if actions.needs_click():  # anyone but the person's own click asks them, in their words: an agent's call the
             actions.require_confirmation(f"Undo: {decisions[0]}.")  # harness replays over REST (X-Abi-Confirm) too
+        if decisions[2]:  # it can't be checked against the newer decisions (the type's rules are gone): nothing is undone
+            raise ActionFailed(409, decisions[2])
     elif actions.by_agent() or actions._call.get((None,) * 4)[3]:  # WB-9: an agent changes data only after the user's click
         actions.require_confirmation(f"Undo edit batch {args.batch} of '{t}'.")  # (also when the harness replays its call over REST)
 
@@ -551,13 +553,14 @@ def undo_edits(conn, user: User, args: Proposal) -> dict:
         if t not in _logs(cur) or not cur.execute(f"UPDATE lake.edits.{_q(t)} SET status = 'undone' WHERE batch_id = ?"
                                                   " AND status = 'active'", [args.batch]).fetchone()[0]:
             raise ActionFailed(404, f"No applied edit batch {args.batch} on '{t}'.")
-        # the last defence: a record is never a record of two objects (the transaction rolls back)
-        two = None
+        # the last defence: never a record of two objects, never a chain deeper than the views follow (the transaction rolls back)
+        why = None
         if decisions and (sql := effective_sql(cur, t)):
             with contextlib.suppress(duckdb.BinderException):  # a table of that name with other columns: nothing to check
-                two = cur.execute(f'SELECT 1 FROM ({sql}) WHERE "same" AND a <> b GROUP BY b HAVING count(*) > 1 LIMIT 1').fetchone()
-        if two:
-            raise ActionFailed(409, "Undoing this would put a record into two objects at once: undo the newer decisions about it first.")
+                why = same.unsound({(a, b): yes for a, b, yes in cur.execute(
+                    f'SELECT CAST(a AS VARCHAR), CAST(b AS VARCHAR), "same" FROM ({sql})').fetchall()})
+        if why:
+            raise ActionFailed(409, f"Undoing this isn't possible now: {why}. Undo the newer decisions about these records first.")
 
     snap = storage._commit(con, run, user.name, f"undo edit batch {args.batch} of {t}")
     review(args.project, t)

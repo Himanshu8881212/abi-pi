@@ -126,6 +126,20 @@ for i in range(5):
         time.sleep(2)
 print(" ".join(sorted(semantic._columns_of(storage.lake(P).cursor(), "query"))))
 """
+# the decisions log read whole and through a small window, and what an undo of the oldest decision would say
+WINDOWED = r"""
+import json, sys
+import abi.app  # noqa: F401
+from abi import db, security
+from abi.semantic import same
+a = json.loads(sys.stdin.read())
+full, cut = same._log(a["project"], a["table"], None), same._log(a["project"], a["table"], a["window"])
+with db.connect() as c:
+    u = security.user(c, c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"])
+    words = same.undo_words(c, u, a["project"], a["table"], full[-1]["batch"])
+show = lambda log: [[d["batch"], sorted(d["rows"])] for d in log]
+print(json.dumps({"full": show(full), "cut": show(cut), "oldest": words, "default": same.WINDOW}))
+"""
 CONTACTS = """contact_id,name,phone
 1,Kim,12345678
 2,Kim A,+45 12345678
@@ -791,6 +805,56 @@ def test_er_undo_stays_a_persons_without_resolve(er):
     finally:
         sure("save_ontology", project=P, ontology=ONTO)
     assert stored() == was and by("revenue")[120] == 15 and by("revenue")[121] == 16, "back with `resolve`: still taken out"
+
+
+def test_er_undo_fails_closed(er):
+    """An undo that can't be checked against the newer decisions is not done. (1) With `resolve` taken off the type
+    (through import_project) the person's own undo of a take-out is refused with what to do, and nothing changes; with
+    the rules back it works by the normal rule. A table of that name that never held a decision keeps the ordinary
+    undo. (2) Decided reads a window of the log and never half a decision; an undo reads all of it, so the oldest
+    decision is still named and still waits for the newer one."""
+    import io
+    import zipfile
+
+    import transfer
+
+    decide("same", 120, 121)
+    out = decide("split", 121)
+    was = stored()
+    z = zipfile.ZipFile(io.BytesIO(transfer.export(P)))
+    bundle = {n.removeprefix("abi/"): json.loads(z.read(n)) if n.endswith(".json") else z.read(n).decode() for n in z.namelist() if n.startswith("abi/")}
+    rules = bundle["model/ontology.json"]
+    assert rules["objects"][0]["resolve"] == RESOLVE
+    sure("import_project", project=P, bundle={**bundle, "model/ontology.json": {**rules, "objects": [
+        {k: v for k, v in x.items() if k != "resolve"} for x in rules["objects"]]}})
+    try:
+        assert "resolve" not in call("ontology")["objects"][0]
+        said = refused(out["batch"])
+        assert said.startswith("These decisions belong to a type whose matching rules were removed: put the rules back first, then undo.")
+        assert "`resolve` on the object type over table 'customers' in model/ontology.json" in said
+        call("create_input_table", table="same_as_notes", key=["id"], columns=[{"name": "id", "type": "BIGINT"}])
+        with pytest.raises(abi.ActionError) as e:  # no decision was ever kept there: the ordinary undo answers
+            call("undo_edits", table="same_as_notes", batch="0" * 32)
+        assert e.value.status == 404 and "No applied edit batch" in e.value.body["message"]
+        sure("delete_table", project=P, table="same_as_notes")
+    finally:
+        sure("import_project", project=P, bundle=bundle)
+    assert stored() == was and by("revenue")[120] == 15, "the rules are back and the take-out still stands"
+    call("undo_edits", table=S, batch=out["batch"])
+    assert by("revenue")[120] == 31, "and now it is undone, by the normal rule"
+    # (2) three more decisions, read through a window of 3 log rows (each has 2)
+    decide("same", 103, 104)
+    decide("same", 109, 110)
+    decide("same", 103, 109)
+    r = engine(WINDOWED, timeout=120, stdin=json.dumps({"project": P, "table": S, "window": 3}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    got = json.loads(r.stdout.splitlines()[-1])
+    assert got["default"] == 1000 and len(got["full"]) >= 5 and all(len(rows) == 1 for _, rows in got["full"][:3])
+    assert got["cut"] == got["full"][:1], "the decision the window cuts in two is left out whole"
+    oldest = got["full"][-1][0]
+    assert oldest not in [b for b, _ in got["cut"]] and got["oldest"][0].endswith("the same customer") and got["oldest"][2] is None
+    first = next(b for b, rows in got["full"] if rows == [["103", "104"]])
+    assert refused(first) == "A newer decision builds on this one: undo “Bäckerei Müller and Kaffee Kontor are the same customer” first."
 
 
 def test_er_phone_conflicting_keys_and_production(tmp_path):

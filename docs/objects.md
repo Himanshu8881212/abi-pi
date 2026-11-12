@@ -249,8 +249,9 @@ records are the same one; a person decides. The example is a `customers` table k
   every other write-back, load and step into it is refused, Data › Edits doesn't offer it, a flow can't undo a
   decision and an agent's undo asks the person. Undo goes newest first per customer: a decision is undone once no
   newer decision in force is about the same records or the customers they are in now ("A newer decision builds on
-  this one: undo … first"); until then Decided shows it without the Undo button. Decided reads the newest 1,000
-  history entries: older decisions stay in force but are no longer listed.
+  this one: undo … first"); until then Decided shows it without the Undo button. Decided lists from the newest 1,000
+  history entries; older decisions stay in force and an undo still checks all of them. Decisions are undone only
+  while the type has its `resolve` rules: with the rules taken off, an undo answers "put the rules back first".
 - **Not the same** holds until it is undone: the two are not proposed together again, a proposed group never contains
   both, and a merge that would make them one, directly or through other records, is refused with their names.
 - The group keeps the ID it had; when two groups merge, the lower ID stays. The ID moves to the first of the rest when
