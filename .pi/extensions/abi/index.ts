@@ -619,6 +619,8 @@ export default async function abi(pi: ExtensionAPI) {
 		// the person may have switched to Viewer while the question was open: the yes changes nothing then
 		if (await mode() === "viewer" && !READS.has(tool)) return { status: "Viewer mode: nothing changed. The person can switch to Developer in the app's top bar and ask again.", message };
 		const done = await rest(tool, input, tok);
+		// what the yes showed may have changed meanwhile: ABI then asks again (409 with a new token), which never goes to the model
+		if (done.body && typeof done.body === "object") delete done.body.confirm_token;
 		return done.status < 300 ? { result: done.body, confirmed_by_person: true } : { error: done.body };
 	}
 

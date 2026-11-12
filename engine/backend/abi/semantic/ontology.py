@@ -1002,7 +1002,7 @@ def run_object_action(conn, user: User, args: RunAction) -> dict:
         try:
             out["write"] = wr = writeback._batch(user, batch, status)
         except ActionFailed as e:  # WB-7's "changed to <value>" may quote a value hidden from you
-            if e.status == 409:
+            if e.status == 409 and not t.startswith("same_as_"):  # (a table kept for decide_same says so itself)
                 raise ActionFailed(409, f"What action type '{a['id']}' writes changed since it was read; run it again.") from None
             raise
         hide = lambda c: c is not None and c.lower() in hid  # noqa: E731  old values from the system read, as the preview masks them

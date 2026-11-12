@@ -114,21 +114,23 @@ except actions.ActionFailed as e:
 # the worker builds the query copies too; built here so the first timing reads them
 COPIES = r"""
 import sys, time
-from abi import semantic
+from abi import semantic, storage
 P = sys.stdin.read().strip()
 for i in range(5):
     try:
         semantic.build_copies(P)
         break
     except Exception:
+        if i == 4:
+            raise
         time.sleep(2)
-print("{}")
+print(" ".join(sorted(semantic._columns_of(storage.lake(P).cursor(), "query"))))
 """
 CONTACTS = """contact_id,name,phone
 1,Kim,12345678
 2,Kim A,+45 12345678
 3,Lou,030 123456
-4,Lou B,+49 30 123456
+4,Lou B,+49 (0)30 123456
 5,Max,(212) 555-0199
 6,Mia,(312) 555-0199
 """
@@ -175,6 +177,32 @@ def stored(token: str | None = None) -> list:
     with abi.as_user(token):
         rows = abi._open("GET", f"/api/projects/{P}/tables/{S}/rows?offset=0&limit=1000")[1]["rows"]
     return sorted((int(a), int(b), yes == "true") for a, b, yes in rows)
+
+
+def newest() -> str:
+    """The batch of the newest decision."""
+    return found(limit=1)[0]["decisions"][0]["batch"]
+
+
+def refused(batch: str, table: str = S) -> str:
+    """Undoing `batch` is refused (409) and nothing changes: ABI's message."""
+    was = stored() if table == S else None
+    with pytest.raises(abi.ActionError) as e:
+        call("undo_edits", table=table, batch=batch)
+    assert e.value.status == 409 and (was is None or stored() == was), e.value.body
+    return e.value.body["message"]
+
+
+def flow_fails(action: str, args: dict, why: str) -> None:
+    """A flow whose one step runs `action` fails with `why`."""
+    sure("save_flow", project=P, flow={"id": "sneak", "name": "Sneak", "enabled": False, "trigger": {"type": "manual"},
+                                       "steps": [{"id": "s", "type": "action", "action": action, "input": args}]})
+    run, end = call("run_flow", flow="sneak")["run"], time.monotonic() + 300
+    while (x := call("flow_runs", run=run)["runs"][0])["status"] in ("queued", "running"):
+        assert time.monotonic() < end, x
+        time.sleep(1)
+    sure("delete_flow", project=P, flow="sneak")
+    assert x["status"] == "failed" and why in json.dumps(x), x
 
 
 def by(measure: str, dim: str = "customers.customer_id", **q) -> dict:
@@ -492,7 +520,7 @@ def test_er_rls_hides_source_rows(er):
     # fail closed: without its relationships onto the customer nothing filters the decisions table, so they read none of it
     for c in "ab":
         sure("remove_relationship", project=P, id=f"{S}-{c}")
-    assert stored(er["token"]) == [] and len(stored()) >= 4 and vby("revenue") == rev
+    assert stored(er["token"]) == [] and len(stored()) >= 4 and vby("revenue")[104] == 20 and by("revenue")[902] == 30, "and nothing is merged without them"
     for c in "ab":
         call("add_relationship", **{"from": f"{S}.{c}", "to": "customers.customer_id"})
     assert stored(er["token"]) == [] and (103, 104, True) in stored() and vby("revenue") == rev
@@ -537,8 +565,10 @@ def test_er_different_blocks_a_merge(er):
         assert e.value.status == 409 and "“Kaffee Kontor” and “Kaffee Kontor GmbH” were marked as not the same" in e.value.body["message"], keys
     assert not [g for g in found()[1] if "109" in g], "and no proposal puts them in one group"
     assert by("revenue")[109] == 9 and by("revenue")[110] == 24
-    call("undo_edits", table=S, batch=no["batch"])
-    assert decide("same", 109, 112)["id"] == "110" and by("revenue")[110] == 33, "undone: one customer, under the ID there already"
+    # undo goes newest first: the merge of 110 and 112 is about 110 too
+    assert refused(no["batch"]) == "A newer decision builds on this one: undo “Kaffee Kontor GmbH and Kaffee-Kontor are the same customer” first."
+    [call("undo_edits", table=S, batch=b) for b in (newest(), no["batch"])]
+    assert decide("same", 109, 110, 112)["id"] == "109" and by("revenue")[109] == 33, "undone: they can be one customer"
 
 
 def test_er_undo_under_a_newer_decision(er):
@@ -549,8 +579,11 @@ def test_er_undo_under_a_newer_decision(er):
     decide("same", 109, 110)
     out = decide("split", 110)
     assert decide("same", 110, 112)["id"] == "110" and by("revenue")[110] == 24 and by("revenue")[109] == 9
-    call("undo_edits", table=S, batch=out["batch"])
-    assert {(a, b) for a, b, yes in stored() if yes} == {(109, 110), (110, 112)}, "a chain: 112 under 110 under 109"
+    # the take-out can't be undone under the newer merge of 110 (110 would be a record of 109 and the ID of its own group)
+    assert refused(out["batch"]) == "A newer decision builds on this one: undo “Kaffee Kontor GmbH and Kaffee-Kontor are the same customer” first."
+    [call("undo_edits", table=S, batch=b) for b in (newest(), out["batch"])]
+    decide("same", 110, 112)
+    assert {(a, b) for a, b, yes in stored() if yes} == {(109, 110), (109, 112)}, "in order: both are records of 109"
     rev = by("revenue")
     assert rev[109] == 33 and 110 not in rev and 112 not in rev and total("customers_n") == n - 2
     assert call("get_object", type="customer", key=[112])["key"] == [109]
@@ -642,7 +675,18 @@ def test_er_decisions_come_from_decide_same_only(er, tmp_path):
     call("create_input_table", table=t, key=["a", "b"], columns=[{"name": c, "type": ty} for c, ty in (
         ("a", "BIGINT"), ("b", "BIGINT"), ("same", "BOOLEAN"), ("note", "VARCHAR"))])
     try:
-        call("edit_cells", table=t, add=[row | {"note": "by hand"}])
+        # the name is reserved whatever the columns: by hand, as a flow's step (which would be in force with no click)
+        # and through a proposal, nothing gets a row into it; the comment a caller writes proves nothing
+        hand = {"table": t, "add": [row | {"note": "by hand"}], "comment": "same"}
+        with pytest.raises(abi.ActionError) as e:
+            call("edit_cells", **hand)
+        assert e.value.status == 409 and "Tables named same_as_… are kept for decisions" in e.value.body["message"] and "rename the table" in e.value.body["message"]
+        assert "Possible duplicates" not in e.value.body["message"]
+        flow_fails("edit_cells", hand, "Tables named same_as_")
+        with pytest.raises(abi.ActionError) as e:
+            call("approve_edit", table=t, batch="0" * 32)
+        assert e.value.status == 409 and "Tables named same_as_" in e.value.body["message"]
+        assert abi._open("GET", f"/api/projects/{P}/tables/{t}/rows?offset=0&limit=10")[1]["total"] == 0
         with pytest.raises(abi.ActionError) as e:
             call("save_ontology", ontology=with_resolve)
         [err] = [x for x in e.value.body["errors"] if x["path"] == "$.objects[1].resolve"]
@@ -661,9 +705,10 @@ def test_er_undo_of_an_older_decision(er):
     decide("same", 103, 104)
     cd = decide("same", 109, 110)
     assert decide("same", 103, 109)["id"] == "103" and by("revenue")[103] == 50
-    call("undo_edits", table=S, batch=cd["batch"])
+    assert refused(cd["batch"]) == "A newer decision builds on this one: undo “Bäckerei Müller and Kaffee Kontor are the same customer” first."
+    [call("undo_edits", table=S, batch=b) for b in (newest(), cd["batch"])]
     rev = by("revenue")
-    assert rev[103] == 39 and rev[110] == 11 and 109 not in rev, "(A) 110 is its own customer again; 109 stays"
+    assert rev[103] == 30 and rev[110] == 11 and rev[109] == 9, "(A) in order: the group merge, then 109 and 110"
     # (B)
     first = decide("same", 120, 121)
     decide("same", 120, 107)
@@ -688,6 +733,64 @@ def test_er_undo_of_an_older_decision(er):
     call("undo_edits", table=S, batch=merge["batch"])
     assert by("revenue")[101] == 150 and not [r for r in stored() if 902 in r[:2]]
     assert "same_as" not in json.dumps(call("inbox")), "no feed line about the decisions table"
+
+
+def test_er_undo_goes_newest_first(er):
+    """One rule: a decision is undone only when no newer decision in force is about its records or the customers they
+    are in now; the refusal names the newest such decision, so following it always ends. (1) two groups merged, then a
+    record taken out (which rewrites the group): the group merge can't be undone before the take-out. (2) a record
+    taken out and then merged elsewhere, as a record of another customer or as the one others are records of: the
+    take-out can't be undone before that merge. Decided marks such a decision as blocked. No record ever has two
+    customers above it."""
+    one_parent = lambda: len({b for _, b, yes in stored() if yes}) == len([b for _, b, yes in stored() if yes])  # noqa: E731
+    decide("same", 103, 104)
+    decide("same", 109, 110)
+    group = decide("same", 103, 109)
+    take = decide("split", 104)
+    assert by("revenue")[103] == 30 and by("revenue")[104] == 20 and one_parent()
+    assert refused(group["batch"]) == "A newer decision builds on this one: undo “Bäckerei Müler taken out of Bäckerei Müller” first."
+    [d] = [d for d in found()[0]["decisions"] if d["batch"] == group["batch"]]
+    assert d["blocked"] is True and not d["undone"], "in force, and not to be undone yet"
+    [call("undo_edits", table=S, batch=b) for b in (take["batch"], group["batch"])]
+    rev = by("revenue")
+    assert rev[103] == 30 and rev[109] == 20 and 104 not in rev and 110 not in rev and one_parent(), "in order: the two first groups again"
+    # (2) 121 is taken out of 120, then becomes a record of 107
+    decide("same", 120, 121)
+    out = decide("split", 121)
+    assert decide("same", 121, 107)["id"] == "107"
+    assert refused(out["batch"]) == "A newer decision builds on this one: undo “Solo Ltd and Teehaus Frankfurt are the same customer” first."
+    assert one_parent() and by("revenue")[107] == 23 and by("revenue")[120] == 15
+    call("undo_edits", table=S, batch=newest())
+    # ... or the one a South customer is a record of
+    assert decide("same", 121, 905)["id"] == "121"
+    assert refused(out["batch"]) == "A newer decision builds on this one: undo “Teehaus Frankfurt and Nordwind AG are the same customer” first."
+    [call("undo_edits", table=S, batch=b) for b in (newest(), out["batch"])]
+    assert by("revenue")[120] == 31 and by("revenue")[905] == 5 and one_parent()
+    with pytest.raises(abi.ActionError) as e:  # a key that isn't one of the column's values is a key no customer has
+        decide("same", 120, "abc")
+    assert e.value.status == 404 and "No customer with key abc" in e.value.body["message"]
+
+
+def test_er_undo_stays_a_persons_without_resolve(er):
+    """With `resolve` taken off the type, its decisions table is still kept for decisions: a flow's step can't undo a
+    take-out (which would merge again once `resolve` is back), a replayed agent call is asked, and nothing writes it."""
+    decide("same", 120, 121)
+    out = decide("split", 121)
+    was = stored()
+    sure("save_ontology", project=P, ontology={**ONTO, "objects": [{k: v for k, v in ONTO["objects"][0].items() if k != "resolve"}, ONTO["objects"][1]]})
+    try:
+        flow_fails("undo_edits", {"table": S, "batch": out["batch"]}, "a flow can't take a decision back")
+        with pytest.raises(abi.ActionError) as e:
+            abi.call("undo_edits", confirm="ask", project=P, table=S, batch=out["batch"])
+        assert e.value.status == 409 and e.value.body["confirm_token"]
+        assert e.value.body["message"] == "Undo: a decision about which records are the same one. Confirm to proceed."
+        with pytest.raises(abi.ActionError) as e:
+            call("edit_cells", table=S, add=[{"a": 107, "b": 108, "same": True}], comment="same")
+        assert e.value.status == 409 and "Tables named same_as_" in e.value.body["message"]
+        assert stored() == was
+    finally:
+        sure("save_ontology", project=P, ontology=ONTO)
+    assert stored() == was and by("revenue")[120] == 15 and by("revenue")[121] == 16, "back with `resolve`: still taken out"
 
 
 def test_er_phone_conflicting_keys_and_production(tmp_path):
@@ -800,6 +903,10 @@ def test_duplicates_card_in_the_app(er, tmp_path):
         assert "Made of 2 records" in obj["text"] and "ACME Gmbh · erp" in obj["text"] and "Acme GmbH · crm" in obj["text"]
         assert obj["buttons"].count("Take out") == 2 and "Undo" in obj["buttons"] and obj["wide"] is False
         assert not re.search(r"same_as|customer_id|\b902\b", obj["text"])
+        old = drive(owner, tmp_path, [["show", okey("customer", 902)], ["wait", "main .okv"], ["until", "document.querySelectorAll('main .pick tr[data-r]').length >= 3"],
+                                      ["text", "name", ".pghead h1"], ["get", "orders", "document.querySelectorAll('main .pick tr[data-r]').length"],
+                                      ["all", "amounts", "main .pick tr[data-r] td:last-child"]])
+        assert (old["name"], old["orders"], sorted(old["amounts"])) == ("Acme GmbH", 3, ["100", "30", "50"]), "the merged record's key: the customer's page, with the orders of both"
         small = drive(owner, tmp_path, [page[0], page[1], ["wait", "main .kpis .kpi"], ["get", "wide", wide], ["get", "text", text],
                                         ["shot", str(tmp_path / "customer-390.png")]], width=390)
         assert small["wide"] is False and "180" in small["text"], "the merged customer's revenue, on a phone too"
@@ -859,6 +966,7 @@ def test_er_blocking_scales(tmp_path, record_property):
         # after that merge is undone (as before again). Each is a first, uncached read of its snapshot
         built = engine(COPIES, timeout=600, stdin=BIG)
         assert built.returncode == 0, built.stderr[-2000:]
+        assert [c for c in built.stdout.split() if c.startswith("orders__")], f"no query copy of orders was built: {built.stdout[-500:]}"
 
         def timed() -> tuple[float, dict]:
             t0 = time.perf_counter()

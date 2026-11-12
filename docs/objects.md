@@ -230,7 +230,7 @@ records are the same one; a person decides. The example is a `customers` table k
 ```
 
 - `exact` columns are compared after normalising: `id` keeps letters and digits (a VAT number), `email` trims and
-  lower-cases. Two `phone` values are the same when, without spaces, signs and leading zeros, the shorter one (7
+  lower-cases. Two `phone` values are the same when, without spaces, signs, "(0)" and leading zeros, the shorter one (7
   digits or more) ends the longer one: a number with and without its country code. `fuzzy` columns are text: `threshold` is how alike two values must be,
   from 0 to 1 (`method`: `jaro_winkler`, the default, or `levenshtein`).
 - Two records are proposed as the same when an exact column is equal, or when every fuzzy column reaches its threshold
@@ -247,12 +247,15 @@ records are the same one; a person decides. The example is a `customers` table k
 - Every decision is listed under **Decided** with who and when, and **Undo** takes it back. Decisions are kept in the
   input table `same_as_customers` (hidden from the model; one logged edit batch each). Only `decide_same` writes it:
   every other write-back, load and step into it is refused, Data › Edits doesn't offer it, a flow can't undo a
-  decision and an agent's undo asks the person. A decision that a newer one builds on is undone after that one
-  ("A newer decision builds on this one: undo … first").
+  decision and an agent's undo asks the person. Undo goes newest first per customer: a decision is undone once no
+  newer decision in force is about the same records or the customers they are in now ("A newer decision builds on
+  this one: undo … first"); until then Decided shows it without the Undo button. Decided reads the newest 1,000
+  history entries: older decisions stay in force but are no longer listed.
 - **Not the same** holds until it is undone: the two are not proposed together again, a proposed group never contains
   both, and a merge that would make them one, directly or through other records, is refused with their names.
-- The group's ID stays the key of its first record while that record is in it. It moves to the first of the rest when
-  that record is taken out, and the group shows under the first remaining record when it disappears from the source.
+- The group keeps the ID it had; when two groups merge, the lower ID stays. The ID moves to the first of the rest when
+  the record that carries it is taken out, and the group shows under the first remaining record when that record
+  disappears from the source.
 - A table with one row per record (predictions, an input table keyed like the type) shows the row of the record the
   group shows under. Write-back (the Data grid, an action's write) edits a source record, never the group.
 - A merged customer shows the values of the record it shows under. The other records' own values (another spelling of
@@ -274,7 +277,8 @@ records are the same one; a person decides. The example is a `customers` table k
   1,000,000 orders, sales by postcode, first read of a snapshot, query copies built): 0.18 s before any decision,
   0.39 to 0.44 s with one merge in force (about twice as long), 0.20 to 0.22 s after it was undone
   (`test_er_blocking_scales` records it on every run). After the last merge is undone, queries stop reading through
-  the views at once; the fast copies are used again once the background worker has rebuilt them. Bigger tables and
+  the views at once. The fast copies are used again at once when they are still there; the background worker (it
+  checks every minute) drops the copy of a table read through the views and builds it again after the undo. Bigger tables and
   wider dimensions were not measured.
 - Wrong references are refused when the ontology is saved, with the file, the field and the fix, for example
   `model/ontology.json $.objects[0].resolve.fuzzy[0].column: Object type 'customer': table 'customers' has no column 'nam'.`

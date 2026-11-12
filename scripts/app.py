@@ -1671,7 +1671,7 @@ function sameCard(box,T,key){if(!T.resolve||MODE==='viewer'||myRank()<2)return;c
   line=(lead,os)=>{const d=h('div','txt');d.append(lead);os.forEach((o,i)=>d.append(i?(i===os.length-1?' and ':', '):' ',nm(o)));return d},
   go=async(args,done,action)=>{try{await api(action||'decide_same',args);toast(done);show(CUR)}catch(e){toast(e.message,!/^You declined/.test(e.message))}},
   doubt=p=>p.why.some(w=>w.startsWith('different '));
- api('find_same',{type:T.id,...(key?{key:key[0]}:{})}).then(r=>{if(!c.isConnected)return;let pri=1;
+ api('find_same',{type:T.id,...(key?{key:key[0]}:{})}).then(r=>{if(!c.isConnected)return;let pri=key?0:1;  // an object's page has its own primary action
   r.groups.forEach(g=>{const d=h('div','item'),a=h('div','row acts'),n=g.objects.length,by=Object.fromEntries(g.objects.map(o=>[o.key,o])),keys=g.objects.map(o=>o.key),unsure=g.pairs.some(doubt);
    d.append(line(`These ${n} ${many} look like the same one:`,g.objects));
    // what speaks against a group is always shown, and such a group never carries the page's one primary button
@@ -1688,7 +1688,7 @@ function sameCard(box,T,key){if(!T.resolve||MODE==='viewer'||myRank()<2)return;c
    r.decisions.slice(0,key?20:5).forEach(x=>{const d=h('div','item');
     d.append(h('div','file',[cell(String(x.at).replace(' ','T')+'Z'),x.user,x.undone?'undone':''].filter(Boolean).join(' · ')),
      x.out&&x.of?line(`Taken out of ${x.of.title??'it'}:`,x.out):line({same:'The same one:',different:'Not the same:',split:'Taken apart:'}[x.decision]||'Changed by hand:',x.objects));
-    if(!x.undone){const a=h('div','row acts');a.append(btn('Undo',()=>go({table:r.table,batch:x.batch},'Taken back.','undo_edits')));d.append(a)}dc.append(d)})}}).catch(e=>{if(c.isConnected){c.append(h('p','empty',e.message));c.hidden=false}})}
+    if(!x.undone&&!x.blocked){const a=h('div','row acts');a.append(btn('Undo',()=>go({table:r.table,batch:x.batch},'Taken back.','undo_edits')));d.append(a)}dc.append(d)})}}).catch(e=>{if(c.isConnected){c.append(h('p','empty',e.message));c.hidden=false}})}
 // Data Model › Objects: the types as boxes and their connections as named lines with how many meet how many. A phone has
 // no canvas: it reads the picture ABI draws from the project's files (render.sections) and each type as a card
 function objectsHome(box){objBar(box,'objects');const L=(D.ontology.links||[]).filter(l=>otype(l.from)&&otype(l.to)),ids=OT().map(t=>t.id);
@@ -1732,7 +1732,8 @@ async function objectPage(box,T,key){const bar=h('div','row bar lead');bar.appen
     fc=actionForm(a,()=>key,async r=>{show(CUR);return actDone(a,r)});act(fc,'Cancel',shut);tb.hidden=true;box.querySelector('.pghead').after(fc);fc.querySelector('.fld input,.fld select,.fld textarea,.acts .btn')?.focus()};
    if(i){b.setAttribute('role','menuitem');more(tb).append(b)}else tb.append(b)});box.append(tb)}
  let o;try{o=await api('get_object',{type:T.id,key})}catch(e){if(box.isConnected){tb?.remove();eb.remove();box.append(emptyBox('lock','Not available',e.message,[`Open ${T.plural.toLowerCase()}`,async()=>show('obj:'+T.id)]))}return}
- if(!box.isConnected)return;if(COPY())pubNote(box);const title=String(o.title??key.join(' · '));box.querySelector('.pghead h1').textContent=title;$('#pgname').textContent=title;document.title=title+' · '+D.project;if(PAGES[CUR])PAGES[CUR][0]=title;setTimeout(ctx);
+ if(!box.isConnected)return;key=o.key;  // 1.2.6 M11: a merged record's key opens the object it became: everything below is that object's
+ if(COPY())pubNote(box);const title=String(o.title??key.join(' · '));box.querySelector('.pghead h1').textContent=title;$('#pgname').textContent=title;document.title=title+' · '+D.project;if(PAGES[CUR])PAGES[CUR][0]=title;setTimeout(ctx);
  if(T.description&&T.description!==MASK)tt.append(h('p','',T.description));
  // the columns that point at another object aren't properties here: that object is in its connection's section below
  const g=h('div','cards'),pc=card('Properties'),kv=h('div','kv okv'),R=D.model?.relationships||[],there=new Set((D.ontology.links||[]).filter(l=>l.via.length===1&&[l.from,l.to].includes(T.id)).flatMap(l=>R.find(r=>r.id===l.via[0]&&r.from.table===T.table)?.from.columns||[]));

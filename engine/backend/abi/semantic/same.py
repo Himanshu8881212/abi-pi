@@ -45,6 +45,7 @@ log = logging.getLogger(__name__)
 BLOCK = 200  # rows sharing one block value past which they aren't compared with each other (an empty-like postcode, "unknown")
 LETTERS = 4  # first letters of the first fuzzy column that make a block
 PAIRS = 20_000  # proposed pairs read at most
+MARK = "decide_same"  # reviewed_by of a decision's log rows: writeback._batch sets it for decide_same only, no input carries it
 DEPTH = 16  # same-rows gone up from a record to its group's ID (1 unless an older decision was undone under a newer one)
 _active: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # lake connection -> {(snapshot, same-as table): it merges a record}
 _built: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # lake connection -> {schema names built}
@@ -79,8 +80,13 @@ def _merges(con, snap: int, s: str) -> bool:
         semantic._effective(cur, con, snap)
         for k in [k for k in seen if k[0] < snap]:  # older snapshots never come back
             del seen[k]
-        seen[snap, s] = (cur.execute(f"SELECT 1 FROM lake.model.{_q(s)} LIMIT 1").fetchone() is None
-                         and cur.execute(f'SELECT 1 FROM {_q(s)} WHERE "same" LIMIT 1').fetchone() is not None)
+        try:
+            seen[snap, s] = (cur.execute(f"SELECT 1 FROM lake.model.{_q(s)} LIMIT 1").fetchone() is None
+                             and cur.execute(f"SELECT 1 FROM lake.edits.{_q(s)} WHERE status = 'active' AND reviewed_by IS DISTINCT FROM"
+                                             f" '{MARK}' LIMIT 1").fetchone() is None  # every row in force is decide_same's
+                             and cur.execute(f'SELECT 1 FROM {_q(s)} WHERE "same" LIMIT 1').fetchone() is not None)
+        except duckdb.Error:  # no edit log: no decision
+            seen[snap, s] = False
     return seen[snap, s]
 
 
@@ -101,13 +107,17 @@ def types(project: str, cols: dict, con, snap: int) -> dict[str, tuple[dict, str
     if not any("resolve" in x for x in o):
         return {}
     try:
-        keys = ontology._keys(actions.memo(("same.model", project), lambda: model._read(project, "model.json")))
+        mj = actions.memo(("same.model", project), lambda: model._read(project, "model.json"))
     except ValueError:
         return {}
+    keys = ontology._keys(mj)
 
     def ok(t: str) -> bool:
         c, typ = cols.get(table(t)) or {}, cols[t].get(keys[t][0])
-        return (rls.same_as(table(t), c) and c["a"] == c["b"] == typ and c["same"] == "BOOLEAN"
+        # the relationships `_ensure` wrote: a key column changed since no longer reads the old decisions
+        onto = {r["from"]["columns"][0] for r in mj.get("relationships", []) if r["from"]["table"] == table(t) and r["to"] == {
+            "table": t, "columns": keys[t]} and len(r["from"]["columns"]) == 1}
+        return (rls.same_as(table(t), c) and c["a"] == c["b"] == typ and c["same"] == "BOOLEAN" and onto == {"a", "b"}
                 and actions.memo(("same.input", project, t), lambda: _made_by_us(project, table(t))) and _merges(con, snap, table(t)))
     return {t: (x, keys[t][0]) for x in o if "resolve" in x and len(keys.get(t := x["table"]) or []) == 1 and t in cols and ok(t)}
 
@@ -238,9 +248,8 @@ def blockers(project: str, files: dict) -> list[dict]:
                 cur = storage.lake(project).cursor()
                 if cur.execute(f"SELECT 1 FROM lake.model.{_q(s)} LIMIT 1").fetchone():
                     why = "holds loaded rows"
-                elif cur.execute(f"SELECT 1 FROM lake.edits.{_q(s)} WHERE split_part(coalesce(comment, ''), ' ', 1) NOT IN"
-                                 f" ({', '.join(repr(k) for k in KINDS)}) LIMIT 1").fetchone():
-                    why = "holds edits that are no decisions (made by hand)"
+                elif cur.execute(f"SELECT 1 FROM lake.edits.{_q(s)} WHERE reviewed_by IS DISTINCT FROM '{MARK}' LIMIT 1").fetchone():
+                    why = "holds edits that are no decisions (not made by decide_same)"
             except (duckdb.Error, ActionFailed):  # no lake, no such table or no edits yet: nothing in the way
                 pass
         if why:
@@ -262,19 +271,20 @@ def _state(project: str, s: str, cols: dict) -> dict[tuple[str, str], bool]:
     return {(a, b): yes for a, b, yes in _read(project, f'SELECT CAST(a AS VARCHAR), CAST(b AS VARCHAR), "same" FROM {_q(s)}', {"same_as": s}, None)}
 
 
-def _roots(state: dict) -> dict[str, str]:
-    """{record: its group's ID}, going up the same-rows to the top as `_group` does."""
+def _roots(state: dict, cap: bool = False) -> dict[str, str]:
+    """{record: its group's ID}, going up the same-rows to the top as `_group` does. `cap`: None for a record more
+    than DEPTH - 1 rows under its top (deeper than the views follow)."""
     up: dict[str, str] = {}
     for (a, b), yes in state.items():
         if yes and a != b:
             up[b] = min(up.get(b, a), a, key=_order)
 
-    def top(v: str) -> str:
+    def top(v: str) -> str | None:
         for _ in range(DEPTH):
             if v not in up:
-                break
+                return v
             v = up[v]
-        return v
+        return None if cap and v in up else v
     return {b: top(b) for b in up}
 
 
@@ -306,10 +316,10 @@ def _norm(c: str, how: str) -> str:
     if how == "email":
         e = f"lower(trim({v}))"
     elif how == "phone":  # the block only: the last 7 digits of the number as dialled, which every pair `_sql` calls the same shares
-        d = f"regexp_replace(regexp_replace({v}, '[^0-9]', '', 'g'), '^0+', '')"
+        d = f"regexp_replace(regexp_replace(replace({v}, '(0)', ''), '[^0-9]', '', 'g'), '^0+', '')"
         e = f"CASE WHEN length({d}) >= 7 THEN substring({d}, length({d}) - 6) END"
     elif how == "digits":  # a phone as dialled: its digits without leading zeros (00 49 30 …, 0 30 …)
-        e = f"regexp_replace(regexp_replace({v}, '[^0-9]', '', 'g'), '^0+', '')"
+        e = f"regexp_replace(regexp_replace(replace({v}, '(0)', ''), '[^0-9]', '', 'g'), '^0+', '')"
     elif how == "id":
         e = f"upper(regexp_replace(strip_accents({v}), '[^A-Za-z0-9]', '', 'g'))"
     else:  # text: lower-cased, accents and punctuation dropped, spaces single
@@ -360,7 +370,7 @@ def _sql(x: dict, k: str, typ: str, decided: bool, key) -> tuple[str, str]:
         s = _q(table(t))
         keep += f' AND (ka, kb) NOT IN (SELECT a, b FROM {s} WHERE NOT "same" UNION ALL SELECT b, a FROM {s} WHERE NOT "same")'
     if key is not None:
-        lit = rls.cast_lit(key, typ)
+        lit = "TRY_" + rls.cast_lit(key, typ)
         keep += f" AND (ka = {lit} OR kb = {lit})"
     out = ", ".join(["CAST(ka AS VARCHAR)", "CAST(kb AS VARCHAR)", "ta", "tb", *(f"q{i}" for i in range(len(ex))), *(f"d{i}" for i in range(len(ex))),
                      *(f"s{i}" for i in range(len(fz))), "n"])
@@ -403,7 +413,7 @@ def _titles(project: str, x: dict, k: str, typ: str, keys, user_id: int | None) 
         return {}
     src = _q(x["resolve"]["source"]) if "source" in x["resolve"] else "NULL"
     return {r[0]: r[1:] for r in _read(project, f"SELECT CAST({_q(k)} AS VARCHAR), CAST({_q(x['title'])} AS VARCHAR), CAST({src} AS VARCHAR)"
-                                                f" FROM {_q(x['table'])} WHERE {_q(k)} IN ({', '.join(rls.cast_lit(v, typ) for v in keys)}) ORDER BY {_q(k)}",
+                                                f" FROM {_q(x['table'])} WHERE {_q(k)} IN ({', '.join('TRY_' + rls.cast_lit(v, typ) for v in keys)}) ORDER BY {_q(k)}",
                                        {"same_as": x["id"]}, user_id, raw=True)}
 
 
@@ -422,7 +432,9 @@ def _log(conn, user: User, project: str, x: dict) -> list[dict]:
     except ActionFailed:  # no decisions table yet
         return []
     out: dict[str, dict] = {}
-    for row_key, _, _, _, _, who, at, comment, batch, status, *_ in h["entries"]:
+    for row_key, _, _, _, _, who, at, comment, batch, status, by, *_ in h["entries"]:
+        if by != MARK:  # not a decision (decide_same's rows carry the mark; nothing else writes this table)
+            continue
         kind, _, more = (comment or "").partition(" ")
         d = out.setdefault(batch, {"batch": batch, "at": at, "user": who, "decision": kind if kind in KINDS else "edit",
                                    "undone": status == "undone", "keys": [], "rows": set(), "took": []})
@@ -437,15 +449,29 @@ def _log(conn, user: User, project: str, x: dict) -> list[dict]:
     return list(out.values())
 
 
+def _newer(log: list[dict], roots: dict, i: int) -> dict | None:
+    """The newest decision in force, newer than log[i], that involves a record log[i] involves or a record of the
+    groups those are in now. While there is one, log[i] can't be undone: a write-back undo only stops its rows applying,
+    which under a newer decision about the same records changes nothing or leaves that one half done. Newest first
+    always ends."""
+    tops = {roots.get(v, v) for v in log[i]["keys"]}
+    records = set(log[i]["keys"]) | tops | {b for b, a in roots.items() if a in tops}
+    return next((d for d in log[:i] if not d["undone"] and records & set(d["keys"])), None)
+
+
 def _decisions(conn, user: User, project: str, x: dict, k: str, typ: str, only: set[str] | None, limit: int = 20) -> list[dict]:
     """`_log`'s newest `limit` decisions with the records' names: `objects` ({key, title}: the records it names), for
-    a split also `out` (the records taken out) and `of` (the object they were taken out of). `only`: those naming one
-    of these keys."""
-    kept = [d for d in _log(conn, user, project, x) if only is None or only & set(d["keys"])][:limit]
-    names = _titles(project, x, k, typ, [v for d in kept for v in d["keys"]], user.id)
+    a split also `out` (the records taken out) and `of` (the object they were taken out of), and `blocked` (in force
+    under a newer decision: `_newer`, as an index into the answer, else None). `only`: those naming one of these keys."""
+    log = _log(conn, user, project, x)
+    roots = _roots(_state(project, table(x["table"]), model.lake_columns(project)))
+    kept = [(i, d) for i, d in enumerate(log) if only is None or only & set(d["keys"])][:limit]
+    names = _titles(project, x, k, typ, [v for _, d in kept for v in d["keys"]] + [v for i, d in kept if not d["undone"]
+                                                                                    and (n := _newer(log, roots, i)) for v in n["keys"]], user.id)
     named = lambda vs: [{"key": v, "title": names[v][0]} for v in vs if v in names]  # noqa: E731
-    return [{i: v for i, v in d.items() if i not in ("keys", "took")} | {"objects": named(d["keys"])} | (
-        {"out": named([v for _, vs in d["took"] for v in vs]), "of": (named([d["took"][0][0]]) or [None])[0]} if d["took"] else {}) for d in kept]
+    full = lambda d: {i: v for i, v in d.items() if i not in ("keys", "took", "rows")} | {"objects": named(d["keys"])} | (  # noqa: E731
+        {"out": named([v for _, vs in d["took"] for v in vs]), "of": (named([d["took"][0][0]]) or [None])[0]} if d["took"] else {})
+    return [full(d) | {"blocked": None if d["undone"] or (n := _newer(log, roots, i)) is None else full(n)} for i, d in kept]
 
 
 def _words(d: dict, one: str) -> str:
@@ -472,19 +498,19 @@ def kept(project: str, t: str) -> dict | None:
 
 
 def undo_words(conn, user: User, project: str, t: str, batch: str) -> tuple[str, str | None] | None:
-    """For table `t` that keeps a type's decisions: (what undoing batch `batch` takes back, in the person's words; the
-    newest decision in force that changed a row of this one since, in words, or None). writeback.undo_edits asks with
-    the first and refuses with the second: a write-back undo only stops this batch's rows applying, so under a newer
-    decision on the same rows it would change nothing or leave that one half done. None for any other table."""
-    if (x := kept(project, t)) is None:
+    """For a table named same_as_… (kept for decisions, whether or not a type resolves through it now): (what undoing
+    batch `batch` takes back, in the person's words; the newer decision to undo first, in words, or None: `_newer`).
+    writeback.undo_edits asks with the first and refuses with the second. None for any other table."""
+    if not t.startswith("same_as_"):
         return None
+    if (x := kept(project, t)) is None:
+        return "a decision about which records are the same one", None
     cols, one = model.lake_columns(project), x["name"].lower()
     k = (ontology._keys(model._read(project, "model.json")).get(x["table"]) or [None])[0]
     ds = _decisions(conn, user, project, x, k, cols[x["table"]][k], None, 1000) if k in cols.get(x["table"], {}) else []
-    if (i := next((i for i, d in enumerate(ds) if d["batch"] == batch), None)) is None:
+    if (d := next((d for d in ds if d["batch"] == batch), None)) is None:
         return f"a decision about which {x['plural'].lower()} are the same one", None
-    newer = next((d for d in ds[:i] if not d["undone"] and d["rows"] & ds[i]["rows"]), None)
-    return _words(ds[i], one), newer and _words(newer, one)
+    return _words(d, one), d["blocked"] and _words(d["blocked"], one)
 
 
 @action(Role.editor)
@@ -545,7 +571,7 @@ def find_same(conn, user: User, args: Find) -> dict:
     elif n := _read(args.project, big, asked, user.id)[0][0]:
         out["note"] = (f"{n} value(s) are shared by more than {BLOCK} {x['plural']} each (an empty-like postcode, a very common start of a name):"
                        " those weren't compared with each other through that value. A more telling `block` column in `resolve` compares them.")
-    out["decisions"] = [{i: v for i, v in d.items() if i != "rows"} for d in _decisions(conn, user, args.project, x, k, typ, only)]
+    out["decisions"] = [d | {"blocked": d["blocked"] is not None} for d in _decisions(conn, user, args.project, x, k, typ, only)]
     # D-22: the names and each pair's evidence are quotable rows
     return out | {"columns": ["group", "name", "other name", "why"],
                   "rows": [[i + 1, titles[p["a"]], titles[p["b"]], ", ".join(p["why"])] for i, g in enumerate(shown) for p in g["pairs"]]}
@@ -634,7 +660,7 @@ def decide_same(conn, user: User, args: Decide) -> dict:
         want.update({(the, v): True for v in tops if v != the})  # one row from it to each other group's ID: a later undo of an older merge still works
         why = (f"Treat these {len(tops)} {many} as the same one: {said(tops)}. Every number then counts them once, under {said([the])}."
                + (" People reading the published version keep seeing them separately: decisions aren't published."
-                  if (git.path(p).parent / f"{p}_pub").is_dir() else ""))
+                  if (git.path(p).parent / f"{p}_pub"[:63]).is_dir() else ""))
     elif args.decision == "different":
         if len(tops) < len(keys) or len(keys) < 2:
             raise ActionFailed(409, f"Give two or more {many} that are apart. {many.capitalize()} that count as one now are taken apart with"
@@ -666,6 +692,12 @@ def decide_same(conn, user: User, args: Decide) -> dict:
     drop = [[a, b] for (a, b), yes in want.items() if yes is None and (a, b) in state]
     if not (add or edits or drop):
         raise ActionFailed(409, f"Nothing to change: these {many} are like that already.")
+    after = {ab: yes for ab, yes in (state | want).items() if yes is not None}
+    if any(sum(1 for (a, b2), yes in after.items() if yes and b2 == b and a != b) > 1 for (_, b), yes in want.items() if yes):
+        raise ActionFailed(409, f"This would put a record into two {many} at once. Undo the newer decisions about it first (under Decided).")
+    if None in _roots(after, True).values():  # deeper than the views follow: never merged silently wrong
+        raise ActionFailed(409, f"These {many} were merged group by group too many times over (more than {DEPTH} on top of each other)."
+                                " Undo the latest merges of them (under Decided) and merge the records in one step.")
     # always the person's click, an agent's call too (never automatic). The token signs the rows this changes: a
     # decision made in between asks again
     require_confirmation(why + " You can undo this.", {"change": actions.sha(json.dumps([add, [[e.key, e.value] for e in edits], drop], sort_keys=True))[:16]})
