@@ -126,10 +126,13 @@ relationship onto `cafes`) and the café type lists it as a property with a mean
 - Only project members are ever sent to, and each only when they can see that café themselves. They get their own
   rows of `data`, filtered to the café. An address in the data never becomes a recipient by itself. Anyone else is
   skipped: the run's trace (`flow_runs`) says who and why, and the flow's owner gets an Inbox message naming them and
-  what to do (add the person to the project with that email). When nobody can be reached the run ends as stopped.
+  what to do (a workspace owner adds the person under Users & access with that email, or you change their access or
+  the value). When nobody can be reached the run ends as stopped, and starts no cooldown.
 - The condition is checked with the flow owner's access. A recipient who can see the café but not all of its rows
   (some of its orders, say) still learns that the café met the condition; the rows they get are only their own.
-- `{{ data.trigger.recipients }}` is those members' account emails. The first email to a domain the project hasn't
+- `{{ data.trigger.recipients }}` is those members' account emails. When none of them has one, the email step's
+  `when` (as above) skips it; without that `when` the run stops at the step, with the reason, and later steps don't
+  run. The first email to a domain the project hasn't
   mailed before still waits for a person: the email step fails with "needs confirmation" and says what to do. To
   confirm, send one email to an address of that domain yourself (ask the agent, or `send_email`) and confirm ABI's
   question; the next alert then goes out.
@@ -138,8 +141,8 @@ relationship onto `cafes`) and the café type lists it as a property with a mean
   `report_snapshot`, `semantic_query`, `get_object`, `list_objects` and `visual_data`. Saving refuses everything else
   with the file, the field and the fix: a Slack, Teams or webhook channel, `notify`, an approval, a tool step,
   `run_flow`, a report, docs or tool result attached to a send, an "answer changed" check, and an object type on a
-  live table. Inside the run a published tool that sends a request outside is refused too (an agent's tool call as
-  well). It can't be run by hand. A failed run is reported in the owner's own Inbox, not in the project's alerts.
+  live table (its own, a one-to-one property's or the recipients link's). Inside the run every published API tool is
+  refused too, reading ones as well (an agent's tool call included). It can't be run by hand. A failed run is reported in the owner's own Inbox, not in the project's alerts.
 - In the app, **Monitor › New monitor** makes the same flow: choose "each café" under Check and who it is for under
   Send to. On the Monitor card and in the Inbox, a café's name opens its page.
 

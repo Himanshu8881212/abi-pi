@@ -9,5 +9,7 @@
 - An alert per object (one per café): add `"per": <object type id>` to a data_condition trigger. Each object whose row
   starts to hold gets its own run with `{{ data.trigger.title }}` and `{{ data.trigger.object.<column> }}`; its inbox
   post and emails reach only project members who can see that object. `"recipients": {"property": <an email or person
-  property>, "link"?: <link id>}` sends to the people the object names; use `"to": "{{ data.trigger.recipients }}"`.
+  property>, "link"?: <link id>}` sends to the people the object names; use `"to": "{{ data.trigger.recipients }}"` with
+  `"when": {"value": "{{ data.trigger.recipients }}", "op": "!=", "to": []}` on that step (without it, a run whose
+  people have no email stops there). Only refresh, agent, snapshot, condition steps and inbox/email sends run in it.
 - `run_flow` runs now; `flow_runs` shows status. `subscribe` sets a person's own alert.

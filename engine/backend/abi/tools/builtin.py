@@ -10,8 +10,8 @@ actions send nothing out and write one private inbox message to the task owner n
 1.2.6 M8: inside a per-object run (`flows.OBJECT`) send_email mails only the account addresses of project members who see
 the run's object themselves, and post_message posts only to the inbox, to those members (the trigger's recipients, else
 everyone who sees it); each gets their own rows of the attached query or condition, filtered to that object (`_only`,
-`_seeing`). A channel, a tool's result, a report and the docs are refused there; so is a published tool that sends
-(tools.run_tool), a status post (`notify`) and every step outside flows._per_ok.
+`_seeing`). A channel, a tool's result, a report and the docs are refused there; so is every published API tool
+(tools.run_tool: an agent step's tool call too), a status post (`notify`) and every step outside flows._per_ok.
 FL-6: the first send to an email domain or channel not yet confirmed in the project needs a confirmation (D-1 style
 409 + token, from any caller); confirmed targets are stored per project. Principle 7: when the agent sends, every
 number in its text must be a value of the attached tool or query result (`data`), which goes with the message.
@@ -564,7 +564,8 @@ def _seeing(conn, project: str, ob: dict, where: str, values: list, request: Sem
                 v = None
             return rls.MARK if v is None or isinstance(v, dict) else str(v)
         texts = filled if not rls.restricted(project, me.id) else {
-            k: flows.DATA.sub(mine, raw[k]) if isinstance(raw.get(k), str) else rls.MARK for k in filled}
+            k: re.sub(r"[\r\n]+", " ", flows.DATA.sub(mine, raw[k])) if k == "subject" and isinstance(raw.get(k), str)  # one header line
+            else flows.DATA.sub(mine, raw[k]) if isinstance(raw.get(k), str) else rls.MARK for k in filled}
         out.append((u, texts, own, {"type": ob["type"], "key": ob["key"], "title": ontology._json(got["title"])}))
     return out
 

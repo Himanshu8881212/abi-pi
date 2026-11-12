@@ -31,6 +31,7 @@ P = "pi_object_flows"
 MARK = "[hidden by row-level security]"
 COND = {"query": {"measures": ["alarm"]}, "measure": "alarm", "op": ">", "value": 0}
 ROWS = {"measures": ["alarm"], "dimensions": ["cafes.cafe_name"]}  # what an alert attaches: filtered to its café by ABI
+HINT = "A run can't confirm it: send one email to that domain (or one post to that channel) yourself and confirm it; the next run then sends."
 ODD = 'it\'s 100% "odd" {{ data.trigger.key }}'  # a key and title of any characters, a template among them
 
 # the worker's minute tick for these flows, now or `ahead` minutes on (flows._data_condition, in the engine's own Python);
@@ -286,7 +287,7 @@ def test_cap_reports_rest(w):
     got = runs("cap_alarm", 3)
     assert sorted(r["object"]["key"][0] for r in got) == cafes[:3]
     said = [m for m in inbox() if "started to meet its condition" in m["text"]]
-    assert len(said) == 1 and said[0]["text"] == ("Flow Cap alarm: 5 Cafés started to meet its condition at once. 3 of them got an alert."
+    assert len(said) == 1 and said[0]["text"] == ("Flow Cap alarm: 5 cafés started to meet its condition at once. 3 of them got an alert."
                                                   " The other 2 are listed here and get one when they stop and start again."), said
     assert said[0]["data"]["rows"] == [{"cafes.cafe_id": k, "alarm": 1} for k in cafes[3:]], "the rest, by their rows"
     for who in ("editor", "north"):
@@ -423,7 +424,7 @@ def test_first_send_still_confirms(w):
     tick("late_alarm")
     [r] = runs("late_alarm", 1)
     assert r["status"] == "failed" and step(r, "_recipients")["output"] == {"to": [late], "skipped": []}
-    assert step(r, "mail")["error"] == f"needs confirmation: First send from project '{P}' to email:{late.split('@')[1]}.", r
+    assert step(r, "mail")["error"] == f"needs confirmation: First send from project '{P}' to email:{late.split('@')[1]}. {HINT}", r
     assert not [m for m in mails(w) if m["To"] == late], "nothing left before a person's yes"
     with pytest.raises(abi.ActionError) as e:
         abi.call("send_email", project=P, to=[late], subject="Hello", body="A first mail, sent by a person.")
@@ -541,7 +542,14 @@ def test_app_says_it_per_object(w, tmp_path):
         assert not re.search(r"cafe_id|cafe_contacts|data\.trigger|monitor_alarm|\bper\b", out["flow"] + out["card"]), "no ids, columns or field names"
         assert out["open"] == f"Open {name}" and name in out["figs"] and out["title"] == name, out
         assert out["links"] == [name] and out["opened"] == name, "on the Monitor card, the café's name opens the café's page"
-        rest = [m for m in inbox() if "started to meet its condition" in m["text"] and m["data"].get("objects")]
+        sure("save_flow", project=P, flow=flow("shown_alarm", [POST | {"input": POST["input"] | {"text": "Shown {{ data.trigger.title }}"}}]))
+        alarms(w)
+        tick("shown_alarm")
+        alarms(w, w["a"], w["b"], e)
+        tick("shown_alarm", cap=1)
+        runs("shown_alarm", 1)
+        rest = [m for m in inbox() if m["text"].startswith("Flow Shown alarm: 3 cafés") and m["data"].get("objects")]
+        assert len(rest) == 1 and OWNER.exists(), "the message of the two cafés past the cap, and the owner's sign-in"
         if rest and OWNER.exists():  # round 2 (M1): the owner's message of the objects past the cap, each by its name
             item = f"[...document.querySelectorAll('main .item')].find(d => d.textContent.includes({json.dumps(rest[-1]['text'])}))"
             seen = drive(Browser(srv.server_address[1], "admin", OWNER, P), tmp_path, [
@@ -550,6 +558,15 @@ def test_app_says_it_per_object(w, tmp_path):
                 ["get", "_", f"({item}).querySelector('.oopen').click()"], ["wait", "main .kv"], ["text", "title", "main h1"]])
             assert seen["names"] == [o["title"] for o in rest[-1]["data"]["objects"]] and seen["title"] == seen["names"][0], seen
             assert seen["heads"] == ["Café", "Alarm"], "its name and the figures, no key column"
+            narrow = drive(Browser(srv.server_address[1], "admin", OWNER, P), tmp_path, [  # round 3: at a phone's width
+                ["show", "inbox"], ["until", f"!!({item})"], ["shot", str(tmp_path / "inbox-rest-390.png")],
+                ["get", "wide", "document.documentElement.scrollWidth > innerWidth + 1"]], width=390)
+            assert narrow["wide"] is False, "nothing wider than the phone's screen"
+            alarms(w, e)
+            narrow = drive(ed, tmp_path, [["show", "monitor"], ["until", f"({card})?.innerText.includes('Holds now')"],
+                                          ["shot", str(tmp_path / "monitor-390.png")], ["get", "links", f"[...({card}).querySelectorAll('.mtext .oopen')].map(b => b.textContent)"],
+                                          ["get", "wide", "document.documentElement.scrollWidth > innerWidth + 1"]], width=390)
+            assert narrow["links"] == [name] and narrow["wide"] is False
         assert all((tmp_path / f"{x}.png").stat().st_size > 10_000 for x in ("monitor-form", "monitor", "flow", "inbox"))
         ed.page()
         r = ed.post("/monitor", {"action": "delete", "id": "alarm_raised"})  # its flow goes with it, after ABI's confirmation
@@ -586,8 +603,9 @@ def test_the_owner_is_told_whom_an_alert_cannot_reach(w):
     told = [m["text"] for m in inbox() if m["text"].startswith(head)]
     part = {b: f"{names[b]}: {out} (not a member of this project)", n: f"{names[n]}: nobody is named"}
     assert told == [head + "; ".join(part[k] for k in sorted(part)) + ". People are found by their account's"
-                    " email or name: add the person to this project with that email (People), or correct the value. They get the alert the"
-                    " next time the condition starts to hold for that café."], told
+                    " email or name. Someone who isn't in this project: ask a workspace owner to add them under Users & access with that"
+                    " email, or correct the value. Where nobody is named: fill in the value. They get the alert the next time the condition"
+                    " starts to hold for that café."], told
     for who in ("editor", "north"):
         assert not [m for m in inbox(w["tok"][who]) if "couldn't reach" in m["text"]], f"{who} is not told"
     mine = [m["text"] for m in inbox(w["tok"]["north"]) if m["text"].startswith("Told: ")]
@@ -676,12 +694,148 @@ def test_a_per_object_flow_runs_only_what_is_on_its_list(w):
         e, fix = got[f"$.steps[{i}]"]
         assert f"({what}) isn't one an alert for one object may run" in e and "Use only agent, condition, refresh, snapshot steps" in fix, (e, fix)
     assert "$.steps[3]" not in got or "may run" not in got["$.steps[3]"][0], "an agent step is on the list (its sends are checked when it runs)"
+    assert not [p for p, (e, _) in got.items() if "may run" in e and p not in ("$.steps[0]", "$.steps[1]", "$.steps[2]")], "only those three are off the list"
     assert "compares with the run before it, which is another object's" in got["$.steps[4]"][0]
     e, fix = got["$.steps[5].input.data"]
     assert e.startswith("Step 'post' attaches rows that can't be filtered to one Café: ") and "table 'cafes'" in fix
     assert not (abi.ABI_PROJECTS / P / "flows/listed.json").exists()
     src = (ROOT / "engine/backend/abi/tools/__init__.py").read_text()
-    assert src.index("if sends(t) and builtin.flows.OBJECT.get():") < src.index("if sends(t) and (test := builtin.flows.TEST_RUN.get()) is not None:")
+    assert src.index('if t.get("kind") == "api" and builtin.flows.OBJECT.get():') < src.index("if sends(t) and (test := builtin.flows.TEST_RUN.get()) is not None:")
+
+
+GUARD = r"""
+import json, sys
+import abi.app  # noqa: F401
+from abi import actions, db, flows, security
+a = json.loads(sys.stdin.read())
+with db.connect() as c:
+    u = security.user(c, a["uid"])
+flows.OBJECT.set({"type": "cafe", "key": ["x"], "title": "x", "object": {}})  # inside a per-object run
+out = {}
+for tool in a["tools"]:
+    try:
+        actions.run("run_tool", {"project": a["project"], "tool": tool, "inputs": {}}, u, "agent")
+        out[tool] = "ran"
+    except actions.ActionFailed as e:
+        out[tool] = [e.status, str(e)]
+print(json.dumps(out))
+"""
+
+
+def test_the_run_itself_refuses_what_the_save_check_refuses(w):
+    """Round 3 (M1, M2, L1, L2, L4, L8): a step written into the flow's file behind the save check doesn't run: the run
+    fails with the refusal, nothing is sent and the owner is told once, in their own Inbox. Inside a per-object run every
+    published API tool is refused, a reading one too, before any request leaves (run_tool, as an agent's tool call
+    reaches it; the bench has no model, so no agent step runs here). Failing runs and one that went well in one check
+    are one message and no "works again". Recipients without an email address stop the run with the reason; a stopped
+    run starts no cooldown; the owner is told again when the people it couldn't reach change; an object with a key too
+    long to keep is left out and the owner told."""
+    a, b, s, e, names = w["a"], w["b"], w["s"], w["e"], w["names"]
+    path = abi.ABI_PROJECTS / P / "flows/behind_alarm.json"
+    for n, (step, why) in enumerate((
+            ({"id": "post", "type": "action", "action": "post_message", "input": {"channel": "ops", "text": "Behind {{ data.trigger.title }}"}},
+             "step 'post' failed: An alert for one object reaches only project members who see it: channel 'ops' has readers that can't be"
+             " checked. Post to channel inbox, or use send_email."),
+            ({"id": "tool", "type": "tool", "tool": "hook"}, "step(s) tool aren't ones an alert for one object may run."))):
+        sure("save_flow", project=P, flow=flow("behind_alarm", [POST | {"input": POST["input"] | {"text": "Behind {{ data.trigger.title }}"}}]))
+        f = json.loads(path.read_text())
+        path.write_text(json.dumps(f | {"steps": [step]}))  # behind ABI's back: what no save lets through
+        alarms(w)
+        tick("behind_alarm", ahead=70 * n)
+        alarms(w, a)
+        tick("behind_alarm", ahead=70 * n + 1)
+        r = runs("behind_alarm", n + 1)[-1]
+        assert r["status"] == "failed" and r["error"] == why, r
+        told = [m["text"] for m in inbox() if m["text"].startswith("Flow Behind alarm (owner ")]
+        assert len(told) == n + 1 and told[-1].endswith(why), told
+    assert not [m for m in inbox() + inbox(w["tok"]["north"]) if m["text"].startswith("Behind ")], "nothing was posted"
+    # every published API tool, sending or reading, is refused inside the run, before a request
+    tool = {"$schema": "https://schema.abi.invalid/v1/tool.json", "name": "Hook", "description": "Calls outside.", "version": 1, "status": "published",
+            "kind": "api", "owner": f["owner"], "inputs": {"type": "object", "additionalProperties": False, "properties": {}},
+            "rows": "/items", "outputs": {"type": "array", "items": {"type": "object", "properties": {"x": {"type": "string"}}}},
+            "tests": [{"inputs": {}}], "permissions": {"role": "viewer"}}
+    made = {"hook_post": "POST", "hook_get": "GET"}
+    try:
+        (abi.ABI_PROJECTS / P / "tools").mkdir(exist_ok=True)
+        for tid, method in made.items():
+            (abi.ABI_PROJECTS / P / f"tools/{tid}.json").write_text(json.dumps(tool | {"id": tid, "request": {
+                "method": method, "url": "https://hooks.example.test/x"}}))
+        r = engine(GUARD, timeout=120, stdin=json.dumps({"project": P, "uid": int(f["owner"]), "tools": list(made)}))
+        assert r.returncode == 0, r.stderr[-2000:]
+        out = json.loads(r.stdout.splitlines()[-1])
+        for tid in made:
+            assert out[tid] == [403, f"Tool '{tid}' calls an outside API; an alert for one object reaches only project members who see it."
+                                     " Use post_message (channel inbox) or send_email."], out
+    finally:
+        for tid in made:
+            (abi.ABI_PROJECTS / P / f"tools/{tid}.json").unlink(missing_ok=True)
+        path.unlink()
+    # two failing runs and one that went well in one check: one message, no "works again"
+    mail = {k: v for k, v in MAIL.items() if k != "when"} | {"when": {"value": "{{ data.trigger.object.region }}", "op": "=", "to": "South"},
+                                                             "input": MAIL["input"] | {"to": [f"x@mixed-{w['dom']}"]}}
+    sure("save_flow", project=P, flow=flow("mixed_alarm", [mail]))
+    r = engine("import sys\nfrom abi import db\nwith db.connect() as c:\n    c.execute('DELETE FROM send_targets WHERE project = %s AND target = %s',"
+               " sys.argv[1:])".replace("sys.argv[1:]", json.dumps([P, f"email:mixed-{w['dom']}"])))  # as if never confirmed
+    assert r.returncode == 0, r.stderr[-2000:]
+    alarms(w)
+    tick("mixed_alarm")
+    alarms(w, a, s, e)
+    tick("mixed_alarm")
+    assert sorted(x["status"] for x in runs("mixed_alarm", 3)) == ["failed", "failed", "ok"]
+    told = [m["text"] for m in inbox() if m["text"].startswith("Flow Mixed alarm (owner ")]
+    assert len(told) == 1 and told[0].endswith(HINT) and not [m for m in inbox() if "Mixed alarm" in m["text"] and "works again" in m["text"]], told
+    # the people named have no email address: the run stops at the email step, with the reason
+    sure("save_flow", project=P, flow=flow("nomail_alarm", [{k: v for k, v in MAIL.items() if k != "when"}, POST],
+                                           recipients={"property": "cafe_contacts.manager"}))
+    abi.call("set_user_email", name=w["made"]["editor"], email=None)
+    try:
+        alarms(w)
+        tick("nomail_alarm")
+        alarms(w, e)
+        tick("nomail_alarm")
+        [r] = runs("nomail_alarm", 1)
+    finally:
+        abi.call("set_user_email", name=w["made"]["editor"], email=w["mail"]["editor"])
+    assert r["status"] == "stopped" and r["error"] == ("stopped at step 'mail': the people this alert is for have no email address on their account,"
+                                                       " so nothing was mailed."), r
+    assert [x["step"] for x in r["steps"]] == ["_recipients", "mail"], "the post after it didn't run"
+    # a stopped run (nobody to reach) starts no cooldown; a changed list of people is said again
+    sure("save_flow", project=P, flow=flow("again_alarm", [POST | {"input": POST["input"] | {"text": "Again {{ data.trigger.title }}"}}],
+                                           recipients={"property": "cafe_contacts.manager"}))
+    head = "Flow Again alarm couldn't reach everyone its alert is for. "
+    for n in (1, 2):
+        alarms(w)
+        tick("again_alarm")
+        alarms(w, b)
+        tick("again_alarm")
+        assert [x["status"] for x in runs("again_alarm", n)] == ["stopped"] * n, "no cooldown after a run that reached nobody"
+    assert len([m for m in inbox() if m["text"].startswith(head)]) == 1, "the same person: said once"
+    was = sql(f"SELECT manager FROM cafe_contacts WHERE cafe_id = '{b}'")[0][0]
+    abi.call("edit_cells", project=P, table="cafe_contacts", edits=[{"key": [b], "column": "manager", "value": f"someone@else-{w['dom']}"}])
+    try:
+        alarms(w)
+        tick("again_alarm")
+        alarms(w, b)
+        tick("again_alarm")
+        runs("again_alarm", 3)
+    finally:
+        abi.call("edit_cells", project=P, table="cafe_contacts", edits=[{"key": [b], "column": "manager", "value": was}])
+    said = [m["text"] for m in inbox() if m["text"].startswith(head)]
+    assert len(said) == 2 and f"{names[b]}: someone@else-{w['dom']} (not a member of this project)" in said[1], said
+    # a key too long to keep track of: no alert for it, the owner told what to do
+    long = ["North", "k" * 2100]
+    post = {"id": "post", "type": "action", "action": "post_message", "input": {"channel": "inbox", "text": "Long {{ data.trigger.key }}"}}
+    sure("save_flow", project=P, flow={"id": "long_alarm", "name": "Long alarm", "enabled": False, "steps": [post], "trigger": {
+        "type": "data_condition", "query": {"measures": ["site_alarm"]}, "measure": "site_alarm", "op": ">", "value": 0, "per": "site"}})
+    abi.call("edit_cells", project=P, table="sites", add=[{"region": long[0], "code": long[1], "alarm": 1}])
+    try:
+        state = tick("long_alarm")["state"]
+    finally:
+        abi.call("edit_cells", project=P, table="sites", delete=[long])
+    assert not [k for k in state if len(k) > 2000] and not [m for m in inbox() if m["text"].startswith("Long ") and long[1] in m["text"]]
+    assert [m["text"] for m in inbox() if m["text"].startswith("Flow Long alarm can't alert for")] == [
+        "Flow Long alarm can't alert for 1 of the sites: what identifies them is too long to keep track of. Shorten that value in the data, or use"
+        " this alert for an object type with a shorter one."]
 
 
 def test_a_pending_step_stays_waiting_when_the_person_is_in_viewer_mode():
