@@ -1017,3 +1017,38 @@ def test_deleted_flow_posts_nothing(w):
         assert said["gone_check"] == [], said
     finally:
         sure("delete_flow", project=P, flow="kept_check")
+
+
+def test_decimal_keys_beyond_2_53_get_their_own_alert(tmp_path):
+    """Two objects whose DECIMAL keys differ only beyond what a float holds (9007199254740992 and ...993) were one
+    object to an alert per object: one run, or none. Each now has its own run, named by its own key, and opens."""
+    import duckdb
+
+    from conftest import parquet  # noqa: F401  (the same loader the other fixtures use)
+    p, keys = "pi_decimal_keys", ["9007199254740992", "9007199254740993"]
+    if abi.folder(p):
+        drop([p])
+    duckdb.sql(f"COPY (SELECT * FROM (VALUES (CAST('{keys[0]}' AS DECIMAL(20,0)), 'Vault A', 1), (CAST('{keys[1]}' AS DECIMAL(20,0)), 'Vault B', 1))"
+               f" t(vault_id, name, alarm)) TO '{tmp_path}/vaults.parquet' (FORMAT parquet)")
+    abi.load("demo", p, [str(tmp_path / "vaults.parquet")])
+    try:
+        abi.call("set_table", project=p, table="vaults", key=["vault_id"])
+        abi.call("set_measure", project=p, id="alarm", name="Alarm", expression="SUM(vaults.alarm)")
+        sure("save_ontology", project=p, ontology={"objects": [{"id": "vault", "table": "vaults", "name": "Vault", "plural": "Vaults", "title": "name"}]})
+        sure("save_flow", project=p, flow={"id": "vault_alarm", "name": "Vault alarm", "enabled": False,
+                                           "trigger": {"type": "data_condition", **COND, "per": "vault", "cooldown_minutes": 60},
+                                           "steps": [{"id": "post", "type": "action", "action": "post_message",
+                                                      "input": {"channel": "inbox", "text": "Alarm at {{ data.trigger.title }}"}}]})
+        r = engine(TICK, timeout=600, stdin=json.dumps({"project": p, "flows": ["vault_alarm"], "state": "vault_alarm", "ahead": 0}))
+        assert r.returncode == 0, r.stderr[-2000:]
+        state = json.loads(r.stdout.splitlines()[-1])["state"]
+        assert sorted(k for k in state if k) == sorted(json.dumps([k]) for k in keys), state
+        end = time.monotonic() + 300
+        while len(got := abi.call("flow_runs", project=p, flow="vault_alarm", limit=10)["runs"]) < 2 or any(x["status"] in ("queued", "running") for x in got):
+            assert time.monotonic() < end, got
+            time.sleep(1)
+        assert sorted((x["object"]["key"][0], x["status"]) for x in got) == [(keys[0], "ok"), (keys[1], "ok")], got
+        assert sorted(m["text"] for m in abi.call("inbox", project=p)["messages"] if m["text"].startswith("Alarm at")) == ["Alarm at Vault A", "Alarm at Vault B"]
+        assert abi.call("get_object", project=p, type="vault", key=[keys[1]])["title"] == "Vault B"
+    finally:
+        drop([p])
