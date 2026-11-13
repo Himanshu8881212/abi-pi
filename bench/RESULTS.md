@@ -1641,7 +1641,7 @@ the owner's choice. Not measured: 1.2.6 with no ontology on this day (stopped wh
 
 The same server, container and commands as the first step above, on a new volume made by 1.2.5 (d5496bd) the same
 evening; the final code is 83c9a38 (the worktree's HEAD, copied into a container of the test image). One run at a time, 0
-errors and 0 dropped in every run. The live install had been upgraded to 1.2.6 an hour before and was idle.
+errors and 0 dropped in every run. The live install's upgrade to 1.2.6 had ended an hour before.
 
 | code | project | first run's first p50 / p95 | after a commit p50 / p95, runs 1, 2, 3 | mean p95 | of 1.2.5 |
 |---|---|---|---|---|---|
@@ -1655,7 +1655,7 @@ errors and 0 dropped in every run. The live install had been upgraded to 1.2.6 a
   with the link, median of 20; 27.7 ms without one in the first step). What is left is not the link: restricted pages
   without any ontology are x1.12 of 1.2.5 on this code (the app's page is 562 KB against 507 KB), and an ontology
   adds the rest. Getting clearly inside x1.2 means making every restricted filter build cheaper (it hashes every file
-  of the project once per person and build: about a third of the 28 ms), or the page smaller; neither is item 2.
+  of the project once per person and build: about a quarter of the build in a profile), or the page smaller; neither is item 2.
 - **A restricted view's text with a follow link: 0.2 KB** (`customers`; `cafes` and `orders` 0.1 KB). Target: at most 4 KB.
 - **A Viewer who follows to all 60,000 customers, first read after a restart: 3.06, 3.03 and 3.02 s**, then 0.02 s
   (`cold.py`, three times; the same six rows as the constant list gave). Target: at most 3.5 s.
