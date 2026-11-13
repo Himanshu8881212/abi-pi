@@ -538,6 +538,16 @@ def marked(cur, t: str) -> list:
         f"SELECT DISTINCT batch_id, status FROM lake.edits.{_q(t)} WHERE reviewed_by = '{MARK}' AND status IN ('active', 'undone')").fetchall())
 
 
+def keeps_key(project: str, t: str) -> None:
+    """Refuses (409) a change of what identifies table t's rows while decisions about them are in force: a decision
+    names its records by that key, so under another key it would be read against other records. set_table and an
+    import both ask here."""
+    if any(not d["undone"] for d in _log(project, table(t), None)):
+        raise ActionFailed(409, "What identifies these records can't change while decisions about which of them are the same one are in"
+                                " force: the decisions name records by it. Undo those decisions first (under Decided), or keep it as it"
+                                f" is. (For a developer: the key of table '{t}' in model/model.json; the decisions are in '{table(t)}'.)")
+
+
 def unsound(state: dict) -> str | None:
     """Why the decisions `state` ({(a, b): same}) can't stand, or None: a record of two objects at once, or records
     chained deeper than the views follow. decide_same and an undo's transaction both refuse such a state."""
@@ -607,7 +617,8 @@ def find_same(conn, user: User, args: Find) -> dict:
     elif n := _read(args.project, big, asked, user.id)[0][0]:
         out["note"] = (f"{n} value(s) are shared by more than {BLOCK} {x['plural']} each (an empty-like postcode, a very common start of a name):"
                        " those weren't compared with each other through that value. A more telling `block` column in `resolve` compares them.")
-    out["decisions"] = [d | {"blocked": d["blocked"] is not None} for d in _decisions(conn, user, args.project, x, k, typ, only)]
+    out["decisions"] = [d | {"blocked": d["blocked"] is not None} | ({"blocked_by": _words(d["blocked"], x["name"].lower())} if d["blocked"] else {})
+                        for d in _decisions(conn, user, args.project, x, k, typ, only)]  # blocked_by: the newer decision to undo first, in words
     # D-22: the names and each pair's evidence are quotable rows
     return out | {"columns": ["group", "name", "other name", "why"],
                   "rows": [[i + 1, titles[p["a"]], titles[p["b"]], ", ".join(p["why"])] for i, g in enumerate(shown) for p in g["pairs"]]}

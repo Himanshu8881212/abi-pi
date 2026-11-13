@@ -195,7 +195,8 @@ def test_ontology_journey(tmp_path):
         assert {"cafes", "customers", "orders", "products"} <= set(types) and not onto_file.exists()
         assert [(ln["from"], ln["to"]) for ln in draft["links"] if ln.get("rls") == "follow" and ln["from"] == types["customers"]["id"]] == [
             (types["customers"]["id"], types["cafes"]["id"])], "a rule on cafés: customers are proposed to follow it"
-        assert north("propose_ontology")["ontology"]["objects"] and not onto_file.exists()
+        theirs = north("propose_ontology")["ontology"]  # the Viewer's draft: the same types, made of what they read
+        assert {x["table"] for x in theirs["objects"]} == set(types) and not onto_file.exists()
 
         # ---- the refinement (the agent's part), then the person's approval
         cafe, customer = types["cafes"], types["customers"]
@@ -209,7 +210,8 @@ def test_ontology_journey(tmp_path):
                              "writes": {"table": "cafe_contacts", "set": {"visit_reason": "{{ data.inputs.reason }}"}}}]
         assert "needs the editor role" in refused(403, "save_ontology", ontology=draft)["message"]
         ask = refused(409, "save_ontology", mine=False, ontology=draft)
-        assert ask["confirm_token"] and ask["preview"] and not onto_file.exists(), "asked first: who sees less, and what Viewers may run"
+        assert ask["confirm_token"] and not onto_file.exists(), "asked first: who sees less, and what Viewers may run"
+        assert "flag_visit" in ask["preview"]["grants"] and ask["preview"]["follow"]["new"] and not ask["preview"]["follow"]["old"], ask["preview"]
         abi.call("save_ontology", confirm=ask["confirm_token"], project=J, ontology=draft)
         assert onto_file.exists() and {x["id"] for x in call("ontology")["objects"]} >= {cafe["id"], customer["id"]}
         ct, cu = cafe["id"], customer["id"]
@@ -299,6 +301,23 @@ def test_ontology_journey(tmp_path):
         assert now == {one: pytest.approx(sum(was.values()))} and now_north == {one: pytest.approx(sum(was_north.values()))}
         gone = b if one == a else a
         assert call("get_object", type=cu, key=[gone])["key"] == [one] and north("get_object", type=cu, key=[gone])["key"] == [one]
+        # ... and a record the Viewer sees merged with one they don't (`far`, the lower key, so the customer shows under it):
+        # the Viewer keeps their own part and never reads the values of the record that is hidden from them
+        seg = dict(sql("SELECT customer_id, segment FROM customers"))
+        c = next(k for k in sorted(visited) if k > far and k not in (a, b) and seg[k] != seg[far])
+        two = {**both, "filters": [{"column": "customers.customer_id", "op": "in", "value": [c, far]}]}
+        mine_was, north_was = dict(call("semantic_query", **two)["rows"]), dict(north("semantic_query", **two)["rows"])
+        assert set(mine_was) == {c, far} and set(north_was) == {c}
+        under = str(sure("decide_same", project=J, type=cu, keys=[c, far], decision="same")["id"])
+        assert dict(call("semantic_query", **two)["rows"]) == {under: pytest.approx(sum(mine_was.values()))}
+        after = dict(north("semantic_query", **two)["rows"])
+        assert list(after.values()) == [pytest.approx(north_was[c])] and set(after) <= {c, under}, "their own orders, no more"
+        try:
+            shown = row(north("get_object", type=cu, key=[under]))
+        except abi.ActionError as e:
+            assert e.status == 404, e.body
+            shown = None
+        assert shown is None or shown["segment"] == seg[c], "never the values of the record that is hidden from them"
 
         # ---- one plan: seats to the cafés that earn most, within a total. The owner's is proposed; the Viewer's is of the North
         call("save_optimizer", optimizer={"id": "seats", "name": "Seats per café", "over": {"type": ct},
@@ -306,7 +325,10 @@ def test_ontology_journey(tmp_path):
                                           "objective": {"goal": "maximize", "name": "Revenue", "per_unit": {"measure": "revenue"}},
                                           "limits": [{"name": "Seats in total", "max": 1000}]})
         seats = sql("SELECT cafe_id, seats FROM cafes ORDER BY 1")
-        full, part = plan(None), plan(tok)
+        full = plan(None)
+        none_yet = north("optimizers", optimizer="seats")  # the owner's run is made of every café: not the Viewer's to read
+        assert none_yet["rows"] == [] and none_yet.get("run") is None and not none_yet.get("text"), none_yet
+        part = plan(tok)
         objects = lambda r: {x[1]: x[2] for x in r["rows"] if x[5] is not None}  # noqa: E731
         best = lambda where: sql(f"SELECT c.cafe_name FROM orders o JOIN cafes c USING (cafe_id) {where} GROUP BY 1 ORDER BY sum(o.revenue) DESC LIMIT 10")  # noqa: E731
         assert full["outcome"] == "best" and len(objects(full)) == len(names) and full["proposal"]["changes"] > 0

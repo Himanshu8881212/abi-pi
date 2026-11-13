@@ -1691,7 +1691,7 @@ function sameCard(box,T,key){if(!T.resolve||MODE==='viewer'||myRank()<2)return;c
     d.append(h('div','file',[cell(String(x.at).replace(' ','T')+'Z'),x.user,x.undone?'undone':''].filter(Boolean).join(' · ')),
      x.out&&x.of?line(`Taken out of ${x.of.title??'it'}:`,x.out):line({same:'The same one:',different:'Not the same:',split:'Taken apart:'}[x.decision]||'Changed by hand:',x.objects));
     if(!x.undone&&!x.blocked){const a=h('div','row acts');a.append(btn('Undo',()=>go({table:r.table,batch:x.batch},'Taken back.','undo_edits')));d.append(a)}
-    else if(x.blocked)d.append(h('div','file','Undo the newer decision about them first.'));dc.append(d)})}}).catch(e=>{if(c.isConnected){c.append(h('p','empty',e.message));c.hidden=false}})}
+    else if(x.blocked)d.append(h('div','file',x.blocked_by?`A newer decision builds on this one. Undo “${x.blocked_by}” first.`:'Undo the newer decision about them first.'));dc.append(d)})}}).catch(e=>{if(c.isConnected){c.append(h('p','empty',e.message));c.hidden=false}})}
 // Data Model › Objects: the types as boxes and their connections as named lines with how many meet how many. A phone has
 // no canvas: it reads the picture ABI draws from the project's files (render.sections) and each type as a card
 function objectsHome(box){objBar(box,'objects');const L=(D.ontology.links||[]).filter(l=>otype(l.from)&&otype(l.to)),ids=OT().map(t=>t.id);
@@ -2083,7 +2083,7 @@ function plans(box){const g=h('div','cards');box.append(g);
    if(r.status==='failed'){out.append(h('p','bad',r.error||'It could not be worked out.'));return}
    out.append(h('p','txt',r.text||''));const rows=r.rows||[],objs=rows.filter(x=>x[5]&&x[0]!=='Limit in conflict');  // an object's own two bounds in conflict are in the sentence, not objects of a plan
    // a limit the rounded plan went past first, then the ones that bind
-   const past=x=>x[2]!==null&&x[4]!==null&&(/^At least/.test(x[0])?x[2]<x[4]:x[0]==='Exactly'?x[2]!==x[4]:x[2]>x[4]),rank=x=>past(x)?2:/used|met/.test(x[0])?1:0;
+   const near=(a,b)=>Math.abs(a-b)<=1e-6*Math.max(1,Math.abs(b)),past=x=>x[2]!==null&&x[4]!==null&&!near(x[2],x[4])&&(/^At least/.test(x[0])?x[2]<x[4]:x[0]==='Exactly'||x[2]>x[4]),rank=x=>past(x)?2:/used|met/.test(x[0])?1:0;
    const lims=['best','found'].includes(r.outcome)?rows.filter(x=>/^(Limit|At least|Exactly)/.test(x[0])).sort((a,b)=>rank(b)-rank(a)):[];
    lims.slice(0,8).forEach(x=>out.append(h('div','file',/^At least/.test(x[0])?`${x[1]}: at least ${fmt(x[4])}: ${fmt(x[2])}${/just met/.test(x[0])?' (just met)':''}`:
     x[0]==='Exactly'?`${x[1]}: exactly ${fmt(x[4])}`:`${x[1]}: ${fmt(x[2])}${x[4]===null?'':' of '+fmt(x[4])}${x[0]==='Limit fully used'?' (fully used)':''}`)));
@@ -2488,7 +2488,7 @@ $('#chat .stop').onclick=()=>fetch('/chat/stop',{method:'POST',headers:{'X-Abi-A
   else if(e.type==='progress'){const r=steps&&[...steps.children].reverse().find(x=>x.dataset.s==='run');if(r)r.textContent=`… ${stepName(r.dataset.t)}${e.text?' · '+e.text:''}`}  // a big load the agent waits for (M3.2)
   else if(e.type==='said')bubble('me',e.text)
   else if(e.type==='answer'){steps=null;if(e.model){MODEL=e.model;ctx()}bubble('ai',e.text);chats();if(!chatBox.classList.contains('open'))toast('The agent answered')}
-  else if(e.type==='ask'){const yes=await ask(chatAsk(e));bubble('sys',yes?'You confirmed.':'You declined.');
+  else if(e.type==='ask'){const once=e.title==='Shown once: copy it now',yes=await ask(once?{title:e.title,message:'',preview:e.message,yes:'I copied it'}:chatAsk(e));bubble('sys',once?'Shown to you once. It is not kept in this chat.':yes?'You confirmed.':'You declined.');  // a credential: for the person's eyes only (index.ts shownOnce)
    fetch('/chat/answer',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({id:e.id,yes})})}
   else if(e.type==='open'){location.href='/?p='+encodeURIComponent(e.project)+'#'+encodeURIComponent(e.page)}
   else if(e.type==='mode'){setMode(e.mode);show(CUR);if(e.mode==='viewer'&&!e.published){let seen=0;try{seen=sessionStorage.getItem('abi-unpub');sessionStorage.setItem('abi-unpub','1')}catch(x){}if(!seen)toast('Nothing published yet: Viewer shows the working version until you publish.')}}

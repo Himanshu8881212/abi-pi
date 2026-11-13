@@ -244,13 +244,15 @@ records are the same one; a person decides. The example is a `customers` table k
 - After **Same customer** the group is one customer under one stable ID (the key of its first record). Reports,
   measures, the customer's page, flows and ML models count it once and show its orders together. The Data grid still
   shows the source rows. A merged customer's page lists its records; **Take out** splits one off again.
+- What identifies a customer can't change while decisions about customers are in force (`set_table` and an import
+  are refused): the decisions name records by that key. Undo them first, or keep the key.
 - Every decision is listed under **Decided** with who and when, and **Undo** takes it back. Decisions are kept in the
   input table `same_as_customers` (hidden from the model; one logged edit batch each). Only `decide_same` writes it:
   every other write-back, load and step into it is refused, Data › Edits doesn't offer it, a flow can't undo a
   decision and an agent's undo asks the person. Undo goes newest first per customer: a decision is undone once no
   newer decision in force is about the same records or the customers they are in now ("A newer decision builds on
-  this one: undo … first"); until then Decided shows it without the Undo button and says "Undo the newer decision
-  about them first". Two people undoing at the same moment: the second is told to look again. Decided lists from the newest 1,000
+  this one: undo … first"); until then Decided shows it without the Undo button and names the newer decision to undo
+  first. Two people undoing at the same moment: the second is told to look again. Decided lists from the newest 1,000
   history entries; older decisions stay in force and an undo still checks all of them. Decisions are undone only
   while the type has its `resolve` rules: with the rules taken off, an undo answers "put the rules back first".
 - **Not the same** holds until it is undone: the two are not proposed together again, a proposed group never contains
@@ -259,7 +261,10 @@ records are the same one; a person decides. The example is a `customers` table k
   the record that carries it is taken out, and the group shows under the first remaining record when that record
   disappears from the source.
 - A table with one row per record (predictions, an input table keyed like the type) shows the row of the record the
-  group shows under. Write-back (the Data grid, an action's write) edits a source record, never the group.
+  group shows under. The rows of the records merged into it are no longer read through the model, so a sum or a
+  count over such a table drops by what those rows held (the merged-away record's prediction, its target, its note)
+  until the merge is undone; they stay in the Data grid. Write-back (the Data grid, an action's write) edits a source
+  record, never the group.
 - A merged customer shows the values of the record it shows under. The other records' own values (another spelling of
   the name, another address) are no longer searched, filtered or matched against new records; they stay in the Data grid.
 - **Take out** says the record is not that customer: it is not proposed for it or merged into it again until the

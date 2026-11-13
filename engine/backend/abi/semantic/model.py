@@ -240,6 +240,10 @@ def set_table(conn, user: User, args: TableDef) -> dict:
     t = m["tables"].setdefault(args.table, {"kind": "fact", "key": None, "description": None})
     from abi.semantic import ontology  # not at top: ontology imports this module
 
+    if args.key and t["key"] and args.key != t["key"]:
+        from abi.semantic import same  # not at top: same imports this module
+
+        same.keeps_key(args.project, args.table)  # 1.2.6 M11: decisions bind key values
     if args.key and t["key"] and args.key != t["key"] and (used := ontology.uses(args.project, f"table:{args.table}")):
         raise ActionFailed(409, f"The key of '{args.table}' is the identity of {', '.join(used)} in the ontology; change or"
                                 " remove those first (save_ontology, delete_ontology_item).", uses=used)
@@ -249,7 +253,7 @@ def set_table(conn, user: User, args: TableDef) -> dict:
     if args.description:  # §8: marked agent-written when the Main Agent wrote it, else human-reviewed
         from abi import docs  # not at top: docs imports this module
 
-        docs.mark(args.project, {f"table:{args.table}": "agent" if actions.by_agent() else "human"})
+        docs.mark(args.project, {f"table:{args.table}": "agent" if actions.needs_click() else "human"})  # an agent's text stays an agent's after a yes
     return {"table": t, "readiness": report(args.project)}
 
 

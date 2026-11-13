@@ -77,3 +77,40 @@ def test_a_1_2_5_database_upgrades_to_this_schema(monkeypatch):
     assert out.pop("schema") == [5, 7, 7, 7], "1.2.5's schema number, then this code's on both databases"
     assert fresh["columns"] > 300 and out == {"columns": [], "constraints": [], "indexes": [], "triggers": []}, out
     assert extra == {"columns": ['["sources", "spec", "jsonb", "YES", null, "NO"]'], "constraints": [], "indexes": [], "triggers": []}, extra
+
+
+ROUND1 = r"""
+import json, os
+os.environ["ABI_PG_POOL"] = "0"
+import psycopg
+from abi import db
+D = "abi_upgrade_plans"
+admin = psycopg.connect(autocommit=True)
+admin.execute(f"DROP DATABASE IF EXISTS {D} WITH (FORCE)")
+admin.execute(f"CREATE DATABASE {D}")
+os.environ["PGDATABASE"] = D
+db.init()
+with psycopg.connect(dbname=D) as c:  # the table as M12's first rounds made it, with a run in it
+    c.execute("ALTER TABLE optimizer_runs DROP COLUMN started")
+    c.execute("ALTER TABLE optimizer_runs DISABLE TRIGGER ALL")
+    c.execute("INSERT INTO optimizer_runs (id, project, optimizer, user_id, restricted, spec, status) VALUES"
+              " ('00000000-0000-0000-0000-000000000001', 'p', 'hours', 1, false, '{}', 'running')")
+    c.execute("ALTER TABLE optimizer_runs ENABLE TRIGGER ALL")
+db.init()
+db.init()
+with psycopg.connect(dbname=D) as c:
+    cols = [r[0] for r in c.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'optimizer_runs'")]
+    stale = c.execute("SELECT count(*) FROM optimizer_runs WHERE status = 'running' AND started < now() - interval '30 minutes'").fetchone()[0]
+    rows = c.execute("SELECT optimizer, status, started FROM optimizer_runs").fetchall()
+admin.execute(f"DROP DATABASE {D} WITH (FORCE)")
+print(json.dumps({"started": "started" in cols, "stale": stale, "rows": rows}, default=str))
+"""
+
+
+@pytest.mark.skipif(not PY.exists() or engine("from abi import db; db.connect().close()").returncode, reason="engine's Postgres not running")
+def test_a_plans_table_from_before_started_gets_the_column_and_keeps_its_runs():
+    """M10 (M12's LOW): a database whose optimizer_runs was made before `started` existed gets the column at the next
+    start, keeps its rows, and the query run_optimizer sweeps stale runs with reads it."""
+    r = engine(ROUND1, timeout=180)
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert json.loads(r.stdout.strip().splitlines()[-1]) == {"started": True, "stale": 0, "rows": [["hours", "running", None]]}

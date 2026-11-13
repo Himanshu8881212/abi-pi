@@ -854,9 +854,10 @@ print(json.dumps(seen))
 
 
 def test_a_queued_scoring_takes_object_from_the_file_as_it_is_now(objs):
-    """M10 (M9's LOW): a scoring run queued before the model was moved to another object type, taken off its type or
-    deleted scores with the file's `object` as it is now, so it puts no property back on a type the model left."""
+    """M10 (M9's LOW): a queued scoring run keeps `object` only while the model's file still has the one it was queued
+    with; queued before the model was moved to another object type, taken off its type or deleted, it scores without
+    one, so it puts no property back on a type the model left (nor on one its dataset was not read for)."""
     revenue()
-    r = engine(STALE, stdin=json.dumps({"project": P, "runs": [[DOC[1]["id"], "customer"], ["pi_model_that_is_gone", "cafe"]]}))
+    r = engine(STALE, stdin=json.dumps({"project": P, "runs": [[DOC[1]["id"], "cafe"], [DOC[1]["id"], "customer"], ["pi_model_that_is_gone", "cafe"]]}))
     assert r.returncode == 0, r.stderr[-2000:]
-    assert json.loads(r.stdout.splitlines()[-1]) == ["cafe", None]
+    assert json.loads(r.stdout.splitlines()[-1]) == ["cafe", None, None]

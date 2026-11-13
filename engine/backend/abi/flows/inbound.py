@@ -375,7 +375,7 @@ def reject_inbound_action(conn, user: User, args: ApprovalRef) -> dict:
 
 @action(Role.editor)
 def rotate_webhook_token(conn, user: User, args: flows.FlowRef) -> dict:
-    """Makes a new signing token for a webhook-trigger flow and shows it once, in the app; the old token stops working at once. Always asks the user to confirm."""
+    """Makes a new signing token for a webhook-trigger flow and shows it once, to the person only (an agent never sees it); the old token stops working at once. Always asks the person to confirm."""
     f = imports.load(args.project, "flow", args.flow)
     if f["trigger"]["type"] != "webhook":
         raise ActionFailed(400, f"Flow '{args.flow}' has no webhook trigger.")

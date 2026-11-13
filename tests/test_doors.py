@@ -279,3 +279,50 @@ def test_the_agent_loads_every_format_and_asks_before_a_new_host():
     assert "parquet" not in bridge.lower() and 'const first = await rest(tool, input, "ask");' in bridge
     skill = " ".join((abi.ROOT / ".pi/skills/load-data/SKILL.md").read_text().split())
     assert "only input" not in skill and "Add a database table" in skill and "Never ask for, repeat or pass a password" in skill
+
+
+def test_a_credential_goes_to_the_person_and_never_to_the_model(tmp_path):
+    """M10: a share link, an embed key and a webhook token are asked like anything else; what ABI answers after the yes
+    goes to the person in a dialog and the model gets only the listed plain fields (none when the answer has another
+    shape). A pending step is sent to ABI only under an action's name, in the Lead's project, never in Viewer mode."""
+    src = (abi.ROOT / ".pi/extensions/abi/index.ts").read_text()
+    bridge = src[src.index("async function confirmBridge("):]
+    bridge = bridge[:bridge.index("\n\t}\n")]
+    shown = bridge.index("const once = done.status < 300 ? shownOnce(tool, done.body) : null;")
+    assert bridge.index("const done = await rest(tool, input, tok);") < shown < bridge.index("return done.status < 300 ? { result: done.body")
+    assert "await ctx.ui.confirm(SHOWN, `Your new ${once.what}:\\n\\n${once.secret}" in bridge and bridge.count("once.secret") == 2, "the dialog, and the check that there is one"
+    assert "return { result: { ...once.safe, created:" in bridge and 'log({ event: "shown_once", tool });' in bridge
+    assert "if (first.status < 300 && SHOWN_ONCE[tool]) return { status:" in bridge, "an answer that was never asked about is not passed on"
+    rest = src[src.index("async function rest("):]
+    assert rest.index("if (!ACTION.test(action)) return { status: 400") < rest.index("fetch(`${ABI_URL}/api/actions/${action}`")
+    tool = src[src.index('name: "abi_pending"'):]
+    tool = tool[:tool.index("pi.registerTool(")]
+    assert "await confirmBridge(String(it.action), { ...(it.args || {}), project: p.project }, ctx)" in tool
+    assert tool.index('if (await mode() === "viewer" && !READS.has(String(it.action)))') < tool.index("await confirmBridge(")
+    assert '"set_workspace_owner"' in src[src.index("const PERSON_CLICK"):src.index("// shown-once:start")]
+    if not shutil.which("node"):
+        pytest.skip("no node")
+    f = tmp_path / "shown.ts"
+    f.write_text(src[src.index("// shown-once:start"):src.index("// shown-once:end")] + """
+console.log(JSON.stringify([
+  shownOnce("create_share_link", { id: 7, url: "/#share=abc", expires: "2026-12-01T00:00:00+00:00" }),
+  shownOnce("create_embed_key", { kid: "k1", key: "S3CRET", url: "/embed/k1" }),
+  shownOnce("rotate_webhook_token", { token: "T0KEN", url: "/api/hooks/p/f" }),
+  shownOnce("create_share_link", "https://x/#share=abc"),
+  shownOnce("create_share_link", { id: 7, url: 5 }),
+  shownOnce("create_share_link", { id: "see /#share=abc", url: "/#share=abc", expires: { at: "/#share=abc" } }),
+  shownOnce("delete_report", { url: "/#share=abc" }),
+  ["edit_cells", "../admin/dbkey", "a/b", "Edit", "", "x?y=1"].map((a) => ACTION.test(a)),
+]));
+""")
+    r = subprocess.run(["node", "--experimental-strip-types", str(f)], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert json.loads(r.stdout.splitlines()[-1]) == [
+        {"what": "share link", "secret": "/#share=abc", "safe": {"id": 7, "expires": "2026-12-01T00:00:00+00:00"}},
+        {"what": "embed key", "secret": "S3CRET", "safe": {"kid": "k1"}},
+        {"what": "webhook token", "secret": "T0KEN", "safe": {"url": "/api/hooks/p/f"}},
+        {"what": "share link", "secret": None, "safe": {}},
+        {"what": "share link", "secret": None, "safe": {}},
+        {"what": "share link", "secret": "/#share=abc", "safe": {}},
+        None,
+        [True, False, False, False, False, False]]

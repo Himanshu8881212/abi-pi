@@ -116,6 +116,9 @@ def _restricted(project: str, user_id: int) -> bool:
     return not row or not (row["workspace_owner"] or (row["role"] and Role[row["role"]] >= Role.editor))
 
 
+IN_SQL = True  # a follow link's key list is written by DuckDB (`conditions.listed`); False: by `_in`, key by key (tests compare the two)
+
+
 def cast_lit(text, typ: str) -> str:
     """The exact value of `text` (as DuckDB renders it) in DuckDB type `typ`: only ever a quoted, escaped literal."""
     return f"CAST('{storage._lit(str(text))}' AS {typ})"
@@ -269,7 +272,21 @@ def conditions(project: str, user_id: int, read, types: dict | None = None) -> d
             at = theirs["table"]
             where = " AND ".join(x for x in (f"{ontology._tuple(theirs['columns'])} IN ({sub})", vis(at, conds) if at != f["from"] else "") if x)
         # ponytail: F's linked values inlined as constants (60k customers: 1.6 MB of view text); a lake table if slow
-        return allowed(at, tuple(f["cols"]), where)
+        return listed(at, f["cols"][0], where) if IN_SQL and len(f["cols"]) == 1 else allowed(at, tuple(f["cols"]), where)
+
+    @functools.cache  # fixpoint rounds repeat unchanged reads: run each once
+    def listed(t: str, col: str, where: str) -> str:
+        """`allowed` for one column, the list's text made by DuckDB itself: the same values as `_in` gives (each as
+        CAST('<text>' AS <type>), a NULL left out, the same rows in the same order), without a Python step per key.
+        Tens of thousands of keys per person, for many people at once, kept every other reader waiting on that step
+        (M10: 50 Viewers, 25,000 customers each: page p95 15 s). Raises nothing: a missing table or column denies."""
+        c = storage._q(col)
+        try:
+            got = read("SELECT string_agg('CAST(''' || replace(CAST(c AS VARCHAR), '''', '''''') || ''' AS ' || typeof(c) || ')', ', '"
+                       f" ORDER BY CAST(c AS VARCHAR), typeof(c)) FROM (SELECT DISTINCT {c} AS c FROM {storage._q(t)} WHERE {where}) WHERE c IS NOT NULL", {})
+        except (duckdb.Error, ActionFailed):
+            return "FALSE"
+        return f"list_contains([{got[0][0]}], {c})" if got and got[0][0] else "FALSE"
 
     def step(t: str, conds: dict) -> list:
         """t's filter as (tag: the follow link it is made from, or none; SQL) parts."""

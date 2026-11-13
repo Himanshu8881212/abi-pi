@@ -681,7 +681,10 @@ def execute(run_id: str, last: bool = True) -> None:
     elif owner and error and not again:  # that an object met the condition is the owner's to know, not the feed's (every member's). Said
         # once a day per flow until the problem's text changes, after the last try; no "works again": another object's run that went well doesn't
         # say this one's does. A flow whose file is gone has no owner to tell: its run keeps the error
-        _to_owner(project, owner.id, flow, "failed", head + error)
+        # in the owner's words first; the step, the project and the target as ABI names them only in the developer part
+        _to_owner(project, owner.id, flow, "failed", head + "this alert could not finish for one of the objects it watches, so nobody was told."
+                  " Open the flow's runs to see which one and what stopped it, fix that, and it alerts again the next time its"
+                  " condition starts to hold. For a developer: " + error)
     if not again and not alert:
         notify(run_id)
     if error and retry:

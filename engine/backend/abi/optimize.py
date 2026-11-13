@@ -382,7 +382,8 @@ def _plan(conn, project: str, o: dict, user: User, made: list | None = None) -> 
             over = most is not None and used > most and not near(used, most)
             if over or least is not None and used < least and not near(used, least):
                 a, b = _fmt(used), _fmt(most if over else least)  # two figures that read the same say nothing: the name alone
-                past.append((lrows[-1], over, name if a == b else f"{name} ({a} of {b})" if over else f"{name} ({a} of at least {b})"))
+                past.append((lrows[-1], over, name if a == b else f"{name} ({a} of {b})" if over else
+                             f"{name} ({a} of exactly {b})" if least == most else f"{name} ({a} of at least {b})"))
     order = sorted(range(n), key=lambda j: (-plan[j], title[j]))
     most_ = {j for j in range(n) if hi[j] is not None and near(vals[j], hi[j])}
     orows = [[one, title[j], plan[j], ontology._json(objs[j][w]) if now[j] is not None else None,
@@ -399,10 +400,14 @@ def _plan(conn, project: str, o: dict, user: User, made: list | None = None) -> 
     if past:  # the plan is not solved again in the stored numbers: said, with both figures
         way = "over" if all(p[1] for p in past) else "off" if any(p[1] for p in past) else "under"
         text += f" After rounding, the plan is slightly {way}: {_some([p[2] for p in past], 'other limits')}."
-    text += f" At their most {dec['name']}: {_some([title[j] for j in order if j in most_])}." if most_ else ""
     head = [["Total", obj.get("name") or "Total", total, before, None, None]]
     # the limits the sentence names come before the objects, the others after: an agent is shown the first rows only
     named = list({id(r): r for r in full[:3] + met[:3] + [p[0] for p in past[:3]]}.values())
+    # ... and so the objects it names "at their most" are those among the first rows (ontology.SAMPLE-like 20: the total,
+    # the changes and the named limits come before them); others at their most are "and others", or not said at all
+    seen = set(order[:max(0, 20 - 2 - len(named))])
+    tops = [title[j] for j in order if j in most_ and j in seen][:3]
+    text += f" At their most {dec['name']}: {', '.join(tops)}{' and others' if len(most_) > len(tops) else ''}." if tops else ""
     tail = named + orows + [r for r in lrows if not any(r is x for x in named)]
     out |= {"outcome": "best" if best else "found", "rows": head + tail}
     if not editor:
@@ -522,7 +527,13 @@ def save_optimizer(conn, user: User, args: Save) -> dict:
 
 @action(Role.editor, destructive=True, definition=True)
 def delete_optimizer(conn, user: User, args: Ref) -> dict:
-    """Deletes an optimiser's definition; its runs and the proposals made from them stay."""
+    """Deletes an optimiser's definition; its runs and the proposals made from them stay. Refused while a flow runs it."""
+    used = [f["name"] for f in imports.objects(args.project, "flows") for s in f["steps"]
+            if s.get("action") == "run_optimizer" and (s.get("input") or {}).get("optimizer") == args.optimizer]
+    if used:
+        o = imports.load(args.project, "optimizer", args.optimizer)
+        raise ActionFailed(409, f"“{o['name']}” is run by the flow{'s' * (len(set(used)) > 1)} {_some([f'“{n}”' for n in dict.fromkeys(used)])}."
+                                " Take that step out of the flow, or delete the flow, first.")
     imports.remove(args.project, "optimizer", args.optimizer)
     return {}
 

@@ -792,13 +792,15 @@ def gate(conn, project: str, old: dict, files: dict, asking: bool = False) -> tu
         hosts = sorted({urlsplit(files[rel]["request"]["url"]).hostname for rel in apis})
         why.append(f"This publishes API tools that let everyone with their role send requests to the outside host(s) {', '.join(hosts)}.")
         preview |= {"hosts": hosts, "api_tools": {rel: api_shape(files[rel]) for rel in apis}}
-    # H-01.3-fix-2: pushes would go somewhere new; like actions.PERSON_CLICK, a person's own REST call is one step
-    if actions.VIA.get() != "rest" and (new := _remote(files)) and new != _remote(old):
-        why.append(f"This points the project's Git remote at {new.get('url')}: a push sends the whole project history there.")
-        preview["remote"] = new
     if targets := sends(conn, project, old, files):  # FL-6 with D-56: the promote's Owner confirms its flows' first sends
         why.append(f"First send from project '{project}' to {', '.join(targets)}.")
         preview["send_targets"] = targets
+    # H-01.3-fix-2: pushes would go somewhere new. As the hosts below: an agent's (or inbound, or a Confirm click's) change
+    # asks; a person's own REST change is one step and shows it only when it asks anyway, so the call that carries the
+    # token signs the same preview and the yes is for this address
+    if (why or asking or actions.needs_click()) and (new := _remote(files)) and new != _remote(old):
+        why.append(f"This points the project's Git remote at {new.get('url')}: a push sends the whole project history there.")
+        preview["remote"] = new
     # H-01.5-fix-8, §5 #3: an agent's (or inbound, or a Confirm click's) change adding a source host asks first; a
     # person's own REST change asks only when it asks anyway, so its token call (always asking) signs the same preview
     if (why or asking or actions.needs_click()) and (hosts := source_hosts(conn, project, old, files)):
@@ -841,6 +843,12 @@ def apply(conn, user: User, project: str, files: dict, dry_run: bool = False, as
             _err(k.split("#")[0], "$.sharing" if "#" not in k else f"$.datasets[id={k.split('#')[1]}].sharing",
                  "This change lets more accounts view it without a role in the project.",
                  "Keep its sharing as it is, or ask a project Owner to make the change.") for k in sorted(wide)])
+    keys = lambda fs: {e["table"]: e.get("key") for e in (fs.get("model/model.json") or {}).get("entities", [])}  # noqa: E731
+    for t, k in keys(old).items():  # 1.2.6 M11: decisions about a table's records bind its key
+        if k and keys(files).get(t, k) != k:
+            from abi.semantic import same  # not at top: the semantic package imports this module
+
+            same.keeps_key(project, t)
     apis = api_published(old, files)
     if apis and (role_in(conn, user, project) or 0) < Role.owner:
         raise ActionFailed(403, "Only a project Owner may publish or change a published API tool; nothing changed.", errors=[

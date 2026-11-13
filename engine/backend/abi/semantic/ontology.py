@@ -984,14 +984,20 @@ def run_object_action(conn, user: User, args: RunAction) -> dict:
             {"column": c, "old": (rls.MARK if c.lower() in hid else now.get(c)) if now else None, "new": v} for c, v in vals.items()]}
     if a.get("flow"):
         preview["flow"] = a["flow"]
-    proposed = bool(w) and bool(a.get("approval") or actions.by_agent() or actions.inbound())
     # (5) the token signs the preview: a changed old value asks again. A flow is started by a person's own click only: an
     # agent's call asks, and the Confirm click (or the harness's replay) that follows is checked against what was shown
-    if a.get("confirm") or a.get("flow") and (actions.by_agent() or actions._call.get((None,) * 4)[3]):
+    asks = bool(a.get("confirm") or a.get("flow") and (actions.by_agent() or actions._call.get((None,) * 4)[3]))
+    # The call after a yes is the person's own, so the dialog says what that call does: the write applies and the flow
+    # starts, unless the action type wants an approval or an outside message started this. An agent's call that asks
+    # nothing only ever proposes.
+    later = bool(w) and bool(a.get("approval") or actions.inbound())
+    proposed = later or bool(w) and actions.by_agent() and not asks
+    if asks:
+        preview["after_yes"] = {"write": None if not w else "proposal" if later else "applied", "starts_flow": bool(a.get("flow")) and not later}
         said = [f"{t}.{c['column']}: {json.dumps(c['old'])} → {json.dumps(c['new'])}" for c in preview.get("writes", {}).get("changes", [])]
         require_confirmation(f"Run '{a['name']}' on {x['name']} {json.dumps(preview['object']['title'])}: " + "; ".join(
-            said + ([f"starts flow '{a['flow']}'"] if a.get("flow") and not proposed else [])) + "." + (
-            " The write is a proposal an Editor approves; no flow starts." if proposed else ""), preview)
+            said + ([f"starts flow '{a['flow']}'"] if a.get("flow") and not later else [])) + "." + (
+            " The write is a proposal an Editor approves; no flow starts." if later else ""), preview)
     out: dict = {"action": a["id"], "type": x["id"], "key": key}
     if w:  # (6) as the runner: logged with old and new values, undoable
         status = "proposed" if proposed else "active"

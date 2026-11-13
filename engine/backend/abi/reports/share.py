@@ -38,7 +38,7 @@ class NewLink(ReportRef):
 
 @action(Role.editor)
 def create_share_link(conn, user: User, args: NewLink) -> dict:
-    """Makes a view-only link to a report (or one page): anyone holding it sees it read-only, as you, until it expires (1-30 days, default 7) or is revoked. Always asks the user to confirm; the link is shown once, only in the app."""
+    """Makes a view-only link to a report (or one page): anyone holding it sees it read-only, as you, until it expires (1-30 days, default 7) or is revoked. Always asks the person to confirm; the link is then shown once, to the person only: an agent never sees it."""
     if rls.rules(args.project):  # D-82
         raise ActionFailed(422, RULED)
     r = imports.load(args.project, "report", args.report)

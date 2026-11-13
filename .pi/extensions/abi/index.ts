@@ -51,7 +51,28 @@ function groupNotes(a: string): string {
 	return [notes, ...books].join("\n");
 }
 // abi.actions.PERSON_CLICK: access and where the project goes change only on a click in ABI's own UI (H-01.3)
-const PERSON_CLICK = new Set(["set_role", "set_tenant_admin", "set_user_tenant", "map_sender", "invite_user", "set_tenant", "set_remote"]);
+const PERSON_CLICK = new Set(["set_role", "set_tenant_admin", "set_user_tenant", "map_sender", "invite_user", "set_tenant", "set_remote", "set_workspace_owner"]);
+// shown-once:start (self-contained: tests/test_doors.py runs this block alone)
+// A share link, an embed key and a webhook token are credentials ABI answers once. The person gets them in a dialog only
+// they read; the model gets the listed plain fields and nothing else. An answer in any other shape: no credential is
+// found, so nothing of it goes to the model either (fail closed).
+const SHOWN_ONCE: Record<string, { secret: string; keep: string[]; what: string }> = {
+	create_share_link: { secret: "url", keep: ["id", "expires"], what: "share link" },
+	create_embed_key: { secret: "key", keep: ["kid"], what: "embed key" },
+	rotate_webhook_token: { secret: "token", keep: ["url"], what: "webhook token" },
+};
+function shownOnce(tool: string, body: unknown): { what: string; secret: string | null; safe: Record<string, unknown> } | null {
+	const s = SHOWN_ONCE[tool];
+	if (!s) return null;
+	const b = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+	const secret = typeof b[s.secret] === "string" && b[s.secret] ? (b[s.secret] as string) : null;
+	const safe: Record<string, unknown> = {};
+	if (secret) for (const k of s.keep) if (["string", "number"].includes(typeof b[k]) && !String(b[k]).includes(secret)) safe[k] = b[k];
+	return { what: s.what, secret, safe };
+}
+// an action's name as ABI has them: it goes into the request's path, so nothing else is ever sent
+const ACTION = /^[a-z][a-z0-9_]*$/;
+// shown-once:end
 const DATA_FILE = /\.(csv|tsv|parquet|xlsx?|avro|arrow|feather|jsonl|ndjson|db|duckdb|sqlite|ducklake)$/i;
 const PREFS = path.join(os.homedir(), ".abi-pi", `prefs-${process.env.ABI_USER || "admin"}.json`);
 const LOG = path.join(ROOT, "logs", `harness-${new Date().toISOString().slice(0, 10)}.jsonl`);
@@ -100,6 +121,7 @@ function token(refresh = false): string {
 }
 
 async function rest(action: string, args: unknown, confirm?: string): Promise<{ status: number; body: any }> {
+	if (!ACTION.test(action)) return { status: 400, body: { message: "That is not the name of an ABI action." } };
 	for (const retry of [false, true]) {
 		const r = await fetch(`${ABI_URL}/api/actions/${action}`, {
 			method: "POST",
@@ -396,14 +418,16 @@ export default async function abi(pi: ExtensionAPI) {
 		pi.registerTool({
 			name: "abi_pending",
 			label: "Pending confirmations",
-			description: "Steps specialists couldn't run because they need the person's yes. list shows them; run asks the person for each (ABI's own message and preview) and runs the ones they approve.",
+			description: "Steps specialists couldn't run because they need the person's yes. list shows them; run takes each in turn: a step ABI asks about is shown to the person (ABI's own message and preview) and runs on their yes; a step ABI doesn't ask about runs as your own call would (a change of data becomes a proposal); what only the person may do in the app is refused, and in Viewer mode nothing runs.",
 			parameters: Type.Object({ project: Type.String(), action: Type.String({ enum: ["list", "run"] }) }),
 			async execute(_id, p, _signal, _onUpdate, ctx) {
 				const list = JSON.parse(await runTeam(["pending", p.project]) || "[]");
 				if (p.action === "list" || !list.length) return text(JSON.stringify(list));
 				const out: unknown[] = [];
 				for (const it of list) {
-					const r: any = await confirmBridge(String(it.action), { project: p.project, ...(it.args || {}) }, ctx);
+					// each step against the mode as it is now: the person may have switched to Viewer since the list was made
+					if (await mode() === "viewer" && !READS.has(String(it.action))) { out.push({ id: it.id, action: it.action, outcome: "waiting", detail: { status: "Viewer mode: nothing changed. The person can switch to Developer in the app's top bar and ask again." } }); break; }
+					const r: any = await confirmBridge(String(it.action), { ...(it.args || {}), project: p.project }, ctx);  // the step's project is the Lead's, whatever its args say
 					// the app is in Viewer mode: nothing ran, so the step stays waiting and the rest isn't asked
 					if (String(r.status ?? "").startsWith("Viewer mode")) { out.push({ id: it.id, action: it.action, outcome: "waiting", detail: r }); break; }
 					const outcome = "result" in r ? "ok" : String(r.status ?? "").includes("declined") ? "declined" : "failed";
@@ -598,6 +622,7 @@ export default async function abi(pi: ExtensionAPI) {
 		}
 	}
 
+	const SHOWN = "Shown once: copy it now";  // the dialog's title; the app's chat reads it (scripts/app.py)
 	async function confirmBridge(tool: string, input: unknown, ctx: ExtensionContext) {
 		if (PERSON_CLICK.has(tool)) return { status: "This changes access or where the project goes: the person does it in ABI's app, never from an agent." };
 		// "ask" makes ABI treat this call as the agent's own (abi.actions.ASK: the agent's door, as the MCP call replayed
@@ -607,6 +632,7 @@ export default async function abi(pi: ExtensionAPI) {
 		// person's own, one step. Only a 409 with a token is ever run as the person, after their yes
 		const first = await rest(tool, input, "ask");
 		if (first.status !== 409 || !first.body?.confirm_token) {
+			if (first.status < 300 && SHOWN_ONCE[tool]) return { status: "Nothing of ABI's answer is passed on: it was not asked first. Tell the person to make it again." };
 			return first.status < 300 ? { result: first.body } : { error: first.body };
 		}
 		const tok: string = first.body.confirm_token; // stays in this closure: never in content, logs or the transcript
@@ -625,6 +651,13 @@ export default async function abi(pi: ExtensionAPI) {
 		const done = await rest(tool, input, tok);
 		// what the yes showed may have changed meanwhile: ABI then asks again (409 with a new token), which never goes to the model
 		if (done.body && typeof done.body === "object") delete done.body.confirm_token;
+		const once = done.status < 300 ? shownOnce(tool, done.body) : null;
+		if (once) {  // a credential: to the person alone, in a dialog; never the tool result, the transcript, a log or pending.json
+			if (!once.secret) return { status: `ABI made the ${once.what}, but its answer was not in the form expected, so it is not shown and nothing of it is passed on. Tell the person to revoke it and make a new one.` };
+			await ctx.ui.confirm(SHOWN, `Your new ${once.what}:\n\n${once.secret}\n\nCopy it now and keep it somewhere safe: it is shown this once, it is not kept in this chat, and the agent never sees it.`);
+			log({ event: "shown_once", tool });
+			return { result: { ...once.safe, created: `The ${once.what} was made and shown to the person once, in a dialog only they read. You never see it: don't ask for it and don't guess it.` }, confirmed_by_person: true };
+		}
 		return done.status < 300 ? { result: done.body, confirmed_by_person: true } : { error: done.body };
 	}
 

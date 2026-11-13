@@ -1155,8 +1155,8 @@ def asked(action: str, /, **args) -> abi.ActionError:
 def test_a_replayed_call_is_the_agents_call(acts):
     """The harness replays a step over REST as the person (the confirm bridge; abi_pending takes any step a specialist
     names), first with `X-Abi-Confirm: ask`. That call is the agent's: a write is a proposal, a flow start is asked
-    (and the yes is checked against what was shown), what is never an agent's is refused, and no token is handed out
-    for a credential that is shown once. A Git remote inside imported files is asked too."""
+    (and the yes is checked against what was shown, and the dialog says what the yes does), and what is never an agent's
+    is refused. A Git remote inside imported files is asked too, also beside another reason, and the yes then applies it."""
     import io
     import zipfile
 
@@ -1171,16 +1171,23 @@ def test_a_replayed_call_is_the_agents_call(acts):
     out = abi.call("edit_cells", confirm="ask", project=P, table="cafe_contacts", edits=[{"key": [good], "column": "manager", "value": "Replayed"}])
     assert out["status"] == "proposed" and contact(good) == was, out
     sure("reject_edit", project=P, table="cafe_contacts", batch=out["batch"])
-    # never an agent's: a person's own credentials and where password links go; shown once: no token goes to the bridge
+    # never an agent's: a person's own credentials, where password links go, who owns the workspace
     for action, args in (("create_personal_token", {"name": "x"}), ("set_user_email", {"name": acts["names"]["viewer"], "email": "x@example.com"}),
-                         ("set_account_mail", {"smtp": None}), ("create_share_link", {"project": P, "report": "x"}),
-                         ("create_embed_key", {"project": P, "name": "x", "origins": ["https://x.example.com"]}),
-                         ("rotate_webhook_token", {"project": P, "flow": "cafe_visit"}), ("set_role", {"project": P, "user": acts["names"]["viewer"], "role": "owner"})):
+                         ("set_account_mail", {"smtp": None}), ("set_workspace_owner", {"name": acts["names"]["viewer"], "on": True}),
+                         ("set_role", {"project": P, "user": acts["names"]["viewer"], "role": "owner"})):
         e = asked(action, **args)
         assert e.status == 403 and "confirm_token" not in e.body and "the person does it in the app" in e.body["message"], (action, e.body)
+    # a credential shown once is asked like anything else (the harness shows ABI's answer to the person alone: test_doors)
+    e = asked("create_embed_key", project=P, name="x", origins=["https://x.example.com"])
+    assert e.status == 409 and e.body["confirm_token"] and "https://x.example.com" in e.body["message"], e.body
+    assert not abi.call("list_embed_keys", project=P)["keys"]
     # a flow start with no confirmation of its own: asked, nothing starts; after the yes it runs, checked against the preview
     base = onto(acts["format"])
-    sure("save_ontology", project=P, ontology={**base, "actions": [*base["actions"], {"id": "ping", "object": "cafe", "name": "Ping", "inputs": REASON, "flow": "cafe_visit"}]})
+    sure("save_ontology", project=P, ontology={**base, "actions": [*base["actions"], {"id": "ping", "object": "cafe", "name": "Ping", "inputs": REASON, "flow": "cafe_visit"},
+        {"id": "sure_note", "object": "cafe", "name": "Note, asked", "confirm": True, "inputs": REASON,
+         "writes": {"table": "cafe_contacts", "set": {"manager": "{{ data.inputs.reason }}"}}},
+        {"id": "flow_note", "object": "cafe", "name": "Note, then visit", "inputs": REASON,
+         "writes": {"table": "cafe_contacts", "set": {"visit_reason": "{{ data.inputs.reason }}"}}, "flow": "cafe_visit"}]})
     try:
         runs = lambda: len(abi.call("object_history", project=P, type="cafe", key=[fresh])["flows"])  # noqa: E731
         n = runs()
@@ -1194,6 +1201,17 @@ def test_a_replayed_call_is_the_agents_call(acts):
         assert finished(done["run"])["status"] == "ok" and runs() == n + 1
         own = run(None, type="cafe", key=[fresh], action="ping", **why)  # the person's own click is one step, as before
         assert finished(own["run"])["status"] == "ok" and runs() == n + 2
+        # the dialog says what the person's yes does: the write applies (and the flow starts), never "a proposal"
+        e = asked("run_object_action", project=P, type="cafe", key=[good], action="sure_note", **why)
+        assert e.status == 409 and "proposal" not in e.body["message"] and "starts" not in e.body["message"], e.body
+        assert e.body["preview"]["after_yes"] == {"write": "applied", "starts_flow": False} and contact(good) == was
+        done = run(None, confirm=e.body["confirm_token"], type="cafe", key=[good], action="sure_note", **why)
+        assert done["write"]["status"] == "active" and "run" not in done and contact(good)[0][0] == "Replayed"
+        e = asked("run_object_action", project=P, type="cafe", key=[good], action="flow_note", **why)
+        assert e.status == 409 and "proposal" not in e.body["message"] and "starts flow 'cafe_visit'" in e.body["message"], e.body
+        assert e.body["preview"]["after_yes"] == {"write": "applied", "starts_flow": True} and contact(good)[0][1] == was[0][1]
+        done = run(None, confirm=e.body["confirm_token"], type="cafe", key=[good], action="flow_note", **why)
+        assert done["write"]["status"] == "active" and finished(done["run"])["status"] == "ok" and contact(good)[0][1] == "Replayed"
     finally:
         sure("save_ontology", project=P, ontology=base)
     # where the project is pushed: a remote inside imported files is asked on the replay, with the address shown
@@ -1203,4 +1221,18 @@ def test_a_replayed_call_is_the_agents_call(acts):
     moved = {**bundle, "project.json": {**bundle["project.json"], "settings": {**bundle["project.json"].get("settings", {}), "remote": there}}}
     e = asked("import_project", project=P, bundle=moved)
     assert e.status == 409 and e.body["preview"]["remote"] == there and "https://git.example.com/brew.git" in e.body["message"], e.body
+    assert abi.call("remote_settings", project=P)["remote"] is None
+    # ... and beside another reason (an action type Viewers may run): one dialog names both, and the yes applies both
+    extra = {"id": "extra", "object": "cafe", "name": "Extra", "role": "viewer", "writes": {"table": "cafe_contacts", "set": {"visit_reason": "extra"}}}
+    both = {**moved, "model/ontology.json": {**bundle["model/ontology.json"], "actions": [*bundle["model/ontology.json"]["actions"], extra]}}
+    try:
+        e = asked("import_project", project=P, bundle=both)
+        assert e.status == 409 and e.body["preview"]["remote"] == there and "extra" in e.body["preview"]["grants"], e.body
+        with pytest.raises(abi.ActionError) as own:  # the person's own call asks for the grant, and then shows the address too
+            abi.call("import_project", project=P, bundle=both)
+        assert own.value.status == 409 and own.value.body["preview"]["remote"] == there
+        abi.call("import_project", confirm=e.body["confirm_token"], project=P, bundle=both)
+        assert abi.call("remote_settings", project=P)["remote"] == there
+    finally:
+        sure("import_project", project=P, bundle=bundle)
     assert abi.call("remote_settings", project=P)["remote"] is None

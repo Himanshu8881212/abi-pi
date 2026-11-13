@@ -278,17 +278,17 @@ PRODUCTION_OK = PRODUCTION_READS | PRODUCTION_ACCESS | {
 # is pushed, change only on a person's click. From an agent, MCP, a flow or an inbound run these ask a confirmation that
 # only the UI can give (the token goes to the Confirm button, never back to the caller); a person's own REST call is one step.
 PERSON_CLICK = frozenset({"set_role", "set_tenant_admin", "set_user_tenant", "map_sender", "invite_user", "set_tenant",
-                          "set_remote"})  # set_project_tenant confirms itself (confirms=True)
+                          "set_remote", "set_workspace_owner"})  # set_project_tenant confirms itself (confirms=True)
 
 
 # The harness's confirm bridge (.pi/extensions/abi/index.ts confirmBridge, abi_pending) replays an agent's call over REST
 # with the person's session: first with `X-Abi-Confirm: ask`, to learn what ABI asks, then with the token after their
 # yes. The asking call is the agent's, so it goes through the agent's door (as MCP, D-33): every agent rule holds (edits
 # become proposals, sends are grounded, nothing counts as typed by a person), a call that asks nothing does no more than
-# the agent's own would, and what an agent may never call (agent._secret, PERSON_CLICK) is refused. SHOWN_ONCE: their
-# answer is a credential for the person's screen (SC-4); the bridge would hand it to the model, so no token goes there.
+# the agent's own would, and what an agent may never call (agent._secret, PERSON_CLICK) is refused. A share link, an
+# embed key and a webhook token are asked like anything else; what ABI answers after the yes is a credential, and the
+# harness shows it to the person alone (index.ts shownOnce): the server can't tell the harness from the person.
 ASK = "ask"
-SHOWN_ONCE = frozenset({"create_share_link", "create_embed_key", "rotate_webhook_token"})
 
 
 def production_refusal(name: str, project, role: Role | None = None) -> str | None:
@@ -360,8 +360,10 @@ def run(name: str, payload: dict, user: User, via: str, confirm: str | None = No
                 raise ActionFailed(403, why)
             _call.set((user, name, json.dumps(logged, sort_keys=True), confirm))
             _said.set(None)
-            if act.destructive and not act.confirms:
-                require_confirmation(f"Destructive: {' '.join((act.fn.__doc__ or '').split())}")  # no action ID in the text
+            if act.destructive and not act.confirms:  # no action ID in the text; what it acts on, as the call names it
+                on = [f"{k.replace('_', ' ')} '{v}'" for k, v in logged.items() if isinstance(v, str | int) and not isinstance(v, bool)
+                      and len(str(v)) <= 80 and "*" not in str(v) and "${secret:" not in str(v)][:6]
+                require_confirmation(f"Destructive: {' '.join((act.fn.__doc__ or '').split())}" + (f" It acts on: {', '.join(on)}." if on else ""))
             if via != "rest" and name in PERSON_CLICK:  # every arg shown, uncut: the click approves all of them (a logo is a digest)
                 require_confirmation(f"Changes access or where the project goes: {' '.join((act.fn.__doc__ or '').split())}"
                                      f" Asked: {json.dumps(_audited(name, logged), ensure_ascii=False)}.")  # SUMMARIZED fields hashed: the text is audited
@@ -427,7 +429,7 @@ def call_action(
         from abi import agent  # not at top: agent imports this module
 
         act = ACTIONS.get(name)
-        if name in SHOWN_ONCE | PERSON_CLICK or act and agent._secret(act):
+        if name in PERSON_CLICK or act and agent._secret(act):
             with db.connect() as conn:
                 audit(conn, user, "mcp", name, None, None, 403, "not an agent's to replay")
             raise HTTPException(403, {"message": f"'{name}' is not available to an agent: the person does it in the app."})

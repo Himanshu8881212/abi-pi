@@ -46,6 +46,10 @@ def test_handoff_passes_unlocks_dependents_and_failures_go_back():
     assert not team.handoff("p", "data-engineer", {"task_id": "bronze"})["accepted"], "summary and status are required"
     ROWS["data_quality"] = {"columns": ["table", "rows"], "rows": [["bronze_basic", 1000]]}
     ROWS["semantic_model"] = {"columns": {}}
+    for name in ("../admin/dbkey", "edit_cells?x=1", "Edit", ""):  # M10: the Lead sends a pending step to ABI by its name
+        odd = team.handoff("p", "data-engineer", {"task_id": "bronze", "status": "partial", "summary": "loaded",
+                                                  "pending_confirmations": [{"action": name, "args": {}, "why": "x"}]})
+        assert not odd["accepted"] and "is not the name of an ABI action" in odd["errors"][0] and not team.pending("p"), odd
     bad = team.handoff("p", "data-engineer", {"task_id": "bronze", "status": "done", "summary": "loaded",
                                               "done": [{"kind": "table", "id": "bronze_basic"}, {"kind": "table", "id": "bronze_missing"}]})
     assert bad["result"] == "failed" and "bronze_missing" in bad["checks"][0]["problems"][0]

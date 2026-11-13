@@ -1004,3 +1004,59 @@ def test_derived_f_stays_denied(links):
     finally:
         sure("set_steps", project=P, table="customers", steps=steps)
         gone("delete_table", table="rev_by_cust")
+
+
+# the same person's filters, with a follow link's key list written by DuckDB and, as before M10, key by key in Python
+BOTH = r"""
+import json, re, sys
+from abi import semantic, storage
+from abi.semantic import rls
+a = json.loads(sys.stdin.read())
+P, uid = a["project"], a["uid"]
+read = lambda sql, reads: semantic.execute(P, sql, {"test": "rls links"}, reads=reads)
+cols = semantic._columns_of(storage.lake(P).cursor(), "model")
+out = {}
+for way in (True, False):
+    rls.IN_SQL = way
+    out[way] = rls.conditions(P, uid, read, cols)
+lits = lambda s: sorted(re.findall(r"CAST\('(?:[^']|'')*' AS [^()]*(?:\([^()]*\))?\)", s))
+shape = lambda s: re.sub(r"CAST\('(?:[^']|'')*' AS [^()]*(?:\([^()]*\))?\)(?:, )?", "", s)
+print(json.dumps({"tables": sorted(out[True]), "same_tables": sorted(out[True]) == sorted(out[False]),
+                  "same_keys": [t for t in out[True] if lits(out[True][t]) != lits(out[False][t])],
+                  "same_shape": [t for t in out[True] if shape(out[True][t]) != shape(out[False][t])],
+                  "n": {t: len(lits(out[True][t])) for t in out[True]}}))
+"""
+
+
+def test_follow_keys_written_by_the_lake_are_the_keys_read_one_by_one(links):
+    """M10 (item 32): a follow link's key list is written by DuckDB in one read; it holds exactly the keys the earlier
+    key-by-key way gives, for every table of the person's filters, and the rest of each filter is the same text. A
+    customer's key with a quote in it is one of them, written as the same literal."""
+    odd = "C'9\\9"
+    [cust] = [abi.call("sql_query", project=P, sql="SELECT * FROM customers LIMIT 1")]
+    one = dict(zip(cust["columns"], cust["rows"][0])) | {"customer_id": odd}
+    order = dict(zip(*(lambda r: (r["columns"], r["rows"][0]))(abi.call("sql_query", project=P, sql=(
+        "SELECT o.* FROM orders o JOIN cafes c USING (cafe_id) WHERE c.region = 'North' LIMIT 1"))))) | {"customer_id": odd, "order_id": "ORD-ODD-1"}
+    abi.call("edit_cells", project=P, table="customers", add=[one])
+    abi.call("edit_cells", project=P, table="orders", add=[order])
+    try:
+        r = engine(BOTH, timeout=300, stdin=json.dumps({"project": P, "uid": links["uid"]}))
+        assert r.returncode == 0, r.stderr[-3000:]
+        got = json.loads(r.stdout.splitlines()[-1])
+        assert got["same_tables"] and got["same_keys"] == [] and got["same_shape"] == [], got
+        assert got["n"]["customers"] == len(sql(VISITED)) > 1000, got["n"]
+        assert mine(links, "get_object", type="customer", key=[odd])["key"] == [odd], "fresh after an edit: the new visitor is seen at once"
+    finally:
+        abi.call("edit_cells", project=P, table="orders", delete=[["ORD-ODD-1"]])
+        abi.call("edit_cells", project=P, table="customers", delete=[[odd]])
+    with pytest.raises(abi.ActionError) as e:
+        mine(links, "get_object", type="customer", key=[odd])
+    assert e.value.status == 404, "and gone again with the order"
+    # fresh after a rule change: the same Viewer moved to the South follows the South's visitors
+    south = sql(VISITED.replace("'North'", "'South'"))
+    sure("set_rls_rule", project=P, id="region", table="cafes", column="region", users={links["uid"]: ["South"]})
+    try:
+        assert mine(links, "sql_query", sql="SELECT count(*) FROM customers")["rows"] == [[len(south)]]
+    finally:
+        sure("set_rls_rule", project=P, id="region", table="cafes", column="region", users={links["uid"]: ["North"]})
+    assert mine(links, "sql_query", sql="SELECT count(*) FROM customers")["rows"] == [[len(sql(VISITED))]]

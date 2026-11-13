@@ -45,7 +45,7 @@ class NewKey(storage.ProjectRef):
 
 @action(Role.owner)
 def create_embed_key(conn, user: User, args: NewKey) -> dict:
-    """Makes a signing key for embedding this project's reports in other sites: the host's backend signs short-lived tokens with it naming one of the project's Viewers, whose view the embed shows. Always asks the user to confirm; the key is shown once, only in the app."""
+    """Makes a signing key for embedding this project's reports in other sites: the host's backend signs short-lived tokens with it naming one of the project's Viewers, whose view the embed shows. Always asks the person to confirm; the key is then shown once, to the person only: an agent never sees it."""
     origins = sorted(set(args.origins))
     require_confirmation(f"Pages on {', '.join(origins)} can show this project's reports as any of its Viewers, to"
                          " whoever the host site chooses, with tokens signed by this key, until you revoke it.")

@@ -332,8 +332,11 @@ def handoff(project: str, agent: str, h: dict) -> dict:
         return {"accepted": False, "errors": errs}
     pend = read(project, "pending.json", [])
     for p in h.get("pending_confirmations") or []:
-        pend.append({"id": f"p{len(pend) + 1}", "task": t["id"], "agent": agent, "action": str(p.get("action") or "").removeprefix("mcp__abi__"),
-                     "args": p.get("args") or {}, "why": p.get("why", ""), "status": "waiting", "t": now()})
+        name, args = str(p.get("action") or "").removeprefix("mcp__abi__"), p.get("args")
+        if not re.fullmatch(r"[a-z][a-z0-9_]*", name) or not isinstance(args or {}, dict):  # the Lead sends it to ABI by this name
+            return {"accepted": False, "errors": [f"pending_confirmations: '{name[:60]}' is not the name of an ABI action with its arguments"]}
+        pend.append({"id": f"p{len(pend) + 1}", "task": t["id"], "agent": agent, "action": name,
+                     "args": {k: v for k, v in (args or {}).items() if k != "project"}, "why": p.get("why", ""), "status": "waiting", "t": now()})
     write(project, "pending.json", pend)
     results = [check(project, c, h.get("done") or [], h) for c in AGENTS[agent]["checks"]]
     checks_ok = all(r["passed"] for r in results)

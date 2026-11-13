@@ -900,6 +900,11 @@ def test_er_undo_checks_again_inside_its_write(er):
     assert rev[103] == 30 and 104 not in rev, "the first decision stands"
     assert rev[109] == 9 and rev[110] == 11 and stored() != was, "the other Editor's undo landed"
     assert refused("0" * 32) == "This isn't a decision about customers that can be undone: take one of those listed under Decided."
+    with pytest.raises(abi.ActionError) as e:  # a decision names its records by the key: the key stays while one is in force
+        call("set_table", table="customers", key=["name"])
+    assert e.value.status == 409 and e.value.body["message"].startswith("What identifies these records can't change while decisions")
+    [d] = [d for d in found()[0]["decisions"] if d["batch"] == first["batch"]]
+    assert d["blocked"] is False and "blocked_by" not in d
     call("undo_edits", table=S, batch=first["batch"])
     assert by("revenue")[104] == 20
 

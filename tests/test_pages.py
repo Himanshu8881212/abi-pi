@@ -576,11 +576,16 @@ def okey(type_: str, key: str) -> str:
 
 
 KV = "!!document.querySelector('main .kv')"
+# what ABI asks when an agent runs an action type: the dialog says what the person's yes does (M10: it applies the write
+# and starts the flow); with `approval` on the action type the write stays a proposal and no flow starts
+ASKED = {"action": "flag_visit", "object": {"type": "cafe", "key": ["CF1"], "title": "Brew North"}, "inputs": {"reason": "why"},
+         "writes": {"table": "cafe_contacts", "row": "added", "changes": [{"column": "visit_reason", "old": None, "new": "why"}]},
+         "flow": "cafe_visit"}
 CHAT_ASK = ("Run 'Flag for a visit' on Café \"Brew North\": cafe_contacts.visit_reason: null → \"why\"; starts flow 'cafe_visit'."
-            " The write is a proposal an Editor approves; no flow starts.\n\nPreview:\n" + json.dumps({
-                "action": "flag_visit", "object": {"type": "cafe", "key": ["CF1"], "title": "Brew North"}, "inputs": {"reason": "why"},
-                "writes": {"table": "cafe_contacts", "row": "added", "changes": [{"column": "visit_reason", "old": None, "new": "why"}]},
-                "flow": "cafe_visit"}, indent=1) + "\n\nProceed?")
+            "\n\nPreview:\n" + json.dumps(ASKED | {"after_yes": {"write": "applied", "starts_flow": True}}, indent=1) + "\n\nProceed?")
+CHAT_PROPOSAL = ("Run 'Flag for a visit' on Café \"Brew North\": cafe_contacts.visit_reason: null → \"why\"."
+                 " The write is a proposal an Editor approves; no flow starts.\n\nPreview:\n"
+                 + json.dumps(ASKED | {"after_yes": {"write": "proposal", "starts_flow": False}}, indent=1) + "\n\nProceed?")
 VISIT_REASON = "api('get_object',{type:'cafe',key:[%s]}).then(o=>o.rows[0][o.columns.indexOf('cafe_contacts.visit_reason')])"
 
 
@@ -746,6 +751,7 @@ def test_action_form_confirms(objs, tmp_path):
         ["show", "flw:cafe_visit"], ["wait", "main .lastrun .oopen"], ["click", "main .lastrun .oopen"], ["until", KV], ["get", "from_flow", "CUR"],
         # the chat agent's confirmation of such an action reads like the form's
         ["get", "chat", "(c => [c.title, c.lead, plainPreview(c.preview)])(chatAsk({title: 'ABI asks for your confirmation', message: " + json.dumps(CHAT_ASK) + "}))"],
+        ["get", "chat_proposal", "(c => [c.title, c.lead, plainPreview(c.preview)])(chatAsk({title: 'ABI asks for your confirmation', message: " + json.dumps(CHAT_PROPOSAL) + "}))"],
         ["get", "chat_other", "chatAsk({title: 'ABI asks for your confirmation', message: 'Destructive: deletes report x.\\n\\nProceed?'}).message"],
         # the history names a run's inputs as the form does: by the input's title
         ["get", "hist_title", "(async () => { const real = api, c = document.createElement('div');"
@@ -785,8 +791,11 @@ def test_action_form_confirms(objs, tmp_path):
     assert "leaves the project" not in out["rm_lead"] + out["rm_prev"] and "Segment:" in out["rm_prev"] and "Saved" in out["rm_toast"] and "deleted" not in out["rm_toast"], out
     assert objs["sql"](f"SELECT segment FROM customers WHERE customer_id = '{cust}'") == [["Unflagged"]]
     assert out["from_flow"] == okey("cafe", fresh), "the flow's last run links the café it ran for"
-    assert out["chat"][0] == "Flag for a visit?" and "Brew North" in out["chat"][1] and "editor approves" in out["chat"][1], out["chat"]
-    assert "Reason: why" in out["chat"][2] and "starts" not in out["chat"][2] and not IDS.search(" ".join(out["chat"])), out["chat"]
+    assert out["chat"][0] == "Flag for a visit?" and "Brew North" in out["chat"][1] and "editor approves" not in out["chat"][1], out["chat"]
+    assert "Reason: why" in out["chat"][2] and "Then starts “Café visit”." in out["chat"][2] and not IDS.search(" ".join(out["chat"])), out["chat"]
+    prop = out["chat_proposal"]  # an action type that wants an approval: said so, and no flow is promised
+    assert prop[0] == "Flag for a visit?" and "Brew North" in prop[1] and "editor approves" in prop[1], prop
+    assert "Reason: why" in prop[2] and "starts" not in prop[2] and not IDS.search(" ".join(prop)), prop
     assert out["chat_other"] == "ABI asks for your confirmation", "any other confirmation reads as before"
     # ABI names the object of an action-started run to its runner and to Editors and Owners, never to another Viewer
     mine = e.post("/api/flow_runs", {"project": PO, "flow": "cafe_visit"})["result"]["runs"]

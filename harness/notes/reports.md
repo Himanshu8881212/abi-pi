@@ -7,5 +7,7 @@
   without `key` the person picks the object in the card.
 - After saving: `abi_sync` renders `workspaces/<ws>/_views/<project>/reports/<id>.html` (interactive, offline).
 - `visual_data` returns one visual's rows; `report_snapshot`/`export_visual` make PNG/PDF/CSV files.
-- Sharing, share links and embed keys widen who sees data: they need the person's confirmation.
+- Sharing, share links and embed keys widen who sees data: they need the person's confirmation. A new share link or
+  embed key is shown to the person once, in a dialog only they read: you never see it. Say it was made and that they
+  should keep it safe; never ask for it or write one yourself.
 - `delete_report` is destructive: the person confirms.

@@ -702,10 +702,11 @@ def job(run_id: str) -> None:
             raise ActionFailed(400, "The user who asked for this scoring run no longer exists.")
         else:
             with git.change(r["project"], u, "score_model"):
-                # `object` as the model's file has it now: a run queued before the model was taken off its object type
-                # (or deleted) writes its predictions and puts no property back on the type
+                # `object` only while the model's file still has the one this run was queued with: a run queued before
+                # the model was taken off its object type, moved to another or deleted writes its predictions (its dataset
+                # was read for the queued type) and puts no property on any type
                 now = (bundle(git.path(r["project"])).get(f"ml/{r['spec']['id']}.json") or {}).get("object")
-                spec = {k: v for k, v in r["spec"].items() if k != "object"} | ({"object": now} if now else {})
+                spec = {k: v for k, v in r["spec"].items() if k != "object"} | ({"object": now} if now and now == r["spec"].get("object") else {})
                 out = _predictions(r["project"], spec, r["trained"], r["query"], u)
     except Exception as e:  # noqa: BLE001 - any failure is the run's outcome
         error = str(e)
