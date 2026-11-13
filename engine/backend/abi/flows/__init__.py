@@ -873,7 +873,7 @@ def _per_object(project: str, f: dict, now: datetime, u: User) -> None:
         for row in held(t, r["columns"], r["rows"]):
             if None not in (key := [row[i] for i in at]):
                 # 1.2.7 M0: a DECIMAL key no float holds exactly stays its own text (two such keys were one object here)
-                key = [str(v) if isinstance(v, Decimal) and abs(v) > 2 ** 53 else v for v in key]
+                key = [str(v) if isinstance(v, Decimal) and abs(v) >= 2 ** 53 else v for v in key]
                 k = json.dumps(ontology._json(key))  # an object is its key, as JSON text
                 if len(k.encode()) > 2000:  # more than the state's index holds
                     long += 1
