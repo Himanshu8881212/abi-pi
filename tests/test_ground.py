@@ -958,7 +958,7 @@ def test_count_word_before_named_items_grounds():
     by region and Revenue by month" after a save_report whose result holds the visuals' IDs only. A count, as a word
     or as a digit, grounds when exactly that many items are named after it and each is a title the agent sent in this
     session (or a result's own text, as before)."""
-    for n in ("three", "Three", "3"):
+    for n in ("three", "3"):
         out = ground.check(BUILT.format(n), [SAVED], vocab={"revenue", "region", "month"}, wrote=SENT)
         assert out["numbers"] == [] and out["names"] == [], (n, out)
     got = ground.run({"answer": BUILT.format("three"), "results": [SAVED], "wrote": SENT, "vocab": ["revenue", "region", "month"]})

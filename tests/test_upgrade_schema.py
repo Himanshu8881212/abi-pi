@@ -68,6 +68,7 @@ VALUE = {"text": "'x'", "varchar": "'x'", "int4": "1", "int8": "1", "int2": "1",
          "timestamptz": "TIMESTAMPTZ '2026-11-01 00:00:00+00'", "timestamp": "TIMESTAMP '2026-11-01 00:00:00'", "date": "DATE '2026-11-01'",
          "uuid": "'00000000-0000-0000-0000-000000000001'", "bytea": "'\\x00'", "numeric": "1", "float8": "1", "float4": "1",
          "inet": "'127.0.0.1'", "interval": "'1 hour'"}
+BY_HAND = {"account_tokens": "INSERT INTO account_tokens (hash, kind, user_id, expires) VALUES ('\\x00', 'invite', 1, TIMESTAMPTZ '2026-11-01 00:00:00+00')"}
 def every():
     with psycopg.connect(dbname=OLD) as c:
         ts = [r[0] for r in c.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'"
@@ -83,21 +84,27 @@ def seed_all():
         for t in every():
             if c.execute(f'SELECT count(*) FROM "{t}"').fetchone()[0]:
                 continue  # SEED's rows
-            cols = c.execute("SELECT column_name, udt_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = %s"
-                             " AND is_nullable = 'NO' AND column_default IS NULL AND is_identity = 'NO' AND is_generated = 'NEVER'"
-                             " ORDER BY ordinal_position", [t]).fetchall()
-            vals = []
-            for col, typ in cols:
-                listed = next((m[1] for tt, d in checks if tt.strip('"') == t for m in [re.search(
-                    rf"\(?{col}\)?(?:::text)? = (?:ANY \(\(?ARRAY\[)?'([^']*)'", d)] if m), None)
-                vals.append(f"'{listed}'" if listed is not None else "'{}'" if typ.startswith("_") else VALUE.get(typ))
-            try:
-                if None in vals:
-                    raise ValueError(f"no value for a column of type {[ty for (_, ty), v in zip(cols, vals) if v is None]}")
-                c.execute(f'INSERT INTO "{t}" ({", ".join(chr(34) + x + chr(34) for x, _ in cols)}) VALUES ({", ".join(vals)})' if cols
-                          else f'INSERT INTO "{t}" DEFAULT VALUES')
-            except Exception as e:  # named in the result: the test fails on it
-                bad[t] = str(e)[:200]
+            if t in BY_HAND:  # a CHECK ties two columns together: no rule of thumb fills it
+                c.execute(BY_HAND[t])
+                continue
+            for need in ("AND is_nullable = 'NO'", ""):  # a CHECK over two columns may want a nullable one filled: then every column
+                cols = c.execute("SELECT column_name, udt_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = %s"
+                                 f" {need} AND column_default IS NULL AND is_identity = 'NO' AND is_generated = 'NEVER'"
+                                 " ORDER BY ordinal_position", [t]).fetchall()
+                vals = []
+                for col, typ in cols:
+                    listed = next((m[1] for tt, d in checks if tt.strip('"') == t for m in [re.search(
+                        rf"\(?{col}\)?(?:::text)? = (?:ANY \(\(?ARRAY\[)?'([^']*)'", d)] if m), None)
+                    vals.append(f"'{listed}'" if listed is not None else "'{}'" if typ.startswith("_") else VALUE.get(typ))
+                try:
+                    if None in vals:
+                        raise ValueError(f"no value for a column of type {[ty for (_, ty), v in zip(cols, vals) if v is None]}")
+                    c.execute(f'INSERT INTO "{t}" ({", ".join(chr(34) + x + chr(34) for x, _ in cols)}) VALUES ({", ".join(vals)})' if cols
+                              else f'INSERT INTO "{t}" DEFAULT VALUES')
+                    bad.pop(t, None)
+                    break
+                except Exception as e:  # named in the result: the test fails on it
+                    bad[t] = str(e)[:200]
     return bad
 everything = os.environ.get("ABI_UPGRADE_ROWS") == "all"
 if everything:
