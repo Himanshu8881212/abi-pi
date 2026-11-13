@@ -4,6 +4,99 @@ A self-hosted agentic BI app in one container: ABI-PI's own copy of ABI's engine
 ML, custom agents), the Pi agent with a team of specialists, and a one-page app. Install: see [README.md](README.md)
 (`.env` with the owner account, `docker compose up -d`).
 
+## 1.2.6: checked before the tag
+
+Not tagged. This section says what was run on the 1.2.6 code, what came out, what is known and not fixed, and how
+an install moves from 1.2.5. The measurements are in [bench/RESULTS.md](bench/RESULTS.md), "1.2.6 release run".
+
+### Checked for 1.2.6
+
+All on pve1 (LXC 100, 6 cores, 10 GB) in throwaway containers, 13 Nov 2026; nothing ran on a developer's machine and
+the live install was not touched.
+
+- **Tests.** The whole suite in a fresh container of each round's commit: 503 passed, 24 skipped, 6 failed (round 3,
+  ffa91fe); the 6 are the container-only failures listed under Known. `tests/test_brewline.py::test_ontology_journey`
+  runs Brewline from the load to the object pages as an owner and as a Viewer of one region: the draft, the
+  refinement, the approval, a café's page, a Viewer's action, an alert per café, a prediction on the customer's page,
+  one merge of two customer records (also of a record the Viewer sees with one they don't) and one plan.
+- **Upgrade from 1.2.5** (item 34). A 1.2.5 install with two projects (Brewline at 37,000 and at 7.4 million orders,
+  a Viewer with a row rule, a dataset, a flow, an input table with an edit), stopped, its data volume started under
+  the 1.2.6 image: the schema number went from 5 to 7, 54 recorded answers (27 queries and every report visual, as
+  the Owner and as the Viewer) were byte-identical before and after, every project file and Git head was unchanged,
+  no `model/ontology.json` appeared, and the engine's log had no error. In the test suite a database made by 1.2.5's
+  own schema, with a project's rows in it, gets every column, constraint, index and trigger of a fresh one and keeps
+  every row.
+- **Restricted pages with a follow link** (item 32). 50 Viewers, each limited to one café, on Brewline scale 1, with
+  customers following the cafés they visited: page p95 right after a commit 5.29, 5.44 and 5.29 s (mean 5.34 s)
+  against 1.2.5's 3.87 and 4.77 s without the link (mean 4.32 s): x1.24. The target was x1.2: missed by a little.
+  It was 15 to 17 s (x3.5) before two fixes in this release run. Without a follow link 1.2.6 is as fast as 1.2.5
+  (4.39 and 4.43 s). The first read of a Viewer who follows to 60,000 customers takes 6 to 7 s after a restart.
+- **Agent bench** (item 33, claude-sonnet-5-5, 38 runs): "why did it change" 20 of 20 on the two planted datasets,
+  none masked; a question 10 of 10; a load 3 of 3; a report 4 of 5 (one answer had a count word masked in front of
+  three correct names; the report itself was right). Targets: why at least 18 of 20: met; report 5 of 5 with nothing
+  masked: missed by one run; no wrong number anywhere; nothing below 1.2.0's bench (the last one recorded).
+- **Worker memory.** A deleted project's lake stayed in memory for as long as the process lived (the default worker
+  grew by 6.2 MB and one database connection for every project made and deleted); fixed, with a test. Then two hours
+  of loads, queries, trainings, scorings and plan runs with idle periods: the default worker went from 277 to 291 MB
+  and the engine from 290 to 328 MB, both still rising slowly at the end; the heavy worker stopped after its idle
+  time in every one of 19 cycles. Each live project costs the engine about 14 MB and the default worker about 7 MB
+  for as long as it exists.
+- **Live checks of the agent harness**: a confirmation through the dialog and a webhook token shown once to the
+  person (not in the agent's answer, its tool results, Pi's session file or any log); an alert per café with an agent
+  step (both runs right to the cent); one job given to the Lead and delegated to all nine specialists (every task
+  passed its checks, revenue by region exact to the cent, the two steps that needed a yes asked and run after it).
+- **Security of the confirmation bridge.** A step an agent hands on for the person's yes is asked as the agent's own
+  call: a write becomes a proposal, a flow start is asked, account and access changes are refused, and the dialog
+  says what the yes will do from what ABI signed, never from typed text.
+
+### Known and not fixed in 1.2.6
+
+- **A public link to a report, embedding a report in another site, and webhook calls from outside are not reachable
+  through the app's address.** The pages and the hook address are served by the engine only (port 8780 on the
+  server), which the address people open ABI at does not pass on. The agent refuses a public link and an embed key
+  and says to use Share on the report (people with access open it after signing in). A flow's webhook token can be
+  made and is shown once, but calls reach the hook only if an administrator exposes the engine's `/api/hooks/` path.
+- **Restricted pages with a follow link are about a quarter slower than without** at 7.4 million orders (above), and
+  a Viewer's first read after a restart takes several seconds when they follow to tens of thousands of objects. The
+  keys are written into each person's views; taking that out is a change to how the views are built.
+- **A published copy shows "—" for values an action wrote**, and it carries no merges of records and no plans:
+  Publish does not take them into the published version yet.
+- **The agent may write a count word that gets masked** ("[not verified] visuals: A, B and C") though the names are
+  right (1 of 5 report answers in the bench).
+- **Memory was watched for two hours, not for a day.** The engine and the default worker were still rising slowly
+  (about 1 MB per cycle of work at the end). Each live project keeps one DuckDB instance per process open with
+  whatever its reads cached, up to `ABI_DUCKDB_MEMORY_LIMIT`; nothing closes the instance of a project nobody has
+  read for a long time.
+- **Six tests fail in the container and pass elsewhere**: five need a newer Node than the image's 22.12 for the test
+  scaffolding itself (test_a_models_prices…, test_abi_show…, test_the_harness_grounds…, test_the_agents_file_tools…,
+  test_the_agent_waits_for_a_big_load…), and test_a_killed_engine_or_worker… fails in the test container only
+  (known since 1.2.6's first milestone).
+- **Smaller things left as they are**: an alert whose flow was deleted during a check can post one stale line; the
+  owner can get the same failure message two to four times when runs finish together; a per-object alert with
+  `period` runs its query once per restricted recipient; undoing a decision checks every decision of the type (slow
+  beyond some thousands); decisions are listed from the newest 1,000 entries; the confirmation of a merge shows names
+  only, so two records of the same name can't be told apart; taking `resolve` off a type and putting it back
+  un-merges and re-merges without a question; a plan's run by a Viewer hides the Editor's "Review the changes"
+  button until the Editor runs it again; digits in names outside a plan's rows are masked in the agent's answer; a
+  project renamed and renamed back hides its earlier action runs in History; on a phone the Objects picture can be
+  missing for up to 30 seconds after a change made elsewhere; "(can't see this Café)" is written with a capital; the
+  hint for a person without an email says "add one under Users & access" without saying who can.
+
+### Upgrade from 1.2.5
+
+`git pull && scripts/upgrade.sh`, as for every release (README › Update): it backs the install up first, then
+starts the new image on the same data volume.
+
+- The database's schema number goes from 5 to 7 on the first start. A 1.2.5 engine refuses the upgraded database
+  and a 1.2.5 image refuses the volume once it records 1.2.6: to go back, restore the backup `scripts/upgrade.sh`
+  made into a new volume (README › Back up and restore).
+- Nothing is written into a project by the upgrade. No project gets a `model/ontology.json` by itself: object
+  types, links, action types, merges and plans exist only after a person approves them, and every query, report,
+  flow and row rule of a 1.2.5 project answers as before.
+- A project bundle exported from 1.2.6 that holds `model/ontology.json` or `optimizers/` does not import into
+  1.2.5.
+- New in the image: the solver for plans (HiGHS, MIT); no new service, port or setting is needed.
+
 ## 1.2.0 (Beta)
 
 1.2.0 is a beta: ready for pilots of about 50 people, with the limits listed below. The milestones' own measurements are in [bench/RESULTS.md](bench/RESULTS.md), each beside 1.1.0's.

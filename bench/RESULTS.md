@@ -1360,3 +1360,197 @@ later.
 Memory: after `docker restart abi-m5b` and 4 minutes idle with no heavy worker: memory.current 463.5 MB (M4 round 3:
 477.5 MB); RSS sums app 34.3, engine 228.4, default worker 289.5 and Postgres 355.7 MB in 23 processes. Per chat
 (app + Pi): 156.3 MB, then 105.5 MB (the first run after a long idle is the high one, as in every round).
+
+## 1.2.6 release run (pve1)
+
+13 Nov 2026 (UTC), pve1 LXC 100 (6 cores, 10 GB), throwaway containers only (the live `abi` and `lake` containers
+were not touched). 1.2.6 is the worktree's HEAD of each step (named with it); 1.2.5 is d5496bd, the code 1.2.6 was
+built on (1.2.5 has no tag), as image abi-125:test built there from `git archive d5496bd`. The engine is started as
+CI starts it (`scripts/engine.sh start`, `scripts/accounts.py`), the app with `python3 scripts/app.py perf_brewline
+8790`. One run at a time.
+The `/tmp/*.py` scripts named below were one-off probes written for this run (what each does is said where it
+is used); they are not in the repository.
+
+### Restricted pages with a follow link (item 32)
+
+`python3 bench/perf.py project perf_brewline --scale 1` (7,400,054 orders, 60,000 customers, 120 cafés), then
+`python3 bench/perf.py pages --project perf_brewline --sessions 50 --rls cafes.cafe_id`: 50 Viewers, each sees one
+café; a 506 KB page; 0 errors and 0 dropped in every run. 1.2.6 ran on the 1.2.5 run's own volume after the upgrade
+below. The follow link: `visited`, customer to café through orders, `rls: follow`, saved and committed before the
+runs; a Viewer of one café then follows to about 25,000 customers. RESULTS.md had no 1.2.5 number for this, so
+1.2.5 was measured the same way first.
+
+| code | ontology | run | first p50 / p95 s | after a commit p50 / p95 s |
+|---|---|---|---|---|
+| 1.2.5 (d5496bd) | none | 1 (the project's first pages) | 4.96 / 7.36 | 3.40 / 4.77 |
+| 1.2.5 (d5496bd) | none | 2 | 2.95 / 4.09 | 2.61 / 3.87 |
+| 1.2.6 (426fa4b) | none | 1 (after the upgrade's restart) | 4.91 / 7.39 | 2.86 / 4.39 |
+| 1.2.6 (426fa4b) | none | 2 | 3.27 / 4.60 | 3.15 / 4.43 |
+| 1.2.6 (426fa4b) | follow | 1 | 21.50 / 35.58 | 9.03 / 17.54 |
+| 1.2.6 (426fa4b) | follow | 2 | 8.75 / 15.22 | 8.88 / 15.37 |
+| 1.2.6 (426fa4b) | follow | 3 | 9.53 / 17.08 | 8.45 / 15.09 |
+| 1.2.6 (round 2, the key list written by DuckDB) | follow | 1 | 3.78 / 5.49 | 3.44 / 5.08 |
+| 1.2.6 (round 2) | follow | 2 | 4.50 / 6.75 | 3.60 / 5.45 |
+| 1.2.6 (round 2) | follow | 3 | 3.70 / 5.49 | 3.69 / 5.54 |
+| 1.2.6 (ffa91fe: also the keys read once per person) | follow | 1 | 3.75 / 5.38 | 3.46 / 5.29 |
+| 1.2.6 (ffa91fe) | follow | 2 | 3.78 / 5.39 | 3.65 / 5.44 |
+| 1.2.6 (ffa91fe) | follow | 3 | 4.84 / 6.99 | 3.48 / 5.29 |
+
+Target: p95 within x1.2 of 1.2.5's restricted p95. Without an ontology 1.2.6 is 1.2.5 (4.39 and 4.43 s against 3.87
+and 4.77 s). With the follow link 426fa4b was x3.2 to x4.5. Where the time went (one Viewer alone: filters 0.69 s,
+the first page 2.2 s, the same page again 0.17 s; a profile of that page): the two reads of the link's keys take
+0.19 s each in DuckDB; turning 2 x 25,006 keys into literals in Python one by one (`rls._in`, `cast_lit`) took the
+most, and Python does that for one person at a time, so 50 Viewers queued behind each other. Round 2 lets DuckDB
+write the list in the same read (`conditions.listed`): after a commit 5.08, 5.45 and 5.54 s, mean 5.36 s against
+1.2.5's mean 4.32 s: x1.24 (x1.07 to x1.43 run against run). Just above the target on the mean, inside it against
+1.2.5's slower run. Round 3 (ffa91fe) then made the link's keys be read once per person instead of twice (counted on
+the server for one Viewer: reads of 0.17 and 0.14 s before, one of 0.12 s after; that person's filters built in 0.16 s
+instead of 0.46 s; the filters byte-identical): after a commit 5.29, 5.44 and 5.29 s, mean 5.34 s: x1.24 again, so
+that read was not what the last 20% is. **Result for item 32: x1.24 of 1.2.5 on the mean (5.34 s against 4.32 s),
+x1.11 to x1.40 run against run; the x1.2 target is missed by a little.** What is left is the size of the list itself (700 KB of filter text per Viewer and table, read
+by every query that touches customers); taking it out means not inlining the keys (the plan's "a lake table if
+slow"), which changes what the views are and was not attempted in the release run.
+
+Cold restricted read with the follow link (a new Viewer of the North region, who follows to all 60,000 customers;
+revenue by customer segment through `semantic_query`): 5.10 s first and 0.03 s again; right after an engine restart
+7.15 s and 0.02 s (M3: about 6 s). With round 2: 5.79 s and 0.03 s; after a restart 7.03 s and 0.03 s; with ffa91fe after a restart 6.66 s and 0.11 s. Without a
+follow link the same first read took 1.02 s (2.44 s after a restart).
+
+### Upgrade from 1.2.5 (item 34)
+
+A 1.2.5 install (abi-125:test) seeded as it is used: `up_brew` (Brewline 0.005: 37,000 orders, six more measures, a
+Viewer whose rule shows the North region, a dataset, a scheduled flow saved off, an input table with one row) and
+`perf_brewline` (Brewline 1 with its starter report). Recorded: every project's files (sha256 each), Git head and
+uncommitted changes, and the rows of 27 queries (tests/test_rls_shared.py's and five more) and of every visual of
+every report, as the Owner and for `up_brew` as the Viewer too. The engine stopped (`scripts/engine.sh stop`), the
+container stopped, its `/data` volume mounted into a new container of the 1.2.6 image (426fa4b), `scripts/engine.sh
+start`. `schema_state.app_schema` 5 before, 7 after. The same record taken again: byte-identical (54 answers, 6 of
+them the same refusals for measures `perf_brewline` doesn't have; sha256 03f2ed92a42308a7bdadbe7fd0768427e8700d87891df40a933a79c7bbc5352c
+both times), no project has a `model/ontology.json`, nothing uncommitted, no error or traceback in the engine's log.
+The schema itself is also a test: tests/test_upgrade_schema.py (a database made by 1.2.5's db.py gets every column,
+constraint, index and trigger of a fresh one).
+
+### A worker that only grew: lakes of deleted projects
+
+Found on 12 Nov (a 1.2.5 engine left running 6 days on a development machine: the default worker held 16 GB).
+`python3 /tmp/churn.py 5`: five times a small project (20,000 rows) made, read once, left for a minute so the
+worker's tick sees it, then deleted; resident memory of the engine and the default worker with their children, and
+Postgres connections, after each.
+
+| | default worker MB, before and after each of 5 | Postgres connections |
+|---|---|---|
+| before the fix (the Part A tree without it) | 304.0, 308.4, 314.9, 321.1, 327.7, 333.1; 150 s later 333.1 | 30, 31, 32, 33, 34; 34 |
+| with it (426fa4b) | 273.4, 274.5, 276.0, 277.1, 277.8; 150 s later 277.8 | 14, 14, 14, 14, 14; 14 |
+
+Before: +6.2 MB and one Postgres connection for every project made and deleted, never given back (each kept its
+DuckDB instance and its catalog connection). After: +1.1 MB per project and no connection. The fix:
+`storage._forget_gone`.
+
+The same sweep now also runs from the worker's minute tick (ffa91fe), so a worker with no project left lets go too.
+
+### Worker memory over two hours (B3)
+
+`python3 /tmp/memloop.py 2.1 /tmp/mem.jsonl` in the throwaway container (dced0a3), 13 Nov 07:45 to 10:02 UTC: one
+project (Brewline 0.05, about 370,000 orders, with object types, a yes/no model on customers and a plan over cafés);
+19 cycles of: the orders reloaded, 40 queries nobody asked before, a training run, a scoring run, two plan runs, a
+small project made and deleted, then 5 minutes idle (the heavy worker's idle time is 180 s). Resident memory of each
+process with its children and the Postgres connections, every minute (136 samples).
+
+| at the end of the idle part of cycle | engine MB | default worker MB | heavy worker | Postgres connections |
+|---|---|---|---|---|
+| 1 (7 min) | 289.8 | 276.9 | stopped | 23 |
+| 5 (34 min) | 304.3 | 279.5 | stopped | 21 |
+| 10 (67 min) | 314.6 | 282.0 | stopped | 18 |
+| 15 (101 min) | 324.5 | 286.2 | stopped | 15 |
+| 19 (128 min) | 328.0 | 289.0 | stopped | 15 |
+| 7 minutes after the last cycle | 328.0 | 291.3 | stopped | 15 |
+
+- The default worker: 276.9 to 291.3 MB in 2 hours 8 minutes, +0.7 MB a cycle; its highest sample was 299.0 MB. The
+  engine: 289.8 to 328.0 MB, +3 MB a cycle in the first hour and +0.9 MB a cycle in the last 40 minutes (324.5,
+  323.9, 324.5, 326.6, 328.0); its highest sample was 371.3 MB during a cycle. Neither is flat yet after two hours;
+  neither grows by a fixed amount per cycle. Two hours can't tell a slow leak from caches still filling: a day's run
+  would.
+- The heavy worker started in every cycle (highest sample 602.4 MB) and was gone in the last sample of every one of
+  the 19 idle parts (66 of the 102 idle samples have no heavy worker): it stops after its idle time, every time.
+- Postgres connections fell from 23 to 15 and stayed there.
+
+Live projects kept open (`python3 /tmp/live.py 6`: six projects of Brewline 0.05, each loaded and read with 30 new
+queries, a minute apart):
+
+| live projects | engine MB | default worker MB |
+|---|---|---|
+| 0 | 315.0 | 291.6 |
+| 1 | 328.6 | 285.3 |
+| 2 | 350.5 | 289.8 |
+| 3 | 355.8 | 304.0 |
+| 4 | 371.0 | 307.5 |
+| 5 | 387.2 | 319.5 |
+| 6 | 399.6 | 332.4 |
+| 6, each read again (30 more queries) | 429.2 | 332.4 |
+| 6, 4 idle minutes later | 429.0 | 331.1 |
+| all six deleted, 150 s later | 318.2 | 331.2 |
+
+Each live project costs the engine about 14 MB when first read and about 5 MB more for 30 further queries, and the
+default worker about 7 MB; it is held while the project exists (one DuckDB instance per project and process) and is
+not given back when the project is idle. Deleting them gave the engine its memory back (318.2 MB); the worker's
+stayed (331.2 MB) because, with no project left, the worker read no lake and so never looked (dced0a3); from ffa91fe
+its minute tick looks too. So memory is bounded by the number of live projects times what each one's reads cached,
+not by time; nothing caps how much one project's instance may cache below DuckDB's own memory limit
+(ABI_DUCKDB_MEMORY_LIMIT, 1500 MB by default, per instance). No cap on the number of open instances was added: with
+these figures 50 live projects cost about 1 GB in the engine. The 16 GB of 12 Nov fits the deleted-project leak (a
+development machine that made and deleted thousands of test projects over six days), which is fixed; whether it was
+all of it can't be shown from here.
+
+### Agent bench (item 33)
+
+13 Nov 2026 12:18-12:26 UTC, pve1, the throwaway container on the round-4 tree (the notes and tool texts as they ship),
+load average 0.7-1.7. `python3 bench/bench.py --runs ask=10,why=10,report=5,load=3 --plant north --model
+server/claude-sonnet-5-5`, then `python3 bench/bench.py --runs why=10 --tasks why --plant retail --model
+server/claude-sonnet-5-5` (scale 0.01, seed 42, the first wording): the same runs, data and model as the 1.2.0 release
+candidate's (there on a Mac as proxy/claude-sonnet-5-5 with a fallback; here the model is the deployment's endpoint,
+`ABI_PI_LLM_BASE`, `ABI_PI_LLM_KEY` and `ABI_PI_LLM_MODEL` in the bench's environment only, no fallback). Sonnet
+answered all 38 runs. RESULTS.md has no 1.2.5 agent bench; the last one before this is 1.2.0's, shown beside.
+
+| task | data | pass | runs masked | median s | turns | tools | tool errors | masked | orders stated | 1.2.0 RC |
+|---|---|---|---|---|---|---|---|---|---|---|
+| ask | north | 10/10 | 0 | 4.8 | 2 | 1 | 0 | 0 | - | 10/10, 4.8 s |
+| why | north | 10/10 | 0 | 8.5 | 2 | 2 | 0 | 0 | 10/10 | 9/10, 7.6 s |
+| why | retail | 10/10 | 0 | 12.6 | 3 | 2 | 0 | 0 | 10/10 | 9/10, 8.2 s |
+| why | both | 20/20 | 0 | - | - | - | 0 | 0 | 20/20 | 18/20 |
+| report | north | 4/5 | 1 | 10.7 | 4 | 5 | 0 | 0 | - | 3/5 (2 masked), 17.6 s |
+| load | north | 3/3 | 0 | 16.8 | 5 | 4 | 0 | 0 | - | 3/3, 15.1 s |
+
+Against the targets: why at least 18 of 20: met (20 of 20, none masked); no category below the last recorded run:
+met; no wrong number in any answer; report 5 of 5 with nothing masked: **missed by one run**. Report run 2 saved the
+right report (the KPI, the bar and the line; `save_report`, `abi_sync`) and wrote "It has one page, Overview, with [not
+verified] visuals: Total revenue, Revenue by region and Revenue by month": a count word masked in front of the three
+names, the same kind of miss as 1.2.0's two (RELEASE.md, known limits). The bench and its check were left as they are.
+The why answers on the retail data took 3 turns in six of ten runs (1.2.0: 2).
+
+### Live checks of the harness (B4)
+
+13 Nov 2026, the same container and model.
+
+- A confirmation through the dialog, with a credential shown once (`/tmp/pi_check.py`): asked to rotate a flow's
+  webhook token, the agent called `rotate_webhook_token`; ABI's question came as a dialog ("Rotate the webhook token of
+  flow 'Hook': calls signed with the current token are refused from now on."); after the yes a second dialog, "Shown
+  once: copy it now", held the token and where the hook listens. The agent's answer and its tool results do not hold
+  the token; it said it never saw it and where the hook listens. Pi itself keeps no dialog text: the token is in no
+  file under `~/.pi`, not in the session file Pi wrote for that turn (86,485 bytes), and in none of the app's or the
+  engine's logs, the workspaces or `/tmp`.
+- An alert per object with an agent step (`/tmp/flow_agent.py`; the engine started with the model in its environment):
+  two cafés raised the alarm, each got its own run, both `ok` (`ask`, then `post`); the custom agent's answer in each
+  run is that café's own revenue to the cent (Hamburg Mitte 2,010.26; Berlin Mitte 1,507.82); both posts are in the
+  Inbox. Before the agent was published the runs failed with "Agent 'helper' is a draft; … flows and MCP need it
+  published", as they should.
+- A team run (`python3 bench/team_live.py --model server/claude-sonnet-5-5`, 12:29-12:36 UTC): the Lead planned nine
+  tasks and delegated to all nine specialists in phase order (the ml-engineer twice: the forecast passed its checks
+  on the second attempt); every task ended `passed`; the model is Ready with revenue by region equal to the
+  generator's known answers to the cent; the report has its visuals, the flow is saved switched off, one forecast,
+  one custom agent with a 7-case evaluation set, one board pack; nothing masked in the Lead's answer. Two steps
+  waited for the person and were run by the Lead through `abi_pending` after the yes to ABI's own question (the
+  flow's first send to a new address; publishing the custom agent): 2 dialogs, both `ok`. Two more were handed on by
+  the reviewer and by release-ops as `set_delivery` with no arguments ("email delivery isn't set up") and stayed
+  waiting; the Lead's answer says that nothing can be emailed until delivery is set up. The harness has no separate
+  "chain" job: the Lead's plan with tasks that wait for each other is the chain, and this run is it (each specialist
+  was briefed with the handoffs before it; the journal holds them).
