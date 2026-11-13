@@ -1672,9 +1672,18 @@ function objTable(box,T,fixed,n){n=n||50;const bar=h('div','row obar'),q=h('inpu
   // ABI refuses it). ponytail: a type with a several-column key lists no measures; its object pages show them
   if(ms.length&&T.key.length===1){const kc=`${T.table}.${T.key[0]}`;try{const m=await api('visual_data',{query:{measures:ms,dimensions:[kc],filters:[{column:kc,op:'in',value:st.keys.map(k=>k[0])}]},type:'table'}),by=new Map(m.rows.map(x=>[String(x[0]),x.slice(1)]));
     if(my!==st.n)return;ms.forEach(id=>d.format[id]={...m.format?.[id],fixed:!m.format?.[id]?.compact});d.columns.push(...ms);Object.assign(d.measures,m.measures);d.rows.forEach((x,i)=>x.push(...(by.get(String(st.keys[i][0]))||ms.map(()=>null))))}catch(e){}}
+  // 1.2.7 M0 (9b): the figures right after the name ...
+  if(ms.length&&d.columns.length>shown.length){const k=shown.length,mv=x=>[x[0],...x.slice(k),...x.slice(1,k)];d.columns=mv(d.columns);d.rows=d.rows.map(mv)}
+  // ... and a column that points at another object shows that object by its name, which opens it: never its raw key
+  const R=D.model?.relationships||[],to={},tt={};shown.forEach(c=>{const l=(D.ontology.links||[]).find(l=>l.from===T.id&&l.via.length===1&&otype(l.to)&&(r=>r&&r.from.table===T.table&&r.from.columns.length===1&&r.from.columns[0]===c)(R.find(r=>r.id===l.via[0])));if(l)to[c]=otype(l.to)});
+  await Promise.all(Object.entries(to).map(async([c,Z])=>{const j=d.columns.indexOf(c),vs=[...new Set(d.rows.map(x=>x[j]).filter(v=>v!==null))];d.measures[c]=Z.name;tt[c]={};if(!vs.length)return;
+   try{const z=await api('list_objects',{type:Z.id,filters:[{property:Z.key[0],op:'in',value:vs}],limit:Math.min(1000,vs.length)}),ki=z.columns.indexOf(Z.key[0]),ti=z.columns.indexOf(Z.title);z.rows.forEach(x=>tt[c][String(x[ki])]=ti<0?null:x[ti])}catch(e){}}));
+  if(my!==st.n)return;
   rows(out,d);out.classList.add('pick');
   // after each draw (a sort draws again): no column id in a header's tooltip, a row reachable by keyboard
-  const mark=()=>{out.querySelectorAll('th').forEach(th=>th.removeAttribute('title'));out.querySelectorAll('tr[data-r]').forEach(tr=>{tr.tabIndex=0;tr.setAttribute('role','link')})};
+  const mark=()=>{out.querySelectorAll('th').forEach(th=>th.removeAttribute('title'));out.querySelectorAll('tr[data-r]').forEach(tr=>{tr.tabIndex=0;tr.setAttribute('role','link');
+    Object.entries(to).forEach(([c,Z])=>{const j=d.columns.indexOf(c),td=tr.children[j],v=d.rows[tr.dataset.r]?.[j];if(!td||td.dataset.o||v===null||v===undefined)return;td.dataset.o=1;
+     const nm=tt[c][String(v)],b=h('button','flink oopen',nm===undefined||nm===null?`${Z.name} ${v}`:String(nm));b.onclick=e=>{e.stopPropagation();openObj(Z.id,[v])};td.replaceChildren(b)})})};
   mark();new MutationObserver(mark).observe(out.querySelector('table'),{childList:true,subtree:true});
   // the pages: under the table, and for a whole list (50 rows a page) above it too, in reach without scrolling
   if(st.offset||r.more){const b=(t,on,fn)=>{const x=h('button','btn',t);x.disabled=!on;x.onclick=fn;return x};
@@ -1715,13 +1724,17 @@ const NO_OBJECTS='Objects are the things your business talks about, such as a cu
 function objectsHome(box){if(!OT().length){box.append(emptyBox('objects','No objects yet',NO_OBJECTS+(MODE==='viewer'||MOBILE?' A builder of this project makes them on a computer; they show here after Publish.':''),
   MODE==='developer'&&!MOBILE?['Let ALL propose them',()=>{openChat(true);inp.value='Propose objects for this project.';inp.focus()}]:null));return}
  objBar(box,'objects');const L=(D.ontology.links||[]).filter(l=>otype(l.from)&&otype(l.to)),ids=OT().map(t=>t.id);
- const props=T=>{const p=T.properties.filter(p=>(p.name||p.meaning)&&p.column!==T.title);return (p.length?p:T.properties).slice(0,6)};
+ // 1.2.7 M0 (9b): a box says what the business needs of a type: how many there are, its figures, what can be done with
+ // one; never its columns (that is the Data models picture). A line reads as a sentence
+ const facts=T=>[['n'],...(T.measures||[]).slice(0,4).map(id=>['m',id]),...(OA().some(a=>a.object===T.id)?[['a']]:[])];
+ const says=l=>{const A=otype(l.from),B=otype(l.to),one=/one$/.test(l.cardinality||''),to=one?low(B):B.plural.toLowerCase(),nm=String(l.name||'').toLowerCase();
+  return [low(B),B.plural.toLowerCase()].includes(nm)?(one?`each ${low(A)} has one ${low(B)}`:`${A.plural.toLowerCase()} have ${B.plural.toLowerCase()}`):`${low(A)} ${l.name} ${to}`};
  if(MOBILE){const pic=h('div','odiag'),g=h('div','cards mlist2');{const t=h('div');t.insertAdjacentHTML('beforeend',D.sections?.Objects||'');const svg=t.querySelector('svg');if(svg){pic.append(svg);box.append(pic)}}
   OT().forEach(T=>{const c=card(T.plural),cl=h('div','stepchips');if(T.description&&T.description!==MASK)c.append(h('p','mtext',T.description));
    if(T.links.length)cl.append(h('span','file','Connections'));T.links.forEach(w=>{const b=h('button','chip',`${w.name} → ${otype(w.to)?.plural||''}`);b.onclick=()=>show('obj:'+w.to);cl.append(b)});if(T.links.length)c.append(cl);
    act(c,'Open',async()=>show('obj:'+T.id));g.append(c)});box.append(g);return}
- box.append(h('h4','sub','Objects and connections'),h('p','file','Each box is a kind of thing the business works with; each line is a connection between two of them, read along the line. Drag a box by its title to move it; Open lists its objects.'));
- const W=250,key='abi-opos-'+D.project,hgt=t=>46+props(otype(t)).length*27,depth={};let pos={};try{pos=JSON.parse(localStorage.getItem(key)||'{}')}catch(e){}
+ box.append(h('h4','sub','Objects and connections'),h('p','file','Each box is a kind of thing the business works with: how many there are, its figures and what you can do with one. Each line is a connection between two of them, read along the line. Drag a box by its title to move it; Open lists its objects.'));
+ const W=250,key='abi-opos-'+D.project,hgt=t=>46+facts(otype(t)).length*27,depth={};let pos={};try{pos=JSON.parse(localStorage.getItem(key)||'{}')}catch(e){}
  const save=()=>{try{localStorage.setItem(key,JSON.stringify(pos))}catch(e){}};
  // columns by depth along the connections (no loops back); every second column starts lower, so a line across two columns passes above the one between
  {const s=ids.filter(t=>!L.some(l=>l.to===t&&l.from!==t));(s.length?s:ids.slice(0,1)).forEach(t=>depth[t]=0)}
@@ -1731,7 +1744,12 @@ function objectsHome(box){if(!OT().length){box.append(emptyBox('objects','No obj
  const kit=canvasKit(box,()=>{pos={};layout();ids.forEach(t=>{boxes[t].style.left=pos[t].x+'px';boxes[t].style.top=pos[t].y+'px'});save();extent();draw()});
  const {stage,svg}=kit,boxes={};layout();
  ids.forEach(t=>{const T=otype(t),b=h('div','tbl dim'),hd=h('div','th'),go=h('button','badge','Open'),cs=h('div','cols');b.style.left=pos[t].x+'px';b.style.top=pos[t].y+'px';go.title=`List the ${T.plural.toLowerCase()}`;go.onclick=()=>show('obj:'+t);
-  hd.append(h('span','',T.plural),go);props(T).forEach(p=>{const r=h('div','col');r.append(h('span','',pname(p,T)));cs.append(r)});b.append(hd,cs);stage.append(b);boxes[t]=b;
+  hd.append(h('span','',T.plural),go);const cell=k=>{const r=h('div','col'),v=h('span','file','…');r.append(h('span','',k),v);cs.append(r);return [r,v]};
+  facts(T).forEach(([kind,id])=>{if(kind==='n'){const [r,v]=cell(T.event?'Recorded':'How many');r.dataset.f='n';api('list_objects',{type:t,limit:1,count:true}).then(x=>v.textContent=fmt(x.total)).catch(()=>v.textContent='—')}
+   else if(kind==='m'){const [r,v]=cell((D.measures.find(m=>m.id===id)||{}).name||colName(id));r.dataset.f='m';r.dataset.m=id}
+   else{const as=OA().filter(a=>a.object===t).map(a=>a.name),[r,v]=cell('You can');r.dataset.f='a';v.textContent=as.slice(0,2).join(', ')+(as.length>2?` +${as.length-2}`:'');v.title=as.join(', ')}});
+  if((T.measures||[]).length)api('visual_data',{query:{measures:T.measures.slice(0,4)},type:'kpi'}).then(d=>T.measures.slice(0,4).forEach((id,i)=>{const v=cs.querySelector(`[data-m="${id}"] .file`);if(v)v.textContent=d.rows[0]?.[i]==null?'—':fmt(d.rows[0][i],d.format?.[id])})).catch(()=>cs.querySelectorAll('[data-f=m] .file').forEach(v=>v.textContent='—'));
+  b.append(hd,cs);stage.append(b);boxes[t]=b;
   hd.onpointerdown=e=>{if(e.target===go)return;e.preventDefault();const [sx,sy]=kit.local(e.clientX,e.clientY),ox=pos[t].x,oy=pos[t].y;hd.setPointerCapture(e.pointerId);
    hd.onpointermove=m=>{const [x,y]=kit.local(m.clientX,m.clientY);pos[t]={x:Math.max(0,ox+x-sx),y:Math.max(0,oy+y-sy)};b.style.left=pos[t].x+'px';b.style.top=pos[t].y+'px';extent();draw()};
    hd.onpointerup=()=>{hd.onpointermove=null;save()}}});
@@ -1741,7 +1759,7 @@ function objectsHome(box){if(!OT().length){box.append(emptyBox('objects','No obj
   L.forEach(l=>{const A=pos[l.from],B=pos[l.to],ya=A.y+19,yb=B.y+19,pk=[l.from,l.to].sort().join(),k=n[pk]=(n[pk]||0)+1;let d,lx,ly,x2,anc='middle';
    if(Math.abs(A.x-B.x)<W){const x=Math.max(A.x,B.x)+W,r=30+k*28;x2=B.x+W;d=`M${A.x+W},${ya} C${x+r},${ya} ${x+r},${yb} ${x2},${yb}`;lx=x+r*.75+6;ly=(ya+yb)/2+4;anc='start'}
    else{const R=A.x<B.x,x1=R?A.x+W:A.x;x2=R?B.x:B.x+W;const dx=Math.max(40,Math.abs(x2-x1)/2)*(R?1:-1);d=`M${x1},${ya} C${x1+dx},${ya} ${x2-dx},${yb} ${x2},${yb}`;lx=(x1+x2)/2;ly=(ya+yb)/2+4+(k-1)*18}
-   el('path',{d,class:'ln'},svg);el('circle',{cx:x2,cy:yb,r:4,class:'one'},svg);const t=el('text',{x:lx,y:ly,class:'lbl','text-anchor':anc},svg);t.textContent=`${l.name} · ${String(l.cardinality||'').replace(/-/g,' ')}`;
+   el('path',{d,class:'ln'},svg);el('circle',{cx:x2,cy:yb,r:4,class:'one'},svg);const t=el('text',{x:lx,y:ly,class:'lbl','text-anchor':anc},svg);t.textContent=says(l);
    const bb=t.getBBox();svg.insertBefore(el('rect',{x:bb.x-5,y:bb.y-2,width:bb.width+10,height:bb.height+4,class:'lblbg'}),t)})}
  kit.draw=draw;extent();requestAnimationFrame(draw);new ResizeObserver(()=>draw()).observe(kit.wrap)}
 // one object: what it is (its properties), its numbers (the type's measures, filtered to it), what it connects to (a
@@ -1761,10 +1779,12 @@ async function objectPage(box,T,key){const bar=h('div','row bar lead');bar.appen
  // the columns that point at another object aren't properties here: that object is in its connection's section below
  const g=h('div','cards'),pc=card('Properties'),kv=h('div','kv okv'),R=D.model?.relationships||[],there=new Set((D.ontology.links||[]).filter(l=>l.via.length===1&&[l.from,l.to].includes(T.id)).flatMap(l=>R.find(r=>r.id===l.via[0]&&r.from.table===T.table)?.from.columns||[]));
  o.columns.forEach((c,i)=>{const p=T.properties.find(p=>p.column===c);if(!p||c===T.title||there.has(c)&&!T.key.includes(c))return;const v=pval(T,p,o.rows[0][i]),d=h('div');d.append(h('b','',pname(p,T)),h('span','',v===null?'—':typeof v==='number'?fmt(v,p.meaning==='money'?{decimals:2,fixed:true}:null):String(v)));kv.append(d)});
- pc.classList.add('wide');pc.append(kv);g.append(pc);
- // its measures as a report's headline numbers: ABI's visual_data, filtered to the object, each in its own format
+ pc.classList.add('wide');pc.append(kv);
+ // its measures as a report's headline numbers: ABI's visual_data, filtered to the object, each in its own format.
+ // 1.2.7 M0 (9b): they come first: the figures are what a person opens the page for
  if((T.measures||[]).length){const mc=card('Measures'),ks=h('div','kpis');mc.classList.add('wide');mc.append(ks);g.append(mc);
   api('visual_data',{query:{measures:T.measures,filters:T.key.map((k,i)=>({column:`${T.table}.${k}`,op:'=',value:o.key[i]}))},type:'kpi'}).then(d=>chart(ks,d)).catch(e=>ks.replaceWith(h('p','empty',e.message)))}
+ g.append(pc);
  // ponytail: an object with a several-column key asks one condition per key column (each must hold for a linked object)
  sameCard(g,T,o.key);
  T.links.slice(0,12).forEach(w=>{const Y=otype(w.to);if(!Y||w.inverse&&w.to===T.id)return;const c=card(cap(w.name));c.classList.add('wide');if(cap(w.name)!==Y.plural)c.querySelector('h3').append(h('span','file',Y.plural));

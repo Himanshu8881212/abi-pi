@@ -147,6 +147,41 @@ def test_propose_brewline(onto):
     assert not any(ln.get("rls") for ln in one), "many-to-one links already follow the rule"
 
 
+def test_proposal_is_not_a_mirror_of_the_tables(onto):
+    """1.2.7 M0 (9b): the draft is about the business's things, not a copy of the star schema. A type gets the measures
+    that can be read per object of it (revenue on a café); a link is named in words both ways, never by the joining
+    column or its cardinality; a column that points at another type is that type's link and no property (and no key
+    is one); the fact table is a type marked `event`, and a fact table without a date (figures per café and month) is
+    left out, with a sentence saying why. The draft is still a valid ontology file."""
+    sure("create_input_table", project=P, table="targets", key=["cafe_id", "month"],
+         columns=[{"name": "cafe_id", "type": "VARCHAR"}, {"name": "month", "type": "INTEGER"}, {"name": "target", "type": "DOUBLE"}])
+    try:
+        abi.call("add_relationship", project=P, **{"from": "targets.cafe_id", "to": "cafes.cafe_id"})
+        r = abi.call("propose_ontology", project=P)
+    finally:
+        sure("delete_table", project=P, table="targets")
+    o = r["ontology"]
+    assert not list(Draft202012Validator(SCHEMA).iter_errors(o)), "the draft is a valid ontology file"
+    types = {x["table"]: x for x in o["objects"]}
+    have = {m["id"] for m in abi.call("semantic_model", project=P, all=True)["measures"]}
+    for t in ("cafes", "customers", "products"):
+        assert "revenue" in types[t]["measures"] and set(types[t]["measures"]) <= have and "event" not in types[t], (t, types[t].get("measures"))
+    assert types["orders"].get("event") is True and "measures" not in types["orders"], "the fact table: what happened, not a thing"
+    assert "targets" not in types and [x["table"] for x in r["left_out"]] == ["targets"], r.get("left_out")
+    assert r["left_out"][0]["why"].startswith("'Targets' holds figures per cafe id and month, not things with a page of their own"), r["left_out"]
+    keys = {"cafe_id", "customer_id", "product_id", "order_id"}
+    for t, x in types.items():
+        assert not keys & {p["column"] for p in x["properties"]}, (t, [p["column"] for p in x["properties"]])
+    columns = {c for cs in abi.call("semantic_model", project=P, all=True)["columns"].values() for c in cs}
+    names = {x["name"].lower() for x in o["objects"]} | {x["plural"].lower() for x in o["objects"]}
+    for ln in o["links"]:
+        for said in (ln["name"], ln["inverse"]):
+            assert said not in columns and said not in names and "many" not in said and "_" not in said, ln
+    by = {(ln["from"], ln["to"]): ln for ln in o["links"] if len(ln["via"]) == 1}
+    assert (by["order", "cafe"]["name"], by["order", "cafe"]["inverse"]) == ("is for", "has"), by["order", "cafe"]
+    assert {ln["name"] for ln in o["links"] if len(ln["via"]) == 2} == {"has orders with"}
+
+
 def test_propose_writes_nothing(onto):
     before, commits = files(), len(abi.call("history", project=P)["commits"])
     abi.call("propose_ontology", project=P)

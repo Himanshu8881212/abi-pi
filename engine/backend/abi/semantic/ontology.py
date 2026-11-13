@@ -429,10 +429,22 @@ def propose(project: str, user_id: int | None) -> dict:
     m = model.visible(model.load(project))
     mj, cols = model._read(project, "model.json"), model.lake_columns(project)
     date, hid = (m["date_table"] or {}).get("table"), rls.hidden(project, user_id)
-    objects, types = [], {}
+    objects, types, left = [], {}, []
+    # 1.2.7 M0 (9b): a type is a thing, not every table. A fact table records what happened: with a date it is a type
+    # marked `event` (an order); without one (figures per month and shop: targets) it is left out, and said so
+    ours = lambda t, i: i["key"] and t != date and t in cols and not (  # noqa: E731  M9: a model's predictions table is no type itself
+        t.startswith("ml_") and (git.path(project) / "ml" / f"{t[3:]}.json").is_file())
+    dated = lambda t: any(re.match(r"DATE|TIMESTAMP", ty) for ty in cols[t].values())  # noqa: E731
+    kept = {t for t, i in m["tables"].items() if ours(t, i) and (i["kind"] != "fact" or dated(t))}
+    mine = [x for x in model._read(project, "measures.json").get("measures", []) if not x.get("hidden")]
     for t, i in m["tables"].items():
-        if not i["key"] or t == date or t not in cols or t.startswith("ml_") and (git.path(project) / "ml" / f"{t[3:]}.json").is_file():
-            continue  # M9: a model's predictions table is keyed like its object type, and is no type itself
+        if not ours(t, i):
+            continue
+        if t not in kept:
+            left.append({"table": t, "why": f"'{_label(t)}' holds figures per {' and '.join(_label(k).lower() for k in i['key'])}, not things with a page of"
+                                            " their own, so it is no object type here. Add it as one if people need to open its rows one by one."})
+            continue
+        fks = {c for r in m["relationships"] if r["from"]["table"] == t and r["to"]["table"] in kept for c in r["from"]["columns"]}
         tc = {c: ty for c, ty in cols[t].items() if c.lower() not in hid.get(t, ())}  # D-110: never a hidden column
         text = [c for c, ty in tc.items() if ty == "VARCHAR"]
         rows, n = 0, []
@@ -442,13 +454,27 @@ def propose(project: str, user_id: int | None) -> dict:
         distinct = dict(zip(text, n))
         one = _singular(t)
         x = {"id": model.slug(one), "table": t, "name": _label(one), "plural": _label(one) + "s", "title": _title(tc, i["key"]),
+             # (a column that points at another type is that type's link, not a property: its key is no value to read)
              "properties": [{"column": c, "meaning": _meaning(c, ty, i["key"], distinct.get(c), rows)}
-                            for c, ty in tc.items() if c not in i["key"]]}
+                            for c, ty in tc.items() if c not in i["key"] and c not in fks]}
         if i["description"]:
             x["description"] = i["description"][:2000]
+        if i["kind"] == "fact":
+            x["event"] = True
+        elif len(i["key"]) == 1:  # the measures that can be read per object of this type (planned as the caller, not run)
+            can = []
+            for ms in mine[:40]:
+                try:
+                    semantic._plan(project, {"measures": [ms["id"]], "dimensions": [f"{t}.{i['key'][0]}"]}, user_id)
+                    can.append(ms["id"])
+                except Exception:  # noqa: BLE001, S112 - no way from this measure to the type (or hidden from the caller): not its measure
+                    continue
+            if can:
+                x["measures"] = can[:6]
         objects.append(x)
         types[t] = x
     taken, links, cards = {x["id"] for x in objects}, [], {}
+    mj_table = lambda via: next(r["from"]["table"] for r in mj.get("relationships", []) if r["id"] == via[0])  # noqa: E731  the table two types meet in
     ruled = {r["table"] for r in rls.row_rules(project)}
 
     def add(a: dict, b: dict, via: list, more: str = "") -> None:
@@ -457,8 +483,11 @@ def propose(project: str, user_id: int | None) -> dict:
             lid = model.slug(lid + "_2")
         taken.add(lid)
         card = cards[lid] = cardinality(mj, walk(mj, a["table"], via))
-        ln = {"id": lid, "from": a["id"], "to": b["id"], "name": b["name"].lower() if card in ("many-to-one", "one-to-one") else b["plural"].lower(),
-              "inverse": a["plural"].lower(), "via": via}
+        # 9b: read in words, both ways, never as the joining column: "order is for café" and "café has orders";
+        # "customer has orders with cafés" for two types that meet in a table
+        through = _label(_singular(mj_table(via))).lower() + "s" if len(via) == 2 else None
+        name, inverse = (f"has {through} with",) * 2 if through else ("is for", "has") if a.get("event") else ("belongs to", "has") if card == "many-to-one" else ("matches", "matches")
+        ln = {"id": lid, "from": a["id"], "to": b["id"], "name": name, "inverse": inverse, "via": via}
         if card != "many-to-one" and b["table"] in ruled:  # owner, 6 Nov 2026: proposed on, the Owner approves it
             ln["rls"] = "follow"
         links.append(ln)
@@ -480,16 +509,18 @@ def propose(project: str, user_id: int | None) -> dict:
     # 1.2.6 M6: the glossary terms whose columns belong to a proposed type (set_glossary_term {objects} attaches them)
     attach = [{"term": g["id"], "objects": about} for g in model._read(project, "glossary.json").get("terms", [])
               if (about := sorted({types[c["table"]]["id"] for c in g.get("columns", []) if c["table"] in types} - set(g.get("objects", []))))]
-    return {"ontology": doc, "cardinality": cards, **({"glossary": attach} if attach else {}),
-            "note": "A draft from the model and your data, not saved. Names are naive: refine names, plurals and descriptions"
+    return {"ontology": doc, "cardinality": cards, **({"glossary": attach} if attach else {}), **({"left_out": left} if left else {}),
+            "note": "A draft from the model and your data, not saved. Names are naive: refine names, plurals, link names and descriptions"
                     " (search the vault and cite it), drop what isn't wanted, then save_ontology; the person confirms."
+                    " A type marked `event` records something that happened (an order), not a thing."
+                    + (" `left_out` names the tables that became no type, and why: tell the person." if left else "")
                     + (" `glossary` lists the terms whose columns belong to a type: once it is saved, attach each with"
                        " set_glossary_term {objects} (send the term's other fields again)." if attach else "")}
 
 
 @action(Role.viewer)
 def propose_ontology(conn, user: User, args: storage.ProjectRef) -> dict:
-    """Drafts an ontology from the model and the data, as you (row-level security applies), and saves nothing: each visible keyed table but the date table as an object type (title column and property meanings from names, types and value counts), each relationship between two types as a many-to-one link, each table linking two types as a many-to-many link per pair (several ways between two types stay separate links; none is picked); `glossary` suggests the glossary terms to attach to a type (their columns are its table's). Refine names and descriptions, then save_ontology."""
+    """Drafts an ontology from the model and the data, as you (row-level security applies), and saves nothing: each visible keyed dimension table as an object type (title column, property meanings from names, types and value counts, the measures that can be read per object), a keyed fact table with a date as a type marked `event`, any other fact table left out (`left_out` says why); each relationship between two types as a link named in words both ways, each table linking two types as a many-to-many link per pair (several ways between two types stay separate links; none is picked); `glossary` suggests the glossary terms to attach to a type. Refine names and descriptions, then save_ontology."""
     return propose(args.project, user.id)
 
 
@@ -896,6 +927,7 @@ class Objects(storage.ProjectRef):
     order: list[By] = Field([], max_length=5, description="default: the title, then the key")
     limit: int = Field(100, ge=1, le=LIMIT)
     offset: int = Field(0, ge=0)
+    count: bool = Field(False, description="also `total`: how many objects pass the filters, as you see them")
 
 
 @action(Role.viewer)
@@ -924,8 +956,10 @@ def list_objects(conn, user: User, args: Objects) -> dict:
     sql = (f"SELECT {', '.join(map(storage._q, show))} FROM {storage._q(t)} WHERE {' AND '.join(conds) or 'TRUE'}"
            f" ORDER BY {', '.join(dict.fromkeys(order))} LIMIT {args.limit + 1} OFFSET {args.offset}")
     rows = _read(args.project, sql, {"list_objects": x["id"], **args.model_dump(mode="json", exclude={"project", "type"})}, user.id)
+    total = {"total": _read(args.project, f"SELECT count(*) FROM {storage._q(t)} WHERE {' AND '.join(conds) or 'TRUE'}",
+                            {"list_objects": x["id"], "count": True}, user.id)[0][0]} if args.count else {}  # 1.2.7 M0 (9b): the overview's "how many"
     return {"type": x["id"], "name": x["plural"], "key": keys, "title": x["title"], "columns": show, "rows": rows[:args.limit],
-            "offset": args.offset, "more": len(rows) > args.limit}
+            "offset": args.offset, "more": len(rows) > args.limit} | total
 
 
 # ---------- action types: run on one object, as the person; its history ----------

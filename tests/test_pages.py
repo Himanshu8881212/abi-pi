@@ -1074,6 +1074,63 @@ def test_objects_entry_shows_before_any_object_exists(people, tmp_path):
     assert phone["buttons"] == [] and phone["said"] == viewer["said"], phone  # (a phone reads the published version: Viewer)
 
 
+def test_object_page_shows_measures_and_linked_titles(objs, tmp_path):
+    """1.2.7 M0 (9b): an object's page starts with its figures, and its list shows them right after the name. A column
+    that points at another object (an order's café, as earlier drafts listed it: the café's key) shows that object by
+    its name, under the type's name, and opens its page: never the raw key."""
+    e = objs["editor"]
+    o = json.loads((abi.ABI_PROJECTS / PO / "model/ontology.json").read_text())
+    was = json.loads(json.dumps(o))
+    order = next(x for x in o["objects"] if x["id"] == "order")
+    order["properties"] = [{"column": "cafe_id", "meaning": "identifier"}, {"column": "customer_id", "meaning": "identifier"}, *order["properties"]]
+    sure("save_ontology", project=PO, ontology=o)
+    try:
+        cust = objs["sql"]("SELECT min(customer_id) FROM orders WHERE customer_id IS NOT NULL")[0][0]
+        cafes = {r[0]: r[1] for r in objs["sql"]("SELECT cafe_id, cafe_name FROM cafes")}
+        e.page()
+        cards = "[...document.querySelectorAll('main .cards > .card > h3')].map(h => h.innerText.split('\\n')[0])"
+        out = drive(e, tmp_path, [
+            ["show", okey("cafe", objs["good"])], ["until", KV], ["get", "cards", cards],
+            ["show", "obj:cafe"], ["wait", "main .olist table tr[data-r]"], ["until", "document.querySelectorAll('main .olist th').length > 5"],
+            ["get", "heads", "[...document.querySelectorAll('main .olist th')].map(th => th.textContent.trim())"],
+            ["get", "figures", "(D.ontology.objects.find(t => t.id === 'cafe').measures || []).map(id => (D.measures.find(m => m.id === id) || {}).name)"],
+            ["show", okey("customer", cust)], ["until", KV], ["wait", "main .olist table td button.oopen"],
+            ["get", "orders_heads", "[...document.querySelectorAll('main .olist th')].map(th => th.textContent.trim())"],
+            ["all", "linked", "main .olist table td button.oopen"],
+            ["click", "main .olist table td button.oopen"], ["until", "CUR.startsWith('obj:cafe:')"], ["until", KV], ["text", "opened", "main .pghead h1"]])
+        assert out["cards"].index("Measures") < out["cards"].index("Properties"), out["cards"]
+        named = [h for h in out["heads"] if h in out["figures"]]
+        assert named and out["heads"].index(named[0]) == 1 and out["heads"].index("City") > out["heads"].index(named[-1]), out["heads"]
+        assert "Café" in out["orders_heads"] and not [h for h in out["orders_heads"] if "id" in h.lower().split()], out["orders_heads"]
+        cafe_links = [x for x in out["linked"] if x != cust]  # (a customer's title is its ID in this project)
+        assert cafe_links and set(cafe_links) <= set(cafes.values()) and not [x for x in cafe_links if x in cafes], out["linked"]
+        assert out["opened"] == out["linked"][0], "the name opens that object's page"
+    finally:
+        sure("save_ontology", project=PO, ontology=was)
+
+
+def test_objects_overview_is_not_the_table_diagram(objs, tmp_path):
+    """1.2.7 M0 (9b): the Objects overview is not the Data models diagram again. A box says how many of the type there
+    are, its figures and what one can do with one, and none of its columns; a line reads as a sentence about the two
+    types, never as a column name with "many to one"."""
+    e = objs["editor"]
+    e.page()
+    box = "[...document.querySelectorAll('main .tbl')].find(b => b.querySelector('.th span').textContent === 'Cafés')"
+    out = drive(e, tmp_path, [
+        ["show", "objects"], ["wait", "main .tbl"], ["until", f"!{box}.innerText.includes('…')"],
+        ["get", "cafe", f"[...{box}.querySelectorAll('.col')].map(r => [r.dataset.f, r.children[0].textContent, r.children[1].textContent])"],
+        ["get", "lines", "[...document.querySelectorAll('main svg text.lbl')].map(t => t.textContent)"],
+        ["get", "revenue", "(D.measures.find(m => m.id === 'revenue') || {}).name"]])
+    rows = {r[1]: r for r in out["cafe"]}
+    n = objs["sql"]("SELECT count(*) FROM cafes")[0][0]
+    assert [r[0] for r in out["cafe"]] == ["n", "m", "m", "a"], out["cafe"]
+    assert int(rows["How many"][2].replace(",", "")) == n and re.search(r"\d", rows[out["revenue"]][2]), out["cafe"]
+    assert rows["You can"][2].startswith("Flag for a visit"), rows["You can"]
+    assert not {"City", "Region", "Seats", "Format", "Opened", "Manager"} & set(rows), "no column list"
+    assert "each order has one café" in out["lines"] and "customer visited cafés" in out["lines"], out["lines"]
+    assert not [x for x in out["lines"] if "many" in x or "·" in x or "_" in x], out["lines"]
+
+
 def test_form_card_gap_closes(objs, tmp_path):
     """1.2.7 M0 (item 8): a form card a person may not use is not drawn, and its place in the row stayed empty: the
     chart beside it kept half the page. Now the row's other cards share the row: for the Viewer "Revenue by region" is

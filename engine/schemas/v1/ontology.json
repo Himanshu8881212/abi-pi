@@ -27,6 +27,7 @@
         "description": {"$ref": "#/$defs/text"},
         "properties": {"type": "array", "items": {"$ref": "#/$defs/property"}},
         "measures": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "measure IDs shown per object, filtered to it"},
+        "event": {"type": "boolean", "description": "true: a record of something that happened (an order, a payment), not a thing. propose_ontology marks a keyed fact table with a date so"},
         "resolve": {"$ref": "#/$defs/resolve"}}},
     "resolve": {"type": "object", "additionalProperties": false, "anyOf": [{"required": ["exact"]}, {"required": ["fuzzy"]}],
       "description": "1.2.6 M11: how rows of the type's table that are the same real thing are found (find_same). Two rows are proposed as the same when an `exact` column is equal, or when every `fuzzy` column is at least as alike as its threshold and no `exact` column differs. Nothing is merged until a person confirms (decide_same)",
