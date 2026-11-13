@@ -809,6 +809,17 @@ def gate(conn, project: str, old: dict, files: dict, asking: bool = False) -> tu
     return why, preview or None
 
 
+def keys_kept(project: str, old: dict, files: dict) -> None:
+    """1.2.6 M11: refuses (409) going from `old` to `files` when that changes the key of a table whose records have
+    decisions in force (same.keeps_key): an import, and an undo that puts files back without one (git.undo)."""
+    keys = lambda fs: {e["table"]: e.get("key") for e in (fs.get("model/model.json") or {}).get("entities", [])}  # noqa: E731
+    for t, k in keys(old).items():
+        if k and keys(files).get(t, k) != k:
+            from abi.semantic import same  # not at top: the semantic package imports this module
+
+            same.keeps_key(project, t)
+
+
 def apply(conn, user: User, project: str, files: dict, dry_run: bool = False, ask: tuple[str, dict] | None = None) -> dict:
     """PC-3 end to end. Call inside a definition=True action: git.change makes it one undoable change and
     restores the old files if anything fails. `ask`: (why, preview) the caller confirms anyway, asked with the gate's
@@ -843,12 +854,7 @@ def apply(conn, user: User, project: str, files: dict, dry_run: bool = False, as
             _err(k.split("#")[0], "$.sharing" if "#" not in k else f"$.datasets[id={k.split('#')[1]}].sharing",
                  "This change lets more accounts view it without a role in the project.",
                  "Keep its sharing as it is, or ask a project Owner to make the change.") for k in sorted(wide)])
-    keys = lambda fs: {e["table"]: e.get("key") for e in (fs.get("model/model.json") or {}).get("entities", [])}  # noqa: E731
-    for t, k in keys(old).items():  # 1.2.6 M11: decisions about a table's records bind its key
-        if k and keys(files).get(t, k) != k:
-            from abi.semantic import same  # not at top: the semantic package imports this module
-
-            same.keeps_key(project, t)
+    keys_kept(project, old, files)
     apis = api_published(old, files)
     if apis and (role_in(conn, user, project) or 0) < Role.owner:
         raise ActionFailed(403, "Only a project Owner may publish or change a published API tool; nothing changed.", errors=[

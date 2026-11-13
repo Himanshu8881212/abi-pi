@@ -33,6 +33,9 @@ def srv():
         (drop / "orders.csv").write_text("order_id,order_date,region,amount\n" + "".join(  # an id: `amount` is no key
             f"{d * 2 + i},2026-05-{d:02d},{r},{d * 3 + i}\n" for d in range(1, 29) for i, r in enumerate(["North", "South"])))
         abi.load("demo", P, parquet(drop / "orders.csv"))
+    # the app keeps its browsers' hubs per process, and this server's one browser has the fixed key "default": a hub an
+    # earlier test module's server left under it would carry that module's project (M10: 22 tests failed in that order)
+    app.HUBS.clear()
     s = app.serve(P, 0, open_browser=False)
     port = s.server_address[1]
     page = urllib.request.urlopen(f"http://127.0.0.1:{port}/").read().decode()

@@ -28,7 +28,7 @@ from psycopg.types.json import Jsonb
 from pydantic import Field, ValidationError, field_validator
 
 from abi import db, flows, security, semantic, storage, writeback
-from abi.actions import ActionFailed, action
+from abi.actions import ActionFailed, action, require_confirmation
 from abi.project import ID, SCHEMA, git, imports
 from abi.project.bundle import bundle
 from abi.security import Role, User, role_in
@@ -525,7 +525,7 @@ def save_optimizer(conn, user: User, args: Save) -> dict:
     return {"id": o["id"]}
 
 
-@action(Role.editor, destructive=True, definition=True)
+@action(Role.editor, definition=True, confirms=True)  # asks inside, after the in-use check: nobody says yes and is then refused
 def delete_optimizer(conn, user: User, args: Ref) -> dict:
     """Deletes an optimiser's definition; its runs and the proposals made from them stay. Refused while a flow runs it."""
     used = [f["name"] for f in imports.objects(args.project, "flows") for s in f["steps"]
@@ -534,6 +534,8 @@ def delete_optimizer(conn, user: User, args: Ref) -> dict:
         o = imports.load(args.project, "optimizer", args.optimizer)
         raise ActionFailed(409, f"“{o['name']}” is run by the flow{'s' * (len(set(used)) > 1)} {_some([f'“{n}”' for n in dict.fromkeys(used)])}."
                                 " Take that step out of the flow, or delete the flow, first.")
+    require_confirmation(f"Destructive: deletes the plan definition '{args.optimizer}' of project '{args.project}'. Its runs and the"
+                         " proposals made from them stay.")
     imports.remove(args.project, "optimizer", args.optimizer)
     return {}
 

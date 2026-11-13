@@ -900,9 +900,24 @@ def test_er_undo_checks_again_inside_its_write(er):
     assert rev[103] == 30 and 104 not in rev, "the first decision stands"
     assert rev[109] == 9 and rev[110] == 11 and stored() != was, "the other Editor's undo landed"
     assert refused("0" * 32) == "This isn't a decision about customers that can be undone: take one of those listed under Decided."
+    was_now = stored()
     with pytest.raises(abi.ActionError) as e:  # a decision names its records by the key: the key stays while one is in force
         call("set_table", table="customers", key=["name"])
     assert e.value.status == 409 and e.value.body["message"].startswith("What identifies these records can't change while decisions")
+    import io
+    import zipfile
+
+    import transfer
+
+    z = zipfile.ZipFile(io.BytesIO(transfer.export(P)))  # ... and the same through an import of the project's files
+    bundle = {n.removeprefix("abi/"): json.loads(z.read(n)) if n.endswith(".json") else z.read(n).decode() for n in z.namelist() if n.startswith("abi/")}
+    m = bundle["model/model.json"]
+    rekeyed = {**bundle, "model/model.json": {**m, "entities": [e | {"key": ["name"]} if e["table"] == "customers" else e for e in m["entities"]]}}
+    assert rekeyed != bundle
+    with pytest.raises(abi.ActionError) as e:
+        sure("import_project", project=P, bundle=rekeyed)
+    assert e.value.status in (409, 422) and stored() == was_now, e.value.body
+    assert e.value.status == 422 or e.value.body["message"].startswith("What identifies these records can't change while decisions"), e.value.body
     [d] = [d for d in found()[0]["decisions"] if d["batch"] == first["batch"]]
     assert d["blocked"] is False and "blocked_by" not in d
     call("undo_edits", table=S, batch=first["batch"])

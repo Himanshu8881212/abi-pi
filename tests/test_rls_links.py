@@ -1015,16 +1015,22 @@ a = json.loads(sys.stdin.read())
 P, uid = a["project"], a["uid"]
 read = lambda sql, reads: semantic.execute(P, sql, {"test": "rls links"}, reads=reads)
 cols = semantic._columns_of(storage.lake(P).cursor(), "model")
-out = {}
-for way in (True, False):
-    rls.IN_SQL = way
-    out[way] = rls.conditions(P, uid, read, cols)
+out, reads = {}, {}
+def counted(sql, r):
+    n[0] += "string_agg(" in sql
+    return read(sql, r)
+for way in ((True, True), (False, False), (True, False)):  # (the list written by DuckDB, rules settled first); as before M10; in between
+    rls.IN_SQL, rls.SETTLE = way
+    n = [0]
+    out[way] = rls.conditions(P, uid, counted, cols)
+    reads[str(way)] = n[0]
+new, old, mid = out[(True, True)], out[(False, False)], out[(True, False)]
 lits = lambda s: sorted(re.findall(r"CAST\('(?:[^']|'')*' AS [^()]*(?:\([^()]*\))?\)", s))
 shape = lambda s: re.sub(r"CAST\('(?:[^']|'')*' AS [^()]*(?:\([^()]*\))?\)(?:, )?", "", s)
-print(json.dumps({"tables": sorted(out[True]), "same_tables": sorted(out[True]) == sorted(out[False]),
-                  "same_keys": [t for t in out[True] if lits(out[True][t]) != lits(out[False][t])],
-                  "same_shape": [t for t in out[True] if shape(out[True][t]) != shape(out[False][t])],
-                  "n": {t: len(lits(out[True][t])) for t in out[True]}}))
+print(json.dumps({"tables": sorted(new), "same_tables": sorted(new) == sorted(old),
+                  "same_keys": [t for t in new if lits(new[t]) != lits(old[t])],
+                  "same_shape": [t for t in new if shape(new[t]) != shape(old[t])],
+                  "n": {t: len(lits(new[t])) for t in new}, "settled_is_the_same_text": new == mid, "key_reads": reads}))
 """
 
 
@@ -1044,6 +1050,8 @@ def test_follow_keys_written_by_the_lake_are_the_keys_read_one_by_one(links):
         assert r.returncode == 0, r.stderr[-3000:]
         got = json.loads(r.stdout.splitlines()[-1])
         assert got["same_tables"] and got["same_keys"] == [] and got["same_shape"] == [], got
+        assert got["settled_is_the_same_text"] is True, "rules settled first, then the follow links: the same filters, to the byte"
+        assert got["key_reads"] == {"(True, True)": 1, "(False, False)": 0, "(True, False)": 2}, got["key_reads"]  # the link's keys: read once
         assert got["n"]["customers"] == len(sql(VISITED)) > 1000, got["n"]
         assert mine(links, "get_object", type="customer", key=[odd])["key"] == [odd], "fresh after an edit: the new visitor is seen at once"
     finally:
@@ -1060,3 +1068,39 @@ def test_follow_keys_written_by_the_lake_are_the_keys_read_one_by_one(links):
     finally:
         sure("set_rls_rule", project=P, id="region", table="cafes", column="region", users={links["uid"]: ["North"]})
     assert mine(links, "sql_query", sql="SELECT count(*) FROM customers")["rows"] == [[len(sql(VISITED))]]
+
+
+LISTS = r"""
+import json, re
+import duckdb
+from abi.semantic import rls
+con = duckdb.connect()
+con.execute("CREATE TABLE t (i INTEGER, d DECIMAL(10,2), day DATE, s VARCHAR, nothing INTEGER)")
+con.execute("INSERT INTO t VALUES (1, 1.50, DATE '2026-01-02', 'it''s', NULL), (2, -0.05, DATE '2026-01-03', 'a\\b', NULL),"
+            " (2, 1.50, NULL, NULL, NULL), (NULL, NULL, NULL, '', NULL), (10, 100.00, DATE '1999-12-31', 'ü', NULL)")
+out = {}
+for c in ("i", "d", "day", "s", "nothing"):
+    for src in ("t", "t WHERE false"):
+        got = con.execute(rls._list_sql(c, src)).fetchone()[0]
+        new = f'list_contains([{got}], "{c}")' if got else "FALSE"
+        keys = sorted(con.execute(f'SELECT DISTINCT CAST("{c}" AS VARCHAR), typeof("{c}") FROM {src}').fetchall(), key=str)
+        old = rls._in((c,), keys)
+        lits = lambda s: sorted(re.findall(r"CAST\('(?:[^']|'')*' AS [^()]*(?:\([^()]*\))?\)", s))
+        rows = con.execute(f"SELECT count(*) FILTER (WHERE {new}), count(*) FILTER (WHERE {old}), count(*) FILTER (WHERE ({new}) IS DISTINCT FROM ({old})) FROM t").fetchone()
+        out[f"{c} {src}"] = [lits(new) == lits(old), len(lits(new)), list(rows), new == "FALSE", old == "FALSE"]
+print(json.dumps(out))
+"""
+
+
+def test_a_key_list_written_by_the_lake_equals_the_one_built_key_by_key():
+    """M10: `rls._list_sql` writes the list `rls._in` builds, for an INTEGER, a DECIMAL, a DATE and a text column (a
+    quote, a backslash, an empty string, a non-ASCII letter): the same literals, and the two filters keep the same
+    rows. A column of NULLs only, and no rows at all, deny in both."""
+    r = engine(LISTS, timeout=120)
+    assert r.returncode == 0, r.stderr[-2000:]
+    got = json.loads(r.stdout.splitlines()[-1])
+    assert got == {"i t": [True, 3, [4, 4, 0], False, False], "i t WHERE false": [True, 0, [0, 0, 0], True, True],
+                   "d t": [True, 3, [4, 4, 0], False, False], "d t WHERE false": [True, 0, [0, 0, 0], True, True],
+                   "day t": [True, 3, [3, 3, 0], False, False], "day t WHERE false": [True, 0, [0, 0, 0], True, True],
+                   "s t": [True, 4, [4, 4, 0], False, False], "s t WHERE false": [True, 0, [0, 0, 0], True, True],
+                   "nothing t": [True, 0, [0, 0, 0], True, True], "nothing t WHERE false": [True, 0, [0, 0, 0], True, True]}, got

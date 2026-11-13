@@ -939,7 +939,7 @@ class RunAction(storage.ProjectRef):
 
 @action(Role.viewer)
 def run_object_action(conn, user: User, args: RunAction) -> dict:
-    """Runs an action type on one object, as you: needs the action type's role (viewer, editor or owner); the object must be visible to you (else 404, as a missing one); `inputs` must match its schema and its checks must hold (else 422 with the check's message). An action type with `confirm` (and any agent call that starts a flow) asks the person to confirm a preview of old and new values first. Its write is one logged, undoable edit batch as you, stored as a proposal an Editor approves when the action type says `approval` or an agent calls it; its flow starts with the object and inputs as {{ data.trigger.object }} and {{ data.trigger.inputs }}, and every step of that run runs as you (your role and row-level security), not as the flow's owner."""
+    """Runs an action type on one object, as you: needs the action type's role (viewer, editor or owner); the object must be visible to you (else 404, as a missing one); `inputs` must match its schema and its checks must hold (else 422 with the check's message). An action type with `confirm` (and any agent call that starts a flow) asks the person to confirm a preview of old and new values first. Its write is one logged, undoable edit batch as you, stored as a proposal an Editor approves when the action type says `approval`, or when an agent calls it and the person was not asked (after the person's yes to the preview it applies, as their own click does); its flow starts with the object and inputs as {{ data.trigger.object }} and {{ data.trigger.inputs }}, and every step of that run runs as you (your role and row-level security), not as the flow's owner."""
     from abi import flows, tools, writeback  # not at top: they import the semantic package
 
     p, o = args.project, read(args.project)
@@ -995,8 +995,8 @@ def run_object_action(conn, user: User, args: RunAction) -> dict:
     if asks:
         preview["after_yes"] = {"write": None if not w else "proposal" if later else "applied", "starts_flow": bool(a.get("flow")) and not later}
         said = [f"{t}.{c['column']}: {json.dumps(c['old'])} → {json.dumps(c['new'])}" for c in preview.get("writes", {}).get("changes", [])]
-        require_confirmation(f"Run '{a['name']}' on {x['name']} {json.dumps(preview['object']['title'])}: " + "; ".join(
-            said + ([f"starts flow '{a['flow']}'"] if a.get("flow") and not later else [])) + "." + (
+        does = said + ([f"starts flow '{a['flow']}'"] if a.get("flow") and not later else [])  # nothing to list: no colon either
+        require_confirmation(f"Run '{a['name']}' on {x['name']} {json.dumps(preview['object']['title'])}" + (": " + "; ".join(does) if does else "") + "." + (
             " The write is a proposal an Editor approves; no flow starts." if later else ""), preview)
     out: dict = {"action": a["id"], "type": x["id"], "key": key}
     if w:  # (6) as the runner: logged with old and new values, undoable

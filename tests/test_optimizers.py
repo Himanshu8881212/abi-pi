@@ -864,6 +864,25 @@ def test_opt_a_failed_run_leaves_no_proposal(opt):
         sure("delete_optimizer", project=P, optimizer="orphan")
 
 
+def test_opt_delete_is_refused_while_a_flow_runs_it(opt):
+    """M10: a plan a flow runs is not deleted, and the person is told which flow before they are asked anything."""
+    call("save_optimizer", optimizer=HOURS | {"id": "kept", "name": "Kept plan"})
+    sure("save_flow", project=P, flow={"id": "plans_weekly", "name": "Weekly plan", "enabled": False, "trigger": {"type": "manual"},
+                                       "steps": [{"id": "plan", "type": "action", "action": "run_optimizer", "input": {"optimizer": "kept"}}]})
+    try:
+        with pytest.raises(abi.ActionError) as e:
+            call("delete_optimizer", optimizer="kept")
+        assert e.value.status == 409 and "confirm_token" not in e.value.body, e.value.body
+        assert e.value.body["message"] == "“Kept plan” is run by the flow “Weekly plan”. Take that step out of the flow, or delete the flow, first."
+    finally:
+        sure("delete_flow", project=P, flow="plans_weekly")
+    with pytest.raises(abi.ActionError) as e:  # free now: asked, then deleted
+        call("delete_optimizer", optimizer="kept")
+    assert e.value.status == 409 and e.value.body["confirm_token"] and e.value.body["message"].startswith("Destructive: deletes the plan definition 'kept'")
+    sure("delete_optimizer", project=P, optimizer="kept")
+    assert "kept" not in [o["id"] for o in call("optimizers")["optimizers"]]
+
+
 def test_a_project_without_optimizers_reads_as_before():
     """Section 4: a project without optimisers has an empty list, no folder for them and nothing to run."""
     other = "pi_opt_none"

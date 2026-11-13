@@ -134,12 +134,13 @@ _swept = [0.0]
 _sweeping = threading.Lock()
 
 
-def _forget_gone(now: float) -> None:
+def _forget_gone(now: float | None = None) -> None:
     """Forget the cached lakes of projects that are gone (deleted or renamed). Nothing asks for such a name again, so
     each one kept its DuckDB instance, the memory that holds and its catalog connection for as long as the process
     lived: a worker that saw many projects come and go only ever grew (16 GB after six days, found 12 Nov 2026). Not
     closed: a thread may still read one; it closes when its last reader lets go. At most once per SWEEP_S, by one
     thread, one catalog query; never while holding a project's lock."""
+    now = time.monotonic() if now is None else now
     if now - _swept[0] < SWEEP_S or not _sweeping.acquire(blocking=False):
         return
     try:

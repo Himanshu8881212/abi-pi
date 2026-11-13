@@ -117,6 +117,7 @@ def _restricted(project: str, user_id: int) -> bool:
 
 
 IN_SQL = True  # a follow link's key list is written by DuckDB (`conditions.listed`); False: by `_in`, key by key (tests compare the two)
+SETTLE = True  # `conditions` settles rules and relationships before the follow links join; False: all in one iteration
 
 
 def cast_lit(text, typ: str) -> str:
@@ -137,6 +138,13 @@ def _in(cols: list[str], keys: list[tuple]) -> str:
         return f"list_contains([{', '.join(v[0] for v in vals)}], {storage._q(cols[0])})"
     return (f"list_contains([{', '.join('(' + ', '.join(v) + ')' for v in vals)}],"
             f" ({', '.join(storage._q(c) for c in cols)}))")
+
+
+def _list_sql(col: str, src: str) -> str:
+    """The read that writes `_in`'s list for one column itself: one row, the distinct non-NULL `col` values of DuckDB
+    `FROM src` as `CAST('<text>' AS <type>), …` (NULL when there is none)."""
+    return ("SELECT string_agg('CAST(''' || replace(CAST(c AS VARCHAR), '''', '''''') || ''' AS ' || typeof(c) || ')', ', '"
+            f" ORDER BY CAST(c AS VARCHAR), typeof(c)) FROM (SELECT DISTINCT {storage._q(col)} AS c FROM {src}) WHERE c IS NOT NULL")
 
 
 def _int(text: str) -> tuple[bool, str]:
@@ -277,19 +285,18 @@ def conditions(project: str, user_id: int, read, types: dict | None = None) -> d
     @functools.cache  # fixpoint rounds repeat unchanged reads: run each once
     def listed(t: str, col: str, where: str) -> str:
         """`allowed` for one column, the list's text made by DuckDB itself: the same values as `_in` gives (each as
-        CAST('<text>' AS <type>), a NULL left out, the same rows in the same order), without a Python step per key.
+        CAST('<text>' AS <type>), a NULL left out; the same rows, ordered by their text), without a Python step per key.
         Tens of thousands of keys per person, for many people at once, kept every other reader waiting on that step
         (M10: 50 Viewers, 25,000 customers each: page p95 15 s). Raises nothing: a missing table or column denies."""
-        c = storage._q(col)
         try:
-            got = read("SELECT string_agg('CAST(''' || replace(CAST(c AS VARCHAR), '''', '''''') || ''' AS ' || typeof(c) || ')', ', '"
-                       f" ORDER BY CAST(c AS VARCHAR), typeof(c)) FROM (SELECT DISTINCT {c} AS c FROM {storage._q(t)} WHERE {where}) WHERE c IS NOT NULL", {})
+            got = read(_list_sql(col, f"{storage._q(t)} WHERE {where}"), {})
         except (duckdb.Error, ActionFailed):
             return "FALSE"
-        return f"list_contains([{got[0][0]}], {c})" if got and got[0][0] else "FALSE"
+        return f"list_contains([{got[0][0]}], {storage._q(col)})" if got and got[0][0] else "FALSE"
 
-    def step(t: str, conds: dict) -> list:
-        """t's filter as (tag: the follow link it is made from, or none; SQL) parts."""
+    def step(t: str, conds: dict, follow: bool = True) -> list:
+        """t's filter as (tag: the follow link it is made from, or none; SQL) parts; without `follow`: the rules and
+        relationships alone."""
         cs = [(frozenset(), c) for c in direct.get(t, [])]
         for r in rels:
             if r["from"]["table"] != t:
@@ -316,7 +323,7 @@ def conditions(project: str, user_id: int, read, types: dict | None = None) -> d
                 else:
                     on = " AND ".join(f"__d.{storage._q(k)} = {storage._q(t)}.{storage._q(f)}" for f, k in zip(fk, key))
                     cs.append((tag, allowed(t, fk, f"EXISTS (SELECT 1 FROM {src} WHERE {on})", reads)))
-        for f in fl:  # after the relationships, so a project without follow links keeps its filters' text
+        for f in fl if follow else ():  # after the relationships, so a project without follow links keeps its filters' text
             if f["from"] != t:
                 continue
             tag = frozenset({f["id"]})
@@ -335,11 +342,17 @@ def conditions(project: str, user_id: int, read, types: dict | None = None) -> d
     tables = sorted(set(direct) | {r["from"]["table"] for r in rels} | {f["from"] for f in fl})
     conds, last, grew = {t: [(frozenset(), c) for c in cs] for t in tables if (cs := direct.get(t))}, None, 0
     skeleton = lambda c: {t: [tag for tag, _ in cs] for t, cs in c.items()}  # noqa: E731
-    while conds != last:
-        last, conds = conds, {t: cs for t in tables if (cs := step(t, conds))}
-        grew += skeleton(conds) != skeleton(last)  # parts only ever join (tags never change), so this stays small
-        if fl and grew > CAP + 10 * len(tables):  # never: fail closed if it ever does
-            return {t: "FALSE" for t in {*tables, *unfiltered_outputs(project)}}
+    # M10: with follow links the rules and relationships are settled first, then the follow parts join and the whole is
+    # iterated again. It ends at the same fixpoint (the first phase's is above it, and filters only shrink from there),
+    # and a link's keys are then read through tables that already have their filters: once, not once per round in
+    # which a table on the way was still getting its own (SETTLE False: all at once, as before; tests compare the two)
+    for follow in (False, True) if fl and SETTLE else (True,):
+        last = None
+        while conds != last:
+            last, conds = conds, {t: cs for t in tables if (cs := step(t, conds, follow))}
+            grew += skeleton(conds) != skeleton(last)  # parts only ever join (tags never change), so this stays small
+            if fl and grew > CAP + 10 * len(tables):  # never: fail closed if it ever does
+                return {t: "FALSE" for t in {*tables, *unfiltered_outputs(project)}}
     return {t: " AND ".join(c for _, c in cs) for t, cs in conds.items()} | {t: "FALSE" for t in unfiltered_outputs(project)}
 
 

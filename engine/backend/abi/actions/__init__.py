@@ -361,8 +361,10 @@ def run(name: str, payload: dict, user: User, via: str, confirm: str | None = No
             _call.set((user, name, json.dumps(logged, sort_keys=True), confirm))
             _said.set(None)
             if act.destructive and not act.confirms:  # no action ID in the text; what it acts on, as the call names it
-                on = [f"{k.replace('_', ' ')} '{v}'" for k, v in logged.items() if isinstance(v, str | int) and not isinstance(v, bool)
-                      and len(str(v)) <= 80 and "*" not in str(v) and "${secret:" not in str(v)][:6]
+                # each value as JSON (a quote, a line break or a direction mark in one can't pass for ABI's own words);
+                # never a secret, never a bare ID nobody could read (a run, a batch)
+                on = [f"{k.replace('_', ' ')} {json.dumps(v)}" for k, v in logged.items() if isinstance(v, str | int) and not isinstance(v, bool)
+                      and len(str(v)) <= 80 and "*" not in str(v) and "${secret:" not in str(v) and not re.fullmatch(r"[0-9a-f-]{16,}", str(v))][:6]
                 require_confirmation(f"Destructive: {' '.join((act.fn.__doc__ or '').split())}" + (f" It acts on: {', '.join(on)}." if on else ""))
             if via != "rest" and name in PERSON_CLICK:  # every arg shown, uncut: the click approves all of them (a logo is a digest)
                 require_confirmation(f"Changes access or where the project goes: {' '.join((act.fn.__doc__ or '').split())}"

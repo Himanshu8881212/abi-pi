@@ -61,14 +61,29 @@ const SHOWN_ONCE: Record<string, { secret: string; keep: string[]; what: string 
 	create_embed_key: { secret: "key", keep: ["kid"], what: "embed key" },
 	rotate_webhook_token: { secret: "token", keep: ["url"], what: "webhook token" },
 };
-function shownOnce(tool: string, body: unknown): { what: string; secret: string | null; safe: Record<string, unknown> } | null {
+const SHOWN = "Shown once: copy it now";  // the dialog's title; the app's chat knows a credential's dialog by it (scripts/app.py SHOWN)
+// the address other people open ABI at (ABI_PUBLIC_URL), never a loopback one: "" when the install has none (app.py public_base)
+function publicBase(url: string | undefined): string {
+	try {
+		const u = new URL(url || "");
+		return /^(localhost|127\.\d+\.\d+\.\d+|\[?::1\]?|0\.0\.0\.0)$/i.test(u.hostname) ? "" : u.origin + u.pathname.replace(/\/+$/, "");
+	} catch { return ""; }
+}
+// ABI answers a link or an address as a path: with the install's address in front it is one a person can open or paste
+const absolute = (v: unknown, base: string): unknown => (typeof v === "string" && v.startsWith("/") && base ? base + v : v);
+// `text`: what the person reads in the dialog (its second paragraph is the credential alone: the app's Copy button takes it)
+function shownOnce(tool: string, body: unknown, base = ""): { what: string; secret: string | null; safe: Record<string, unknown>; text: string } | null {
 	const s = SHOWN_ONCE[tool];
 	if (!s) return null;
 	const b = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
 	const secret = typeof b[s.secret] === "string" && b[s.secret] ? (b[s.secret] as string) : null;
 	const safe: Record<string, unknown> = {};
-	if (secret) for (const k of s.keep) if (["string", "number"].includes(typeof b[k]) && !String(b[k]).includes(secret)) safe[k] = b[k];
-	return { what: s.what, secret, safe };
+	if (secret) for (const k of s.keep) if (["string", "number"].includes(typeof b[k]) && !String(b[k]).includes(secret)) safe[k] = absolute(b[k], base);
+	const path = !!secret && secret.startsWith("/");  // a link: ABI gives its path only
+	const text = !secret ? "" : `Your new ${s.what}:\n\n${absolute(secret, base)}\n\n`
+		+ (path && !base ? "This install has no public address set (ABI_PUBLIC_URL), so this is only the link's path: put it after the address people open ABI at. " : "")
+		+ "Copy it now and keep it somewhere safe: it is shown this once, it is not kept in this chat, and the agent never sees it. If it wasn't copied, revoke it and make a new one.";
+	return { what: s.what, secret, safe, text };
 }
 // an action's name as ABI has them: it goes into the request's path, so nothing else is ever sent
 const ACTION = /^[a-z][a-z0-9_]*$/;
@@ -426,7 +441,7 @@ export default async function abi(pi: ExtensionAPI) {
 				const out: unknown[] = [];
 				for (const it of list) {
 					// each step against the mode as it is now: the person may have switched to Viewer since the list was made
-					if (await mode() === "viewer" && !READS.has(String(it.action))) { out.push({ id: it.id, action: it.action, outcome: "waiting", detail: { status: "Viewer mode: nothing changed. The person can switch to Developer in the app's top bar and ask again." } }); break; }
+					if (await mode() === "viewer" && !READS.has(String(it.action))) { out.push({ id: it.id, action: it.action, outcome: "waiting", detail: { status: "Viewer mode: nothing changed. A person who builds in this project can switch to Developer in the app's top bar and ask again." } }); break; }
 					const r: any = await confirmBridge(String(it.action), { ...(it.args || {}), project: p.project }, ctx);  // the step's project is the Lead's, whatever its args say
 					// the app is in Viewer mode: nothing ran, so the step stays waiting and the rest isn't asked
 					if (String(r.status ?? "").startsWith("Viewer mode")) { out.push({ id: it.id, action: it.action, outcome: "waiting", detail: r }); break; }
@@ -622,14 +637,14 @@ export default async function abi(pi: ExtensionAPI) {
 		}
 	}
 
-	const SHOWN = "Shown once: copy it now";  // the dialog's title; the app's chat reads it (scripts/app.py)
 	async function confirmBridge(tool: string, input: unknown, ctx: ExtensionContext) {
 		if (PERSON_CLICK.has(tool)) return { status: "This changes access or where the project goes: the person does it in ABI's app, never from an agent." };
 		// "ask" makes ABI treat this call as the agent's own (abi.actions.ASK: the agent's door, as the MCP call replayed
 		// here): it asks everything it asks an agent (a new host to load from, a first send), a step that asks nothing
 		// (abi_pending takes any step a specialist names) does only what the agent's own call would, and what is never
-		// an agent's (credentials shown once, account mail, tokens) is refused. Without it this REST call would be the
-		// person's own, one step. Only a 409 with a token is ever run as the person, after their yes
+		// an agent's (account mail, personal tokens, two-step sign-in, who owns the workspace) is refused. Without it this
+		// REST call would be the person's own, one step. Only a 409 with a token is ever run as the person, after their
+		// yes; a credential ABI answers then (a share link, an embed key, a webhook token) goes to the person alone
 		const first = await rest(tool, input, "ask");
 		if (first.status !== 409 || !first.body?.confirm_token) {
 			if (first.status < 300 && SHOWN_ONCE[tool]) return { status: "Nothing of ABI's answer is passed on: it was not asked first. Tell the person to make it again." };
@@ -637,7 +652,12 @@ export default async function abi(pi: ExtensionAPI) {
 		}
 		const tok: string = first.body.confirm_token; // stays in this closure: never in content, logs or the transcript
 		const message: string = first.body.message;
-		const preview = first.body.preview ? JSON.stringify(first.body.preview, null, 1).slice(0, 4000) : "";
+		// what the yes will do, what is written and what starts come first, so a long preview is never cut before them
+		const pv = first.body.preview, lead = ["after_yes", "writes", "flow"];
+		const whole = pv && typeof pv === "object" && !Array.isArray(pv)
+			? JSON.stringify(Object.fromEntries([...lead.filter((k) => k in pv).map((k) => [k, pv[k]]), ...Object.entries(pv).filter(([k]) => !lead.includes(k))]), null, 1)
+			: pv ? JSON.stringify(pv, null, 1) : "";
+		const preview = whole.length > 4000 ? `${whole.slice(0, 4000)}\n… (cut: the rest is not shown here)` : whole;
 		now().pending.push({ message, input });
 		if (!ctx.hasUI) {
 			log({ event: "confirm", tool, decision: "no-ui" });
@@ -647,16 +667,16 @@ export default async function abi(pi: ExtensionAPI) {
 		log({ event: "confirm", tool, decision: yes ? "yes" : "no" });
 		if (!yes) return { status: "The person declined. Nothing changed; don't retry.", message };
 		// the person may have switched to Viewer while the question was open: the yes changes nothing then
-		if (await mode() === "viewer" && !READS.has(tool)) return { status: "Viewer mode: nothing changed. The person can switch to Developer in the app's top bar and ask again.", message };
+		if (await mode() === "viewer" && !READS.has(tool)) return { status: "Viewer mode: nothing changed. A person who builds in this project can switch to Developer in the app's top bar and ask again.", message };
 		const done = await rest(tool, input, tok);
 		// what the yes showed may have changed meanwhile: ABI then asks again (409 with a new token), which never goes to the model
 		if (done.body && typeof done.body === "object") delete done.body.confirm_token;
-		const once = done.status < 300 ? shownOnce(tool, done.body) : null;
+		const once = done.status < 300 ? shownOnce(tool, done.body, publicBase(process.env.ABI_PUBLIC_URL)) : null;
 		if (once) {  // a credential: to the person alone, in a dialog; never the tool result, the transcript, a log or pending.json
 			if (!once.secret) return { status: `ABI made the ${once.what}, but its answer was not in the form expected, so it is not shown and nothing of it is passed on. Tell the person to revoke it and make a new one.` };
-			await ctx.ui.confirm(SHOWN, `Your new ${once.what}:\n\n${once.secret}\n\nCopy it now and keep it somewhere safe: it is shown this once, it is not kept in this chat, and the agent never sees it.`);
+			await ctx.ui.confirm(SHOWN, once.text);
 			log({ event: "shown_once", tool });
-			return { result: { ...once.safe, created: `The ${once.what} was made and shown to the person once, in a dialog only they read. You never see it: don't ask for it and don't guess it.` }, confirmed_by_person: true };
+			return { result: { ...once.safe, created: `The ${once.what} was made and shown to the person once, in a dialog only they read. You never see it: don't ask for it and don't guess it. If they didn't copy it, they revoke it and make a new one.` }, confirmed_by_person: true };
 		}
 		return done.status < 300 ? { result: done.body, confirmed_by_person: true } : { error: done.body };
 	}

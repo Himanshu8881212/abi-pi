@@ -310,14 +310,10 @@ def test_ontology_journey(tmp_path):
         assert set(mine_was) == {c, far} and set(north_was) == {c}
         under = str(sure("decide_same", project=J, type=cu, keys=[c, far], decision="same")["id"])
         assert dict(call("semantic_query", **two)["rows"]) == {under: pytest.approx(sum(mine_was.values()))}
-        after = dict(north("semantic_query", **two)["rows"])
-        assert list(after.values()) == [pytest.approx(north_was[c])] and set(after) <= {c, under}, "their own orders, no more"
-        try:
-            shown = row(north("get_object", type=cu, key=[under]))
-        except abi.ActionError as e:
-            assert e.status == 404, e.body
-            shown = None
-        assert shown is None or shown["segment"] == seg[c], "never the values of the record that is hidden from them"
+        assert under == far, "the lower key stays the customer's"
+        assert dict(north("semantic_query", **two)["rows"]) == {c: pytest.approx(north_was[c])}, "for the Viewer: under the record they see, their own orders"
+        assert row(north("get_object", type=cu, key=[c]))["segment"] == seg[c], "with that record's own values"
+        refused(404, "get_object", type=cu, key=[far])  # the record hidden from them stays hidden, also as the customer's key
 
         # ---- one plan: seats to the cafés that earn most, within a total. The owner's is proposed; the Viewer's is of the North
         call("save_optimizer", optimizer={"id": "seats", "name": "Seats per café", "over": {"type": ct},

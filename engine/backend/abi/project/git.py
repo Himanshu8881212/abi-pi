@@ -390,6 +390,7 @@ def undo(conn, user: User, args: ProjectRef) -> dict:
             raise ActionFailed(409, "Project files changed outside the action API since the last action; nothing undone.")
         was, now = top.parents[0].tree, top.tree
         old, files = _files(now), _files(was)
+        imports.keys_kept(args.project, old, files)  # 1.2.6 M11: on either way back (the import below, or the files alone)
         gated = imports.ROLES in was and (imports.ROLES not in now or was[imports.ROLES].id != now[imports.ROLES].id) \
             or imports.api_published(old, files) or imports._rules(old) != imports._rules(files) \
             or imports.follow_links(old) != imports.follow_links(files) \
