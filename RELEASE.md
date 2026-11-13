@@ -14,8 +14,9 @@ an install moves from 1.2.5. The measurements are in [bench/RESULTS.md](bench/RE
 All on pve1 (LXC 100, 6 cores, 10 GB) in throwaway containers, 13 Nov 2026; nothing ran on a developer's machine and
 the live install was not touched.
 
-- **Tests.** The whole suite in a fresh container of each round's commit: 503 passed, 24 skipped, 6 failed (round 3,
-  ffa91fe); the 6 are the container-only failures listed under Known. `tests/test_brewline.py::test_ontology_journey`
+- **Tests.** The whole suite in a fresh container of each round's commit; on e54fa93 (round 4 with these notes): 503
+  passed, 24 skipped, 6 failed in 1 h 8 min; the 6 are the container-only failures listed under Known. The last,
+  text-only commit on top of it went through the same gate. `tests/test_brewline.py::test_ontology_journey`
   runs Brewline from the load to the object pages as an owner and as a Viewer of one region: the draft, the
   refinement, the approval, a café's page, a Viewer's action, an alert per café, a prediction on the customer's page,
   one merge of two customer records (also of a record the Viewer sees with one they don't) and one plan.
@@ -29,14 +30,15 @@ the live install was not touched.
 - **Restricted pages with a follow link** (item 32). 50 Viewers, each limited to one café, on Brewline scale 1, with
   customers following the cafés they visited: page p95 right after a commit 5.29, 5.44 and 5.29 s (mean 5.34 s)
   against 1.2.5's 3.87 and 4.77 s without the link (mean 4.32 s): x1.24. The target was x1.2: missed by a little.
-  It was 15 to 17 s (x3.5) before two fixes in this release run. Without a follow link 1.2.6 is as fast as 1.2.5
+  It was 15 to 17 s (x3.7 on the mean) before two fixes in this release run. Without a follow link 1.2.6 is as fast as 1.2.5
   (4.39 and 4.43 s). The first read of a Viewer who follows to 60,000 customers takes 6 to 7 s after a restart.
 - **Agent bench** (item 33, claude-sonnet-5-5, 38 runs): "why did it change" 20 of 20 on the two planted datasets,
   none masked; a question 10 of 10; a load 3 of 3; a report 4 of 5 (one answer had a count word masked in front of
   three correct names; the report itself was right). Targets: why at least 18 of 20: met; report 5 of 5 with nothing
   masked: missed by one run; no wrong number anywhere; nothing below 1.2.0's bench (the last one recorded).
 - **Worker memory.** A deleted project's lake stayed in memory for as long as the process lived (the default worker
-  grew by 6.2 MB and one database connection for every project made and deleted); fixed, with a test. Then two hours
+  grew by 5.8 MB and one database connection for every project made and deleted; 1.1 MB and none after the fix),
+  which has a test. Then two hours
   of loads, queries, trainings, scorings and plan runs with idle periods: the default worker went from 277 to 291 MB
   and the engine from 290 to 328 MB, both still rising slowly at the end; the heavy worker stopped after its idle
   time in every one of 19 cycles. Each live project costs the engine about 14 MB and the default worker about 7 MB
@@ -52,10 +54,12 @@ the live install was not touched.
 ### Known and not fixed in 1.2.6
 
 - **A public link to a report, embedding a report in another site, and webhook calls from outside are not reachable
-  through the app's address.** The pages and the hook address are served by the engine only (port 8780 on the
-  server), which the address people open ABI at does not pass on. The agent refuses a public link and an embed key
-  and says to use Share on the report (people with access open it after signing in). A flow's webhook token can be
-  made and is shown once, but calls reach the hook only if an administrator exposes the engine's `/api/hooks/` path.
+  through the app's address.** The pages and the hook address are served by the engine only (on the server itself,
+  port 8780 unless `ABI_ENGINE_PORT` says otherwise), which the address people open ABI at does not pass on. The
+  agent refuses a public link and an embed key and says that a workspace owner can use Share on the report instead
+  (the people they pick open it after signing in; Share is shown to workspace owners, on a computer). A flow's
+  webhook token can be made and is shown once, but calls reach the hook only if an administrator exposes the
+  engine's `/api/hooks/` path.
 - **Restricted pages with a follow link are about a quarter slower than without** at 7.4 million orders (above), and
   a Viewer's first read after a restart takes several seconds when they follow to tens of thousands of objects. The
   keys are written into each person's views; taking that out is a change to how the views are built.
@@ -81,6 +85,19 @@ the live install was not touched.
   project renamed and renamed back hides its earlier action runs in History; on a phone the Objects picture can be
   missing for up to 30 seconds after a change made elsewhere; "(can't see this Café)" is written with a capital; the
   hint for a person without an email says "add one under Users & access" without saying who can.
+
+### For 1.2.7 (found in the release run's reviews, not fixed)
+
+- A row rule's follow link over a key whose type is not a plain one (an ENUM) falls back to the earlier way of
+  writing the key list, which puts the type's text into the filter unquoted. No load is known to make such a key.
+- A value typed into an action that is longer than about 4,000 characters is not shown whole in the terminal's
+  confirmation: the dialog says that part is not shown, and what the yes writes is then not all visible.
+- An agent started by a message from outside can queue a public link; if the person then approves it and confirms
+  again, the link is made. It goes to the person's own screen only.
+- Not tested end to end: the key rule on a project undo (its question is tested, and that undo asks it first), and
+  the ENUM fallback inside a real row rule (the list's own refusal of an ENUM is tested).
+- The upgrade test seeds 11 of the database's tables with a project's rows, not all of them; the volume upgrade on
+  pve1 covered a whole install.
 
 ### Upgrade from 1.2.5
 

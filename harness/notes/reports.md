@@ -9,5 +9,5 @@
 - `visual_data` returns one visual's rows; `report_snapshot`/`export_visual` make PNG/PDF/CSV files.
 - Sharing widens who sees data: it needs the person's confirmation. A public link to a report and embedding a report
   in another site are not available in this install (ABI refuses `create_share_link` and `create_embed_key`): say so
-  and point to Share on the report, which the people the person picks open after signing in.
+  and that a workspace owner can use Share on the report instead (the people they pick open it after signing in).
 - `delete_report` is destructive: the person confirms.

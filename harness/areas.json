@@ -73,11 +73,9 @@
       ]
     },
     "reports": {
-      "about": "reports, visuals, snapshots, exports, sharing, share links and embeds",
+      "about": "reports, visuals, snapshots, exports, sharing",
       "words": "report|page|visual|chart|dashboard|export|download|share|sharing|embed|link|pdf|png|snapshot|show me",
       "tools": [
-        "create_embed_key",
-        "create_share_link",
         "delete_report",
         "export_visual",
         "get_sharing",

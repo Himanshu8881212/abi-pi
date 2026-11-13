@@ -1407,7 +1407,7 @@ write the list in the same read (`conditions.listed`): after a commit 5.08, 5.45
 the server for one Viewer: reads of 0.17 and 0.14 s before, one of 0.12 s after; that person's filters built in 0.16 s
 instead of 0.46 s; the filters byte-identical): after a commit 5.29, 5.44 and 5.29 s, mean 5.34 s: x1.24 again, so
 that read was not what the last 20% is. **Result for item 32: x1.24 of 1.2.5 on the mean (5.34 s against 4.32 s),
-x1.11 to x1.40 run against run; the x1.2 target is missed by a little.** What is left is the size of the list itself (700 KB of filter text per Viewer and table, read
+x1.11 to x1.41 run against run; the x1.2 target is missed by a little.** What is left is the size of the list itself (700 KB of filter text per Viewer and table, read
 by every query that touches customers); taking it out means not inlining the keys (the plan's "a lake table if
 slow"), which changes what the views are and was not attempted in the release run.
 
@@ -1437,14 +1437,16 @@ Found on 12 Nov (a 1.2.5 engine left running 6 days on a development machine: th
 worker's tick sees it, then deleted; resident memory of the engine and the default worker with their children, and
 Postgres connections, after each.
 
-| | default worker MB, before and after each of 5 | Postgres connections |
+| | default worker MB: before, then after each of the 5 projects | Postgres connections: before, then after each |
 |---|---|---|
-| before the fix (the Part A tree without it) | 304.0, 308.4, 314.9, 321.1, 327.7, 333.1; 150 s later 333.1 | 30, 31, 32, 33, 34; 34 |
-| with it (426fa4b) | 273.4, 274.5, 276.0, 277.1, 277.8; 150 s later 277.8 | 14, 14, 14, 14, 14; 14 |
+| before the fix (the Part A tree without it; the engine had run tests before) | 304.0; 308.4, 314.9, 321.1, 327.7, 333.1; 150 s later 333.1 | 39 (a heavy worker was up); 30, 31, 32, 33, 34; 150 s later 34 |
+| with it (426fa4b; the engine just restarted) | 200.5; 273.4, 274.5, 276.0, 277.1, 277.8; 150 s later 277.8 | 9; 14, 14, 14, 14, 14; 150 s later 14 |
 
-Before: +6.2 MB and one Postgres connection for every project made and deleted, never given back (each kept its
-DuckDB instance and its catalog connection). After: +1.1 MB per project and no connection. The fix:
-`storage._forget_gone`.
+Before: 304.0 to 333.1 MB over the five projects, +5.8 MB each (4.4 to 6.6 MB), and one more Postgres connection
+after each (30 to 34), none given back 150 s later: each project kept its DuckDB instance and its catalog
+connection. After: the first project took the just-restarted worker from 200.5 to 273.4 MB (its own start: DuckDB
+and its extensions load with the first lake), then 273.4 to 277.8 MB over the next four, +1.1 MB each, and the
+connections stayed at 14. The fix: `storage._forget_gone`.
 
 The same sweep now also runs from the worker's minute tick (ffa91fe), so a worker with no project left lets go too.
 

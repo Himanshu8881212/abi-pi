@@ -1179,11 +1179,11 @@ def test_a_replayed_call_is_the_agents_call(acts):
         assert e.status == 403 and "confirm_token" not in e.body and "the person does it in the app" in e.body["message"], (action, e.body)
     # a public link and an embed key: refused to an agent before anything is asked (their pages don't open at the app's
     # address), with what the person does instead; nothing is made
-    for action, args, said in (("create_share_link", {"report": "overview"}, "A public link isn't available in this install. Use Share on the report: the"
-                                                                             " people you pick open it after signing in."),
+    for action, args, said in (("create_share_link", {"report": "overview"}, "A public link isn't available in this install. A workspace owner can use"
+                                                                             " Share on the report instead: the people they pick open it after signing in."),
                                ("create_embed_key", {"name": "x", "origins": ["https://x.example.com"]},
-                                "Embedding a report in another site isn't available in this install. Share the report instead: the people you pick"
-                                " open it after signing in.")):
+                                "Embedding a report in another site isn't available in this install. A workspace owner can use Share on the report"
+                                " instead: the people they pick open it after signing in.")):
         e = asked(action, project=P, **args)
         assert e.status == 403 and "confirm_token" not in e.body and e.body["message"] == said, e.body
         if action == "create_share_link":  # the same from ABI's own agent, as an Editor (an embed key is an Owner's)

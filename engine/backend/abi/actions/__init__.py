@@ -285,9 +285,10 @@ PERSON_CLICK = frozenset({"set_role", "set_tenant_admin", "set_user_tenant", "ma
 # with the person's session: first with `X-Abi-Confirm: ask`, to learn what ABI asks, then with the token after their
 # yes. The asking call is the agent's, so it goes through the agent's door (as MCP, D-33): every agent rule holds (edits
 # become proposals, sends are grounded, nothing counts as typed by a person), a call that asks nothing does no more than
-# the agent's own would, and what an agent may never call (agent._secret, PERSON_CLICK) is refused. A share link, an
-# embed key and a webhook token are asked like anything else; what ABI answers after the yes is a credential, and the
-# harness shows it to the person alone (index.ts shownOnce): the server can't tell the harness from the person.
+# the agent's own would, and what an agent may never call (agent._secret, PERSON_CLICK) is refused. A flow's
+# webhook token is asked like anything else; what ABI answers after the yes is a credential, and the harness shows it to
+# the person alone (index.ts shownOnce): the server can't tell the harness from the person. A public share link and an
+# embed key are refused to every agent before anything is asked (reports/share.py, reports/embed.py).
 ASK = "ask"
 
 
@@ -314,7 +315,7 @@ def production_refusal(name: str, project, role: Role | None = None) -> str | No
 def _quoted(v) -> str:
     """A value inside a sentence a person reads: as JSON, letters as they are (José), with control characters (JSON's
     own escapes) and direction marks written out, so nothing typed can end the quotes or reorder the line."""
-    return re.sub(r"[\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029\x7f-\x9f]", lambda m: f"\\u{ord(m[0]):04x}", json.dumps(v, ensure_ascii=False))
+    return re.sub(r"[\u061c\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff\u2028\u2029\x7f-\x9f]", lambda m: f"\\u{ord(m[0]):04x}", json.dumps(v, ensure_ascii=False))
 
 
 def invalid(e: ValidationError) -> list[dict]:

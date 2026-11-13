@@ -23,6 +23,9 @@ PREFIX = {p: a for a, (_, ps, _) in AREAS.items() for p in ps}
 DEF = re.compile(r"^@action\([^\n]*\n(?:@[^\n]*\n)*def (\w+)\(", re.M)
 
 
+NOT_HERE = {"create_share_link", "create_embed_key"}  # ABI refuses them from an agent (their pages aren't reachable at the app's address)
+
+
 def area(module: str, name: str) -> str | None:
     parts = f"{module}.{name}".split(".")
     return next((PREFIX[p] for i in range(len(parts), 0, -1) if (p := ".".join(parts[:i])) in PREFIX), None)
@@ -35,7 +38,7 @@ def main() -> None:
         rel = f.relative_to(SRC).with_suffix("")
         module = ".".join(rel.parts[:-1] if rel.name == "__init__" else rel.parts)
         for name in DEF.findall(f.read_text()):
-            if name in CORE:
+            if name in CORE or name in NOT_HERE:
                 continue
             (groups[a] if (a := area(module, name)) else other).append(name)
     out = {"core": CORE, "unclassified": sorted(other),

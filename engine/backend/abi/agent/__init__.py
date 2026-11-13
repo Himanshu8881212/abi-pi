@@ -177,7 +177,7 @@ AREAS = {  # area: (what it holds, action module or module.action prefixes (long
               ("abi.semantic", "abi.project.imports"),
               ("model|measure|relationship|join|glossary|term|dataset|date table|calendar|currency|rate|key|row-level|rls|"
                "define|definition|formula|kpi|metric|margin|build")),
-    "reports": ("reports, visuals, snapshots, exports, sharing, share links and embeds",
+    "reports": ("reports, visuals, snapshots, exports, sharing",
                 ("abi.reports", "abi.project.sharing", "abi.tools.builtin.report_snapshot", "abi.tools.builtin.export_visual"),
                 "report|page|visual|chart|dashboard|export|download|share|sharing|embed|link|pdf|png|snapshot|show me"),
     "writeback": ("write-back: edit cells and totals, input tables, proposals and approvals, edit history, sync to sources",

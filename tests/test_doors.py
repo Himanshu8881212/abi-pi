@@ -325,7 +325,7 @@ console.log(JSON.stringify([
   ["edit_cells", "../admin/dbkey", "a/b", "Edit", "", "x?y=1"].map((a) => ACTION.test(a)),
   SHOWN,
   [Object.keys(cut), cut.after_yes, previewText(big).length <= 4000, previewText({ a: 1 }), previewText(null)],
-  [plainMarks("a\u202eb\u2066c"), JSON.parse(previewText({ inputs: { x: "p\u202eq" } })).inputs.x],
+  [plainMarks("a\u202eb\u2066c\u061c\u200b\ufeff"), JSON.parse(previewText({ inputs: { x: "p\u202eq\u2060" } })).inputs.x],
 ]));
 """)
     r = subprocess.run(["node", "--experimental-strip-types", str(f)], capture_output=True, text=True, timeout=60)
@@ -343,7 +343,7 @@ console.log(JSON.stringify([
         [True, False, False, False, False, False],
         "Shown once: copy it now",
         [["action", "object", "after_yes", "writes", "flow", "cut"], {"write": "applied", "starts_flow": True}, True, '{\n "a": 1\n}', ""],
-        ["a\\u202eb\\u2066c", "p\u202eq"]]  # in the dialog's text written out; inside the JSON it is the JSON escape of the same mark
+        ["a\\u202eb\\u2066c\\u061c\\u200b\\ufeff", "p\\u202eq\\u2060"]]  # written out, also in what the app reads back from the JSON: no real mark
 
 
 def test_a_destructive_question_names_what_it_acts_on_and_nothing_typed_passes_for_abis_words():

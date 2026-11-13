@@ -48,8 +48,8 @@ def create_embed_key(conn, user: User, args: NewKey) -> dict:
     """Not for an agent: answers that embedding isn't available here. From ABI's own screens: makes a signing key for embedding this project's reports in other sites (the host's backend signs short-lived tokens with it naming one of the project's Viewers, whose view the embed shows), after a confirmation."""
     if actions.VIA.get() != "rest":  # before anything is asked. SC-4: the key is a credential; and in this install the embedded
         # page is served by the engine only, which the address people open ABI at does not reach (RELEASE.md, known limits)
-        raise ActionFailed(403, "Embedding a report in another site isn't available in this install. Share the report instead: the"
-                                " people you pick open it after signing in.")
+        raise ActionFailed(403, "Embedding a report in another site isn't available in this install. A workspace owner can use Share on"
+                                " the report instead: the people they pick open it after signing in.")
     origins = sorted(set(args.origins))
     require_confirmation(f"Pages on {', '.join(origins)} can show this project's reports as any of its Viewers, to"
                          " whoever the host site chooses, with tokens signed by this key, until you revoke it.")

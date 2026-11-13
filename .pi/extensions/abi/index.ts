@@ -77,18 +77,23 @@ function shownOnce(tool: string, body: unknown): { what: string; secret: string 
 }
 // an action's name as ABI has them: it goes into the request's path, so nothing else is ever sent
 const ACTION = /^[a-z][a-z0-9_]*$/;
-// direction marks in what a person reads are written out, so typed text can't reorder a line (U+202A-202E, U+2066-2069, U+200E/F)
-const plainMarks = (t: string) => t.replace(/[\u202A-\u202E\u2066-\u2069\u200E\u200F]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+// direction and invisible marks in what a person reads are written out, so typed text can't reorder or hide part of a
+// line (U+061C, U+200B-200F, U+202A-202E, U+2060, U+2066-2069, U+FEFF)
+const plainMarks = (t: string) => t.replace(/[\u061C\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+// ... in every string of a value (keys too) before it becomes JSON, so reading the JSON back never brings a mark back
+const plainValue = (v: unknown): unknown => typeof v === "string" ? plainMarks(v) : Array.isArray(v) ? v.map(plainValue)
+	: v && typeof v === "object" ? Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [plainMarks(k), plainValue(x)])) : v;
 // ABI's preview for a dialog: what the yes does, what is written and what starts first; one too long keeps those and says
 // it is cut, as JSON still (the app reads it), never a slice of text
-function previewText(pv: unknown, max = 4000): string {
+function previewText(given: unknown, max = 4000): string {
+	const pv = plainValue(given);
 	if (!pv) return "";
-	if (typeof pv !== "object" || Array.isArray(pv)) { const t = plainMarks(JSON.stringify(pv, null, 1)); return t.length > max ? JSON.stringify({ cut: "The preview is too long to show here." }) : t; }
+	if (typeof pv !== "object" || Array.isArray(pv)) { const t = JSON.stringify(pv, null, 1); return t.length > max ? JSON.stringify({ cut: "The preview is too long to show here." }) : t; }
 	const lead = ["action", "object", "after_yes", "writes", "flow"], o = pv as Record<string, unknown>;
 	const keys = [...lead.filter((k) => k in o), ...Object.keys(o).filter((k) => !lead.includes(k))];
 	for (let n = keys.length; n >= 0; n--) {
 		const part = Object.fromEntries(keys.slice(0, n).map((k) => [k, o[k]]));
-		const t = plainMarks(JSON.stringify(n < keys.length ? { ...part, cut: "The rest of the preview is too long to show here." } : part, null, 1));
+		const t = JSON.stringify(n < keys.length ? { ...part, cut: "The rest of the preview is too long to show here." } : part, null, 1);
 		if (t.length <= max) return t;
 	}
 	return JSON.stringify({ cut: "The preview is too long to show here." });
@@ -650,7 +655,7 @@ export default async function abi(pi: ExtensionAPI) {
 		// (abi_pending takes any step a specialist names) does only what the agent's own call would, and what is never
 		// an agent's (account mail, personal tokens, two-step sign-in, who owns the workspace) is refused. Without it this
 		// REST call would be the person's own, one step. Only a 409 with a token is ever run as the person, after their
-		// yes; a credential ABI answers then (a share link, an embed key, a webhook token) goes to the person alone
+		// yes; a credential ABI answers then (a flow's webhook token) goes to the person alone
 		const first = await rest(tool, input, "ask");
 		if (first.status !== 409 || !first.body?.confirm_token) {
 			if (first.status < 300 && SHOWN_ONCE[tool]) return { status: "Nothing of ABI's answer is passed on: it was not asked first. Tell the person to make it again." };

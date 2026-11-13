@@ -2499,7 +2499,7 @@ $('#chat .stop').onclick=()=>fetch('/chat/stop',{method:'POST',headers:{'X-Abi-A
   else if(e.type==='said')bubble('me',e.text)
   else if(e.type==='answer'){steps=null;if(e.model){MODEL=e.model;ctx()}bubble('ai',e.text);chats();if(!chatBox.classList.contains('open'))toast('The agent answered')}
   else if(e.type==='sys')bubble('sys',String(e.text||''));
-  else if(e.type==='ask'){const once=e.title===SHOWN,yes=await ask(once?{title:e.title,message:'',preview:e.message,yes:'I copied it',plain:true,once:String(e.message||'').split('\n\n')[1]||''}:chatAsk(e));bubble('sys',once?'Shown to you once; it is not kept in this chat. If it wasn\'t copied, revoke it and make a new one.':yes?'You confirmed.':'You declined.');  // a credential: for the person's eyes only (index.ts shownOnce)
+  else if(e.type==='ask'){const once=e.title===SHOWN,yes=await ask(once?{title:e.title,message:'',preview:e.message,yes:'I copied it',plain:true,once:String(e.message||'').split('\n\n')[1]||''}:chatAsk(e));bubble('sys',once?'Shown to you once; it is not kept in this chat. If it wasn\'t copied, make a new one (the old one stops working).':yes?'You confirmed.':'You declined.');  // a credential: for the person's eyes only (index.ts shownOnce)
    fetch('/chat/answer',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({id:e.id,yes})})}
   else if(e.type==='open'){location.href='/?p='+encodeURIComponent(e.project)+'#'+encodeURIComponent(e.page)}
   else if(e.type==='mode'){setMode(e.mode);show(CUR);if(e.mode==='viewer'&&!e.published){let seen=0;try{seen=sessionStorage.getItem('abi-unpub');sessionStorage.setItem('abi-unpub','1')}catch(x){}if(!seen)toast('Nothing published yet: Viewer shows the working version until you publish.')}}
