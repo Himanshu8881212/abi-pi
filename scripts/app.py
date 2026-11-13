@@ -898,7 +898,8 @@ function report(box,rep){let flt=PENDING.filters||RFLT[rep.id]||[];PENDING.filte
  function page(p){cur=p;grid.dataset.page=p.id;[...tabs.children].forEach(b=>b.classList.toggle('on',b.dataset.id===p.id));grid.innerHTML='';
   const vs=p.visuals.slice().sort((a,b)=>(a.layout.y-b.layout.y)||(a.layout.x-b.layout.x)),kp=v=>(v.data?.type||v.type)==='kpi';
   // a row of headline numbers that leaves columns empty shares the row out; a KPI is two rows tall at most
-  const span={},rowsY={};vs.filter(v=>v.text===undefined).forEach(v=>(rowsY[v.layout.y]??=[]).push(v));Object.values(rowsY).forEach(r=>{const w=r.reduce((a,v)=>a+(v.layout.w||6),0);if(r.every(kp)&&w<12){let left=12;r.forEach((v,i)=>{const x=i===r.length-1?left:Math.round((v.layout.w||6)*12/w);span[v.id]=x;left-=x})}});
+  // ... and so does a row that lost a form card this person may not use (1.2.7 M0: its place stayed empty)
+  const span={},rowsY={},lost={};vs.forEach(v=>{if(v.form&&!formOk(v))lost[v.layout.y]=1});vs.filter(v=>v.text===undefined&&!v.form).forEach(v=>(rowsY[v.layout.y]??=[]).push(v));Object.values(rowsY).forEach(r=>{const w=r.reduce((a,v)=>a+(v.layout.w||6),0);if((r.every(kp)||lost[r[0].layout.y])&&w<12){let left=12;r.forEach((v,i)=>{const x=i===r.length-1?left:Math.round((v.layout.w||6)*12/w);span[v.id]=x;left-=x})}});
     if(MOBILE){let n=0;for(const v of vs.filter(v=>v.text===undefined)){if(!kp(v))break;n++}v0odd=n%2?vs.filter(v=>v.text===undefined)[n-1]?.id:null}
   vs.forEach(v=>{if(v.form){formCard(v);return}if(v.text!==undefined){const t=h('p','rtext',v.text);t.dataset.lk=v.id;t.dataset.w=12;t.style.gridColumn='span 12';grid.append(t);return}
    const c=h('div','card'),cw=span[v.id]||Math.min(12,v.layout.w||6);let ch=kp(v)?Math.min(2,v.layout.h||2):v.layout.h;
@@ -918,7 +919,8 @@ function report(box,rep){let flt=PENDING.filters||RFLT[rep.id]||[];PENDING.filte
    $('[data-a=h]',c).onclick=()=>{const x=$('.how',c);x.hidden=!x.hidden;x.textContent=v.how+(flt.length?`\nfilters ${JSON.stringify(flt)}`:'')}})}
  // a form card (1.2.6 M7): an action's inputs, run on the object the card names or the person picks in it; after it
  // ran, the page's visuals read their rows again. Developer only, like every write: Viewer's page has no form
- function formCard(v){const a=OA().find(x=>x.id===v.form.action),T=a&&otype(a.object);if(!a||!T||MODE==='viewer'||RANK[a.role||'editor']>myRank())return;
+ function formOk(v){const a=OA().find(x=>x.id===v.form.action);return !!a&&!!otype(a.object)&&MODE!=='viewer'&&RANK[a.role||'editor']<=myRank()}
+ function formCard(v){if(!formOk(v))return;const a=OA().find(x=>x.id===v.form.action),T=otype(a.object);
   // the object: the one picked in the card, or the one whose title is typed in full (a redraw keeps what was typed)
   let key=v.form.key||null,pk=null;const c=actionForm(a,async()=>{if(!key&&pk?.value.trim())try{const x=await api('list_objects',{type:T.id,filters:[{property:T.title,op:'=',value:pk.value.trim()}],limit:2});if(x.rows.length===1)key=x.key.map(k=>x.rows[0][x.columns.indexOf(k)])}catch(e){}
     if(pk)need(pk,key,`Pick the ${low(T)} first.`);return key},async r=>{await reload();return actDone(a,r)}),cw=Math.min(12,v.layout.w||6),ch=v.layout.h||6,at=()=>c.querySelector(':scope>.fld')||c.querySelector(':scope>.acts');

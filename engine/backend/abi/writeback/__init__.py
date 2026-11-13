@@ -338,6 +338,14 @@ def _batch(user: User, args: Edits, status: str, decision: bool = False) -> dict
             raise ActionFailed(400, "Each cell or row may be changed once per batch.")
         cur.executemany(f"INSERT INTO lake.edits.{_q(t)} VALUES ({', '.join(['?'] * 12)})",
                         [[*r[:4], user.name, now, args.comment, batch, status, r[4], same.MARK if decision else None, None] for r in log])
+        # 1.2.7 M0: two Editors deciding at once each judged the records as they were; what both wrote together is judged
+        # here, in the write's own transaction (which rolls back): never a record of two objects, never too deep a chain
+        if decision and (sql := effective_sql(cur, t)):
+            with contextlib.suppress(duckdb.BinderException):  # a table of that name with other columns: nothing to check
+                if why := same.unsound({(a, b): yes for a, b, yes in cur.execute(
+                        f'SELECT CAST(a AS VARCHAR), CAST(b AS VARCHAR), "same" FROM ({sql})').fetchall()}):
+                    raise ActionFailed(409, f"Someone else decided about these records at the same moment, and with both decisions {why}."
+                                            " Nothing changed: look at the records again (find_same), then decide.")
 
     try:
         snap = storage._commit(con, run, user.name, f"{'propose' if status == 'proposed' else 'edit'} {t} ({len(log)} changes)")

@@ -912,3 +912,108 @@ def test_a_restricted_recipient_gets_the_alert_of_the_period_the_flow_checked(w)
     rows = list(csv.reader(io.StringIO(next(x.get_content() for x in mail.iter_attachments() if x.get_filename() == "data.csv"))))
     assert mail["To"] == north and rows[0] == ["calendar.year", "calendar.month", "visits_n"] and [[float(v) for v in r] for r in rows[1:]] == [[2025, 11, 5]], rows
     sure("delete_flow", project=P, flow="visits_last_month")
+
+
+# ---------- 1.2.7 M0 items 5 and 8: the carried LOWs of alerts per object ----------
+
+def test_unreached_post_no_cooldown(w):
+    """An alert that reached nobody starts no cooldown (it used to: the café then stayed quiet for the whole cooldown
+    though nobody had been told). Café b's alert names someone who is no member: its run stops having sent nothing.
+    When the alarm goes off and on again inside the cooldown (60 minutes), it is tried again. Café a's alert reached
+    its manager: its second edge inside the cooldown is dropped, as before."""
+    a, b = w["a"], w["b"]
+    sure("save_flow", project=P, flow=flow("reach_alarm", [POST], recipients={"property": "cafe_contacts.manager"}))
+    alarms(w)
+    tick("reach_alarm")
+    alarms(w, a, b)
+    tick("reach_alarm")
+    first = {r["object"]["key"][0]: r for r in runs("reach_alarm", 2)}
+    assert first[a]["status"] == "ok" and first[b]["status"] == "stopped" and [x["step"] for x in first[b]["steps"]] == ["_recipients"], first
+    alarms(w)
+    tick("reach_alarm", ahead=1)
+    alarms(w, a, b)
+    tick("reach_alarm", ahead=2)
+    again = runs("reach_alarm", 3)
+    assert sorted(r["object"]["key"][0] for r in again) == sorted([a, b, b]), "b is tried again; a is inside its cooldown"
+    assert [r["status"] for r in again if r["object"]["key"][0] == b] == ["stopped", "stopped"]
+    alarms(w)
+    sure("delete_flow", project=P, flow="reach_alarm")
+
+
+# the owner's inbox message about a per-object alert, from several runs that end at the same moment
+OWNER = r"""
+import json, sys, threading
+from abi import db, flows
+a = json.loads(sys.stdin.read())
+def said(problem, n):
+    gate = threading.Barrier(n)
+    def one():
+        gate.wait()
+        flows._to_owner(a["project"], a["uid"], a["flow"], "failed", problem)
+    ts = [threading.Thread(target=one) for _ in range(n)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    with db.connect() as c:
+        return [r["text"] for r in c.execute("SELECT text FROM inbox WHERE project = %s AND recipient = %s AND sender = 'flows'"
+                                             " AND data @> %s ORDER BY id", [a["project"], a["uid"], json.dumps({"flow": a["flow"], "kind": "failed"})])]
+out = [said(a["first"], 8), said(a["first"], 8), said(a["second"], 8)]
+print(json.dumps(out))
+"""
+
+
+def test_owner_gets_one_message_per_failure(w):
+    """Eight runs of one alert fail at the same moment with the same problem: the flow's owner gets one message, not
+    one per run (each run read "nothing said yet" before any had written). The same problem again says nothing more;
+    another problem is one more message. The message is in the owner's words, the step and the project only in its
+    part for a developer."""
+    uid = next(u["id"] for u in abi.call("rls_rules", project=P)["accounts"] if u["name"] == w["made"]["editor"])
+    fid = f"storm_{secrets.token_hex(3)}"
+    head = ("Flow Storm: this alert could not finish for one of the objects it watches, so nobody was told. Open the flow's runs to see which"
+            " one and what stopped it, fix that, and it alerts again the next time its condition starts to hold. For a developer: ")
+    r = engine(OWNER, timeout=120, stdin=json.dumps({"project": P, "uid": int(uid), "flow": fid, "first": head + "step 'post' failed: A",
+                                                     "second": head + "step 'post' failed: B"}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    one, same, two = json.loads(r.stdout.splitlines()[-1])
+    assert one == same == [head + "step 'post' failed: A"], (len(one), len(same))
+    assert two == [head + "step 'post' failed: A", head + "step 'post' failed: B"], len(two)
+    src = (ROOT / "engine/backend/abi/flows/__init__.py").read_text()
+    said = src[src.index('_to_owner(project, owner.id, flow, "failed", head + '):][:500]
+    assert "this alert could not finish for one of the objects it watches, so nobody was told." in said and said.index("so nobody was told") < said.index(
+        "For a developer: "), "the owner's words first"
+
+
+# a flow's condition that can't be checked, with the flow's file there and after the flow was deleted meanwhile
+GONE = r"""
+import json, sys
+from datetime import UTC, datetime
+from abi import db, flows
+a = json.loads(sys.stdin.read())
+f = a["flow"] | {"trigger": a["flow"]["trigger"] | {"measure": "no_such_measure", "query": {"measures": ["no_such_measure"]}}}
+flows._data_condition(a["project"], f, datetime.now(UTC))
+with db.connect() as c:
+    print(json.dumps([r["message"] for r in c.execute("SELECT message FROM notifications WHERE project = %s AND ref = %s ORDER BY id",
+                                                      [a["project"], f["id"]])]))
+"""
+
+
+def test_deleted_flow_posts_nothing(w):
+    """A flow deleted while the minute's check was reading it used to leave one "can't be checked" line in the feed,
+    about a flow nobody can open any more. With its file there the line is posted (once); deleted, nothing is."""
+    made = {}
+    for fid in ("kept_check", "gone_check"):
+        made[fid] = {"id": fid, "name": fid.replace("_", " ").capitalize(), "enabled": False,
+                     "trigger": {"type": "data_condition", **COND, "cooldown_minutes": 60},
+                     "steps": [{"id": "post", "type": "action", "action": "post_message", "input": {"channel": "inbox", "text": "The alarm is on."}}]}
+        sure("save_flow", project=P, flow=made[fid])
+    owner = str(next(u["id"] for u in abi.call("rls_rules", project=P)["accounts"] if u["role"] == "owner"))
+    sure("delete_flow", project=P, flow="gone_check")
+    try:
+        said = {}
+        for fid in made:
+            r = engine(GONE, timeout=120, stdin=json.dumps({"project": P, "flow": made[fid] | {"owner": owner}}))
+            assert r.returncode == 0, r.stderr[-2000:]
+            said[fid] = json.loads(r.stdout.splitlines()[-1])
+        assert len(said["kept_check"]) == 1 and said["kept_check"][0].startswith("Flow Kept check data condition: can't be checked: "), said
+        assert said["gone_check"] == [], said
+    finally:
+        sure("delete_flow", project=P, flow="kept_check")

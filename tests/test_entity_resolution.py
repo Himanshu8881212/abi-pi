@@ -1159,3 +1159,227 @@ def test_the_docs_example_is_a_valid_type(er):
     [doc] = [json.loads(b) for b in re.findall(r"```json resolve\n(.*?)\n```", (ROOT / "docs/objects.md").read_text(), re.S)]
     schema = json.loads((ROOT / "engine/schemas/v1/ontology.json").read_text())
     assert not list(Draft202012Validator(schema).iter_errors({"$schema": schema["$id"], "objects": [doc]}))
+
+
+# ---------- 1.2.7 M0 item 6: the LOWs of entity resolution ----------
+
+# the decisions log can't be read (not "there is none"): what `_log` and an undo then do
+BROKEN = r"""
+import json, sys
+import duckdb
+import abi.app  # noqa: F401
+from abi import actions, db, security, semantic
+from abi.semantic import same
+a = json.loads(sys.stdin.read())
+with db.connect() as c:
+    u = security.user(c, c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"])
+real, out = semantic.execute, {}
+def failing(kind):
+    def read(project, sql, *x, **k):
+        if "lake.edits" in sql:
+            raise kind("the log can't be read")
+        return real(project, sql, *x, **k)
+    return read
+semantic.execute = failing(duckdb.CatalogException)
+out["no_table"] = same._log(a["project"], a["table"], None)
+semantic.execute = failing(duckdb.IOException)
+try:
+    same._log(a["project"], a["table"], None)
+    out["log"] = "read"
+except duckdb.Error as e:
+    out["log"] = type(e).__name__
+try:
+    actions.run("undo_edits", {"project": a["project"], "table": a["table"], "batch": a["batch"]}, u, "rest")
+    out["undo"] = "ran"
+except actions.ActionFailed as e:
+    out["undo"] = [e.status, e.body["message"]]
+except duckdb.Error as e:
+    out["undo"] = type(e).__name__
+print(json.dumps(out))
+"""
+
+
+def test_undo_log_error_fails_closed(er):
+    """`same._log` takes "no such table" as "no decisions" and nothing else: when the log can't be read for another
+    reason the read fails, and an undo of a decision fails with it instead of going on as an ordinary edit's undo
+    (which skips the newest-first rule). Nothing is undone."""
+    d = decide("same", 103, 104)
+    was = stored()
+    r = engine(BROKEN, timeout=120, stdin=json.dumps({"project": P, "table": S, "batch": d["batch"]}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    got = json.loads(r.stdout.splitlines()[-1])
+    assert got["no_table"] == [] and got["log"] == "IOException" and got["undo"] != "ran", got
+    assert stored() == was and by("revenue")[103] == 30, "the decision stands"
+    call("undo_edits", table=S, batch=d["batch"])
+
+
+# an undo with a thousand newer decisions about other records in the log
+MANY = r"""
+import json, sys, time
+import abi.app  # noqa: F401
+from abi import db, security
+from abi.semantic import same
+a = json.loads(sys.stdin.read())
+real = same._log
+fake = [{"batch": f"{i:032x}", "at": "2026-11-13 00:00:00", "user": "x", "decision": "same", "undone": False,
+         "keys": [f"a{i}", f"b{i}"], "rows": {(f"a{i}", f"b{i}")}, "took": []} for i in range(a["n"])]
+with db.connect() as c:
+    u = security.user(c, c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"])
+    real_words = same.undo_words(c, u, a["project"], a["table"], a["batch"])  # once before: the engine has the project open
+same._log = lambda project, s, window=same.WINDOW: fake + real(project, s, window) if window is None else real(project, s, window)
+with db.connect() as c:
+    start = time.perf_counter()
+    words = same.undo_words(c, u, a["project"], a["table"], a["batch"])
+    took = time.perf_counter() - start
+print(json.dumps({"s": took, "words": words[:3], "seen": len(words[3])}))
+"""
+
+
+def test_undo_of_1000_decisions_under_2s(er):
+    """An undo finds its batch first and works the newest-first rule out for the decisions about its records only: with
+    a thousand newer decisions about other records in the log it is asked in well under 2 s, and none of them blocks it."""
+    d = decide("same", 103, 104)
+    try:
+        r = engine(MANY, timeout=120, stdin=json.dumps({"project": P, "table": S, "batch": d["batch"], "n": 1000}))
+        assert r.returncode == 0, r.stderr[-2000:]
+        got = json.loads(r.stdout.splitlines()[-1])
+        assert got["s"] < 2 and got["seen"] >= 1001, got
+        assert got["words"] == ["Bäckerei Müller and Bäckerei Müler are the same customer", None, None], got["words"]
+    finally:
+        call("undo_edits", table=S, batch=d["batch"])
+
+
+# two Editors say yes at the same moment to decisions about one of the same records
+TWO = r"""
+import json, sys, threading
+import abi.app  # noqa: F401
+from abi import actions, db, security
+a = json.loads(sys.stdin.read())
+with db.connect() as c:
+    u = security.user(c, c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"])
+def asked(args):
+    try:
+        actions.run("decide_same", args, u, "rest")
+    except actions.ActionFailed as e:
+        return e.body.get("confirm_token")
+def yes(args, token):
+    try:
+        return ["done", actions.run("decide_same", args, u, "rest", token)["batch"]]
+    except actions.ActionFailed as e:
+        return [e.status, e.body["message"], e.body.get("confirm_token")]
+tokens, gate, out = {k: asked(a[k]) for k in ("mine", "other")}, threading.Barrier(2), {}
+def go(k):
+    gate.wait()
+    out[k] = yes(a[k], tokens[k])
+ts = [threading.Thread(target=go, args=(k,)) for k in ("mine", "other")]
+[t.start() for t in ts]
+[t.join() for t in ts]
+for k in ("mine", "other"):  # the one who is asked again says yes to what they are shown now
+    if out[k][0] == 409 and out[k][2]:
+        out[k + "_again"] = yes(a[k], out[k][2])[:2]
+    out[k] = out[k][:2] + [bool(out[k][2])] if out[k][0] == 409 else out[k]  # a token is never printed
+print(json.dumps(out))
+"""
+
+
+def test_two_editors_decide_at_once(er):
+    """Two Editors say yes at the same moment to decisions about one record, each asked while nothing was merged (110
+    into 109, and 110 into 103). One decision at a time is taken (a decision is one change of the project): the first
+    is done; the second was a yes to records as they no longer are, so it is not written: its Editor is asked again,
+    with the records as they are now, and after that yes all three are one customer. A record is never in two
+    customers at once (and what a write would leave is judged once more inside its own transaction)."""
+    args = lambda *keys: {"project": P, "type": "customer", "keys": list(keys), "decision": "same"}  # noqa: E731
+    r = engine(TWO, timeout=300, stdin=json.dumps({"mine": args(109, 110), "other": args(103, 110)}))
+    assert r.returncode == 0, r.stderr[-3000:]
+    got = json.loads(r.stdout.splitlines()[-1])
+    first, second = sorted(("mine", "other"), key=lambda k: got[k][0] != "done")
+    try:
+        assert got[first][0] == "done" and got[second][0] == 409 and got[second][2] is True, got
+        assert got[second + "_again"][0] == "done", got
+        rows = stored()
+        assert len(rows) == 2 and all(yes for *_, yes in rows) and len({b for _, b, _ in rows}) == 2, rows
+        rev = by("revenue")
+        assert rev[103] == 30 and 109 not in rev and 110 not in rev, rev
+        src = (ROOT / "engine/backend/abi/writeback/__init__.py").read_text()
+        assert "if decision and (sql := effective_sql(cur, t)):" in src and "Someone else decided about these records at the same moment, and with both decisions" in src
+    finally:
+        for k in (second + "_again", first):
+            if got.get(k, [None])[0] == "done":
+                call("undo_edits", table=S, batch=got[k][1])
+
+
+def test_blocked_decision_says_why(er):
+    """A decision a newer one builds on can't be undone: Decided says so with the decision to undo first, in the
+    person's words (the page shows it in place of the Undo button), the undo's refusal says the same, and once the
+    newer one is undone the older one can be."""
+    first, _, newer = decide("same", 103, 104), decide("same", 109, 110), decide("same", 103, 109)
+    ds = {d["batch"]: d for d in found()[0]["decisions"]}
+    want = "Bäckerei Müller and Kaffee Kontor are the same customer"
+    assert ds[first["batch"]]["blocked"] is True and ds[first["batch"]]["blocked_by"] == want, ds[first["batch"]]
+    assert ds[newer["batch"]]["blocked"] is False and "blocked_by" not in ds[newer["batch"]]
+    assert refused(first["batch"]) == f"A newer decision builds on this one: undo “{want}” first."
+    page = (ROOT / "scripts/app.py").read_text()
+    assert "x.blocked_by?`A newer decision builds on this one. Undo “${x.blocked_by}” first.`:'Undo the newer decision about them first.'" in page
+    assert "if(!x.undone&&!x.blocked){" in page, "no Undo button on a blocked decision"
+    call("undo_edits", table=S, batch=newer["batch"])
+    ds = {d["batch"]: d for d in found()[0]["decisions"]}
+    assert ds[first["batch"]]["blocked"] is False
+    call("undo_edits", table=S, batch=first["batch"])
+
+
+def test_same_names_show_keys(er):
+    """Two records of the same name (Nordwind AG, twice) can't be told apart by name in the question a person answers:
+    each is shown with its key. Records with names of their own stay as they were: names only."""
+    with pytest.raises(abi.ActionError) as e:
+        call("decide_same", type="customer", keys=[905, 906], decision="same")
+    said = e.value.body["message"]
+    assert e.value.status == 409 and e.value.body["confirm_token"], e.value.body
+    assert said.startswith("Treat these 2 customers as the same one: “Nordwind AG” (905), “Nordwind AG” (906)."
+                           " Every number then counts them once, under “Nordwind AG” (905)."), said
+    with pytest.raises(abi.ActionError) as e:
+        call("decide_same", type="customer", keys=[103, 104], decision="same")
+    assert "“Bäckerei Müller”, “Bäckerei Müler”." in e.value.body["message"] and "(103)" not in e.value.body["message"], e.value.body
+    with pytest.raises(abi.ActionError) as e:
+        call("decide_same", type="customer", keys=[905, 906], decision="different")
+    assert "“Nordwind AG” (905), “Nordwind AG” (906)" in e.value.body["message"], e.value.body
+    assert stored() == [], "nothing was decided"
+
+
+def test_resolve_removed_asks(er):
+    """Taking the matching rules off a type un-merges what people decided, and putting them back merges it again: the
+    question the person answers says so, with how many decisions, both times; and it is true: after the first yes the
+    two bakeries are two customers, after the second they are one again."""
+    d = decide("same", 103, 104)
+    plain = {**ONTO, "objects": [{k: v for k, v in x.items() if k != "resolve"} for x in ONTO["objects"]]}
+    try:
+        with pytest.raises(abi.ActionError) as e:
+            abi.call("save_ontology", project=P, ontology=plain)
+        assert e.value.status == 409 and e.value.body["confirm_token"], e.value.body
+        assert ("The customers that 1 decision made one show as separate customers again. The decision is kept and applies again once"
+                " the type has its matching rules back.") in e.value.body["message"], e.value.body["message"]
+        abi.call("save_ontology", project=P, ontology=plain, confirm=e.value.body["confirm_token"])
+        rev = by("revenue")
+        assert rev[103] == 10 and rev[104] == 20, "two customers again"
+        with pytest.raises(abi.ActionError) as e:
+            abi.call("save_ontology", project=P, ontology=ONTO)
+        assert e.value.status == 409 and ("1 decision about which customers are the same one applies again: those customers count as"
+                                          " one.") in e.value.body["message"], e.value.body["message"]
+        abi.call("save_ontology", project=P, ontology=ONTO, confirm=e.value.body["confirm_token"])
+        rev = by("revenue")
+        assert rev[103] == 30 and 104 not in rev, "one customer again"
+        with pytest.raises(abi.ActionError) as e:  # a change that leaves `resolve` alone says nothing of decisions
+            abi.call("save_ontology", project=P, ontology={**ONTO, "objects": [ONTO["objects"][0] | {"description": "Who buys."}, ONTO["objects"][1]]})
+        assert e.value.status == 409 and "decision" not in e.value.body["message"], e.value.body["message"]
+    finally:
+        sure("save_ontology", project=P, ontology=ONTO)
+        call("undo_edits", table=S, batch=d["batch"])
+
+
+def test_object_key_that_does_not_cast_is_a_plain_400(er):
+    """get_object with a key that is no value of the key column's type (customers are keyed by a number) answers 400 in
+    plain words, without DuckDB's text (which names the column, its type and the SQL)."""
+    with pytest.raises(abi.ActionError) as e:
+        call("get_object", type="customer", key=["not-a-number"])
+    said = e.value.body["message"]
+    assert e.value.status == 400 and said.startswith("A value doesn't fit its column: a key or a filter value has to be"), said
+    assert not re.search(r"Conversion Error|BIGINT|INT64|customer_id|CAST|LINE \d", said), said

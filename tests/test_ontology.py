@@ -873,3 +873,55 @@ def test_junk_beside_a_tool_or_a_query_is_refused_never_a_crash(saved):
     assert c["junk_beside_tool_out"] == "Outside your scope: products." and c["expressions_as_before"] == "Outside your scope: orders.", c
     assert "docs" not in out["offered"]["send_email"] and {"to", "subject", "body", "data", "report"} <= set(out["offered"]["send_email"]), out["offered"]
     assert "project" not in out["offered"]["post_message"] and "data" in out["offered"]["post_message"], out["offered"]
+
+
+# ---------- 1.2.7 M0 item 4: the key rule on a project undo, end to end ----------
+
+from test_entity_resolution import _er, er  # noqa: E402, F401  the fixtures of the project with decisions
+
+
+def test_project_undo_asks_key_rule(er):
+    """A decision about which records are the same names them by the table's key, so the key can't change while one
+    is in force: set_table and an import ask that, and so does a project undo that would put an older key back (1.2.6
+    tested the question and that the undo's code asks it first; this is the undo itself). The key was changed and
+    changed back before the decision; undoing that far is refused in the person's words, nothing is undone, and once
+    the decision is taken back the same undo goes through."""
+    import test_entity_resolution as t
+
+    p, key = t.P, lambda: next(e["key"] for e in json.loads((abi.ABI_PROJECTS / t.P / "model/model.json").read_text())["entities"]  # noqa: E731
+                               if e["table"] == "customers")
+    first = t.decide("same", 103, 104)  # the decisions table exists from here on: a later decision changes no file
+    t.call("undo_edits", table=t.S, batch=first["batch"])
+    abi.call("commit", project=p, message="ontology test: before the key changes") if abi.call("changes", project=p)["files"] else None
+    abi.call("set_auto_commit", project=p, on=False)  # undo needs the changes uncommitted
+    no_type = {"objects": [x for x in t.ONTO["objects"] if x["id"] != "customer"]}
+    d = None
+    try:
+        sure("save_ontology", project=p, ontology=no_type)  # no type on customers: its key may change
+        t.call("set_table", table="customers", key=["name"])
+        t.call("set_table", table="customers", key=["customer_id"])
+        sure("save_ontology", project=p, ontology=t.ONTO)
+        d = t.decide("same", 103, 104)
+        sure("undo", project=p)  # the ontology's last save: the type is gone again, the decision stays in force
+        assert "customer" not in [x["id"] for x in abi.call("ontology", project=p)["objects"]] and key() == ["customer_id"]
+        with pytest.raises(abi.ActionError) as e:  # the next undo would make the key `name` again
+            sure("undo", project=p)
+        assert e.value.status == 409 and "confirm_token" not in e.value.body, e.value.body
+        assert e.value.body["message"].startswith("What identifies these records can't change while decisions about which of them are the same one"
+                                                  " are in force"), e.value.body
+        assert "Undo those decisions first (under Decided), or keep it as it is." in e.value.body["message"]
+        assert key() == ["customer_id"] and t.stored() == [(103, 104, True)], "nothing was undone"
+        sure("save_ontology", project=p, ontology=t.ONTO)  # the type back: its decision can be taken back
+        t.call("undo_edits", table=t.S, batch=d["batch"])
+        d = None
+        sure("undo", project=p)  # the save just made
+        sure("undo", project=p)  # and now the key change: no decision is in force
+        assert key() == ["name"]
+    finally:
+        if key() != ["customer_id"]:
+            t.call("set_table", table="customers", key=["customer_id"])
+        sure("save_ontology", project=p, ontology=t.ONTO)
+        if d:
+            t.call("undo_edits", table=t.S, batch=d["batch"])
+        abi.call("commit", project=p, message="ontology test: as it was")
+        abi.call("set_auto_commit", project=p, on=True)

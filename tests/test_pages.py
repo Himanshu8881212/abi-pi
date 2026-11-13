@@ -1055,6 +1055,57 @@ def test_report_form_card_runs_action(objs, tmp_path):
     assert int(out["kpi2"]) == int(out["kpi"]) + 1, f"the page's visuals read their rows again: {out['kpi']} → {out['kpi2']}"
 
 
+def test_form_card_gap_closes(objs, tmp_path):
+    """1.2.7 M0 (item 8): a form card a person may not use is not drawn, and its place in the row stayed empty: the
+    chart beside it kept half the page. Now the row's other cards share the row: for the Viewer "Revenue by region" is
+    as wide as the page; for the Editor, who has the form, it is half of it, as laid out."""
+    box = ("(() => {const g = document.querySelector('main .grid').getBoundingClientRect(),"
+           " c = document.querySelector('main [data-lk=by_region]').getBoundingClientRect(); return Math.round(100 * c.width / g.width)})()")
+    steps = [["show", "rep:cafes"], ["wait", "main [data-lk=by_region]"], ["get", "w", "document.querySelector('main [data-lk=by_region]').dataset.w"],
+             ["get", "card", "!!document.querySelector('main [data-lk=flag]')"], ["get", "share", box],
+             ["get", "other", "document.querySelector('main [data-lk=by_name]').dataset.w"]]
+    mine, theirs = drive(objs["editor"], tmp_path, steps), drive(objs["viewer"], tmp_path, steps)
+    assert mine["card"] is True and mine["w"] == "6" and 40 <= mine["share"] <= 55, mine
+    assert theirs["card"] is False and theirs["w"] == "12" and theirs["share"] >= 95, theirs
+    assert mine["other"] == theirs["other"] == "6", "a row that lost no card is as it was"
+
+
+def test_renamed_project_keeps_history(tmp_path):
+    """1.2.7 M0 (item 8): an object's History lists the runs of its action types from the audit log, which keeps the
+    project's ID of the time. A project renamed, and renamed back, showed none of its earlier runs. Now the runs follow
+    the project through its renames, newest first, under every ID it has had."""
+    from test_ontology_nobreak import brew  # not at top: it imports this module
+    a, b = "pi_hist_a", "pi_hist_b"
+    drop([p for p in (a, b) if abi.folder(p)])
+    brew(a, tmp_path)
+    now = a
+    try:
+        cafe = abi.call("sql_query", project=a, sql="SELECT min(cafe_id) FROM cafes")["rows"][0][0]
+        sure("create_input_table", project=a, table="cafe_notes", key=["cafe_id"],
+             columns=[{"name": "cafe_id", "type": "VARCHAR"}, {"name": "note", "type": "VARCHAR"}])
+        abi.call("add_relationship", project=a, **{"from": "cafe_notes.cafe_id", "to": "cafes.cafe_id"})
+        sure("save_ontology", project=a, ontology={
+            "objects": [{"id": "cafe", "table": "cafes", "name": "Café", "plural": "Cafés", "title": "cafe_name"}],
+            "actions": [{"id": "note", "object": "cafe", "name": "Note it",
+                         "inputs": {"type": "object", "required": ["text"], "properties": {"text": {"type": "string", "maxLength": 100}}},
+                         "writes": {"table": "cafe_notes", "set": {"note": "{{ data.inputs.text }}"}}}]})
+        run = lambda p, t: sure("run_object_action", project=p, type="cafe", key=[cafe], action="note", inputs={"text": t})  # noqa: E731
+        said = lambda p: [r["inputs"]["text"] for r in abi.call("object_history", project=p, type="cafe", key=[cafe])["runs"]]  # noqa: E731
+        run(a, "first")
+        assert said(a) == ["first"]
+        sure("rename_project", project=a, new=b)
+        now = b
+        assert said(b) == ["first"], "under its new ID"
+        run(b, "second")
+        sure("rename_project", project=b, new=a)
+        now = a
+        assert said(a) == ["second", "first"], "renamed back: the runs it had under both IDs"
+        run(a, "third")
+        assert said(a) == ["third", "second", "first"]
+    finally:
+        drop([now])
+
+
 def test_the_published_copy_shows_objects_and_runs_nothing(objs, tmp_path):
     """Round 2 (A-M3): Publish makes the copy Viewer reads. There a Viewer lists the objects and opens one as they see
     it; its page has no action button and says its history is the working project's; the report's form card is gone

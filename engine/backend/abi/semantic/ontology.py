@@ -10,6 +10,7 @@ preview of what changes and what reads it (lineage).
 """
 
 import json
+import logging
 import re
 import uuid
 from decimal import Decimal
@@ -24,6 +25,8 @@ from abi.actions import ActionFailed, action, require_confirmation
 from abi.project import SCHEMA, bundle, git
 from abi.security import IN_PROJECT, Role, User, role_in
 from abi.semantic import lineage, live, model, rls
+
+log = logging.getLogger(__name__)
 
 FILE = "model/ontology.json"
 KINDS = {"object": "objects", "link": "links", "action": "actions"}
@@ -539,6 +542,19 @@ def _change(conn, user: User, project: str, new: dict | None) -> dict:
     ga, gb = lineage.graph(files), lineage.graph(after)
     reads = {n: lineage.reach(gb if n in b else ga, {n}, "downstream") for n in sorted(hit)}
     preview = {"changes": changes, "reads": {n: r for n, r in reads.items() if r}}
+    # 1.2.7 M0: taking `resolve` off a type un-merges what people decided, and putting it back merges it again: said, with
+    # how many decisions, in the question the person answers (it was a silent side effect of an ontology save)
+    from abi.semantic import same  # not at top: it imports this module
+
+    was, now = ({x["id"]: x for x in (o or {}).get("objects", [])} for o in (old, new))
+    for i in sorted(was.keys() | now.keys()):
+        had, has = "resolve" in was.get(i, {}), "resolve" in now.get(i, {})
+        x = now.get(i) or was[i]
+        if had != has and (n := sum(not d["undone"] for d in same._log(project, same.table((was.get(i) or x)["table"]), None))):
+            many, s = x.get("plural", x["name"]).lower(), "" if n == 1 else "s"
+            changes.append(f"{n} decision{s} about which {many} are the same one {'apply' if n > 1 else 'applies'} again: those {many} count as one."
+                           if has else f"The {many} that {n} decision{s} made one show as separate {many} again. The decision{s} {'are' if n > 1 else 'is'}"
+                                       f" kept and {'apply' if n > 1 else 'applies'} again once the type has its matching rules back.")
     # one confirmation with the import gate's (a follow link: the Owner, and who sees fewer rows), after its checks
     return imports.apply(conn, user, project, after, ask=(f"This changes the ontology of project '{project}': {' '.join(changes)}", preview)) | {
         "ontology": preview}
@@ -735,7 +751,9 @@ def _read(project: str, sql: str, asked: dict, user_id: int | None) -> list[tupl
     try:
         return [tuple(map(semantic.tidy, r)) for r in semantic.execute(project, sql, asked, user_id, timeout=semantic.TIMEOUT)]
     except duckdb.ConversionException as e:
-        raise ActionFailed(400, f"A value doesn't fit its column: {e}") from None
+        log.info("a value that doesn't fit its column (%s): %s", asked, e)  # DuckDB's text names columns and types: the log's
+        raise ActionFailed(400, "A value doesn't fit its column: a key or a filter value has to be of the column's own kind (a number"
+                                " for a number, a date as YYYY-MM-DD). Take the key as `list_objects` shows it.") from None
     except duckdb.Error as e:
         raise ActionFailed(400, f"The read failed: {e}") from None
 
@@ -934,11 +952,12 @@ DIALOG = 4000  # characters of a preview the harness's dialog shows; a longer on
 _MARKS = re.compile("[\u061C\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]")  # each written out there as \\uXXXX (plainMarks)
 
 
-def _shown(preview: dict) -> int:
-    """The length of `preview` as that dialog measures it: JSON indented by one, in UTF-16 units, invisible marks written
-    out. ponytail: a float beyond 1e16 prints up to 15 characters longer there; JS number text if such values get typed"""
+def _shown(preview: dict) -> tuple[str, int]:
+    """(`preview` as that dialog writes it: JSON indented by one; its length as the dialog measures it: UTF-16 units,
+    invisible marks written out). ponytail: a float beyond 1e16 prints up to 15 characters longer there; JS number text
+    if such values get typed"""
     t = json.dumps(preview, indent=1, ensure_ascii=False)
-    return len(t.encode("utf-16-le", "surrogatepass")) // 2 + 6 * len(_MARKS.findall(t))
+    return t, len(t.encode("utf-16-le", "surrogatepass")) // 2 + 6 * len(_MARKS.findall(t))
 
 
 class RunAction(storage.ProjectRef):
@@ -1007,11 +1026,14 @@ def run_object_action(conn, user: User, args: RunAction) -> dict:
         preview["after_yes"] = {"write": None if not w else "proposal" if later else "applied", "starts_flow": bool(a.get("flow")) and not later}
         said = [f"{t}.{c['column']}: {json.dumps(c['old'])} → {json.dumps(c['new'])}" for c in preview.get("writes", {}).get("changes", [])]
         does = said + ([f"starts flow '{a['flow']}'"] if a.get("flow") and not later else [])  # nothing to list: no colon either
-        if actions.by_agent() and (n := _shown(preview)) > DIALOG:  # 1.2.7 M0: before the question, so a yes always covers all of it
+        if actions.by_agent() and (n := _shown(preview)[1]) > DIALOG:  # 1.2.7 M0: before the question, so a yes always covers all of it
             k, size = max(((k, len(v)) for k, v in args.inputs.items() if isinstance(v, str)), key=lambda kv: kv[1], default=(None, 0))
+            # the value is in the preview as typed and as written: each character less is that many fewer
+            times = max(1, _shown(preview)[0].count(json.dumps(args.inputs[k], ensure_ascii=False)[1:-1])) if k else 1
+            cut = -(-(n - DIALOG) // times)
             raise ActionFailed(422, f"What '{a['name']}' would ask the person to confirm is {n:,} characters long, and the question an agent"
                                     f" passes on shows at most {DIALOG:,}, so the yes would not cover all of it. Nothing was asked."
-                               + (f" Shorten '{k}' ({size:,} characters){f' by {n - DIALOG:,} characters or more' if size > n - DIALOG else ''}." if k else ""))
+                               + (f" Shorten '{k}' ({size:,} characters){f' by {cut:,} characters or more' if cut < size else ''}." if k else ""))
         require_confirmation(f"Run '{a['name']}' on {x['name']} {json.dumps(preview['object']['title'])}" + (": " + "; ".join(does) if does else "") + "." + (
             " The write is a proposal an Editor approves; no flow starts." if later else ""), preview)
     out: dict = {"action": a["id"], "type": x["id"], "key": key}
@@ -1047,6 +1069,24 @@ def run_object_action(conn, user: User, args: RunAction) -> dict:
     return out | {"columns": ["status", "run"], "rows": [[out.get("write", {}).get("status"), run and flows.run_key(run)]]}
 
 
+def _lives(conn, project: str) -> list[tuple[str, int, int]]:
+    """1.2.7 M0: the IDs this project has had, each as (ID, after this audit row, before this one): its own since the
+    last time a project of that ID was deleted or renamed away, and, when it came to the ID by a rename, the one it had
+    before, up to that rename, and so on back (a project renamed and renamed back lost its earlier action runs in
+    History: the audit log is never re-keyed). ponytail: 20 renames back."""
+    out, hi = [], 2**62
+    for _ in range(20):
+        lo = conn.execute("SELECT COALESCE(max(id), 0) AS id FROM audit_log WHERE project = %s AND action IN ('delete_project', 'rename_project')"
+                          " AND status = 200 AND id < %s", [project, hi]).fetchone()["id"]
+        out.append((project, lo, hi))
+        came = conn.execute("SELECT id, project FROM audit_log WHERE action = 'rename_project' AND status = 200 AND input->>'new' = %s AND id > %s"
+                            " AND id < %s ORDER BY id DESC LIMIT 1", [project, lo, hi]).fetchone()
+        if came is None:
+            break
+        project, hi = came["project"], came["id"]
+    return out
+
+
 class ObjectRef(storage.ProjectRef):
     type: str = Field(description="an object type ID (`ontology`)")
     key: list[storage.Value] = Field(min_length=1, description="the object's key value(s), in key column order")
@@ -1063,14 +1103,16 @@ def object_history(conn, user: User, args: ObjectRef) -> dict:
     key, m, o = _json(got["key"]), model._read(p, "model.json"), read(p)
     x = next(t for t in o["objects"] if t["id"] == args.type)
     text = [str(v) for v in key]  # ponytail: keys compared as text (as typed, as read)
+    lives = _lives(conn, p)
     sees = (role_in(conn, user, p) or 0) >= Role.editor  # inputs are typed text: a Viewer sees only their own
     runs = [{"at": r["at"], "user": r["user_name"], "via": r["via"], "action": r["input"].get("action"),
              "inputs": r["input"].get("inputs") if sees or r["user_id"] == user.id else None}
-            for r in conn.execute("SELECT at, user_id, user_name, via, input FROM audit_log WHERE project = %s AND action = 'run_object_action'"
+            for r in conn.execute("SELECT at, user_id, user_name, via, input FROM audit_log WHERE action = 'run_object_action'"
                                   " AND status = 200 AND input->>'type' = %s AND ARRAY(SELECT jsonb_array_elements_text(input->'key')) = %s"
-                                  # the audit log outlives a project: a new one under a deleted or renamed one's ID starts with no runs
-                                  " AND id > COALESCE((SELECT max(id) FROM audit_log WHERE project = %s AND action IN ('delete_project', 'rename_project')"
-                                  " AND status = 200), 0) ORDER BY at DESC, id DESC LIMIT %s", [p, x["id"], text, p, args.limit])]
+                                  # the audit log outlives a project: a new one under a deleted or renamed one's ID starts with no
+                                  # runs, and a renamed one keeps those it had under its earlier IDs (`_lives`)
+                                  f" AND ({' OR '.join(['(project = %s AND id > %s AND id < %s)'] * len(lives))})"
+                                  " ORDER BY at DESC, id DESC LIMIT %s", [x["id"], text, *(v for life in lives for v in life), args.limit])]
     edits = []
     for t in dict.fromkeys([x["table"], *(a["writes"]["table"] for a in o.get("actions", []) if a["object"] == x["id"] and a.get("writes"))]):
         try:

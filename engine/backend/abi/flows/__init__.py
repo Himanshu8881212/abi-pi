@@ -697,6 +697,9 @@ def _to_owner(project: str, user_id: int, flow: str, kind: str, problem: str | N
     flow's ID and the kind go with the message, so two flows of one name keep their own state."""
     msg, about = problem or fixed, {"flow": flow, "kind": kind}
     with db.connect() as conn:
+        # 1.2.7 M0: one at a time per owner, flow and kind (until this commits): runs that failed together each read
+        # "nothing said yet" and the owner got the same message two to four times
+        conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", [f"flow owner {project} {user_id} {flow} {kind}"])
         last = conn.execute("SELECT text FROM inbox WHERE project = %s AND recipient = %s AND sender = 'flows' AND data @> %s"
                             " AND at > now() - interval '1 day' ORDER BY id DESC LIMIT 1", [project, user_id, Jsonb(about)]).fetchone()
         if msg and (last and last["text"]) != msg and (problem or last):
@@ -826,8 +829,12 @@ def _data_condition(project: str, f: dict, now: datetime) -> None:
         error = str(e)
     except Exception as e:  # noqa: BLE001 - one broken condition doesn't stop the others; no raw text (SC-4)
         error = f"internal error ({type(e).__name__})."
-    finally:
-        notify_change("flow", project, f"Flow {f['name']} data condition: ", error and f"can't be checked: {error}", "is checked again.", f["id"])
+    if error:  # 1.2.7 M0: a flow deleted while it was checked says nothing: there is nothing left to fix or to check
+        try:
+            _load(project, f["id"])
+        except ActionFailed:
+            return
+    notify_change("flow", project, f"Flow {f['name']} data condition: ", error and f"can't be checked: {error}", "is checked again.", f["id"])
 
 
 PER_TICK = 50  # 1.2.6 M8: the runs one per-object condition starts in a tick, so one flow never holds up the others
@@ -930,6 +937,7 @@ def _per_object(project: str, f: dict, now: datetime, u: User) -> None:
         said = "; ".join(missed[:20]) + ("; and more" if len(missed) > 20 else "")
         _to_owner(project, u.id, f["id"], "reach", f"Flow {f['name']} couldn't reach everyone its alert is for. {said}."
                   " People are found by their account's email or name."
+                  + (" An email address is added to an account by a workspace owner (Users & access)." if "no email address" in said else "")
                   + (" Someone who isn't in this project: ask a workspace owner to add them under Users & access with that email,"
                      " or correct the value." if "not a member" in said else "")
                   + (f" Someone who can't see that {x['name'].lower()}: change their access to it (Security), or correct the value."

@@ -1273,6 +1273,7 @@ def test_long_input_refused_before_the_question(acts):
         # marks the dialog writes out count as it writes them (6 characters more each)
         e = asked("run_object_action", project=P, type="cafe", key=[good], action="long_note", inputs={"reason": "x‮" * 400})
         assert e.status == 422 and "Shorten 'reason' (800 characters)" in e.body["message"], e.body
+        assert asked("run_object_action", project=P, type="cafe", key=[good], action="long_note", inputs={"reason": "x" * 1500}).status == 409, "1,500 plain ones fit"
         # ABI's own agent is refused the same way; the person's own click is asked, whole
         out = engine(AS, timeout=120, stdin=json.dumps({"uid": acts["uid"]["editor"], "via": "agent", "action": "run_object_action",
                                                         "args": {"project": P, "type": "cafe", "key": [good], "action": "long_note", "inputs": {"reason": long}}}))

@@ -681,7 +681,9 @@ def decide_same(conn, user: User, args: Decide) -> dict:
     names = {v: n[0] for v, n in _titles(p, x, k, typ, [*keys, *(v for the in tops for v in group(the))], user.id).items()}
     if gone := [v for v in keys if v not in names]:
         raise ActionFailed(404, f"No {one} with key {', '.join(gone)}: use the keys find_same lists.")
-    said = lambda vs: ", ".join(f"“{names.get(v) or f'{one} {v}'}”" for v in vs)  # noqa: E731
+    # 1.2.7 M0: two records of one name are told apart by their key ("Acme GmbH" (101) and "Acme GmbH" (902))
+    twice = lambda v: names.get(v) and sum(n == names[v] for n in names.values()) > 1  # noqa: E731
+    said = lambda vs: ", ".join(f"“{names.get(v) or f'{one} {v}'}”" + (f" ({v})" if twice(v) else "") for v in vs)  # noqa: E731
     want: dict[tuple[str, str], bool | None] = {}  # the rows this decision changes: same, different, or None (gone)
 
     def star(the: str, records: list[str]) -> None:
