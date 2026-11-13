@@ -1636,3 +1636,32 @@ as an ENUM type in `memory.rls_keys`, the column cast to it, and the denied tabl
 what the plan describes (a type, not a table; keys compared by their text), so the build of item 2 stopped here for
 the owner's choice. Not measured: 1.2.6 with no ontology on this day (stopped when the live upgrade began), and
 1.2.5 a second time at the end. The bench volume and container were removed after this was written.
+
+### Item 2 as built: the key type (13 Nov 2026, 18:35 to 18:51 UTC)
+
+The same server, container and commands as the first step above, on a new volume made by 1.2.5 (d5496bd) the same
+evening; the final code is 83c9a38 (the worktree's HEAD, copied into a container of the test image). One run at a time, 0
+errors and 0 dropped in every run. The live install had been upgraded to 1.2.6 an hour before and was idle.
+
+| code | project | first run's first p50 / p95 | after a commit p50 / p95, runs 1, 2, 3 | mean p95 | of 1.2.5 |
+|---|---|---|---|---|---|
+| 1.2.5 (d5496bd) | no ontology (page 506 to 509 KB) | 5.13 / 7.04 | 2.61 / 3.68, 2.55 / 3.73, 2.57 / 3.74 | 3.716 | x1.00 |
+| 1.2.7 M0 (83c9a38) | no ontology, a project of its own made by this code (page 562 to 564 KB) | 5.09 / 7.45 | 2.77 / 4.11, 2.94 / 4.14, 2.87 / 4.22 | 4.160 | x1.12 |
+| 1.2.7 M0 (83c9a38) | `visited` followed, the 1.2.5 volume after the upgrade (page 567 to 570 KB): first set | 5.99 / 9.50 | 2.99 / 4.58, 2.96 / 4.44, 2.90 / 4.57 | 4.527 | **x1.22** |
+| 1.2.7 M0 (83c9a38) | the same, a second set right after | 3.28 / 4.93 | 2.97 / 4.33, 3.03 / 4.53, 3.06 / 4.50 | 4.452 | **x1.20** |
+
+- **The x1.2 target (4.459 s) is met by one set of three and missed by the other**: x1.218 and x1.198, x1.21 over
+  the six runs. The follow link itself now costs the engine about 1 ms per person and filter build (`prof.py`: 28.8 ms
+  with the link, median of 20; 27.7 ms without one in the first step). What is left is not the link: restricted pages
+  without any ontology are x1.12 of 1.2.5 on this code (the app's page is 562 KB against 507 KB), and an ontology
+  adds the rest. Getting clearly inside x1.2 means making every restricted filter build cheaper (it hashes every file
+  of the project once per person and build: about a third of the 28 ms), or the page smaller; neither is item 2.
+- **A restricted view's text with a follow link: 0.2 KB** (`customers`; `cafes` and `orders` 0.1 KB). Target: at most 4 KB.
+- **A Viewer who follows to all 60,000 customers, first read after a restart: 3.06, 3.03 and 3.02 s**, then 0.02 s
+  (`cold.py`, three times; the same six rows as the constant list gave). Target: at most 3.5 s.
+- Rows and row order against the inlined list: tests/test_rls_links.py (`test_follow_key_type_equals_inlined_list`,
+  `test_follow_row_order_kept`), in the suite.
+
+Not run: the report bench (item 3's 10 of 10): it needs the model's key in the bench's environment, which the maker
+was not given a way to pass without reading it. Not finished here: the 24-hour soak (item 9), which is elapsed time.
+The bench volume and container were removed after this was written.
