@@ -389,6 +389,8 @@ CREATE TABLE IF NOT EXISTS optimizer_runs (
 );
 -- a database that made the table before `started` was added (M12 rounds 1 and 2)
 ALTER TABLE optimizer_runs ADD COLUMN IF NOT EXISTS started timestamptz;
+-- 1.2.7 M0: what row-level security let the runner see, as a digest (optimize._seen); NULL: every row, or a run from before
+ALTER TABLE optimizer_runs ADD COLUMN IF NOT EXISTS rules text;
 CREATE INDEX IF NOT EXISTS optimizer_runs_latest ON optimizer_runs (project, optimizer, created DESC);
 -- one run at a time per person and optimiser: run_optimizer's INSERT ... ON CONFLICT DO NOTHING is its guard
 CREATE UNIQUE INDEX IF NOT EXISTS optimizer_runs_open ON optimizer_runs (project, optimizer, user_id) WHERE status IN ('queued', 'running');

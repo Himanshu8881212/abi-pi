@@ -17,6 +17,8 @@ optimisers never loads it.
 """
 
 import contextlib
+import hashlib
+import json
 import logging
 import math
 import re
@@ -181,6 +183,18 @@ def _broken(o: dict, at: str, why: str) -> ActionFailed:
     """The file no longer fits the model: what a person does next, then file, field and fix for a developer."""
     return ActionFailed(422, f"“{o['name']}” can't be worked out: it is set up for something that isn't there any more. Ask the agent to repair"
                              f" this plan. (For a developer: optimizers/{o['id']}.json {at}: {why})")
+
+
+def _seen(project: str, user_id: int) -> str | None:
+    """1.2.7 M0: what row-level security lets this person see, as a digest (their values of every row rule, the hidden
+    columns, the links it follows); None when they read every row. A restricted person's run is made of exactly that,
+    so it is theirs to read only while it stays the same: after a rule is narrowed, the older run would show them
+    objects and totals they may not see any more."""
+    if not rls.restricted(project, user_id):
+        return None
+    f = rls._file(project)
+    return hashlib.sha256(json.dumps([[[r["id"], r["table"], r["column"], r["users"].get(str(user_id))] for r in f.get("rules", [])], f.get("columns", []),
+                                      sorted([x["id"], x["from"], x["to"], x["via"]] for x in rls.follows(project))], sort_keys=True).encode()).hexdigest()
 
 
 def _withdraw(conn, project: str, o: dict, user: User, keep: str | None = None) -> bool:
@@ -549,12 +563,14 @@ def run_optimizer(conn, user: User, args: Ref) -> dict:
                  " started < now() - interval '30 minutes' OR status = 'queued' AND created < now() - interval '6 hours')", [STALE, p])
     run_id, inline = str(uuid.uuid4()), flows.IN_FLOW.get()  # a flow step already runs in the worker
     # one statement: at most OPEN runs open in the project and MINE of them one person's, and (the unique index
-    # optimizer_runs_open) one per person and optimiser
-    if not conn.execute("INSERT INTO optimizer_runs (id, project, optimizer, user_id, restricted, spec, status, started)"
-                        " SELECT %s, %s, %s, %s, %s, %s, %s, CASE WHEN %s THEN now() END"
+    # optimizer_runs_open) one per person and optimiser. 1.2.7 M0: one such statement at a time per project (until this
+    # transaction commits, just below): requests at the same moment each counted the runs before any of them was in
+    conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", [f"optimizer_runs {p}"])
+    if not conn.execute("INSERT INTO optimizer_runs (id, project, optimizer, user_id, restricted, rules, spec, status, started)"
+                        " SELECT %s, %s, %s, %s, %s, %s, %s, %s, CASE WHEN %s THEN now() END"
                         f" WHERE (SELECT count(*) FROM optimizer_runs WHERE project = %s AND {live}) < %s"
                         f" AND (SELECT count(*) FROM optimizer_runs WHERE project = %s AND user_id = %s AND {live}) < %s ON CONFLICT DO NOTHING",
-                        [run_id, p, o["id"], user.id, rls.restricted(p, user.id), Jsonb(o), "running" if inline else "queued", inline,
+                        [run_id, p, o["id"], user.id, rls.restricted(p, user.id), _seen(p, user.id), Jsonb(o), "running" if inline else "queued", inline,
                          p, OPEN, p, user.id, MINE]).rowcount:
         mine = [r["optimizer"] for r in conn.execute(f"SELECT optimizer FROM optimizer_runs WHERE project = %s AND user_id = %s AND {live}", [p, user.id])]
         # a flow's step (inline) is tried again later (503): other people's open runs are no fault of the flow's
@@ -600,8 +616,16 @@ def optimizers(conn, user: User, args: Which) -> dict:
     hide = rls.restricted(args.project, user.id)
     runs = {r.pop("optimizer"): r for r in conn.execute(
         "SELECT DISTINCT ON (optimizer) optimizer, id::text AS run, status, created::text, finished::text, error, result FROM optimizer_runs"
-        f" WHERE project = %s AND {'restricted AND user_id = %s' if hide else 'NOT restricted'} ORDER BY optimizer, created DESC",
-        [args.project, *([user.id] if hide else [])])}
+        f" WHERE project = %s AND {'restricted AND user_id = %s AND rules = %s' if hide else 'NOT restricted'} ORDER BY optimizer, created DESC",
+        [args.project, *([user.id, _seen(args.project, user.id)] if hide else [])])}
+    # 1.2.7 M0: an Editor's proposal that is still open stays in reach when someone's later run (a Viewer's: nothing is
+    # proposed) is the latest: `proposal` is then the open one of an earlier run of the same optimiser
+    waiting = {} if hide or (role_in(conn, user, args.project) or 0) < Role.editor else {r["optimizer"]: r["proposal"] for r in conn.execute(
+        "SELECT DISTINCT ON (optimizer) optimizer, result->'proposal' AS proposal FROM optimizer_runs WHERE project = %s AND NOT restricted"
+        " AND result->'proposal' IS NOT NULL AND result->'withdrawn' IS NULL ORDER BY optimizer, created DESC", [args.project])}
+    for i, r in runs.items():
+        if r["status"] == "ok" and r["result"] and "proposal" not in r["result"] and i in waiting:
+            r["result"] = r["result"] | {"proposal": waiting[i]}
     out = []
     for o in files:
         r = runs.get(o["id"])

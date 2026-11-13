@@ -161,6 +161,10 @@ with db.connect() as c:
                       " (%s, %s, %s, %s, false, '{}', %s, now() - make_interval(mins => %s), now() - make_interval(mins => %s))",
                       [x, a["project"], a["optimizer"] + (str(i) if a["n"] > 1 else ""), u, a.get("status", "running"), a["age"], a["age"]])
         out = {"ids": ids}
+    elif a["do"] == "finished":  # a finished run of `user` over every row that proposed nothing (a Viewer's, in a project without rules)
+        out = {"id": str(uuid.uuid4())}
+        c.execute("INSERT INTO optimizer_runs (id, project, optimizer, user_id, restricted, spec, status, finished, result) VALUES"
+                  " (%s, %s, %s, %s, false, '{}', 'ok', now(), %s)", [out["id"], a["project"], a["optimizer"], u, json.dumps(a["result"])])
     elif a["do"] == "read":
         out = {"rows": [[r["status"], r["error"]] for r in c.execute("SELECT status, error FROM optimizer_runs WHERE id = ANY(%s::uuid[]) ORDER BY id", [a["ids"]])]}
     elif a["do"] == "drop":
@@ -945,3 +949,109 @@ def test_plans_page_in_the_app(opt, tmp_path):
         srv.shutdown()
         for k in set(app.HUBS) - hubs:
             app.HUBS.pop(k, None)
+
+
+# ---------- 1.2.7 M0 item 7: the LOWs of optimisers ----------
+
+# run_optimizer for several optimisers at the same moment, as one person; nothing works them off, so they stay open
+PARALLEL = r"""
+import json, sys, threading
+import abi.app  # noqa: F401
+from abi import actions, db, security, worker
+a = json.loads(sys.stdin.read())
+with db.connect() as c:
+    u = security.user(c, c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"])
+worker.defer = lambda *x, **k: None
+gate, out, lock = threading.Barrier(len(a["optimizers"])), [], threading.Lock()
+def one(o):
+    gate.wait()
+    try:
+        got = ["queued", actions.run("run_optimizer", {"project": a["project"], "optimizer": o}, u, "rest")["run"]]
+    except actions.ActionFailed as e:
+        got = [e.status, e.body["message"]]
+    with lock:
+        out.append(got)
+ts = [threading.Thread(target=one, args=(o,)) for o in a["optimizers"]]
+[t.start() for t in ts]
+[t.join() for t in ts]
+print(json.dumps(out))
+"""
+
+
+def test_caps_hold_in_parallel(opt):
+    """Three runs at a time per person and ten in a project hold when the requests come at the same moment (they were
+    counted before any of them was in, so all could pass): of eight at once for one person exactly three are taken,
+    and with eight runs of others open exactly two of three. The others are told in words, as before."""
+    ids, open_ = [o["id"] for o in ALL][:8], []
+    try:
+        r = engine(PARALLEL, timeout=300, stdin=json.dumps({"project": P, "optimizers": ids}))
+        assert r.returncode == 0, r.stderr[-3000:]
+        got = json.loads(r.stdout.splitlines()[-1])
+        open_ += [x[1] for x in got if x[0] == "queued"]
+        assert len(open_) == 3 and len(got) == 8, got
+        assert {tuple(x) for x in got if x[0] != "queued"} == {(409, "You already have several plans being worked out. Try again when one of them is done.")}, got
+        registry("drop", ids=open_)
+        open_ = registry("fake", optimizer="queue", n=8, age=0, status="queued", user=opt["name"])["ids"]
+        r = engine(PARALLEL, timeout=300, stdin=json.dumps({"project": P, "optimizers": ids[:3]}))
+        assert r.returncode == 0, r.stderr[-3000:]
+        got = json.loads(r.stdout.splitlines()[-1])
+        open_ += [x[1] for x in got if x[0] == "queued"]
+        assert sum(x[0] == "queued" for x in got) == 2, got
+        assert [x for x in got if x[0] != "queued"] == [[409, "Too many plans are being worked out in this project right now. Try again in a moment."]], got
+    finally:
+        registry("drop", ids=open_)
+
+
+test_failed_run_leaves_no_proposal = test_opt_a_failed_run_leaves_no_proposal  # 1.2.7's contract names them so (M10 built them)
+test_delete_refused_while_flow_runs_it = test_opt_delete_is_refused_while_a_flow_runs_it
+
+
+def test_narrowed_rule_drops_old_run(opt):
+    """A restricted Viewer's plan is made of the cafés they saw when it ran. When their rule is narrowed (one café of
+    their region instead of three) they no longer read that run: its rows and its sentence name cafés and a total they
+    may not see any more. Their next run is of what they see now; with the rule as it was, the earlier run is theirs
+    again (it is made of exactly that)."""
+    tok = opt["token"]
+    was = run("hours", tok)
+    assert "Café Markt" in json.dumps(was, ensure_ascii=False) and was["rows"][0][:3] == ["Total", "Revenue", 1700]
+    uid = next(u["id"] for u in call("rls_rules")["accounts"] if u["name"] == opt["name"])
+    sure("set_rls_rule", project=P, id="one_cafe", table="cafes", column="cafe_id", users={uid: [3]})
+    try:
+        with abi.as_user(tok):
+            now = call("optimizers", optimizer="hours")
+            listed = next(o for o in call("optimizers")["optimizers"] if o["id"] == "hours")
+        assert now["status"] == "never run" and now["rows"] == [] and listed["latest_run"] is None, now
+        assert "Café Markt" not in json.dumps([now, listed], ensure_ascii=False) and "1700" not in json.dumps([now, listed])
+        narrow = run("hours", tok)
+        assert [x[1] for x in narrow["rows"] if x[5] is not None] == ["Café Süd"], narrow["rows"]
+    finally:
+        sure("delete_rls_rule", project=P, id="one_cafe")
+    with abi.as_user(tok):
+        back = call("optimizers", optimizer="hours")
+    assert back["run"] == was["run"] and back["rows"] == was["rows"], "the rule as it was: the run made of it"
+
+
+def test_viewer_run_keeps_editor_review(opt):
+    """An Editor's run proposes its plan; a later run by someone who only reads (nothing is proposed for them) became
+    the latest and the page lost its "Review the changes" button while the proposal was still open. The latest run an
+    Editor reads now carries the optimiser's open proposal; the page's own check (is that batch still waiting?) is
+    unchanged. A restricted Viewer's reading has none, and after a new Editor's run it is that run's own."""
+    first = run("hours")
+    batch = first["proposal"]["batch"]
+    later = registry("finished", optimizer="hours", user=opt["name"], result={
+        "outcome": "best", "text": "This is the plan for the Cafés you see; nothing is changed.", "columns": first["columns"], "rows": first["rows"][:1]})
+    try:
+        now = call("optimizers", optimizer="hours")
+        assert now["run"] == later["id"] and "nothing is changed" in now["text"], "the later run is the latest"
+        assert now["proposal"] == first["proposal"] and batch in waiting(), now.get("proposal")
+        listed = next(o for o in call("optimizers")["optimizers"] if o["id"] == "hours")
+        assert listed["latest_run"]["proposal"]["batch"] == batch
+        with abi.as_user(opt["token"]):
+            theirs = call("optimizers", optimizer="hours")
+        assert "proposal" not in theirs, theirs
+        page = (ROOT / "scripts/app.py").read_text()
+        assert "(p.proposals||[]).some(q=>q.batch===r.proposal.batch))out.append(btn('Review the changes'" in page
+    finally:
+        registry("drop", ids=[later["id"]])
+    second = run("hours")
+    assert second["proposal"]["batch"] != batch and set(waiting()) == {second["proposal"]["batch"]}
