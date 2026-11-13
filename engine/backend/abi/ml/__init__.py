@@ -866,6 +866,12 @@ def _predictions(project: str, m: dict, trained: str, query: dict, user: User) -
     semantic_model._write(project, "measures.json", {"measures": ms})
     if "period" in preds:
         semantic_model.extend_calendar(project, t, user.name)  # IN-5: the date table covers the future periods
+    if obj and was is not None:  # 1.2.7 M0: put on this type (again) since its last scoring: the property comes (back), also where
+        # the table kept its key meanwhile (another type shows it), which read as "a person removed the property"
+        with db.connect() as conn:
+            last = conn.execute("SELECT spec->>'object' AS object FROM ml_runs WHERE project = %s AND model = %s AND kind = 'score' AND status = 'ok'"
+                                " ORDER BY created DESC LIMIT 1", [project, m["id"]]).fetchone()
+        was = was if last and last["object"] == x["id"] else None
     _on_object(project, m, obj and x["id"], t, preds, pos and f"How likely {said} is {pos}, from 0 to 1.", said, was)
     _post_drift(project, m, drift["drifted"])
     flows.after_refresh(project, t, snap)  # 1.2.6 M9: flows that trigger on ml_<id>; nothing inside a flow (D-23)
@@ -1072,6 +1078,10 @@ def save_ml_model(conn, user: User, args: SaveModel) -> dict:
     imports.write(args.project, {rel: m})
     if (was := (files.get(rel) or {}).get("object")) and was != m.get("object"):  # taken off its object type: its property goes too
         _off_object(args.project, was, m["id"], m.get("object"))
+    if m.get("object") and was != m["object"]:  # 1.2.7 M0: put on a type (again): its earlier scorings were not for it, so the
+        # next one adds its property (`_predictions`), also where the predictions table kept its key meanwhile
+        conn.execute("UPDATE ml_runs SET spec = spec - 'object' WHERE project = %s AND model = %s AND kind = 'score' AND status = 'ok'",
+                     [args.project, m["id"]])
     return {"id": m["id"]} | ({"note": note} if note else {})
 
 

@@ -861,3 +861,70 @@ def test_a_queued_scoring_takes_object_from_the_file_as_it_is_now(objs):
     r = engine(STALE, stdin=json.dumps({"project": P, "runs": [[DOC[1]["id"], "cafe"], [DOC[1]["id"], "customer"], ["pi_model_that_is_gone", "cafe"]]}))
     assert r.returncode == 0, r.stderr[-2000:]
     assert json.loads(r.stdout.splitlines()[-1]) == ["cafe", None, None]
+
+
+# ---------- 1.2.7 M0 item 5: the carried LOWs of ML on objects ----------
+
+KEPT = {k: v for k, v in DOC[1].items() if k != "$schema"} | {"id": "kept_rev", "name": "Kept revenue"}
+
+# a scoring run queued while the model was on its object type, worked off after `object` was taken off the model
+QUEUED = r"""
+import json, sys, uuid
+import abi.app  # noqa: F401
+from psycopg.types.json import Jsonb
+from abi import db, ml
+a = json.loads(sys.stdin.read())
+run = str(uuid.uuid4())
+with db.connect() as c:
+    last = c.execute("SELECT trained::text, query, spec, user_id FROM ml_runs WHERE project = %s AND model = %s AND kind = 'score' AND status = 'ok'"
+                     " ORDER BY created DESC LIMIT 1", [a["project"], a["model"]]).fetchone()
+    c.execute("INSERT INTO ml_runs (id, project, model, status, user_id, spec, kind, query, trained) VALUES (%s, %s, %s, 'queued', %s, %s, 'score', %s, %s)",
+              [run, a["project"], a["model"], last["user_id"], Jsonb(last["spec"]), Jsonb(last["query"]), last["trained"]])
+ml.job(run)
+with db.connect() as c:
+    r = c.execute("SELECT status, error FROM ml_runs WHERE id = %s", [run]).fetchone()
+print(json.dumps({"queued_with": last["spec"].get("object"), "status": r["status"], "error": r["error"]}))
+"""
+
+
+def test_object_removed_keeps_type_working(objs):
+    """A model on cafés writes one prediction per café; an object type a person made on the predictions table itself
+    uses that table's key. Taking `object` off the model takes the prediction off the café type and leaves the table's
+    key, so that type still lists and opens (it failed with a 500 and blocked later saves when the key was dropped).
+    Putting the model on cafés again brings the property back at the next scoring."""
+    revenue()  # its dataset
+    t = scored(KEPT)
+    assert prop(t, "ml_kept_rev.prediction")["name"] == "Kept revenue"
+    o = json.loads((abi.ABI_PROJECTS / P / "model/ontology.json").read_text())
+    o["objects"].append({"id": "expected", "table": "ml_kept_rev", "name": "Expectation", "plural": "Expectations", "title": "cafes_cafe_id"})
+    sure("save_ontology", project=P, ontology=o)
+    abi.call("save_ml_model", project=P, ml={k: v for k, v in KEPT.items() if k != "object"})
+    assert not [p for p in otype("cafe")["properties"] if p["column"].startswith("ml_kept_rev.")], "the café's prediction went with `object`"
+    assert next(e["key"] for e in model_json()["entities"] if e["table"] == "ml_kept_rev") == ["cafes_cafe_id"], "the key another type needs stays"
+    listed = abi.call("list_objects", project=P, type="expected", limit=5)
+    assert len(listed["rows"]) == 5 and abi.call("get_object", project=P, type="expected", key=[objs["north"]])["key"] == [objs["north"]]
+    sure("save_ontology", project=P, ontology=json.loads((abi.ABI_PROJECTS / P / "model/ontology.json").read_text()) | {"base": "urn:test:kept:"})
+    assert row(abi.call("get_object", project=P, type="cafe", key=[objs["north"]]))["cafe_id"] == objs["north"]
+    abi.call("save_ml_model", project=P, ml=KEPT)  # on cafés again
+    score("kept_rev")
+    assert prop(otype("cafe"), "ml_kept_rev.prediction")["name"] == "Kept revenue", "re-attached: the property is back"
+    assert len(abi.call("list_objects", project=P, type="expected", limit=5)["rows"]) == 5
+
+
+def test_queued_score_after_object_removed(objs):
+    """A scoring run queued while the model was on cafés and worked off after `object` was taken off it scores without
+    the object: the run ends ok, and no prediction comes back onto the café type."""
+    revenue()  # its dataset
+    if "kept_rev" not in MADE:
+        scored(KEPT)
+    abi.call("save_ml_model", project=P, ml=KEPT)
+    score("kept_rev")
+    assert prop(otype("cafe"), "ml_kept_rev.prediction")
+    abi.call("save_ml_model", project=P, ml={k: v for k, v in KEPT.items() if k != "object"})
+    assert not [p for p in otype("cafe")["properties"] if p["column"].startswith("ml_kept_rev.")]
+    r = engine(QUEUED, timeout=600, stdin=json.dumps({"project": P, "model": "kept_rev"}))
+    assert r.returncode == 0, r.stderr[-3000:]
+    got = json.loads(r.stdout.splitlines()[-1])
+    assert got == {"queued_with": "cafe", "status": "ok", "error": None}, got
+    assert not [p for p in otype("cafe")["properties"] if p["column"].startswith("ml_kept_rev.")], "nothing came back onto the café"
+    assert row(abi.call("get_object", project=P, type="cafe", key=[objs["north"]]))["cafe_id"] == objs["north"]
