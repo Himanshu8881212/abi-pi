@@ -941,3 +941,42 @@ def test_own_prose_is_anything_but_a_single_id_number_or_date_token():
     assert sub.count("getFinalOutput(results[results.length - 1].messages)") == 1, "what the Lead receives is as before"
     guard = TS[TS.index('if (name === "subagent" && !sub) {'):TS.index("const inp: any = event.input ?? {};")]
     assert 'if (!SHARED) return { block: true, reason: "Delegation is off in this session' in guard
+
+
+# ---------- 1.2.7 M0 item 3: the count of what the agent just built, written as a word ----------
+
+# save_report's own result: the pages with their visuals' IDs, never the titles; the titles are what the agent sent
+SAVED = {"id": "managers", "pages": [{"id": "overview", "name": "Overview", "visuals": ["kpi", "by_region", "by_month"]}]}
+SENT = [{"project": "brew", "report": {"id": "managers", "name": "Managers", "pages": [{"id": "overview", "name": "Overview", "visuals": [
+    {"id": "kpi", "type": "kpi", "title": "Total revenue"}, {"id": "by_region", "type": "bar", "title": "Revenue by region"},
+    {"id": "by_month", "type": "line", "title": "Revenue by month"}]}]}}]
+BUILT = "It has one page, Overview, with {} visuals: Total revenue, Revenue by region and Revenue by month."
+
+
+def test_count_word_before_named_items_grounds():
+    """The report bench's one masked answer in 1.2.6's release run: "with [not verified] visuals: Total revenue, Revenue
+    by region and Revenue by month" after a save_report whose result holds the visuals' IDs only. A count, as a word
+    or as a digit, grounds when exactly that many items are named after it and each is a title the agent sent in this
+    session (or a result's own text, as before)."""
+    for n in ("three", "Three", "3"):
+        out = ground.check(BUILT.format(n), [SAVED], vocab={"revenue", "region", "month"}, wrote=SENT)
+        assert out["numbers"] == [] and out["names"] == [], (n, out)
+    got = ground.run({"answer": BUILT.format("three"), "results": [SAVED], "wrote": SENT, "vocab": ["revenue", "region", "month"]})
+    assert got == {"numbers": [], "names": []}, got  # nothing masked
+    under = "I built three visuals:\n- **Total revenue**: the KPI\n- **Revenue by region**\n- **Revenue by month**"
+    assert ground.check(under, [SAVED], wrote=SENT)["numbers"] == [], "the list under it counts the same way"
+
+
+def test_count_word_wrong_number_masked():
+    """A count that is not the number of items named, an item nobody sent and no result holds, a count with no list,
+    and the engine's own chat (it has no record of what was sent) stay masked."""
+    for n in ("four", "two", "4"):
+        assert ground.check(BUILT.format(n), [SAVED], wrote=SENT)["numbers"] == [n], n
+    assert ground.check(BUILT.format("three").replace("Revenue by month", "Margin by month"), [SAVED], wrote=SENT)["numbers"] == ["three"]
+    assert ground.check(BUILT.format("three"), [SAVED])["numbers"] == ["three"], "nothing sent, nothing in a result: as before"
+    assert ground.check("It has one page with three visuals.", [SAVED], wrote=SENT)["numbers"] == ["three"], "no items named"
+    got = ground.run({"answer": BUILT.format("four"), "results": [SAVED], "wrote": SENT})
+    assert got["numbers"] == ["four"] and "[not verified] visuals" in got["masked"], got
+    rules = importlib.util.module_from_spec(ground._spec)  # the engine's side of the one rules file: HARNESS off
+    ground._spec.loader.exec_module(rules)
+    assert rules.check(BUILT.format("three"), [SAVED], wrote=SENT)["numbers"] == ["three"]

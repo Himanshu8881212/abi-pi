@@ -294,6 +294,7 @@ def _listed(answer: str, span: tuple[int, int], tok: str, named) -> bool:
     """1.2 (owner, 5 Nov 2026): a whole-number count ("3", "three") before a plural noun and ":" or "(" ("3 visuals:")
     grounds when the rest of its sentence, or else the bullet/numbered list or table right under it, names exactly that
     many distinct items and `named` backs every one. It grounds the count only: the names are still checked as names.
+    1.2.7 M0: in the harness an item is also backed as a text the session's agents sent in a tool call (`check`).
     Refused: a count without a list ("in 3 regions"), a list before the count ("A, B and C: all three"), decimals,
     currency, percentages, scales."""
     if not re.fullmatch(r"\d+|[A-Za-z]+(?:-[A-Za-z]+)?", tok):
@@ -594,8 +595,12 @@ def check(answer: str, results: list, vocab: set[str] = frozenset(), members: se
     bad_names = [(at, n) for n, vocab_ok, at in cands if not ok(n, vocab_ok)
                  and not (vocab_ok and (core(n) != n and ok(core(n), True) or cal(n.split())))
                  and not ("-" in n and all(ok(p, vocab_ok) for p in n.split("-") if p[:1].isupper()))]
-    # 1.2: a count of the items it lists, each backed as a result's own text (never by vocab)
-    bad_nums = [(at, t) for at, t in bad_nums if not _listed(answer, at, t, lambda n: ok(n, False))]
+    # 1.2: a count of the items it lists, each backed as a result's own text (never by vocab). 1.2.7 M0: or, in the
+    # harness, as a text the session's agents sent themselves ("three visuals: A, B and C" of the report it just saved:
+    # save_report answers the visuals' IDs, not their titles). The count is all this grounds, and only when it is the
+    # number of items; a title nobody sent and no result holds keeps it masked
+    sent = "\n".join(own) if HARNESS else ""
+    bad_nums = [(at, t) for at, t in bad_nums if not _listed(answer, at, t, lambda n: ok(n, False) or _has(n, sent))]
     out = {"numbers": list(dict.fromkeys(t for _, t in bad_nums)), "names": list(dict.fromkeys(n for _, n in bad_names))}
     if not spans:
         return out
