@@ -311,6 +311,12 @@ def production_refusal(name: str, project, role: Role | None = None) -> str | No
     return None
 
 
+def _quoted(v) -> str:
+    """A value inside a sentence a person reads: as JSON, letters as they are (José), with control characters (JSON's
+    own escapes) and direction marks written out, so nothing typed can end the quotes or reorder the line."""
+    return re.sub(r"[\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029\x7f-\x9f]", lambda m: f"\\u{ord(m[0]):04x}", json.dumps(v, ensure_ascii=False))
+
+
 def invalid(e: ValidationError) -> list[dict]:
     """pydantic's errors with no input value (SC-4). `include_input=False` still leaves two built-in messages quoting the
     input: a discriminated union's tag and a UUID's bad character; those are rebuilt from ctx (AGENT-CONTEXT-fix-6.1)."""
@@ -363,7 +369,7 @@ def run(name: str, payload: dict, user: User, via: str, confirm: str | None = No
             if act.destructive and not act.confirms:  # no action ID in the text; what it acts on, as the call names it
                 # each value as JSON (a quote, a line break or a direction mark in one can't pass for ABI's own words);
                 # never a secret, never a bare ID nobody could read (a run, a batch)
-                on = [f"{k.replace('_', ' ')} {json.dumps(v)}" for k, v in logged.items() if isinstance(v, str | int) and not isinstance(v, bool)
+                on = [f"{k.replace('_', ' ')} {_quoted(v)}" for k, v in logged.items() if isinstance(v, str | int) and not isinstance(v, bool)
                       and len(str(v)) <= 80 and "*" not in str(v) and "${secret:" not in str(v) and not re.fullmatch(r"[0-9a-f-]{16,}", str(v))][:6]
                 require_confirmation(f"Destructive: {' '.join((act.fn.__doc__ or '').split())}" + (f" It acts on: {', '.join(on)}." if on else ""))
             if via != "rest" and name in PERSON_CLICK:  # every arg shown, uncut: the click approves all of them (a logo is a digest)

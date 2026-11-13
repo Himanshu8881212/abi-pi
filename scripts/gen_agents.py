@@ -18,6 +18,9 @@ HARNESS = {"data-engineer": ["abi_load", "abi_project"], "release-ops": ["abi_cl
            "analyst": ["abi_explore", "abi_monitor"], "automation-engineer": ["abi_monitor"]}  # the app's Explore and Monitor
 
 
+NOT_HERE = {"create_share_link", "create_embed_key"}  # ABI refuses them from an agent: their pages aren't reachable at the app's address
+
+
 def main() -> None:
     out = ROOT / ".pi/agents"
     out.mkdir(parents=True, exist_ok=True)
@@ -27,7 +30,7 @@ def main() -> None:
         tools = COMMON + HARNESS.get(name, []) + [f"mcp__abi__{t}" for t in AREAS["core"]]
         tools += [f"mcp__abi__{t}" for g in a["groups"] for t in AREAS["areas"][g]["tools"]] if not a.get("read_only") else []
         tools += [f"mcp__abi__{t}" for t in READS + EXTRA.get(name, [])]
-        tools = [t for t in dict.fromkeys(tools) if t != "mcp__abi__remember" or name == "release-ops"]
+        tools = [t for t in dict.fromkeys(tools) if (t != "mcp__abi__remember" or name == "release-ops") and t.removeprefix("mcp__abi__") not in NOT_HERE]
         skills = ", ".join(a["skills"])
         (out / f"{name}.md").write_text(
             f"---\nname: {name}\ndescription: {json.dumps(a['description'])}\ntools: {', '.join(tools)}\n---\n\n"

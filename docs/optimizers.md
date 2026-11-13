@@ -62,6 +62,9 @@ ends with at most one open proposal of that optimiser:
 A run that fails after its proposal was stored takes that proposal back.
 A proposal a person already approved or rejected is never touched.
 
+An optimiser a flow runs can't be deleted: the refusal names the flow, before anything is asked; take the step out
+of the flow first.
+
 The agent can set an optimiser up (`save_optimizer`) and run it; a flow runs it with a step
 `{"type": "action", "action": "run_optimizer", "input": {"optimizer": "hours"}}`, on a schedule too: a run that finds
 a plan leaves a proposal, never a change, and a run that finds none fails the step with the reason. A flow started by

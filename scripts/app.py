@@ -134,7 +134,7 @@ label.l{display:block;font:500 12px var(--text);color:var(--mute);margin:16px 0 
 .sl:focus-visible,.fchip button:focus-visible,.flink:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 .grid.busy{opacity:.55;transition:opacity .15s;pointer-events:none}
 dialog{border:1px solid var(--line);border-radius:8px;background:var(--sheet);color:var(--ink);max-width:640px;padding:28px}
-dialog h3{margin:0 0 12px;font:600 18px var(--display)}dialog .row{margin-top:20px;justify-content:flex-end}dialog pre{white-space:pre-wrap;max-height:40vh}dialog::backdrop{background:color-mix(in srgb,#000 45%,transparent);backdrop-filter:blur(2px)}
+dialog h3{margin:0 0 12px;font:600 18px var(--display)}dialog .row{margin-top:20px;justify-content:flex-end}dialog pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:40vh}dialog::backdrop{background:color-mix(in srgb,#000 45%,transparent);backdrop-filter:blur(2px)}
 .trace{margin:12px 0 0;padding-left:20px}.trace li{margin:3px 0}.trace:empty{display:none}
 .stat{font:600 36px/1 var(--display);letter-spacing:-.03em;margin:4px 0 8px;font-variant-numeric:tabular-nums}
 .ed-cell{cursor:text}.ed-cell:hover{outline:1px dashed var(--mute)}td.changed{background:color-mix(in srgb,var(--signal) 12%,transparent)}.checks{display:flex;flex-wrap:wrap;gap:8px 16px}.chk{display:flex;gap:6px;align-items:center;font-size:14px}.crumb{background:none;border:0;color:inherit;font:inherit;cursor:pointer;display:flex;gap:6px;align-items:baseline}.crumb .car{font-style:normal;opacity:.6}
@@ -695,10 +695,10 @@ function ask(c){return new Promise(res=>{const d=$('#confirm'),bad=!c.plain&&/\b
  $('#c-msg').textContent=bad&&ASK_WHAT?`“${ASK_WHAT}” leaves the project. It stays an uncommitted change, so Undo in the toast or under Changes takes it back.`:c.lead||people(c.message);$('#c-abi').textContent=c.lead?people(c.message||''):'';$('#c-abi').hidden=!$('#c-abi').textContent;ASK_WHAT='';const pv=plainPreview(c.preview||'');$('#c-prev').textContent=pv;$('#c-prev').hidden=!pv;$('#c-prev').classList.toggle('plain',pv!==(c.preview||''));
  // one way out, whatever closes it: the answer is given and the dialog's text leaves the page (a credential never stays in it).
  // Esc is No; a credential's dialog (c.once: the credential) has no No and no Esc, and a Copy button
- const cp=$('#c-copy'),done=v=>{d.close();['#c-msg','#c-abi','#c-prev'].forEach(s=>{$(s).textContent=''});cp.hidden=true;cp.onclick=null;$('#c-no').hidden=false;d.oncancel=null;res(v)};
+ let over=false;const cp=$('#c-copy'),done=v=>{if(over)return;over=true;d.onclose=null;d.oncancel=null;if(d.open)d.close();['#c-msg','#c-abi','#c-prev'].forEach(s=>{$(s).textContent=''});cp.hidden=true;cp.onclick=null;$('#c-no').hidden=false;res(v)};
  if(c.once){$('#c-prev').textContent=c.preview;$('#c-prev').hidden=false;$('#c-prev').classList.add('plain')}
  $('#c-no').hidden=!!c.once;cp.hidden=!c.once;cp.textContent='Copy';cp.onclick=async()=>{try{await navigator.clipboard.writeText(c.once)}catch(e){const r=document.createRange();r.selectNodeContents($('#c-prev'));getSelection().removeAllRanges();getSelection().addRange(r)}cp.textContent='Copied'};
- d.oncancel=e=>{e.preventDefault();if(!c.once)done(false)};
+ d.oncancel=e=>{e.preventDefault();if(!c.once)done(false)};d.onclose=()=>done(!!c.once);  // closed some other way (a second Esc, the browser): still answered, still emptied
  d.showModal();$('#c-yes').onclick=()=>done(true);$('#c-no').onclick=()=>done(false)})}
 // ABI's preview of what it will do, in words where it is a known shape (a role change: "editor1: Viewer → Editor")
 function plainPreview(t){t=String(t||'');const who=Object.fromEntries([...(D.rls?.accounts||[]).map(a=>[String(a.id),a.name]),...(window.ME?.id?[[String(ME.id),ME.name]]:[])]),R=x=>x?x[0].toUpperCase()+x.slice(1):'No access',nm=u=>who[String(u)]||'a person';
@@ -712,7 +712,7 @@ function plainPreview(t){t=String(t||'');const who=Object.fromEntries([...(D.rls
  else if(j&&typeof j==='object'&&!Array.isArray(j)&&Object.values(j).every(v=>v===null||typeof v!=='object'))out=Object.entries(j).map(([a,v])=>`${colName(a)}: ${v??'—'}`).join('\n');
  return out==null?people(t):[people(head),out].filter(Boolean).join('\n\n')}
 // "as user 1" in ABI's words: the person's name
-function people(t){const who=Object.fromEntries([...(D.rls?.accounts||[]).map(a=>[String(a.id),a.name]),...(window.ME?.id?[[String(ME.id),ME.name]]:[])]);return String(t||'').replace(/\s*Confirm to proceed\.?/g,'').replace(/\b(measure|dataset|optimizer|model|flow|report|id) "([a-z][a-z0-9_]*)"/g,(m,k,id)=>idsToNames(id)===id?m:`${k==='id'?'':k+' '}“${idsToNames(id)}”`).replace(/\b(flow|report|ML model|tool|agent) '([a-z0-9_]+)'/g,(m,k,id)=>`${k} “${idsToNames(id)===id?id.replace(/_/g,' ').replace(/^./,c=>c.toUpperCase()):idsToNames(id)}”`).replace(/\buser (\d+)\b/g,(m,u)=>who[u]?who[u]:'a person').replace(/project '[a-z0-9_-]+_pub'/g,'the published version').replace(new RegExp(`project '${D.project}'`,'g'),'this project').replace(/Enabling flow (“[^”]+”) lets its data condition trigger run it unattended as [^.]+\./,'$1 then checks every minute and posts to the Inbox, using your access.').replace(/Enabling flow (“[^”]+”) lets its (\w[\w ]*?) trigger run it unattended as [^.]+\./,'$1 then runs on its $2 by itself, using your access.')}
+function people(t){const who=Object.fromEntries([...(D.rls?.accounts||[]).map(a=>[String(a.id),a.name]),...(window.ME?.id?[[String(ME.id),ME.name]]:[])]);return String(t||'').replace(/\s*Confirm to proceed\.?/g,'').replace(/\b(measure|dataset|optimizer|model|flow|report) "([a-z][a-z0-9_]*)"/g,(m,k,id)=>{const x=(({measure:D.measures,dataset:D.datasets,optimizer:D.optimizers,model:D.ml,flow:D.flows,report:D.reports})[k]||[]).find(y=>y.id===id);return x?.name?`${k==='optimizer'?'plan':k} “${x.name}”`:m}).replace(/project "[a-z0-9_-]+_pub"/g,'the published version').replace(new RegExp(`project "${D.project}"`,'g'),'this project').replace(/\b(flow|report|ML model|tool|agent) '([a-z0-9_]+)'/g,(m,k,id)=>`${k} “${idsToNames(id)===id?id.replace(/_/g,' ').replace(/^./,c=>c.toUpperCase()):idsToNames(id)}”`).replace(/\buser (\d+)\b/g,(m,u)=>who[u]?who[u]:'a person').replace(/project '[a-z0-9_-]+_pub'/g,'the published version').replace(new RegExp(`project '${D.project}'`,'g'),'this project').replace(/Enabling flow (“[^”]+”) lets its data condition trigger run it unattended as [^.]+\./,'$1 then checks every minute and posts to the Inbox, using your access.').replace(/Enabling flow (“[^”]+”) lets its (\w[\w ]*?) trigger run it unattended as [^.]+\./,'$1 then runs on its $2 by itself, using your access.')}
 function plainErr(m){return objWords(String(m||'').replace(/( for each [^(:]+) \([a-z0-9_., ]+\)/i,'$1')).replace(/^.*?rejected by the MEL compile:\s*\d+ error\(s\):?\s*/i,'The formula has an error: ').replace(/The formula has an error:\s*[;.]\s*/,'The formula has an error, so nothing changed. Check its column names and brackets. ').replace(/(nothing changed\.[^;]*?)[;.]?\s*nothing changed\.?/i,'$1').replace(/\(DECISIONS [A-Z]-\d+\)/g,'').replace(/\buser (\d+)\b/g,'a person').trim()}
 // an id in ABI's text (a measure, a flow, a report) as its name
 function idsToNames(t){const M=new Map([...(D.measures||[]),...(D.flows||[]),...(D.reports||[]),...(D.ml||[]),...(D.datasets||[]),...(D.optimizers||[])].filter(x=>x.id&&x.name).map(x=>[x.id,x.name]));return String(t??'').replace(/\b[a-z][a-z0-9_]{2,}\b/g,w=>M.get(w)||w)}
@@ -1812,10 +1812,11 @@ function actDone(a,r){const w=r.write?.status,f=a.flow&&(D.flows||[]).find(x=>x.
 // was typed, and typed text must not be able to say "this is only a proposal"
 function actAsk(c){let j;try{j=JSON.parse(c.preview)}catch(e){return c}const a=OA().find(x=>x.id===j?.action),T=otype(j?.object?.type),ay=j?.after_yes,prop=ay?.write==='proposal';if(!a||!T)return c;
  return {...c,plain:true,title:`${a.name}?`,yes:a.name,message:'',preview:JSON.stringify(ay&&!ay.starts_flow?{...j,flow:undefined}:j),lead:`${T.name} “${j.object.title??j.object.key.join(', ')}”.`+(prop?' An editor approves the change before it applies.':'')}}
+// (j.cut: the harness left part of a long preview out and says so)
 function actWords(j){const a=OA().find(x=>x.id===j.action),T=otype(j.object?.type),S=a?.inputs?.properties||{},v=x=>x===null||x===undefined||x===''?'(empty)':x===MASK?'(hidden for your access)':String(x),
   pn=c=>pname((T?.properties||[]).find(p=>p.column===c||p.column===`${j.writes.table}.${c}`)||{column:c},T);
  return [...Object.entries(j.inputs||{}).map(([k,x])=>`${S[k]?.title||colName(k)}: ${v(x)}`),...(j.writes?.changes||[]).map(c=>`${pn(c.column)}: ${v(c.old)} → ${v(c.new)}`),
-  ...(j.flow?[`Then starts “${(D.flows||[]).find(f=>f.id===j.flow)?.name||'its follow-up'}”.`]:[])].join('\n')}
+  ...(j.flow?[`Then starts “${(D.flows||[]).find(f=>f.id===j.flow)?.name||'its follow-up'}”.`]:[]),...(j.cut?['Part of what ABI showed is too long to show here.']:[])].join('\n')}
 // the chat agent's step asks (the harness's wording: ABI's message, "Preview:", its JSON, "Proceed?"): an action on an
 // object reads as a form's own confirmation does; anything else as before
 function chatAsk(e){const m=/^(Run '[\s\S]*?)\n\nPreview:\n([\s\S]*)\n\nProceed\?\s*$/.exec(e.message||''),c=m?actAsk({message:m[1],preview:m[2]}):null;
@@ -2497,6 +2498,7 @@ $('#chat .stop').onclick=()=>fetch('/chat/stop',{method:'POST',headers:{'X-Abi-A
   else if(e.type==='progress'){const r=steps&&[...steps.children].reverse().find(x=>x.dataset.s==='run');if(r)r.textContent=`… ${stepName(r.dataset.t)}${e.text?' · '+e.text:''}`}  // a big load the agent waits for (M3.2)
   else if(e.type==='said')bubble('me',e.text)
   else if(e.type==='answer'){steps=null;if(e.model){MODEL=e.model;ctx()}bubble('ai',e.text);chats();if(!chatBox.classList.contains('open'))toast('The agent answered')}
+  else if(e.type==='sys')bubble('sys',String(e.text||''));
   else if(e.type==='ask'){const once=e.title===SHOWN,yes=await ask(once?{title:e.title,message:'',preview:e.message,yes:'I copied it',plain:true,once:String(e.message||'').split('\n\n')[1]||''}:chatAsk(e));bubble('sys',once?'Shown to you once; it is not kept in this chat. If it wasn\'t copied, revoke it and make a new one.':yes?'You confirmed.':'You declined.');  // a credential: for the person's eyes only (index.ts shownOnce)
    fetch('/chat/answer',{method:'POST',headers:{'X-Abi-App':KEY,'Content-Type':'application/json'},body:JSON.stringify({id:e.id,yes})})}
   else if(e.type==='open'){location.href='/?p='+encodeURIComponent(e.project)+'#'+encodeURIComponent(e.page)}
@@ -3007,6 +3009,8 @@ class Hub:
             t = e.get("type")
             if t == "extension_ui_request" and e.get("method") == "confirm":
                 self.emit({"type": "ask", "id": e["id"], "title": e.get("title"), "message": e.get("message")})
+            elif t == "extension_ui_request" and e.get("method") == "notify" and e.get("message"):
+                self.emit({"type": "sys", "text": str(e["message"])[:500]})  # the harness's own word to the person (a yes that came too late)
             elif t == "extension_ui_request" and e.get("method") in ("select", "input", "editor"):
                 self.send({"type": "extension_ui_response", "id": e["id"], "cancelled": True})
             elif t == "extension_ui_request" and e.get("method") == "setStatus" and e.get("statusKey") == "abi-load":

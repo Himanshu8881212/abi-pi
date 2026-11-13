@@ -45,12 +45,14 @@ class NewKey(storage.ProjectRef):
 
 @action(Role.owner)
 def create_embed_key(conn, user: User, args: NewKey) -> dict:
-    """Makes a signing key for embedding this project's reports in other sites: the host's backend signs short-lived tokens with it naming one of the project's Viewers, whose view the embed shows. Always asks the person to confirm; the key is then shown once, to the person only: an agent never sees it."""
+    """Not for an agent: answers that embedding isn't available here. From ABI's own screens: makes a signing key for embedding this project's reports in other sites (the host's backend signs short-lived tokens with it naming one of the project's Viewers, whose view the embed shows), after a confirmation."""
+    if actions.VIA.get() != "rest":  # before anything is asked. SC-4: the key is a credential; and in this install the embedded
+        # page is served by the engine only, which the address people open ABI at does not reach (RELEASE.md, known limits)
+        raise ActionFailed(403, "Embedding a report in another site isn't available in this install. Share the report instead: the"
+                                " people you pick open it after signing in.")
     origins = sorted(set(args.origins))
     require_confirmation(f"Pages on {', '.join(origins)} can show this project's reports as any of its Viewers, to"
                          " whoever the host site chooses, with tokens signed by this key, until you revoke it.")
-    if actions.VIA.get() != "rest":  # SC-4: the key is a credential; it goes to the person's screen, never to an LLM or a trace
-        raise ActionFailed(403, "An embed key is shown only to you, in the app.")
     kid, key = secrets.token_hex(8), secrets.token_urlsafe(32)
     conn.execute("INSERT INTO embed_keys (kid, project, name, origins, creator, key) VALUES (%s, %s, %s, %s, %s, %s)",
                  [kid, args.project, args.name, origins, user.id, _fernet().encrypt(key.encode())])

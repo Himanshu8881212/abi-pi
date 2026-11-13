@@ -534,8 +534,8 @@ def delete_optimizer(conn, user: User, args: Ref) -> dict:
         o = imports.load(args.project, "optimizer", args.optimizer)
         raise ActionFailed(409, f"“{o['name']}” is run by the flow{'s' * (len(set(used)) > 1)} {_some([f'“{n}”' for n in dict.fromkeys(used)])}."
                                 " Take that step out of the flow, or delete the flow, first.")
-    require_confirmation(f"Destructive: deletes the plan definition '{args.optimizer}' of project '{args.project}'. Its runs and the"
-                         " proposals made from them stay.")
+    name = imports.load(args.project, "optimizer", args.optimizer)["name"]
+    require_confirmation(f"Destructive: deletes the plan “{name}”. Its runs and the proposals made from them stay.")
     imports.remove(args.project, "optimizer", args.optimizer)
     return {}
 

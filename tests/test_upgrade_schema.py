@@ -32,6 +32,35 @@ Q = {"columns": "SELECT table_name, column_name, data_type, is_nullable, column_
                     " WHERE connamespace = 'public'::regnamespace",
      "indexes": "SELECT tablename, indexname, indexdef FROM pg_indexes WHERE schemaname = 'public'",
      "triggers": "SELECT tgrelid::regclass::text, tgname FROM pg_trigger WHERE NOT tgisinternal"}
+# M10 round 4: one project's rows as a 1.2.5 install holds them, put in before this code's init and read back after it
+SEED = [
+    "INSERT INTO users (name, password_hash, workspace_owner) VALUES ('up_owner', 'x', true), ('up_viewer', 'x', false)",
+    "INSERT INTO project_roles SELECT id, 'up_brew', 'viewer' FROM users WHERE name = 'up_viewer'",
+    "INSERT INTO memory (project, text, created_by) VALUES ('up_brew', 'Revenue is net of discounts.', 'up_owner')",
+    "INSERT INTO notifications (project, kind, message) VALUES ('up_brew', 'flow', 'Flow Monday: works again.')",
+    "INSERT INTO sources (project, table_name, spec, fingerprint) VALUES ('up_brew', 'orders', '{\"location\": \"orders.parquet\"}', 'f1')",
+    "INSERT INTO flow_runs (id, project, flow, status) VALUES ('up_brew/monday/2026-11-09T07:00Z', 'up_brew', 'monday', 'ok')",
+    "INSERT INTO flow_steps (run_id, pos, step, status, input, output, started) VALUES ('up_brew/monday/2026-11-09T07:00Z', 0, 'q', 'ok',"
+    " '{\"measures\": [\"revenue\"]}', '{\"rows\": [[1]]}', now())",
+    "INSERT INTO flow_schedule VALUES ('up_brew', 'monday', now())",
+    "INSERT INTO send_targets VALUES ('up_brew', 'mail:ops@example.com')",
+    "INSERT INTO inbox (project, sender, text, data) VALUES ('up_brew', 'flows', 'Weekly summary', '{\"columns\": [\"revenue\"], \"rows\": [[1]]}')",
+    "INSERT INTO flow_conditions (project, flow, holds, fired) VALUES ('up_brew', 'monday', true, now())",
+]
+KEPT = {"users": "name, password_hash, workspace_owner", "project_roles": "user_id, project, role", "memory": "project, text, created_by, created",
+        "notifications": "project, kind, message, at", "sources": "project, table_name, spec, fingerprint",
+        "flow_runs": "id, project, flow, status, error, created, finished", "flow_steps": "run_id, pos, step, status, input, output, started, finished",
+        "flow_schedule": "project, flow, checked", "send_targets": "project, target", "inbox": "project, sender, text, data, at",
+        "flow_conditions": "project, flow, holds, fired"}
+def rows():
+    with psycopg.connect(dbname=OLD) as c:
+        return {t: sorted(json.dumps(r, default=str) for r in c.execute(f"SELECT {cols} FROM {t}").fetchall()) for t, cols in KEPT.items()}
+seeded = os.environ.get("ABI_UPGRADE_ROWS") == "1"
+if seeded:
+    with psycopg.connect(dbname=OLD) as c:
+        for q in SEED:
+            c.execute(q)
+    before = rows()
 got, state = {}, {}
 for d in (OLD, NEW):
     os.environ["PGDATABASE"] = d
@@ -39,9 +68,10 @@ for d in (OLD, NEW):
     with psycopg.connect(dbname=d) as c:
         got[d] = {k: {json.dumps(r, default=str) for r in c.execute(q).fetchall()} for k, q in Q.items()}
         state[d] = c.execute("SELECT app_schema FROM schema_state").fetchone()[0]
+kept = {"rows": [rows() == before, sum(map(len, before.values()))]} if seeded else {}
 for d in (OLD, NEW):
     admin.execute(f"DROP DATABASE {d} WITH (FORCE)")
-print(json.dumps({k: sorted(got[NEW][k] - got[OLD][k]) for k in Q} | {"fresh": {k: len(v) for k, v in got[NEW].items()},
+print(json.dumps({k: sorted(got[NEW][k] - got[OLD][k]) for k in Q} | kept | {"fresh": {k: len(v) for k, v in got[NEW].items()},
                   "extra": {k: sorted(got[OLD][k] - got[NEW][k]) for k in Q},
                   "schema": [lit["SCHEMA_NUMBER"], state[OLD], state[NEW], db.SCHEMA_NUMBER]}))
 """
@@ -66,15 +96,17 @@ REF_125 = "d5496bd"  # the 1.2.5 code 1.2.6 is built on (1.2.5 has no tag of its
 @pytest.mark.skipif(not PY.exists() or engine("from abi import db; db.connect().close()").returncode, reason="engine's Postgres not running")
 def test_a_1_2_5_database_upgrades_to_this_schema(monkeypatch):
     """1.2.6 item 34: a database made exactly as 1.2.5's db.py makes it (schema 5), upgraded by this branch's init, has
-    every column, constraint, index and trigger a fresh one gets, records schema 7, and keeps nothing more than the
-    column C1 dropped from the schema."""
+    every column, constraint, index and trigger a fresh one gets, records schema 7, keeps nothing more than the
+    column C1 dropped from the schema, and every row a project left in it reads the same afterwards."""
     monkeypatch.setenv("ABI_UPGRADE_REF", REF_125)
     monkeypatch.setenv("ABI_UPGRADE_VERSION", "1.2.5")
+    monkeypatch.setenv("ABI_UPGRADE_ROWS", "1")  # with a project's rows in it: accounts, a role, memory, a source, a flow's run, schedule and state
     r = engine(UPGRADE, timeout=180)
     assert r.returncode == 0, r.stderr[-2000:]
     out = json.loads(r.stdout.strip().splitlines()[-1])
     fresh, extra = out.pop("fresh"), out.pop("extra")
     assert out.pop("schema") == [5, 7, 7, 7], "1.2.5's schema number, then this code's on both databases"
+    assert out.pop("rows") == [True, 12], "every row the 1.2.5 database held reads the same after the upgrade"
     assert fresh["columns"] > 300 and out == {"columns": [], "constraints": [], "indexes": [], "triggers": []}, out
     assert extra == {"columns": ['["sources", "spec", "jsonb", "YES", null, "NO"]'], "constraints": [], "indexes": [], "triggers": []}, extra
 

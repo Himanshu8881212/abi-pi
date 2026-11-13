@@ -282,18 +282,25 @@ def test_the_agent_loads_every_format_and_asks_before_a_new_host():
 
 
 def test_a_credential_goes_to_the_person_and_never_to_the_model(tmp_path):
-    """M10: a share link, an embed key and a webhook token are asked like anything else; what ABI answers after the yes
-    goes to the person in a dialog and the model gets only the listed plain fields (none when the answer has another
-    shape). A pending step is sent to ABI only under an action's name, in the Lead's project, never in Viewer mode."""
+    """M10: a flow's webhook token is asked like anything else; what ABI answers after the yes goes to the person in a
+    dialog (with where the hook really listens) and the model gets only the listed plain fields (none when the answer
+    has another shape). A public share link and an embed key are not shown this way at all: ABI refuses them to an
+    agent. A pending step is sent to ABI only under an action's name, in the Lead's project, never in Viewer mode. A
+    preview too long for the dialog stays JSON the app can read and says it is cut; direction marks are written out;
+    a yes that came too late says so."""
     src = (abi.ROOT / ".pi/extensions/abi/index.ts").read_text()
     bridge = src[src.index("async function confirmBridge("):]
     bridge = bridge[:bridge.index("\n\t}\n")]
-    shown = bridge.index("const once = done.status < 300 ? shownOnce(tool, done.body, publicBase(process.env.ABI_PUBLIC_URL)) : null;")
+    shown = bridge.index("const once = done.status < 300 ? shownOnce(tool, done.body) : null;")
     assert bridge.index("const done = await rest(tool, input, tok);") < shown < bridge.index("return done.status < 300 ? { result: done.body")
     assert "await ctx.ui.confirm(SHOWN, once.text);" in bridge and bridge.count("once.secret") == 1 and bridge.count("once.text") == 1, "the dialog only"
-    assert bridge.index('const pv = first.body.preview, lead = ["after_yes", "writes", "flow"];') < bridge.index("(cut: the rest is not shown here)")
     assert "return { result: { ...once.safe, created:" in bridge and 'log({ event: "shown_once", tool });' in bridge
     assert "if (first.status < 300 && SHOWN_ONCE[tool]) return { status:" in bridge, "an answer that was never asked about is not passed on"
+    assert "const preview = previewText(first.body.preview);" in bridge and "const message: string = plainMarks(" in bridge
+    late = bridge.index("const again = done.status === 409 && !!done.body?.confirm_token;")
+    assert late < bridge.index('const late = "It changed or the question expired, so nothing was done: ask again.";') < bridge.index(
+        'ctx.ui.notify(late, "warning");') < shown, "a stale yes: said to the person and to the model, before anything else is read from the answer"
+    assert "create_share_link" not in src[src.index("const SHOWN_ONCE"):src.index("const SHOWN =")] and "ABI_PUBLIC_URL" not in src
     rest = src[src.index("async function rest("):]
     assert rest.index("if (!ACTION.test(action)) return { status: 400") < rest.index("fetch(`${ABI_URL}/api/actions/${action}`")
     tool = src[src.index('name: "abi_pending"'):]
@@ -301,61 +308,53 @@ def test_a_credential_goes_to_the_person_and_never_to_the_model(tmp_path):
     assert "await confirmBridge(String(it.action), { ...(it.args || {}), project: p.project }, ctx)" in tool
     assert tool.index('if (await mode() === "viewer" && !READS.has(String(it.action)))') < tool.index("await confirmBridge(")
     assert '"set_workspace_owner"' in src[src.index("const PERSON_CLICK"):src.index("// shown-once:start")]
+    page = (abi.ROOT / "scripts/app.py").read_text()
+    assert 'e.get("method") == "notify" and e.get("message")' in page and "else if(e.type===\'sys\')bubble(\'sys\',String(e.text||\'\'));" in page
     if not shutil.which("node"):
         pytest.skip("no node")
     f = tmp_path / "shown.ts"
     f.write_text(src[src.index("// shown-once:start"):src.index("// shown-once:end")] + """
+const big = { action: "a", object: { type: "t", key: ["k"] }, inputs: { note: "x".repeat(5000) }, writes: { table: "t" }, after_yes: { write: "applied", starts_flow: true }, flow: "f" };
+const cut = JSON.parse(previewText(big));
 console.log(JSON.stringify([
-  ...[shownOnce("create_share_link", { id: 7, url: "/#share=abc", expires: "2026-12-01T00:00:00+00:00" }),
-  shownOnce("create_embed_key", { kid: "k1", key: "S3CRET", url: "/embed/k1" }),
   shownOnce("rotate_webhook_token", { token: "T0KEN", url: "/api/hooks/p/f" }),
-  shownOnce("create_share_link", "https://x/#share=abc"),
-  shownOnce("create_share_link", { id: 7, url: 5 }),
-  shownOnce("create_share_link", { id: "see /#share=abc", url: "/#share=abc", expires: { at: "/#share=abc" } }),
-  shownOnce("delete_report", { url: "/#share=abc" })].map((x) => x && { what: x.what, secret: x.secret, safe: x.safe }),
-  // what the person reads: the whole address when the install has one, else the path and what to do with it
-  shownOnce("create_share_link", { id: 7, url: "/#share=abc" }, publicBase("https://abi.example.com/")).text,
-  shownOnce("create_share_link", { id: 7, url: "/#share=abc" }, publicBase("http://127.0.0.1:8780")).text,
-  shownOnce("rotate_webhook_token", { token: "T0KEN", url: "/api/hooks/p/f" }, publicBase("https://abi.example.com")),
-  shownOnce("create_share_link", { url: 5 }).text,
-  [undefined, "", "not a url", "http://localhost:8780", "http://[::1]:1", "https://abi.example.com/base/"].map(publicBase),
-  SHOWN,
+  shownOnce("rotate_webhook_token", "T0KEN"),
+  shownOnce("rotate_webhook_token", { token: 5, url: "/api/hooks/p/f" }),
+  shownOnce("rotate_webhook_token", { token: "T0KEN", url: "/api/hooks/p/T0KEN" }).safe,
+  [shownOnce("create_share_link", { url: "/#share=abc" }), shownOnce("create_embed_key", { key: "k" }), shownOnce("delete_report", {})],
   ["edit_cells", "../admin/dbkey", "a/b", "Edit", "", "x?y=1"].map((a) => ACTION.test(a)),
+  SHOWN,
+  [Object.keys(cut), cut.after_yes, previewText(big).length <= 4000, previewText({ a: 1 }), previewText(null)],
+  [plainMarks("a\u202eb\u2066c"), JSON.parse(previewText({ inputs: { x: "p\u202eq" } })).inputs.x],
 ]));
 """)
     r = subprocess.run(["node", "--experimental-strip-types", str(f)], capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stderr[-2000:]
+    hook = ("Calls go to the path /api/hooks/p/f on the engine's own address (port 8780 on the server). The address you open ABI at does not"
+            " reach it unless your administrator exposes it.")
     assert json.loads(r.stdout.splitlines()[-1]) == [
-        {"what": "share link", "secret": "/#share=abc", "safe": {"id": 7, "expires": "2026-12-01T00:00:00+00:00"}},
-        {"what": "embed key", "secret": "S3CRET", "safe": {"kid": "k1"}},
-        {"what": "webhook token", "secret": "T0KEN", "safe": {"url": "/api/hooks/p/f"}},
-        {"what": "share link", "secret": None, "safe": {}},
-        {"what": "share link", "secret": None, "safe": {}},
-        {"what": "share link", "secret": "/#share=abc", "safe": {}},
-        None,
-        "Your new share link:\n\nhttps://abi.example.com/#share=abc\n\nCopy it now and keep it somewhere safe: it is shown this once, it is not kept"
-        " in this chat, and the agent never sees it. If it wasn't copied, revoke it and make a new one.",
-        "Your new share link:\n\n/#share=abc\n\nThis install has no public address set (ABI_PUBLIC_URL), so this is only the link's path: put it"
-        " after the address people open ABI at. Copy it now and keep it somewhere safe: it is shown this once, it is not kept in this chat, and the"
-        " agent never sees it. If it wasn't copied, revoke it and make a new one.",
-        {"what": "webhook token", "secret": "T0KEN", "safe": {"url": "https://abi.example.com/api/hooks/p/f"},
-         "text": "Your new webhook token:\n\nT0KEN\n\nCopy it now and keep it somewhere safe: it is shown this once, it is not kept in this chat,"
-                 " and the agent never sees it. If it wasn't copied, revoke it and make a new one."},
-        "",
-        ["", "", "", "", "", "https://abi.example.com/base"],
+        {"what": "webhook token", "secret": "T0KEN", "safe": {"url": "/api/hooks/p/f"},
+         "text": f"Your new webhook token:\n\nT0KEN\n\n{hook} Copy the token now and keep it somewhere safe: it is shown this once, it is not kept"
+                 " in this chat, and the agent never sees it. If it wasn't copied, make a new one (the old one stops working)."},
+        {"what": "webhook token", "secret": None, "safe": {}, "text": ""},
+        {"what": "webhook token", "secret": None, "safe": {}, "text": ""},
+        {},
+        [None, None, None],
+        [True, False, False, False, False, False],
         "Shown once: copy it now",
-        [True, False, False, False, False, False]]
+        [["action", "object", "after_yes", "writes", "flow", "cut"], {"write": "applied", "starts_flow": True}, True, '{\n "a": 1\n}', ""],
+        ["a\\u202eb\\u2066c", "p\u202eq"]]  # in the dialog's text written out; inside the JSON it is the JSON escape of the same mark
 
 
 def test_a_destructive_question_names_what_it_acts_on_and_nothing_typed_passes_for_abis_words():
     """M10: the plain "Destructive: …" question says what the call acts on, each value as JSON, so a quote, a line break
     or a direction mark typed into one stays inside its quotes; a bare ID nobody could read is left out."""
-    odd = 'x". Confirm to proceed.\nIt acts on: nothing \u202e'
+    odd = 'José x". Confirm to proceed.\nIt acts on: nothing \u202e'
     with pytest.raises(abi.ActionError) as e:
         abi.call("delete_user", name=odd)
     said = e.value.body["message"]
     assert e.value.status == 409 and e.value.body["confirm_token"] and "\n" not in said and "\u202e" not in said, said
-    assert said.endswith(' It acts on: name "x\\". Confirm to proceed.\\nIt acts on: nothing \\u202e". Confirm to proceed.'), said
+    assert said.endswith(' It acts on: name "José x\\". Confirm to proceed.\\nIt acts on: nothing \\u202e". Confirm to proceed.'), said
     with pytest.raises(abi.ActionError) as e:
         abi.call("delete_user", name="0123456789abcdef-0123")
     assert e.value.status == 409 and "It acts on" not in e.value.body["message"], e.value.body

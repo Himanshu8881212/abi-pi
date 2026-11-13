@@ -141,9 +141,12 @@ def _in(cols: list[str], keys: list[tuple]) -> str:
 
 
 def _list_sql(col: str, src: str) -> str:
-    """The read that writes `_in`'s list for one column itself: one row, the distinct non-NULL `col` values of DuckDB
-    `FROM src` as `CAST('<text>' AS <type>), …` (NULL when there is none)."""
-    return ("SELECT string_agg('CAST(''' || replace(CAST(c AS VARCHAR), '''', '''''') || ''' AS ' || typeof(c) || ')', ', '"
+    """The read that writes `_in`'s list for one column itself: one row of (every value's type is a plain type name,
+    the distinct non-NULL `col` values of DuckDB `FROM src` as `CAST('<text>' AS <type>), …`); (NULL, NULL) when there
+    is none. The type's name goes into the text unquoted, so only names made of capitals, digits, spaces and a
+    (precision[, scale]) count as plain; `conditions.listed` takes any other column the earlier way."""
+    return ("SELECT bool_and(regexp_full_match(typeof(c), '[A-Z0-9_ ]+(\\(\\d+(,\\s*\\d+)?\\))?')),"
+            " string_agg('CAST(''' || replace(CAST(c AS VARCHAR), '''', '''''') || ''' AS ' || typeof(c) || ')', ', '"
             f" ORDER BY CAST(c AS VARCHAR), typeof(c)) FROM (SELECT DISTINCT {storage._q(col)} AS c FROM {src}) WHERE c IS NOT NULL")
 
 
@@ -292,7 +295,9 @@ def conditions(project: str, user_id: int, read, types: dict | None = None) -> d
             got = read(_list_sql(col, f"{storage._q(t)} WHERE {where}"), {})
         except (duckdb.Error, ActionFailed):
             return "FALSE"
-        return f"list_contains([{got[0][0]}], {storage._q(col)})" if got and got[0][0] else "FALSE"
+        if got and got[0][0] is False:  # a type whose name is no plain word (an ENUM's holds its values): the earlier way
+            return allowed(t, (col,), where)
+        return f"list_contains([{got[0][1]}], {storage._q(col)})" if got and got[0][1] else "FALSE"
 
     def step(t: str, conds: dict, follow: bool = True) -> list:
         """t's filter as (tag: the follow link it is made from, or none; SQL) parts; without `follow`: the rules and

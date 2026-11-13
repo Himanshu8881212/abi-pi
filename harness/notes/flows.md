@@ -6,6 +6,10 @@
 - `send_email` input: to, subject, body, data, optional report {report, page}. The project needs delivery settings
   (`delivery_settings`, `set_delivery`); without them post to the inbox (`post_message channel: inbox`).
 - Enabling a trigger, the first send to new recipients and approvals ask the person's confirmation.
+- A webhook trigger's token (`rotate_webhook_token`, after the person's yes) is shown to the person once, in a dialog
+  only they read: you never see it; if they didn't copy it, they make a new one. Say plainly where the hook listens:
+  the path /api/hooks/<project>/<flow> on the engine's own address (port 8780 on the server), which the address
+  people open ABI at does not reach unless their administrator exposes it.
 - An alert per object (one per café): add `"per": <object type id>` to a data_condition trigger. Each object whose row
   starts to hold gets its own run with `{{ data.trigger.title }}` and `{{ data.trigger.object.<column> }}`; its inbox
   post and emails reach only project members who can see that object. `"recipients": {"property": <an email or person

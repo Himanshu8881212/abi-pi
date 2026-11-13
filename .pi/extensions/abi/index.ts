@@ -53,40 +53,46 @@ function groupNotes(a: string): string {
 // abi.actions.PERSON_CLICK: access and where the project goes change only on a click in ABI's own UI (H-01.3)
 const PERSON_CLICK = new Set(["set_role", "set_tenant_admin", "set_user_tenant", "map_sender", "invite_user", "set_tenant", "set_remote", "set_workspace_owner"]);
 // shown-once:start (self-contained: tests/test_doors.py runs this block alone)
-// A share link, an embed key and a webhook token are credentials ABI answers once. The person gets them in a dialog only
-// they read; the model gets the listed plain fields and nothing else. An answer in any other shape: no credential is
-// found, so nothing of it goes to the model either (fail closed).
+// A flow's webhook token is a credential ABI answers once. The person gets it in a dialog only they read; the model gets
+// the listed plain fields and nothing else. An answer in any other shape: no credential is found, so nothing of it goes
+// to the model either (fail closed). (A public share link and an embed key are not an agent's to make: ABI refuses them
+// before it asks, since the pages they open are not reachable at the app's address.)
 const SHOWN_ONCE: Record<string, { secret: string; keep: string[]; what: string }> = {
-	create_share_link: { secret: "url", keep: ["id", "expires"], what: "share link" },
-	create_embed_key: { secret: "key", keep: ["kid"], what: "embed key" },
 	rotate_webhook_token: { secret: "token", keep: ["url"], what: "webhook token" },
 };
 const SHOWN = "Shown once: copy it now";  // the dialog's title; the app's chat knows a credential's dialog by it (scripts/app.py SHOWN)
-// the address other people open ABI at (ABI_PUBLIC_URL), never a loopback one: "" when the install has none (app.py public_base)
-function publicBase(url: string | undefined): string {
-	try {
-		const u = new URL(url || "");
-		return /^(localhost|127\.\d+\.\d+\.\d+|\[?::1\]?|0\.0\.0\.0)$/i.test(u.hostname) ? "" : u.origin + u.pathname.replace(/\/+$/, "");
-	} catch { return ""; }
-}
-// ABI answers a link or an address as a path: with the install's address in front it is one a person can open or paste
-const absolute = (v: unknown, base: string): unknown => (typeof v === "string" && v.startsWith("/") && base ? base + v : v);
+// where a hook listens, said as it is: the engine's own address, which the address people open ABI at does not reach
+const HOOK = (path: unknown) => `Calls go to the path ${typeof path === "string" && path ? path : "/api/hooks/<project>/<flow>"} on the engine's own address (port 8780 on the server). The address you open ABI at does not reach it unless your administrator exposes it.`;
 // `text`: what the person reads in the dialog (its second paragraph is the credential alone: the app's Copy button takes it)
-function shownOnce(tool: string, body: unknown, base = ""): { what: string; secret: string | null; safe: Record<string, unknown>; text: string } | null {
+function shownOnce(tool: string, body: unknown): { what: string; secret: string | null; safe: Record<string, unknown>; text: string } | null {
 	const s = SHOWN_ONCE[tool];
 	if (!s) return null;
 	const b = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
 	const secret = typeof b[s.secret] === "string" && b[s.secret] ? (b[s.secret] as string) : null;
 	const safe: Record<string, unknown> = {};
-	if (secret) for (const k of s.keep) if (["string", "number"].includes(typeof b[k]) && !String(b[k]).includes(secret)) safe[k] = absolute(b[k], base);
-	const path = !!secret && secret.startsWith("/");  // a link: ABI gives its path only
-	const text = !secret ? "" : `Your new ${s.what}:\n\n${absolute(secret, base)}\n\n`
-		+ (path && !base ? "This install has no public address set (ABI_PUBLIC_URL), so this is only the link's path: put it after the address people open ABI at. " : "")
-		+ "Copy it now and keep it somewhere safe: it is shown this once, it is not kept in this chat, and the agent never sees it. If it wasn't copied, revoke it and make a new one.";
+	if (secret) for (const k of s.keep) if (["string", "number"].includes(typeof b[k]) && !String(b[k]).includes(secret)) safe[k] = b[k];
+	const text = !secret ? "" : `Your new ${s.what}:\n\n${secret}\n\n${HOOK(safe.url)} `
+		+ "Copy the token now and keep it somewhere safe: it is shown this once, it is not kept in this chat, and the agent never sees it. If it wasn't copied, make a new one (the old one stops working).";
 	return { what: s.what, secret, safe, text };
 }
 // an action's name as ABI has them: it goes into the request's path, so nothing else is ever sent
 const ACTION = /^[a-z][a-z0-9_]*$/;
+// direction marks in what a person reads are written out, so typed text can't reorder a line (U+202A-202E, U+2066-2069, U+200E/F)
+const plainMarks = (t: string) => t.replace(/[\u202A-\u202E\u2066-\u2069\u200E\u200F]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+// ABI's preview for a dialog: what the yes does, what is written and what starts first; one too long keeps those and says
+// it is cut, as JSON still (the app reads it), never a slice of text
+function previewText(pv: unknown, max = 4000): string {
+	if (!pv) return "";
+	if (typeof pv !== "object" || Array.isArray(pv)) { const t = plainMarks(JSON.stringify(pv, null, 1)); return t.length > max ? JSON.stringify({ cut: "The preview is too long to show here." }) : t; }
+	const lead = ["action", "object", "after_yes", "writes", "flow"], o = pv as Record<string, unknown>;
+	const keys = [...lead.filter((k) => k in o), ...Object.keys(o).filter((k) => !lead.includes(k))];
+	for (let n = keys.length; n >= 0; n--) {
+		const part = Object.fromEntries(keys.slice(0, n).map((k) => [k, o[k]]));
+		const t = plainMarks(JSON.stringify(n < keys.length ? { ...part, cut: "The rest of the preview is too long to show here." } : part, null, 1));
+		if (t.length <= max) return t;
+	}
+	return JSON.stringify({ cut: "The preview is too long to show here." });
+}
 // shown-once:end
 const DATA_FILE = /\.(csv|tsv|parquet|xlsx?|avro|arrow|feather|jsonl|ndjson|db|duckdb|sqlite|ducklake)$/i;
 const PREFS = path.join(os.homedir(), ".abi-pi", `prefs-${process.env.ABI_USER || "admin"}.json`);
@@ -651,13 +657,8 @@ export default async function abi(pi: ExtensionAPI) {
 			return first.status < 300 ? { result: first.body } : { error: first.body };
 		}
 		const tok: string = first.body.confirm_token; // stays in this closure: never in content, logs or the transcript
-		const message: string = first.body.message;
-		// what the yes will do, what is written and what starts come first, so a long preview is never cut before them
-		const pv = first.body.preview, lead = ["after_yes", "writes", "flow"];
-		const whole = pv && typeof pv === "object" && !Array.isArray(pv)
-			? JSON.stringify(Object.fromEntries([...lead.filter((k) => k in pv).map((k) => [k, pv[k]]), ...Object.entries(pv).filter(([k]) => !lead.includes(k))]), null, 1)
-			: pv ? JSON.stringify(pv, null, 1) : "";
-		const preview = whole.length > 4000 ? `${whole.slice(0, 4000)}\n… (cut: the rest is not shown here)` : whole;
+		const message: string = plainMarks(String(first.body.message ?? ""));
+		const preview = previewText(first.body.preview);
 		now().pending.push({ message, input });
 		if (!ctx.hasUI) {
 			log({ event: "confirm", tool, decision: "no-ui" });
@@ -670,13 +671,20 @@ export default async function abi(pi: ExtensionAPI) {
 		if (await mode() === "viewer" && !READS.has(tool)) return { status: "Viewer mode: nothing changed. A person who builds in this project can switch to Developer in the app's top bar and ask again.", message };
 		const done = await rest(tool, input, tok);
 		// what the yes showed may have changed meanwhile: ABI then asks again (409 with a new token), which never goes to the model
+		const again = done.status === 409 && !!done.body?.confirm_token;
 		if (done.body && typeof done.body === "object") delete done.body.confirm_token;
-		const once = done.status < 300 ? shownOnce(tool, done.body, publicBase(process.env.ABI_PUBLIC_URL)) : null;
+		if (again) {  // ABI asks again: what the yes was for changed, or it came too late (a token holds 300 s)
+			const late = "It changed or the question expired, so nothing was done: ask again.";
+			ctx.ui.notify(late, "warning");
+			log({ event: "confirm", tool, decision: "stale" });
+			return { status: `${late} (Make the same call again so the person sees it as it is now.)` };
+		}
+		const once = done.status < 300 ? shownOnce(tool, done.body) : null;
 		if (once) {  // a credential: to the person alone, in a dialog; never the tool result, the transcript, a log or pending.json
-			if (!once.secret) return { status: `ABI made the ${once.what}, but its answer was not in the form expected, so it is not shown and nothing of it is passed on. Tell the person to revoke it and make a new one.` };
+			if (!once.secret) return { status: `ABI made the ${once.what}, but its answer was not in the form expected, so it is not shown and nothing of it is passed on. Tell the person to make a new one.` };
 			await ctx.ui.confirm(SHOWN, once.text);
 			log({ event: "shown_once", tool });
-			return { result: { ...once.safe, created: `The ${once.what} was made and shown to the person once, in a dialog only they read. You never see it: don't ask for it and don't guess it. If they didn't copy it, they revoke it and make a new one.` }, confirmed_by_person: true };
+			return { result: { ...once.safe, created: `The ${once.what} was made and shown to the person once, in a dialog only they read. You never see it: don't ask for it and don't guess it. If they didn't copy it, they make a new one. ${HOOK(once.safe.url)}` }, confirmed_by_person: true };
 		}
 		return done.status < 300 ? { result: done.body, confirmed_by_person: true } : { error: done.body };
 	}

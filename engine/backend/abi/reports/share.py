@@ -38,7 +38,11 @@ class NewLink(ReportRef):
 
 @action(Role.editor)
 def create_share_link(conn, user: User, args: NewLink) -> dict:
-    """Makes a view-only link to a report (or one page): anyone holding it sees it read-only, as you, until it expires (1-30 days, default 7) or is revoked. Always asks the person to confirm; the link is then shown once, to the person only: an agent never sees it."""
+    """Not for an agent: answers that a public link isn't available here and what the person does instead (Share on the report, for people who sign in). From ABI's own screens: makes a view-only link to a report (or one page) that anyone holding it opens read-only, as you, until it expires (1-30 days, default 7) or is revoked, after a confirmation."""
+    if actions.VIA.get() != "rest":  # before anything is asked. SC-4: the link is a credential; and in this install the page it
+        # opens is served by the engine only, which the address people open ABI at does not reach (RELEASE.md, known limits)
+        raise ActionFailed(403, "A public link isn't available in this install. Use Share on the report: the people you pick open it"
+                                " after signing in.")
     if rls.rules(args.project):  # D-82
         raise ActionFailed(422, RULED)
     r = imports.load(args.project, "report", args.report)
@@ -48,8 +52,6 @@ def create_share_link(conn, user: User, args: NewLink) -> dict:
     expires = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=args.days)
     what = f"report '{r['name']}'" + (f", page '{page['name']}'," if page else "")
     require_confirmation(f"Anyone with this link can see {what} as you until {expires:%Y-%m-%d %H:%M} UTC.")
-    if actions.VIA.get() != "rest":  # SC-4: the link is a credential; it goes to the person's screen, never to an LLM or a trace
-        raise ActionFailed(403, "A share link is shown only to you, in the app.")
     token = secrets.token_urlsafe(32)
     row = conn.execute("INSERT INTO share_links (project, report, page, creator, token_hash, expires)"
                        " VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",

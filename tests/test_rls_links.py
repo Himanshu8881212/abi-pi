@@ -60,7 +60,7 @@ print("{}")
 """
 
 RLS = r"""
-import json, sys
+import json, re, sys
 from abi import semantic, storage
 from abi.semantic import rls
 a = json.loads(sys.stdin.read())
@@ -68,7 +68,16 @@ P, uid = a["project"], a["uid"]
 read = lambda sql, reads: semantic.execute(P, sql, {"test": "rls links"}, reads=reads)
 cols = semantic._columns_of(storage.lake(P).cursor(), "model")
 conds = rls.conditions(P, uid, read, cols)
-print(json.dumps({"explain": rls.explain(P, uid), "filtered": sorted(rls.filtered(P)), "conds": conds,
+# M10: the same filters with the rules and the follow links iterated all at once (as before), and with the key lists
+# built key by key: the same text, the same keys, whatever shape the test set up (a cycle, a chain, a composite key)
+rls.SETTLE = False
+at_once = rls.conditions(P, uid, read, cols)
+rls.IN_SQL = False
+by_key = rls.conditions(P, uid, read, cols)
+rls.SETTLE, rls.IN_SQL = True, True
+lits = lambda s: sorted(re.findall(r"CAST\('(?:[^']|'')*' AS [^()]*(?:\([^()]*\))?\)", s))
+same = {"settled_same": conds == at_once, "keys_same": sorted(conds) == sorted(by_key) and all(lits(conds[t]) == lits(by_key[t]) for t in conds)}
+print(json.dumps({"explain": rls.explain(P, uid), "filtered": sorted(rls.filtered(P)), "conds": conds, **same,
                   "keys": {t: rls.key_columns(P, t) for t in a.get("tables", ("cafes", "customers", "orders", "ml_churn"))},
                   "denied": rls.unfiltered_outputs(P)}))
 """
@@ -124,7 +133,9 @@ def every(links, **args) -> list:
 def state(links, **more) -> dict:
     r = engine(RLS, timeout=300, stdin=json.dumps({"project": P, "uid": links["uid"], **more}))
     assert r.returncode == 0, r.stderr[-3000:]
-    return json.loads(r.stdout.splitlines()[-1])
+    got = json.loads(r.stdout.splitlines()[-1])
+    assert got.pop("settled_same") is True and got.pop("keys_same") is True, "M10: one fixpoint, whichever order it is reached in"
+    return got
 
 
 @contextlib.contextmanager
@@ -414,6 +425,7 @@ def test_cycle_keeps_anonymous_orders(links, kind):
             with saved({**ONTO, "links": [{k: v for k, v in ln.items() if k != "rls"} for ln in ONTO["links"]]}):
                 assert mine(links, "sql_query", sql=q2)["rows"] == with_link, "orders: the same rows as without the link"
             assert [x[0] for x in with_link] == three[:2], "orders of the visible profiles only (no anonymous ones, as without the link)"
+            state(links)  # M10: the cycle with a rule on it settles to the same filters either way
         finally:
             sure("delete_rls_rule", project=P, id="notes")
     finally:
@@ -515,6 +527,7 @@ def test_follow_crosses_its_via_toward_f_only(links):
         assert [x[0] for x in mine(links, "sql_query", sql="SELECT cafe_id FROM cafes ORDER BY 1")["rows"]] == north[1:]
         assert mine(links, "sql_query", sql=f"SELECT count(*) FROM orders WHERE cafe_id = '{h}'")["rows"] == [[0]], "the hidden café's orders"
         assert mine(links, "sql_query", sql=q)["rows"] == want and want[0][1] > 0, "the rest, anonymous ones too"
+        state(links, tables=["cafes", "customers", "orders"])  # M10: the chain back to T settles to the same filters either way
     finally:
         for r in ("cafes-cafe_id", "cafe_owner-owner"):
             sure("remove_relationship", project=P, id=r)
@@ -712,6 +725,7 @@ def test_non_key_relationship_takes_rule_and_follow_parts(links):
                    f" AND customer_id IN ({VISITED})) ORDER BY 1")
         assert want and len(want) < len(sql("SELECT signup_date FROM signups"))
         assert mine(links, "sql_query", sql="SELECT signup_date FROM signups ORDER BY 1")["rows"] == want
+        state(links, tables=["cafes", "customers", "orders"])  # M10: a rule part and a follow part into one table: the same either way
     finally:
         sure("delete_rls_rule", project=P, id="students")
         sure("remove_relationship", project=P, id="signups-signup_date")
@@ -1075,19 +1089,22 @@ import json, re
 import duckdb
 from abi.semantic import rls
 con = duckdb.connect()
-con.execute("CREATE TABLE t (i INTEGER, d DECIMAL(10,2), day DATE, s VARCHAR, nothing INTEGER)")
-con.execute("INSERT INTO t VALUES (1, 1.50, DATE '2026-01-02', 'it''s', NULL), (2, -0.05, DATE '2026-01-03', 'a\\b', NULL),"
-            " (2, 1.50, NULL, NULL, NULL), (NULL, NULL, NULL, '', NULL), (10, 100.00, DATE '1999-12-31', 'ü', NULL)")
+con.execute("CREATE TYPE mood AS ENUM ('ok', 'it''s) OR true --')")
+con.execute("CREATE TABLE t (i INTEGER, d DECIMAL(10,2), day DATE, s VARCHAR, nothing INTEGER, m mood)")
+con.execute("INSERT INTO t VALUES (1, 1.50, DATE '2026-01-02', 'it''s', NULL, 'ok'), (2, -0.05, DATE '2026-01-03', 'a\\b', NULL, 'ok'),"
+            " (2, 1.50, NULL, NULL, NULL, NULL), (NULL, NULL, NULL, '', NULL, NULL), (10, 100.00, DATE '1999-12-31', 'ü', NULL, NULL)")
 out = {}
 for c in ("i", "d", "day", "s", "nothing"):
     for src in ("t", "t WHERE false"):
-        got = con.execute(rls._list_sql(c, src)).fetchone()[0]
+        plain, got = con.execute(rls._list_sql(c, src)).fetchone()
+        assert plain is not False, (c, plain)
         new = f'list_contains([{got}], "{c}")' if got else "FALSE"
         keys = sorted(con.execute(f'SELECT DISTINCT CAST("{c}" AS VARCHAR), typeof("{c}") FROM {src}').fetchall(), key=str)
         old = rls._in((c,), keys)
         lits = lambda s: sorted(re.findall(r"CAST\('(?:[^']|'')*' AS [^()]*(?:\([^()]*\))?\)", s))
         rows = con.execute(f"SELECT count(*) FILTER (WHERE {new}), count(*) FILTER (WHERE {old}), count(*) FILTER (WHERE ({new}) IS DISTINCT FROM ({old})) FROM t").fetchone()
         out[f"{c} {src}"] = [lits(new) == lits(old), len(lits(new)), list(rows), new == "FALSE", old == "FALSE"]
+out["enum"] = con.execute(rls._list_sql("m", "t")).fetchone()[0]  # a type whose name holds its values: not written this way
 print(json.dumps(out))
 """
 
@@ -1095,7 +1112,8 @@ print(json.dumps(out))
 def test_a_key_list_written_by_the_lake_equals_the_one_built_key_by_key():
     """M10: `rls._list_sql` writes the list `rls._in` builds, for an INTEGER, a DECIMAL, a DATE and a text column (a
     quote, a backslash, an empty string, a non-ASCII letter): the same literals, and the two filters keep the same
-    rows. A column of NULLs only, and no rows at all, deny in both."""
+    rows. A column of NULLs only, and no rows at all, deny in both. An ENUM column (its type's name holds its values, quotes
+    and all) is not written this way: `conditions.listed` then takes the key-by-key way."""
     r = engine(LISTS, timeout=120)
     assert r.returncode == 0, r.stderr[-2000:]
     got = json.loads(r.stdout.splitlines()[-1])
@@ -1103,4 +1121,4 @@ def test_a_key_list_written_by_the_lake_equals_the_one_built_key_by_key():
                    "d t": [True, 3, [4, 4, 0], False, False], "d t WHERE false": [True, 0, [0, 0, 0], True, True],
                    "day t": [True, 3, [3, 3, 0], False, False], "day t WHERE false": [True, 0, [0, 0, 0], True, True],
                    "s t": [True, 4, [4, 4, 0], False, False], "s t WHERE false": [True, 0, [0, 0, 0], True, True],
-                   "nothing t": [True, 0, [0, 0, 0], True, True], "nothing t WHERE false": [True, 0, [0, 0, 0], True, True]}, got
+                   "nothing t": [True, 0, [0, 0, 0], True, True], "nothing t WHERE false": [True, 0, [0, 0, 0], True, True], "enum": False}, got

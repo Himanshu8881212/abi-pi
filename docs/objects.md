@@ -244,8 +244,8 @@ records are the same one; a person decides. The example is a `customers` table k
 - After **Same customer** the group is one customer under one stable ID (the key of its first record). Reports,
   measures, the customer's page, flows and ML models count it once and show its orders together. The Data grid still
   shows the source rows. A merged customer's page lists its records; **Take out** splits one off again.
-- What identifies a customer can't change while decisions about customers are in force (`set_table` and an import
-  are refused): the decisions name records by that key. Undo them first, or keep the key.
+- What identifies a customer can't change while decisions about customers are in force (`set_table`, an import
+  and an undo of the project's files that would change it are refused): the decisions name records by that key. Undo them first, or keep the key.
 - Every decision is listed under **Decided** with who and when, and **Undo** takes it back. Decisions are kept in the
   input table `same_as_customers` (hidden from the model; one logged edit batch each). Only `decide_same` writes it:
   every other write-back, load and step into it is refused, Data › Edits doesn't offer it, a flow can't undo a

@@ -1177,10 +1177,19 @@ def test_a_replayed_call_is_the_agents_call(acts):
                          ("set_role", {"project": P, "user": acts["names"]["viewer"], "role": "owner"})):
         e = asked(action, **args)
         assert e.status == 403 and "confirm_token" not in e.body and "the person does it in the app" in e.body["message"], (action, e.body)
-    # a credential shown once is asked like anything else (the harness shows ABI's answer to the person alone: test_doors)
-    e = asked("create_embed_key", project=P, name="x", origins=["https://x.example.com"])
-    assert e.status == 409 and e.body["confirm_token"] and "https://x.example.com" in e.body["message"], e.body
-    assert not abi.call("list_embed_keys", project=P)["keys"]
+    # a public link and an embed key: refused to an agent before anything is asked (their pages don't open at the app's
+    # address), with what the person does instead; nothing is made
+    for action, args, said in (("create_share_link", {"report": "overview"}, "A public link isn't available in this install. Use Share on the report: the"
+                                                                             " people you pick open it after signing in."),
+                               ("create_embed_key", {"name": "x", "origins": ["https://x.example.com"]},
+                                "Embedding a report in another site isn't available in this install. Share the report instead: the people you pick"
+                                " open it after signing in.")):
+        e = asked(action, project=P, **args)
+        assert e.status == 403 and "confirm_token" not in e.body and e.body["message"] == said, e.body
+        if action == "create_share_link":  # the same from ABI's own agent, as an Editor (an embed key is an Owner's)
+            out = engine(AS, timeout=120, stdin=json.dumps({"uid": acts["uid"]["editor"], "via": "agent", "action": action, "args": {"project": P, **args}}))
+            assert json.loads(out.stdout.splitlines()[-1]) == {"status": 403, "body": {"message": said}}, out.stdout[-500:]
+    assert not abi.call("list_embed_keys", project=P)["keys"] and not abi.call("list_share_links", project=P).get("links")
     # a flow start with no confirmation of its own: asked, nothing starts; after the yes it runs, checked against the preview
     base = onto(acts["format"])
     sure("save_ontology", project=P, ontology={**base, "actions": [*base["actions"], {"id": "ping", "object": "cafe", "name": "Ping", "inputs": REASON, "flow": "cafe_visit"},

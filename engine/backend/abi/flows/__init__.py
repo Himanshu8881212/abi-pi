@@ -752,7 +752,10 @@ def tick(now: datetime) -> None:
     the last tick per enabled flow, or when it was enabled (`enabled_now`), so a flow enabled while the worker was down
     still gets its missed run once, and fires from before it was enabled are never caught up. A flow in neither (e.g.
     enabled by an undo) looks back one minute."""
-    storage._forget_gone()  # M10: also when no project is left to read (a worker reads a lake only for a live one)
+    try:  # M10: also when no project is left to read (a worker reads a lake only for a live one)
+        storage._forget_gone()
+    except psycopg.Error:  # the catalog didn't answer: the tick goes on, the next one asks again
+        pass
     with db.connect() as conn:
         last = {(r["project"], r["flow"]): r["checked"] for r in conn.execute("SELECT project, flow, checked FROM flow_schedule")}
     seen, per, broken, listed = [], [], [], git.projects()

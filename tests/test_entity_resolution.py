@@ -886,6 +886,22 @@ except actions.ActionFailed as e:
 """
 
 
+# the question an import and a project undo ask before a table's key changes
+REKEY = r"""
+import json, sys
+import abi.app  # noqa: F401
+from abi import actions
+from abi.project import imports
+a = json.loads(sys.stdin.read())
+m = lambda k: {"model/model.json": {"entities": [{"id": "customers", "table": "customers", "key": k}]}}
+try:
+    imports.keys_kept(a["project"], m(["customer_id"]), m(["name"]))
+    print(json.dumps("kept"))
+except actions.ActionFailed as e:
+    print(json.dumps([e.status, e.body["message"][:58]]))
+"""
+
+
 def test_er_undo_checks_again_inside_its_write(er):
     """M10 (round 5's LOWs): the newest-first rule is judged on the log an undo read; when the log changed before its
     write (two Editors at once) nothing is undone and the person is told to look again. What is no decision of the
@@ -916,12 +932,18 @@ def test_er_undo_checks_again_inside_its_write(er):
     assert rekeyed != bundle
     with pytest.raises(abi.ActionError) as e:
         sure("import_project", project=P, bundle=rekeyed)
-    assert e.value.status in (409, 422) and stored() == was_now, e.value.body
-    assert e.value.status == 422 or e.value.body["message"].startswith("What identifies these records can't change while decisions"), e.value.body
+    assert e.value.status == 409 and stored() == was_now, e.value.body
+    assert e.value.body["message"].startswith("What identifies these records can't change while decisions"), e.value.body
     [d] = [d for d in found()[0]["decisions"] if d["batch"] == first["batch"]]
     assert d["blocked"] is False and "blocked_by" not in d
+    # ... and on a project undo that would put the old key's files back (git.undo asks the same question before anything)
+    rekey = lambda: json.loads(engine(REKEY, timeout=120, stdin=json.dumps({"project": P})).stdout.splitlines()[-1])  # noqa: E731
+    assert rekey() == [409, "What identifies these records can't change while decisions"]
+    undo = (ROOT / "engine/backend/abi/project/git.py").read_text()
+    undo = undo[undo.index("def undo(conn, user: User, args: ProjectRef)"):]
+    assert undo.index("imports.keys_kept(args.project, old, files)") < undo.index("removed = _confirm(") < undo.index("_checkout(r, was.id)")
     call("undo_edits", table=S, batch=first["batch"])
-    assert by("revenue")[104] == 20
+    assert by("revenue")[104] == 20 and rekey() == "kept", "no decision in force: the key may change"
 
 
 def test_er_phone_conflicting_keys_and_production(tmp_path):

@@ -878,7 +878,7 @@ def test_opt_delete_is_refused_while_a_flow_runs_it(opt):
         sure("delete_flow", project=P, flow="plans_weekly")
     with pytest.raises(abi.ActionError) as e:  # free now: asked, then deleted
         call("delete_optimizer", optimizer="kept")
-    assert e.value.status == 409 and e.value.body["confirm_token"] and e.value.body["message"].startswith("Destructive: deletes the plan definition 'kept'")
+    assert e.value.status == 409 and e.value.body["confirm_token"] and e.value.body["message"] == "Destructive: deletes the plan “Kept plan”. Its runs and the proposals made from them stay. Confirm to proceed."
     sure("delete_optimizer", project=P, optimizer="kept")
     assert "kept" not in [o["id"] for o in call("optimizers")["optimizers"]]
 
