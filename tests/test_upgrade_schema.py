@@ -61,6 +61,50 @@ if seeded:
         for q in SEED:
             c.execute(q)
     before = rows()
+# 1.2.7 M0 (item 4): one row in EVERY table the old schema has, made from the catalog (a value per NOT NULL column
+# without a default, by its type; where a CHECK lists the values a column may hold, the first of them), with triggers
+# and foreign keys off for the insert only. Every column of every row is read back after this code's init.
+VALUE = {"text": "'x'", "varchar": "'x'", "int4": "1", "int8": "1", "int2": "1", "bool": "true", "jsonb": "'{}'", "json": "'{}'",
+         "timestamptz": "TIMESTAMPTZ '2026-11-01 00:00:00+00'", "timestamp": "TIMESTAMP '2026-11-01 00:00:00'", "date": "DATE '2026-11-01'",
+         "uuid": "'00000000-0000-0000-0000-000000000001'", "bytea": "'\\x00'", "numeric": "1", "float8": "1", "float4": "1",
+         "inet": "'127.0.0.1'", "interval": "'1 hour'"}
+def every():
+    with psycopg.connect(dbname=OLD) as c:
+        ts = [r[0] for r in c.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'"
+                                      " AND table_name <> 'schema_state' AND table_name NOT LIKE 'procrastinate%' ORDER BY 1").fetchall()]
+        return {t: sorted(json.dumps(r, default=str) for r in c.execute(f'SELECT * FROM "{t}"').fetchall()) for t in ts}
+def seed_all():
+    import re
+    bad = {}
+    with psycopg.connect(dbname=OLD, autocommit=True) as c:
+        c.execute("SET session_replication_role = replica")
+        checks = c.execute("SELECT conrelid::regclass::text, pg_get_constraintdef(oid) FROM pg_constraint WHERE contype = 'c'"
+                           " AND connamespace = 'public'::regnamespace").fetchall()
+        for t in every():
+            if c.execute(f'SELECT count(*) FROM "{t}"').fetchone()[0]:
+                continue  # SEED's rows
+            cols = c.execute("SELECT column_name, udt_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = %s"
+                             " AND is_nullable = 'NO' AND column_default IS NULL AND is_identity = 'NO' AND is_generated = 'NEVER'"
+                             " ORDER BY ordinal_position", [t]).fetchall()
+            vals = []
+            for col, typ in cols:
+                listed = next((m[1] for tt, d in checks if tt.strip('"') == t for m in [re.search(
+                    rf"\(?{col}\)?(?:::text)? = (?:ANY \(\(?ARRAY\[)?'([^']*)'", d)] if m), None)
+                vals.append(f"'{listed}'" if listed is not None else "'{}'" if typ.startswith("_") else VALUE.get(typ))
+            try:
+                if None in vals:
+                    raise ValueError(f"no value for a column of type {[ty for (_, ty), v in zip(cols, vals) if v is None]}")
+                c.execute(f'INSERT INTO "{t}" ({", ".join(chr(34) + x + chr(34) for x, _ in cols)}) VALUES ({", ".join(vals)})' if cols
+                          else f'INSERT INTO "{t}" DEFAULT VALUES')
+            except Exception as e:  # named in the result: the test fails on it
+                bad[t] = str(e)[:200]
+    return bad
+everything = os.environ.get("ABI_UPGRADE_ROWS") == "all"
+if everything:
+    with psycopg.connect(dbname=OLD) as c:
+        for q in SEED:
+            c.execute(q)
+    unseeded, all_before = seed_all(), every()
 got, state = {}, {}
 for d in (OLD, NEW):
     os.environ["PGDATABASE"] = d
@@ -69,6 +113,13 @@ for d in (OLD, NEW):
         got[d] = {k: {json.dumps(r, default=str) for r in c.execute(q).fetchall()} for k, q in Q.items()}
         state[d] = c.execute("SELECT app_schema FROM schema_state").fetchone()[0]
 kept = {"rows": [rows() == before, sum(map(len, before.values()))]} if seeded else {}
+if everything:
+    after = every()  # the old tables' rows, every column the upgraded table has
+    # a column the upgrade added shows in `after` only: compared on the columns the row had (json lists are positional,
+    # and columns are only ever added at the end)
+    changed = sorted(t for t in all_before if t not in after or len(after[t]) != len(all_before[t]) or any(
+        json.loads(a)[:len(json.loads(b))] != json.loads(b) for a, b in zip(after[t], all_before[t])))
+    kept = {"all": {"tables": len(all_before), "empty": sorted(t for t, r in all_before.items() if not r), "unseeded": unseeded, "changed": changed}}
 for d in (OLD, NEW):
     admin.execute(f"DROP DATABASE {d} WITH (FORCE)")
 print(json.dumps({k: sorted(got[NEW][k] - got[OLD][k]) for k in Q} | kept | {"fresh": {k: len(v) for k, v in got[NEW].items()},
@@ -146,3 +197,23 @@ def test_a_plans_table_from_before_started_gets_the_column_and_keeps_its_runs():
     r = engine(ROUND1, timeout=180)
     assert r.returncode == 0, r.stderr[-2000:]
     assert json.loads(r.stdout.strip().splitlines()[-1]) == {"started": True, "stale": 0, "rows": [["hours", "running", None]]}
+
+
+@pytest.mark.skipif(not PY.exists() or engine("from abi import db; db.connect().close()").returncode, reason="engine's Postgres not running")
+def test_every_table_seeded(monkeypatch):
+    """1.2.7 M0 (item 4): 1.2.6's upgrade test put a project's rows into 11 of the database's tables. Here every table
+    1.2.5's schema has holds a row before this code's init (made from the catalog, so a table added to an old schema
+    is seeded without a line here), and every row reads the same afterwards in every column it had: an upgrade that
+    rewrote, dropped or failed on a row of any table fails here."""
+    monkeypatch.setenv("ABI_UPGRADE_REF", REF_125)
+    monkeypatch.setenv("ABI_UPGRADE_VERSION", "1.2.5")
+    monkeypatch.setenv("ABI_UPGRADE_ROWS", "all")
+    r = engine(UPGRADE, timeout=240)
+    assert r.returncode == 0, r.stderr[-3000:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    got = out["all"]
+    assert got["unseeded"] == {} and got["empty"] == [], got
+    assert got["tables"] >= 55, got["tables"]  # every table but schema_state (the upgrade's own row) and the job queue's
+    assert got["changed"] == [], got["changed"]
+    assert out["schema"][0] == 5 and out["schema"][1] == out["schema"][2] == out["schema"][3], out["schema"]
+    assert out["columns"] == [] and out["constraints"] == [] and out["indexes"] == [] and out["triggers"] == [], out

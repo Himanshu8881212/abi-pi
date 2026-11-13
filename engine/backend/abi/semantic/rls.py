@@ -344,7 +344,8 @@ def conditions(project: str, user_id: int, read, types: dict | None = None, keep
     back = {f["id"]: f["back"] for f in fl}
     vis = lambda x, conds: " AND ".join(c for _, c in conds.get(x, []))  # noqa: E731
     denied = unfiltered_outputs(project)  # once per build: it hashes every file of the project
-    blank, hid = (_blanks(project, user_id, types, denied), _hidden(project, user_id)) if fl else (None, {})
+    hid = _hidden(project, user_id) if fl else {}  # once per build too (1.2.7 M0: `_blanks` read it again)
+    blank = _blanks(project, user_id, types, denied, hid) if fl else None
 
     @functools.cache  # fixpoint rounds repeat unchanged reads: run each once
     def held(src: str, cols: tuple[str, ...], on: tuple[str, ...]) -> str:
@@ -480,12 +481,12 @@ def crosses(back: dict, r: dict, tag: frozenset) -> bool:
     return not any((r["id"], r["from"]["table"]) in back.get(x, ()) for x in tag)
 
 
-def _blanks(project: str, user_id: int | None, types: dict | None = None, denied: list | None = None):
+def _blanks(project: str, user_id: int | None, types: dict | None = None, denied: list | None = None, hid: dict | None = None):
     """t -> t shows this user no rows whatever its filter: made from filtered rows (`unfiltered_outputs`) or every
     column hidden (`context`). A follow link reading such a table denies its F."""
     from abi.semantic import model  # not at top: model imports the semantic package
 
-    denied, hid = set(unfiltered_outputs(project) if denied is None else denied), _hidden(project, user_id)
+    denied, hid = set(unfiltered_outputs(project) if denied is None else denied), _hidden(project, user_id) if hid is None else hid
 
     def blank(t: str) -> bool:
         if t in denied:
