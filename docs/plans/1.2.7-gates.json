@@ -1,0 +1,516 @@
+{
+ "M0": {
+  "title": "Guard, carried fixes, the follow-link redesign",
+  "items": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9
+  ],
+  "tests": [
+   "tests/test_127_nobreak.py::test_plan_sql_unchanged_without_new_files",
+   "tests/test_127_nobreak.py::test_rls_views_unchanged_without_follow_links",
+   "tests/test_127_nobreak.py::test_126_bundle_roundtrip_no_new_files",
+   "tests/test_rls_links.py::test_follow_view_holds_no_key_list",
+   "tests/test_rls_links.py::test_follow_key_table_equals_inlined_list",
+   "tests/test_rls_links.py::test_follow_key_table_not_nameable",
+   "tests/test_rls_links.py::test_follow_enum_key",
+   "tests/test_rls_links.py::test_follow_row_order_kept",
+   "tests/test_rls_links.py::test_follow_key_table_dropped_with_snapshot",
+   "tests/test_rls_links.py::test_two_people_same_condition_share_one_key_table",
+   "tests/test_rls_shared.py",
+   "tests/test_ground.py::test_count_word_before_named_items_grounds",
+   "tests/test_ground.py::test_count_word_wrong_number_masked",
+   "tests/test_object_actions.py::test_long_input_refused_before_the_question",
+   "tests/test_doors.py::test_outside_agent_cannot_queue_public_link",
+   "tests/test_ontology.py::test_project_undo_asks_key_rule",
+   "tests/test_upgrade_schema.py::test_every_table_seeded",
+   "tests/test_objects.py::test_object_removed_keeps_type_working",
+   "tests/test_objects.py::test_queued_score_after_object_removed",
+   "tests/test_object_flows.py::test_unreached_post_no_cooldown",
+   "tests/test_object_flows.py::test_owner_gets_one_message_per_failure",
+   "tests/test_object_flows.py::test_deleted_flow_posts_nothing",
+   "tests/test_entity_resolution.py::test_undo_log_error_fails_closed",
+   "tests/test_entity_resolution.py::test_undo_of_1000_decisions_under_2s",
+   "tests/test_entity_resolution.py::test_two_editors_decide_at_once",
+   "tests/test_entity_resolution.py::test_blocked_decision_says_why",
+   "tests/test_entity_resolution.py::test_same_names_show_keys",
+   "tests/test_entity_resolution.py::test_resolve_removed_asks",
+   "tests/test_optimizers.py::test_caps_hold_in_parallel",
+   "tests/test_optimizers.py::test_failed_run_leaves_no_proposal",
+   "tests/test_optimizers.py::test_narrowed_rule_drops_old_run",
+   "tests/test_optimizers.py::test_delete_refused_while_flow_runs_it",
+   "tests/test_optimizers.py::test_viewer_run_keeps_editor_review",
+   "tests/test_pages.py::test_renamed_project_keeps_history",
+   "tests/test_pages.py::test_form_card_gap_closes",
+   "tests/test_perf.py::test_idle_project_instance_is_closed",
+   "tests/test_perf.py::test_reopened_after_idle_reads_same"
+  ],
+  "also": "golden byte-identical with no new files and no follow link; restricted pages (bench/perf.py pages --sessions 50 --rls cafes.cafe_id, scale 1, visited follows): mean of 3 after-commit p95 <= 1.2x the mean of 3 runs of 1.2.5 measured the same day; a restricted view's text <= 4 KB per table with a follow link; first read after a restart of a Viewer following to 60,000 customers <= 3.5 s; report bench 10/10 over two runs of five, 0 masked; bench/soak.py 24 h on pve1: engine and default worker each grow <= 10 MB over the last 12 h with a fixed number of projects; every number recorded in bench/RESULTS.md the day it is measured",
+  "depends": [],
+  "reviewers": 2,
+  "owner_sketch_first": false,
+  "days": 11
+ },
+ "M1": {
+  "title": "The event log as code",
+  "items": [
+   10,
+   11,
+   12,
+   13,
+   14,
+   15
+  ],
+  "tests": [
+   "tests/test_process_log.py::test_schema_examples_valid",
+   "tests/test_process_log.py::test_missing_timestamp_column_names_file_field_fix",
+   "tests/test_process_log.py::test_object_type_key_mismatch_refused",
+   "tests/test_process_log.py::test_build_writes_events_and_per_type_tables",
+   "tests/test_process_log.py::test_cleanup_counts_dropped_rows_by_reason",
+   "tests/test_process_log.py::test_unpivot_timestamp_columns",
+   "tests/test_process_log.py::test_start_and_end_give_duration",
+   "tests/test_process_log.py::test_same_time_order_is_stable",
+   "tests/test_process_log.py::test_event_on_two_objects_counted_once",
+   "tests/test_process_log.py::test_double_counting_measure_refused",
+   "tests/test_process_log.py::test_restricted_viewer_reads_only_their_cases",
+   "tests/test_process_log.py::test_events_table_denied_to_restricted",
+   "tests/test_process_log.py::test_propose_writes_nothing",
+   "tests/test_process_log.py::test_propose_respects_rls",
+   "tests/test_process_log.py::test_save_asks_confirmation_with_lineage",
+   "tests/test_process_log.py::test_rebuild_after_refresh",
+   "tests/test_process_log.py::test_reserved_table_name_clash_named",
+   "tests/test_process_log.py::test_roundtrip_export_import_identical",
+   "tests/test_brewline.py::test_process_data_known_answers"
+  ],
+  "also": "build of 5,000,000 events (Brewline scale 1) <= 60 s and <= 1.5 GB in the heavy worker on pve1; a refresh that changed no source table starts 0 builds; golden byte-identical",
+  "depends": [
+   "M0"
+  ],
+  "reviewers": 1,
+  "owner_sketch_first": false,
+  "days": 7
+ },
+ "M2": {
+  "title": "Discovery, variants, performance, filters",
+  "items": [
+   16,
+   17,
+   18,
+   19,
+   20
+  ],
+  "tests": [
+   "tests/test_process_mine.py::test_dfg_counts_match_known_answers",
+   "tests/test_process_mine.py::test_start_and_end_activities",
+   "tests/test_process_mine.py::test_detail_says_what_it_left_out",
+   "tests/test_process_mine.py::test_variants_by_string_agg_shares_sum_to_100",
+   "tests/test_process_mine.py::test_variant_id_is_stable",
+   "tests/test_process_mine.py::test_heuristic_miner_finds_planted_model",
+   "tests/test_process_mine.py::test_miner_drops_rare_pair_below_threshold",
+   "tests/test_process_mine.py::test_miner_keeps_short_loops",
+   "tests/test_process_mine.py::test_throughput_per_month_known",
+   "tests/test_process_mine.py::test_waiting_and_working_time_known",
+   "tests/test_process_mine.py::test_bottleneck_is_planted_pair",
+   "tests/test_process_mine.py::test_filter_time_variant_attribute",
+   "tests/test_process_mine.py::test_filter_start_end_activity_and_duration",
+   "tests/test_process_mine.py::test_filter_follows_and_contains",
+   "tests/test_process_mine.py::test_filters_compose",
+   "tests/test_process_mine.py::test_restricted_map_equals_map_of_own_cases",
+   "tests/test_process_mine.py::test_delivery_view_and_order_view_do_not_add",
+   "tests/test_ground.py::test_process_activity_names_and_figures_ground"
+  ],
+  "also": "at 5,000,000 events process_map and process_variants p95 of 20 <= 2 s warm and <= 6 s cold on pve1; each read is exactly 1 logged query as the person; golden byte-identical",
+  "depends": [
+   "M1"
+  ],
+  "reviewers": 1,
+  "owner_sketch_first": false,
+  "days": 7
+ },
+ "M3": {
+  "title": "The process map and the case explorer",
+  "items": [
+   21,
+   22,
+   23
+  ],
+  "tests": [
+   "tests/test_pages.py::test_process_page_renders_map",
+   "tests/test_pages.py::test_map_switches_frequency_and_time",
+   "tests/test_pages.py::test_map_click_filters_every_tab",
+   "tests/test_pages.py::test_variant_click_filters_and_offers_reference",
+   "tests/test_pages.py::test_case_timeline_orders_events_and_links_objects",
+   "tests/test_pages.py::test_object_page_shows_its_process",
+   "tests/test_pages.py::test_process_viewer_sees_only_their_cases",
+   "tests/test_pages.py::test_process_page_phone_width",
+   "tests/test_pages.py::test_process_map_labels_apart_and_whole",
+   "tests/test_sections.py::test_process_page_section"
+  ],
+  "also": "owner's sketch OK recorded before the build; intuitiveness I1-I6 all pass; a map of 30 activities and 120 pairs drawn in < 1 s in the test browser; 390 px: 0 sideways scroll; owner's click-through done on the server before M4's screen work",
+  "depends": [
+   "M2"
+  ],
+  "reviewers": 1,
+  "owner_sketch_first": true,
+  "days": 7
+ },
+ "M4": {
+  "title": "KPIs as measures, reference model, conformance, BPMN and OCEL",
+  "items": [
+   24,
+   25,
+   26,
+   27,
+   28
+  ],
+  "tests": [
+   "tests/test_process_conform.py::test_case_table_one_row_per_case",
+   "tests/test_process_conform.py::test_kpi_measures_added_only_on_approval",
+   "tests/test_process_conform.py::test_cycle_time_measure_equals_known",
+   "tests/test_process_conform.py::test_rework_and_happy_share_known",
+   "tests/test_process_conform.py::test_sla_share_known",
+   "tests/test_process_conform.py::test_kpi_by_dimension_through_object",
+   "tests/test_process_conform.py::test_case_columns_are_object_properties",
+   "tests/test_process_conform.py::test_reference_from_variant",
+   "tests/test_process_conform.py::test_reference_drawn_saved_as_code",
+   "tests/test_process_conform.py::test_reference_from_discovered_model",
+   "tests/test_process_conform.py::test_bpmn_import_subset",
+   "tests/test_process_conform.py::test_bpmn_doctype_refused",
+   "tests/test_process_conform.py::test_bpmn_too_big_refused",
+   "tests/test_process_conform.py::test_bpmn_unread_elements_listed",
+   "tests/test_process_conform.py::test_bpmn_unmatched_names_asked",
+   "tests/test_process_conform.py::test_conformance_finds_planted_deviations",
+   "tests/test_process_conform.py::test_parallel_steps_conform_in_any_order",
+   "tests/test_process_conform.py::test_fitness_known",
+   "tests/test_process_conform.py::test_ocel_export_counts_match_log",
+   "tests/test_process_conform.py::test_ocel_export_respects_rls",
+   "tests/test_process_conform.py::test_ocel_import_bad_file_refused_whole",
+   "tests/test_process_conform.py::test_ocel_import_then_propose",
+   "tests/test_pages.py::test_case_timeline_marks_deviations"
+  ],
+  "also": "conformance over 1,000,000 cases <= 10 s on pve1; fuzz of 10,000 mutated BPMN and 10,000 mutated OCEL files: 0 crashes, 0 file or network access, each <= 1 s and <= 200 MB; golden byte-identical",
+  "depends": [
+   "M2",
+   "M3"
+  ],
+  "reviewers": 2,
+  "owner_sketch_first": false,
+  "days": 9,
+  "note": "tests/container_fuzz.py gains a BPMN and an OCEL target (run by the gate, not a pytest id)"
+ },
+ "M5": {
+  "title": "Root cause, alerts per case, the agent's process tools",
+  "items": [
+   29,
+   30,
+   31,
+   32
+  ],
+  "tests": [
+   "tests/test_process_cause.py::test_root_cause_finds_planted_supplier",
+   "tests/test_process_cause.py::test_root_cause_respects_rls",
+   "tests/test_process_cause.py::test_root_cause_rows_ground",
+   "tests/test_process_cause.py::test_train_on_outcome_waits_for_yes",
+   "tests/test_object_flows.py::test_alert_per_stuck_case",
+   "tests/test_object_flows.py::test_alert_once_per_case",
+   "tests/test_object_flows.py::test_case_alert_recipient_must_see_case",
+   "tests/test_process_log.py::test_open_case_age_refreshes",
+   "tests/test_doors.py::test_process_reads_in_viewer_mode",
+   "tests/test_doors.py::test_process_tools_outside_are_reads_only",
+   "tests/test_ground.py::test_digest_lists_processes",
+   "tests/test_scenarios.py::test_process_question_uses_process_tools"
+  ],
+  "also": "intuitiveness I7-I8 pass (each new tool description <= 300 characters; each schema error names the field and a valid value; docs/process.md exists); live: 'why are deliveries slow?' names the planted supplier with every figure grounded in 3 of 3 runs",
+  "depends": [
+   "M4"
+  ],
+  "reviewers": 1,
+  "owner_sketch_first": false,
+  "days": 5,
+  "note": "tests/test_scenarios.py::test_process_question_uses_process_tools is live (needs a model): run on pve1, skipped in CI"
+ },
+ "M6": {
+  "title": "What Publish carries; Viewers submit forms",
+  "items": [
+   33,
+   34,
+   35,
+   36,
+   37
+  ],
+  "tests": [
+   "tests/test_publish_actions.py::test_publish_keeps_granted_actions_and_form_cards",
+   "tests/test_publish_actions.py::test_ungranted_action_not_in_copy",
+   "tests/test_publish_actions.py::test_viewer_submits_form_on_published_app",
+   "tests/test_publish_actions.py::test_viewer_cannot_run_editor_action",
+   "tests/test_publish_actions.py::test_hidden_object_404_on_copy",
+   "tests/test_publish_actions.py::test_restricted_viewer_write_checked_in_working_project",
+   "tests/test_publish_actions.py::test_changed_action_since_publish_refused_with_next_step",
+   "tests/test_publish_actions.py::test_written_value_shows_on_copy",
+   "tests/test_publish_actions.py::test_flow_starts_once_in_working_project",
+   "tests/test_publish_actions.py::test_merge_carried_to_copy",
+   "tests/test_publish_actions.py::test_approved_plan_values_carried",
+   "tests/test_publish_actions.py::test_undo_carried",
+   "tests/test_publish_actions.py::test_carry_is_idempotent",
+   "tests/test_publish_actions.py::test_carry_starts_no_flow",
+   "tests/test_publish_actions.py::test_agent_in_viewer_mode_still_refused",
+   "tests/test_publish_actions.py::test_viewer_text_is_data_in_an_agent_step",
+   "tests/test_publish_actions.py::test_submit_rate_capped_per_person",
+   "tests/test_pages.py::test_the_published_copy_shows_objects_and_runs_granted_actions",
+   "tests/test_pages.py::test_form_on_phone_width",
+   "tests/test_pages.py::test_your_submissions_only_own"
+  ],
+  "also": "written value on the published page <= 5 s after the submit (p95 of 20); 50 Viewers submitting at once: 0 lost, 0 doubled; <= 30 submits per minute per person; intuitiveness I1-I6 pass; owner's click-through done; the one changed assert (the published copy runs nothing -> runs granted actions) is coordinator-approved",
+  "depends": [
+   "M0"
+  ],
+  "reviewers": 2,
+  "owner_sketch_first": false,
+  "days": 8,
+  "note": "replaces tests/test_pages.py::test_the_published_copy_shows_objects_and_runs_nothing"
+ },
+ "M7": {
+  "title": "The app file and the app at run time",
+  "items": [
+   38,
+   39,
+   40,
+   41,
+   42,
+   43
+  ],
+  "tests": [
+   "tests/test_apps.py::test_schema_examples_valid",
+   "tests/test_apps.py::test_unknown_action_names_file_field_fix",
+   "tests/test_apps.py::test_required_input_cannot_be_hidden_without_default",
+   "tests/test_apps.py::test_nav_to_missing_screen_refused",
+   "tests/test_apps.py::test_needs_screen_unreachable_refused",
+   "tests/test_apps.py::test_no_markup_in_text",
+   "tests/test_apps.py::test_size_caps_have_messages",
+   "tests/test_apps.py::test_lineage_app_downstream_of_action",
+   "tests/test_apps.py::test_delete_action_used_by_app_refused",
+   "tests/test_apps.py::test_save_app_confirm_lists_viewer_forms",
+   "tests/test_apps.py::test_apps_read_leaves_out_blocks_a_viewer_cannot_use",
+   "tests/test_apps.py::test_roundtrip_export_import_identical",
+   "tests/test_apps.py::test_publish_carries_app",
+   "tests/test_pages.py::test_app_runs_screens_and_navigation",
+   "tests/test_pages.py::test_app_selection_passes_between_screens",
+   "tests/test_pages.py::test_app_conditional_field_shows_and_hides",
+   "tests/test_pages.py::test_app_form_submits_action",
+   "tests/test_pages.py::test_app_phone_width_single_column",
+   "tests/test_pages.py::test_app_objects_are_clickable",
+   "tests/test_pages.py::test_app_process_block_renders"
+  ],
+  "also": "owner's sketch OK recorded before the build; a screen of 8 blocks paints <= 2 s on Brewline 0.05; app file caps 256 KB, 30 screens, 40 blocks per screen; intuitiveness I1-I6 and I8 pass; owner's click-through done",
+  "depends": [
+   "M6",
+   "M3"
+  ],
+  "reviewers": 1,
+  "owner_sketch_first": true,
+  "days": 9
+ },
+ "M8": {
+  "title": "The app builder and the tenth specialist",
+  "items": [
+   44,
+   45,
+   46,
+   47
+  ],
+  "tests": [
+   "tests/test_apps.py::test_propose_app_from_ontology_writes_nothing",
+   "tests/test_apps.py::test_add_block_is_a_confirmed_save",
+   "tests/test_pages.py::test_app_editor_moves_block_and_saves_same_json",
+   "tests/test_pages.py::test_app_editor_form_designer_sets_condition",
+   "tests/test_pages.py::test_app_editor_phone_preview",
+   "tests/test_pages.py::test_app_editor_business_names_only",
+   "tests/test_team.py::test_team_has_ten_specialists",
+   "tests/test_team.py::test_app_builder_tools_and_areas",
+   "tests/test_team.py::test_app_builder_post_check_reads_every_block",
+   "tests/test_guardrails.py::test_app_text_is_data_not_instruction",
+   "tests/test_scenarios.py::test_agent_builds_app_from_plain_request"
+  ],
+  "also": "owner's sketch OK recorded before the build; live: 3 plain requests -> 3 apps valid at the first save or after <= 1 fix, each approved with 1 confirmation; bench/bench.py task 'app' 3/3; intuitiveness I1-I8 pass; owner's click-through done",
+  "depends": [
+   "M7"
+  ],
+  "reviewers": 1,
+  "owner_sketch_first": true,
+  "days": 9,
+  "note": "tests/test_scenarios.py::test_agent_builds_app_from_plain_request is live (needs a model): run on pve1, skipped in CI"
+ },
+ "M9": {
+  "title": "The public share view at the app's address",
+  "items": [
+   48,
+   49,
+   50,
+   51
+  ],
+  "tests": [
+   "tests/test_share_door.py::test_share_page_opens_at_app_address",
+   "tests/test_share_door.py::test_share_token_in_no_path_or_log",
+   "tests/test_share_door.py::test_pass_through_forwards_only_the_share_header",
+   "tests/test_share_door.py::test_pass_through_refuses_other_api_paths",
+   "tests/test_share_door.py::test_expired_or_revoked_link_says_so",
+   "tests/test_share_door.py::test_share_off_with_row_rules",
+   "tests/test_share_door.py::test_share_view_has_no_forms_or_actions",
+   "tests/test_share_door.py::test_share_rate_limited_per_address",
+   "tests/test_share_door.py::test_share_answers_no_referrer_noindex_no_store",
+   "tests/test_share_door.py::test_agent_still_cannot_make_public_link",
+   "tests/test_share_door.py::test_link_shown_is_the_whole_app_address",
+   "tests/test_share_door.py::test_hook_reaches_engine_at_app_address",
+   "tests/test_share_door.py::test_embed_keeps_frame_ancestors"
+  ],
+  "also": "bench/routes.py: 100% of the addresses a person is given answer through the app's port; 10,000 made-up paths under the passed prefixes: 0 reach another engine route; the token in 0 log lines and 0 Referer headers; intuitiveness I4 and I6 pass; owner's click-through done",
+  "depends": [
+   "M0"
+  ],
+  "reviewers": 2,
+  "owner_sketch_first": false,
+  "days": 4
+ },
+ "M10": {
+  "title": "Graph analytics",
+  "items": [
+   52,
+   53,
+   54,
+   55,
+   56,
+   57,
+   58
+  ],
+  "tests": [
+   "tests/test_graph.py::test_schema_and_roundtrip_export_import_identical",
+   "tests/test_graph.py::test_edges_read_through_ontology_link",
+   "tests/test_graph.py::test_degree_and_weighted_degree",
+   "tests/test_graph.py::test_pagerank_equals_oracle",
+   "tests/test_graph.py::test_betweenness_sampled_within_tolerance",
+   "tests/test_graph.py::test_communities_find_planted_groups",
+   "tests/test_graph.py::test_scores_are_object_properties",
+   "tests/test_graph.py::test_shortest_path_known",
+   "tests/test_graph.py::test_path_never_crosses_hidden_object",
+   "tests/test_graph.py::test_reach_depth_and_direction",
+   "tests/test_graph.py::test_similar_topn_known",
+   "tests/test_graph.py::test_link_prediction_is_proposal",
+   "tests/test_graph.py::test_approved_link_becomes_ontology_link",
+   "tests/test_graph.py::test_reject_and_undo_link",
+   "tests/test_graph.py::test_scores_denied_to_restricted_by_default",
+   "tests/test_graph.py::test_owner_grant_states_what_is_shown",
+   "tests/test_graph.py::test_pairs_need_both_ends_visible",
+   "tests/test_graph.py::test_too_many_links_refused_with_next_step",
+   "tests/test_graph.py::test_time_limit",
+   "tests/test_graph.py::test_rerun_after_refresh",
+   "tests/test_pages.py::test_object_page_shows_scores_and_similar",
+   "tests/test_doors.py::test_graph_reads_in_viewer_mode"
+  ],
+  "also": "3,000,000 links on pve1: read + PageRank + components + communities <= 60 s and <= 1.5 GB in the heavy worker; graph_path on the visible part <= 2 s; refused above 5,000,000 links; only BSD/MIT/Apache code added (scipy BSD-3-Clause direct pin; networkx BSD-3-Clause test-only); intuitiveness I1-I8 pass; owner's click-through done",
+  "depends": [
+   "M0"
+  ],
+  "reviewers": 2,
+  "owner_sketch_first": false,
+  "days": 10
+ },
+ "M11": {
+  "title": "Navigation: Explore folds into chat",
+  "items": [
+   59,
+   60,
+   61,
+   62,
+   63
+  ],
+  "tests": [
+   "tests/test_sections.py::test_sidebar_sections_127",
+   "tests/test_sections.py::test_explore_not_in_sidebar_route_still_opens",
+   "tests/test_sections.py::test_section_rights_unchanged",
+   "tests/test_pages.py::test_chart_appears_in_chat_with_keep_it",
+   "tests/test_pages.py::test_keep_it_pins_to_home",
+   "tests/test_pages.py::test_keep_it_saves_analysis",
+   "tests/test_pages.py::test_keep_it_adds_to_app_after_yes",
+   "tests/test_pages.py::test_saved_analysis_from_126_opens",
+   "tests/test_pages.py::test_home_pin_of_analysis_opens",
+   "tests/test_ground.py::test_instructions_say_chat_not_explore",
+   "tests/test_doors.py::test_viewer_can_keep_a_chart"
+  ],
+  "also": "owner's sketch OK recorded before the build; AI bench on pve1 (the 1.2.6 release run's runs plus the app task): ask 10/10, why >= 18/20, report 5/5, load 3/3, app 3/3, 0 masked, 0 wrong numbers; median why time <= 1.2x 1.2.6's (8.5 s north, 12.6 s retail); intuitiveness I1-I7 pass; owner's click-through done",
+  "depends": [
+   "M8"
+  ],
+  "reviewers": 1,
+  "owner_sketch_first": true,
+  "days": 5
+ },
+ "M12": {
+  "title": "Theme and the name NORN",
+  "items": [
+   64,
+   65,
+   66,
+   67,
+   68
+  ],
+  "tests": [
+   "tests/test_theme.py::test_theme_values_are_the_website_tokens",
+   "tests/test_theme.py::test_no_colour_outside_the_theme_block",
+   "tests/test_theme.py::test_no_font_radius_or_shadow_outside_the_theme_block",
+   "tests/test_theme.py::test_contrast_aa_light_and_dark",
+   "tests/test_theme.py::test_chart_colours_distinct",
+   "tests/test_theme.py::test_visible_name_in_signin_header_and_emails",
+   "tests/test_theme.py::test_code_names_stay_abi",
+   "tests/test_fonts.py",
+   "tests/test_layout.py",
+   "tests/test_pages.py::test_the_objects_picture_keeps_every_label_apart_and_whole",
+   "tests/test_pages.py::test_process_map_labels_apart_and_whole",
+   "tests/test_apps.py::test_app_file_has_no_colours"
+  ],
+  "also": "owner's theme sheet OK recorded before the build; the 1.2.5 tour (bench/ux_shot.py --tour, owner and viewer, 1440 and 390 px, light and dark): 0 failed checks, every step but Explore's still runs; text contrast >= 4.5:1; 0 colour, font, radius or shadow values outside the theme block; tests/test_layout.py and the picture tests green with 0 asserts changed; intuitiveness I1-I6 pass on every page",
+  "depends": [
+   "M3",
+   "M6",
+   "M7",
+   "M8",
+   "M9",
+   "M10",
+   "M11"
+  ],
+  "reviewers": 1,
+  "owner_sketch_first": true,
+  "days": 7
+ },
+ "M13": {
+  "title": "Release run",
+  "items": [
+   69,
+   70,
+   71,
+   72,
+   73,
+   74,
+   75,
+   76
+  ],
+  "tests": [
+   "tests/test_brewline.py::test_demo_journey",
+   "tests/test_roundtrip.py::test_every_area_roundtrips_identical",
+   "tests/test_upgrade_schema.py::test_a_1_2_6_database_upgrades_to_this_schema",
+   "tests/test_127_nobreak.py"
+  ],
+  "also": "restricted pages mean p95 <= 1.2x 1.2.5; AI bench as M11; upgrade 1.2.6 -> 1.2.7 on a pve1 volume: schema 7 -> 8, every recorded answer byte-identical as Owner and as a restricted Viewer, every project file and Git head unchanged, 0 new folders, 0 errors in the log; round trip identical for ontology, processes, apps, graphs, optimisers, flows, reports; the demo script run 3 times, each <= 5 minutes; bench/routes.py 100%; bench/soak.py 24 h within M0's bound; the sentences shown to people checked true; docs/plans/2.0-ideas.md written; owner OK to tag and to upgrade the live install",
+  "depends": [
+   "M12"
+  ],
+  "reviewers": 2,
+  "owner_sketch_first": false,
+  "days": 7
+ }
+}
