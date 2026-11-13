@@ -51,7 +51,10 @@
    "tests/test_pages.py::test_form_card_gap_closes",
    "tests/test_perf.py::test_idle_project_instance_is_closed",
    "tests/test_perf.py::test_reopened_after_idle_reads_same",
-   "tests/test_pages.py::test_objects_entry_shows_before_any_object_exists"
+   "tests/test_pages.py::test_objects_entry_shows_before_any_object_exists",
+   "tests/test_ontology.py::test_proposal_is_not_a_mirror_of_the_tables",
+   "tests/test_pages.py::test_object_page_shows_measures_and_linked_titles",
+   "tests/test_pages.py::test_objects_overview_is_not_the_table_diagram"
   ],
   "also": "golden byte-identical with no new files and no follow link; restricted pages (bench/perf.py pages --sessions 50 --rls cafes.cafe_id, scale 1, visited follows): mean of 3 after-commit p95 <= 1.2x the mean of 3 runs of 1.2.5 measured the same day; a restricted view's text <= 4 KB per table with a follow link; first read after a restart of a Viewer following to 60,000 customers <= 3.5 s; report bench 10/10 over two runs of five, 0 masked; bench/soak.py 24 h on pve1: engine and default worker each grow <= 10 MB over the last 12 h with a fixed number of projects; every number recorded in bench/RESULTS.md the day it is measured",
   "depends": [],
