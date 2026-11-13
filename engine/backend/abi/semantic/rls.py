@@ -423,6 +423,7 @@ def conditions(project: str, user_id: int, read, types: dict | None = None, keep
                     cs.append((tag, ch(t, fk, src, key, reads)))
                 elif tag and keep and d not in lv:  # made from a follow link: d's visible keys are as many as the link's
                     on = " AND ".join(f"__d.{storage._q(k)} = {storage._q(t)}.{storage._q(f)}" for f, k in zip(fk, key))
+                    # (never the type d's own filter tests: a foreign key that is no row of d is in no visible row's key)
                     cs.append((tag, held(src, key, fk) if same else held(f"{storage._q(t)} WHERE EXISTS (SELECT 1 FROM {src} WHERE {on})", fk, fk)))
                 elif d not in lv and all((types or {}).get(t, {}).get(f, 1) == (types or {}).get(d, {}).get(k, 2)
                                          for f, k in zip(fk, key)):
