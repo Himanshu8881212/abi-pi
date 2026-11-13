@@ -681,7 +681,7 @@ def test_viewer_sees_only_visible(objs, tmp_path):
     assert "Viewer mode is read-only" in ran["error"] and objs["sql"](f"SELECT manager FROM cafe_contacts WHERE cafe_id = '{good}'") == [["Ada Example"]], ran
     out = drive(v, tmp_path, [
         ["show", "obj:cafe"], ["wait", "main .pick tr[data-r]"], ["all", "heads", "main .pick th"],
-        ["get", "regions", "[...new Set([...document.querySelectorAll('main .pick tr[data-r]')].map(tr => tr.cells[2].textContent))]"],
+        ["get", "regions", "(i => [...new Set([...document.querySelectorAll('main .pick tr[data-r]')].map(tr => tr.cells[i].textContent))])([...document.querySelectorAll('main .pick th')].findIndex(th => th.textContent.trim() === 'Region'))"],
         ["get", "rows", "document.querySelectorAll('main .pick tr[data-r]').length"],
         ["show", okey("cafe", south)], ["wait", "main .emptyx"], ["text", "hidden", "main .emptyx"],
         ["get", "acts", "document.querySelectorAll('main .pghead .bar.top .btn').length"],

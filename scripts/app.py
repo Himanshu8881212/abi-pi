@@ -1739,12 +1739,12 @@ function objectsHome(box){if(!OT().length){box.append(emptyBox('objects','No obj
  // columns by depth along the connections (no loops back); every second column starts lower, so a line across two columns passes above the one between
  {const s=ids.filter(t=>!L.some(l=>l.to===t&&l.from!==t));(s.length?s:ids.slice(0,1)).forEach(t=>depth[t]=0)}
  for(let i=0;i<ids.length;i++)L.forEach(l=>{const a=l.from,b=l.to;if(a!==b&&depth[a]!==undefined&&(depth[b]===undefined||depth[b]<depth[a]+1)&&depth[a]<ids.length)depth[b]=depth[a]+1});
- const layout=()=>{const cols={};ids.forEach(t=>(cols[depth[t]??0]??=[]).push(t));Object.entries(cols).forEach(([d,list])=>{let y=24+(d%2)*72;list.forEach(t=>{if(!pos[t])pos[t]={x:24+d*(W+150),y};y=Math.max(y,pos[t].y)+hgt(t)+40})})};
+ const layout=()=>{const cols={};ids.forEach(t=>(cols[depth[t]??0]??=[]).push(t));Object.entries(cols).forEach(([d,list])=>{let y=24+(d%2)*72;list.forEach(t=>{if(!pos[t])pos[t]={x:24+d*(W+200),y};y=Math.max(y,pos[t].y)+hgt(t)+40})})};
  const extent=()=>kit.extent(Math.max(...ids.map(t=>pos[t].x+W))+(L.some(l=>Math.abs(pos[l.from].x-pos[l.to].x)<W)?230:24),Math.max(...ids.map(t=>pos[t].y+hgt(t)+24)));
  const kit=canvasKit(box,()=>{pos={};layout();ids.forEach(t=>{boxes[t].style.left=pos[t].x+'px';boxes[t].style.top=pos[t].y+'px'});save();extent();draw()});
  const {stage,svg}=kit,boxes={};layout();
  ids.forEach(t=>{const T=otype(t),b=h('div','tbl dim'),hd=h('div','th'),go=h('button','badge','Open'),cs=h('div','cols');b.style.left=pos[t].x+'px';b.style.top=pos[t].y+'px';go.title=`List the ${T.plural.toLowerCase()}`;go.onclick=()=>show('obj:'+t);
-  hd.append(h('span','',T.plural),go);const cell=k=>{const r=h('div','col'),v=h('span','file','…');r.append(h('span','',k),v);cs.append(r);return [r,v]};
+  hd.append(h('span','',T.plural),go);const cell=k=>{const r=h('div','col'),l=h('span','',k),v=h('span','file','…');l.style.gridColumn='1 / 3';v.style.cssText='grid-column:3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px';r.append(l,v);cs.append(r);return [r,v]};
   facts(T).forEach(([kind,id])=>{if(kind==='n'){const [r,v]=cell(T.event?'Recorded':'How many');r.dataset.f='n';api('list_objects',{type:t,limit:1,count:true}).then(x=>v.textContent=fmt(x.total)).catch(()=>v.textContent='—')}
    else if(kind==='m'){const [r,v]=cell((D.measures.find(m=>m.id===id)||{}).name||colName(id));r.dataset.f='m';r.dataset.m=id}
    else{const as=OA().filter(a=>a.object===t).map(a=>a.name),[r,v]=cell('You can');r.dataset.f='a';v.textContent=as.slice(0,2).join(', ')+(as.length>2?` +${as.length-2}`:'');v.title=as.join(', ')}});
