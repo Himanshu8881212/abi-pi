@@ -48,6 +48,10 @@ PLAN = {"id": "seats", "name": "Seats per café", "over": {"type": "cafe"}, "dec
 WAIT = 1800  # s: one training, scoring or plan run
 
 
+def exists(p: str) -> bool:
+    return p in {x["project"] for x in abi.call("list_projects")["projects"]}
+
+
 def parts() -> dict:
     """MB of the engine, the default worker and the heavy worker, each with its children; None: not running."""
     procs, kids = ps(), defaultdict(list)
@@ -99,7 +103,7 @@ def setup(p: str, scale: float, d: Path) -> None:
     abi.call("save_ml_model", project=p, ml=MODEL)
     abi.call("save_optimizer", project=p, optimizer=PLAN)
     small = d / "small"
-    brewline.generate(small, 0.002)
+    brewline.generate(small, 0.005)
     duckdb.sql(f"COPY (SELECT * FROM read_parquet('{brewline.q(small)}/orders/*.parquet')) TO '{brewline.q(small)}/orders.parquet' (FORMAT parquet)")
 
 
@@ -172,7 +176,7 @@ def main(argv=None) -> dict:
 
     say = lambda doing: state.update(doing=doing)  # noqa: E731
     try:
-        if abi.folder(p):
+        if exists(p):
             sure("delete_project", project=p)
         setup(p, a.scale, d)
         threading.Thread(target=sample, daemon=True).start()
@@ -194,7 +198,7 @@ def main(argv=None) -> dict:
         if not a.keep:
             for x in (f"{p}_tmp", p):
                 with contextlib.suppress(Exception):
-                    if abi.folder(x):
+                    if exists(x):
                         sure("delete_project", project=x)
     return out
 
