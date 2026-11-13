@@ -128,6 +128,7 @@ def _schema_oid(pg, project: str) -> int | None:
 _lakes: dict[str, duckdb.DuckDBPyConnection] = {}  # a project's entry changes only under its "lake" lock
 _oid: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # Postgres-catalog connection -> its schema's OID
 _checked: dict[str, float] = {}  # project -> monotonic time its cached lake was last matched against the catalog
+_used: dict[str, float] = {}  # project -> monotonic time its cached lake was last asked for (`lake`)
 RECHECK_S = 1.0
 SWEEP_S = 60.0  # how often the cached lakes are matched against the projects that still exist
 _swept = [0.0]
@@ -145,6 +146,18 @@ def _forget_gone(now: float | None = None) -> None:
         return
     try:
         _swept[0] = now
+        # 1.2.7 M0: and of projects nobody has read for ABI_IDLE_CLOSE_MIN minutes (default 30; 0: never). Each open
+        # project kept its DuckDB instance and whatever its reads cached (about 14 MB in the engine, 7 MB in a worker,
+        # up to the instance's memory limit) for as long as it existed. The next read attaches it again; its views,
+        # key types and shared partials are made again then.
+        # ponytail: swept when some project is read or the worker ticks; a process nobody asks anything keeps its lakes
+        idle = float(os.environ.get("ABI_IDLE_CLOSE_MIN") or 30) * 60
+        for p in [p for p, t in list(_used.items()) if idle and now - t > idle]:
+            with project_lock("lake", p):
+                if now - _used.get(p, now) > idle:  # not read meanwhile
+                    _lakes.pop(p, None)
+                    _checked.pop(p, None)
+                    _used.pop(p, None)
         names = [p for p, con in list(_lakes.items()) if con in _oid]  # lakes with a Postgres catalog
         if not names:
             return
@@ -155,6 +168,7 @@ def _forget_gone(now: float | None = None) -> None:
                 with project_lock("lake", p):
                     _lakes.pop(p, None)
                     _checked.pop(p, None)
+                    _used.pop(p, None)
     finally:
         _sweeping.release()
 
@@ -179,6 +193,7 @@ def lake(project: str) -> duckdb.DuckDBPyConnection:
         if project not in _lakes:
             _lakes[project] = connect(project)
             _checked[project] = now
+        _used[project] = now
         return _lakes[project]
 
 

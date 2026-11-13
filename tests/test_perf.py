@@ -180,3 +180,74 @@ def test_pages_and_memory_through_an_app_here(capsys, monkeypatch, tmp_path):
         for x in stand:
             x.kill()
         drop([x for x in (P, f"{P}_pub") if x in projects()])
+
+
+# ---------- 1.2.7 M0 item 9: a project nobody reads lets its DuckDB instance go ----------
+
+IDLE = r"""
+import gc, json, sys, weakref
+from abi import semantic, storage
+a = json.loads(sys.stdin.read())
+P, Q = a["project"], a["sql"]
+read = lambda: semantic.execute(P, Q, {"test": "idle"})
+before = read()
+con = storage.lake(P)
+ref, first, snap = weakref.ref(con), id(con), semantic._snapshot(con)
+con.cursor().execute("CREATE SCHEMA IF NOT EXISTS memory.kept_by_the_instance")
+del con
+out = {}
+storage._swept[0] = 0
+storage._forget_gone()  # read a moment ago: it stays
+out["recent"] = P in storage._lakes
+storage._used[P] -= a["minutes"] * 60  # as if nobody had asked for it for so long
+storage._swept[0] = 0
+storage._forget_gone()
+gc.collect()
+out |= {"forgotten": P not in storage._lakes and P not in storage._used, "closed": ref() is None}
+after = read()  # the next read attaches it again
+con = storage.lake(P)
+out |= {"reopened": P in storage._lakes and ref() is None, "same_rows": after == before and len(before) > 0, "same_snapshot": semantic._snapshot(con) == snap,
+        "fresh_memory": con.cursor().execute("SELECT count(*) FROM duckdb_schemas() WHERE database_name = 'memory'"
+                                             " AND schema_name = 'kept_by_the_instance'").fetchone()[0] == 0}
+import os
+os.environ["ABI_IDLE_CLOSE_MIN"] = "0"  # switched off: never
+storage._used[P] -= 10 ** 6
+storage._swept[0] = 0
+storage._forget_gone()
+out["off"] = P in storage._lakes
+print(json.dumps(out))
+"""
+
+
+@pytest.fixture(scope="module")
+def idle_project(tmp_path_factory):
+    from conftest import drop
+    from test_ontology_nobreak import brew
+    p = "pi_idle"
+    brew(p, tmp_path_factory.mktemp("idle"))
+    yield p
+    drop([p])
+
+
+def _idle(p: str, minutes: int) -> dict:
+    from test_engine import engine
+    r = engine(IDLE, timeout=300, stdin=json.dumps({"project": p, "minutes": minutes, "sql": "SELECT region, count(*), sum(seats) FROM cafes GROUP BY 1 ORDER BY 1"}))
+    assert r.returncode == 0, r.stderr[-3000:]
+    return json.loads(r.stdout.splitlines()[-1])
+
+
+def test_idle_project_instance_is_closed(idle_project):
+    """A project read a moment ago keeps its DuckDB instance; one nobody has asked for in ABI_IDLE_CLOSE_MIN minutes
+    (default 30) is forgotten at the next sweep and its instance closes once nothing reads it (here: at once); one
+    idle for less stays; with ABI_IDLE_CLOSE_MIN=0 nothing is ever closed for being idle."""
+    got = _idle(idle_project, 31)
+    assert got["recent"] is True and got["forgotten"] is True and got["closed"] is True and got["off"] is True, got
+    assert _idle(idle_project, 29)["forgotten"] is False, "29 minutes: not yet"
+
+
+def test_reopened_after_idle_reads_same(idle_project):
+    """The next read of a project that was closed for being idle attaches it again and answers the same rows of the
+    same snapshot; what the old instance held in memory (views, key types, shared partials) is made again, not kept."""
+    got = _idle(idle_project, 45)
+    assert got["closed"] is True and got["reopened"] is True and got["same_rows"] is True and got["same_snapshot"] is True, got
+    assert got["fresh_memory"] is True, got
