@@ -1556,3 +1556,83 @@ The why answers on the retail data took 3 turns in six of ten runs (1.2.0: 2).
   waiting; the Lead's answer says that nothing can be emailed until delivery is set up. The harness has no separate
   "chain" job: the Lead's plan with tasks that wait for each other is the chain, and this run is it (each specialist
   was briefed with the handoffs before it; the journal holds them).
+
+## 1.2.7 M0 (pve1)
+
+### Item 2, first step: how a view tests a column against a follow link's keys (13 Nov 2026)
+
+13 Nov 2026, 16:40 to 17:27 UTC, pve1 LXC 100 (6 cores, 10 GB), one throwaway container (`abi-127-p`) on its own
+volume; the live `abi` and `lake` containers were not touched. One run at a time. The owner's upgrade of the live
+install began on the same server at about 17:28: a run that was going then (1.2.6 with no ontology) was stopped and
+is not recorded, and nothing below was taken after it began.
+
+- 1.2.5 is d5496bd (image built from `git archive d5496bd`), which made the volume and the project:
+  `python3 bench/perf.py project perf_brewline --scale 1` (7,400,054 orders, 60,000 customers, ready; 144 MB).
+- 1.2.6 is the worktree's HEAD 347bc3c started on that same volume. The three ways are a prototype on top of it in
+  `abi/semantic/rls.py`, switched by an environment variable, **not committed** (the build waits for the owner's
+  choice): the link's keys are read once per person and snapshot into `memory.rls_keys.k_<hash>` and the view of
+  `customers` tests `customer_id` against it.
+- The follow link is `visited` (customer to café through orders, `rls: follow`), saved and committed before the runs.
+- Pages: `python3 bench/perf.py pages --project perf_brewline --sessions 50 --rls cafes.cafe_id`, three runs each,
+  0 errors and 0 dropped in every run. Each Viewer sees one café and follows to about 25,000 customers.
+- The probes named below (`order.py`, `order2.py`, `prof.py`, `cold.py`) were one-off scripts for this measurement,
+  not in the repository; what each does is said where it is used.
+
+**Row order and the cost of one read** (`order.py`, `order2.py`: on the engine's own lake connection, 3 threads,
+`preserve_insertion_order` on; the grid's read `SELECT COLUMNS(*)::VARCHAR FROM <view> LIMIT 200 OFFSET n` at three
+offsets, three times, and the whole view, compared with the constant list 1.2.6 writes; median of 5 for the times).
+`orders` (7.4 million rows, many row groups) is tested with 300 keys, `customers` (60,000 rows, one row group) with
+the 25,006 keys of one café's Viewer.
+
+| way | the view's test | plan | `orders`: pages and whole table in the table's order, the same in 3 reads | `customers`: a deep page / a count / revenue by segment, ms | filter text |
+|---|---|---|---|---|---|
+| 1.2.6: the constant list | `list_contains([CAST('…' AS VARCHAR), …], customer_id)` | scan | yes (it is the reference) | 1,186 / 1,437 / 1,684 | 684 KB |
+| a semi-join on the key table | `customer_id IN (SELECT k FROM memory.rls_keys.k_…)` | HASH_JOIN | **no**: other rows on a page, and other pages from one read to the next | 18 / 18 / 266 | 0.1 KB |
+| a list read from a one-row table | `list_contains((SELECT ks FROM memory.rls_keys.k_…), customer_id)` | BLOCKWISE_NL_JOIN | **no**: the same | 1,070 / 1,248 / 1,489 | 0.1 KB |
+| a third way, found while measuring: the keys as an ENUM type | `TRY_CAST(customer_id AS memory.rls_keys.k_…) IS NOT NULL` | scan | yes | 31 / 32 / 275 | 0.1 KB |
+
+Both ways the plan names put a join into the view, and a join does not keep the rows' order (the header of
+`rls.py` says so for 1.2.6: GATE-4-fix-1). On `customers` alone both look right, because 60,000 rows are one row
+group; on `orders` they are wrong. Every way returns the same rows. The one-row list is also as slow as the constant
+list: the list is searched from its start for every row. The ENUM is a cast inside the scan, so no join: the order
+holds, and the lookup is a hash. It was made in 102 to 110 ms (the read through 7.4 million orders included); an
+INTEGER, a DECIMAL and a DATE key work through their text (`TRY_CAST(CAST(col AS VARCHAR) AS …)`), an empty ENUM can
+be made and shows no rows, and a view over a dropped one fails (closed).
+
+**Pages**, p50 / p95 in seconds; the last column is the mean of the three after-commit p95 against 1.2.5's.
+
+| code | ontology | first run's first p50 / p95 | after a commit p50 / p95, runs 1, 2, 3 | mean p95 | of 1.2.5 |
+|---|---|---|---|---|---|
+| 1.2.5 (d5496bd) | none | 5.09 / 6.97 | 2.58 / 3.80, 2.42 / 3.63, 2.65 / 3.85 | 3.758 | x1.00 |
+| 1.2.6 (347bc3c) | objects and links, none followed | 4.69 / 6.87 | 2.97 / 4.42, 3.01 / 4.37, 3.06 / 4.44 | 4.407 | x1.17 |
+| 1.2.6 (347bc3c): the constant list | `visited` followed | 17.26 / 28.26 | 3.08 / 4.82, 3.14 / 4.80, 3.25 / 4.94 | 4.856 | x1.29 |
+| prototype: semi-join | followed | 5.56 / 8.94 | 3.05 / 4.67, 3.13 / 4.79, 3.10 / 4.89 | 4.780 | x1.27 |
+| prototype: one-row list | followed | 5.84 / 9.24 | 3.22 / 4.75, 3.19 / 4.70, 3.06 / 4.69 | 4.711 | x1.25 |
+| prototype: ENUM | followed | 6.01 / 9.40 | 3.18 / 4.63, 3.09 / 4.74, 3.37 / 4.82 | 4.731 | x1.26 |
+| prototype: ENUM, and the denied tables read once per filter build | followed | (no restart before it) | 3.10 / 4.44, 2.99 / 4.55, 3.05 / 4.40 | 4.464 | x1.19 |
+
+The target is x1.2 of 1.2.5: 4.510 s. What the table says:
+
+- **Neither way the plan names reaches x1.2, and neither keeps the rows' order.** Taking the key list out of the
+  view is worth 0.08 to 0.15 s of the 0.45 s the follow link costs; the page's five visuals read `orders`, never
+  `customers`, so the 684 KB text was not what they waited for.
+- The rest is Python, one person at a time (`prof.py`: one Viewer's filters built again as after a commit, in a
+  process of its own, median of 20): 27.7 ms without a follow link, 44.5 ms with the constant list, 38.2 ms with the
+  ENUM. With a follow link `rls.unfiltered_outputs` runs twice per build (`conditions` and `_blanks`), and each run
+  hashes every file of the project. Read once and handed on: 30.1 ms, and the pages come to x1.19.
+- **An ontology alone costs x1.17** (4.407 s, no link followed; the page is 572 KB against 1.2.5's 507 KB). The
+  1.2.6 release run compared 1.2.6 without an ontology (x1.02 there). So the x1.2 target leaves about 0.10 s for
+  the follow link itself, and the one way inside it is inside by 0.05 s, which is about what three runs differ by.
+- The first run's first pages (every person's filters built for the first time): 28.3 s p95 with the constant list
+  after the engine's start, 8.9 to 9.4 s with a key structure.
+
+**A Viewer who follows to all 60,000 customers** (`cold.py`: a new Viewer of the North region, the engine restarted,
+then revenue by customer segment through `semantic_query`; one run each): the constant list 7.08 s, then 0.03 s
+again; the ENUM 3.32 s, then 0.02 s; the same six rows. Target: at most 3.5 s.
+
+**Result of the first step.** Of the two ways the plan names, none can be chosen: both lose the rows' order, and
+both miss x1.2 (x1.27 and x1.25). A third way keeps the order and, with one more change, measures x1.19: the keys
+as an ENUM type in `memory.rls_keys`, the column cast to it, and the denied tables read once per build. It is not
+what the plan describes (a type, not a table; keys compared by their text), so the build of item 2 stopped here for
+the owner's choice. Not measured: 1.2.6 with no ontology on this day (stopped when the live upgrade began), and
+1.2.5 a second time at the end. The bench volume and container were removed after this was written.
