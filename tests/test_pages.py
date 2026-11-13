@@ -613,12 +613,13 @@ def test_object_page_renders(objs, tmp_path):
         ["until", "[...document.querySelectorAll('main .obar select')].every(s => s.options.length > 1)"],
         ["get", "facets", "[...document.querySelectorAll('main .obar select')].map(s => [s.getAttribute('aria-label'), [...s.options].map(o => o.text)])"],
         ["get", "rows", "document.querySelectorAll('main .pick tr[data-r]').length"],
-        ["get", "money", "[...document.querySelectorAll('main .pick tr[data-r]')].map(tr => tr.cells[6].textContent)"],
-        ["get", "days", "[...document.querySelectorAll('main .pick tr[data-r]')].map(tr => tr.cells[3].textContent)"],
+        ["get", "money", "[...document.querySelectorAll('main .pick tr[data-r]')].map(tr => tr.cells[(n => [...document.querySelectorAll('main .pick th')].findIndex(th => th.textContent.trim() === n))(%s)].textContent)" % json.dumps(names["revenue"])],
+        ["get", "days", "[...document.querySelectorAll('main .pick tr[data-r]')].map(tr => tr.cells[(n => [...document.querySelectorAll('main .pick th')].findIndex(th => th.textContent.trim() === n))('Opened')].textContent)"],
         ["get", "pager_seen", "(r => r.top >= 0 && r.bottom <= innerHeight)(document.querySelector('main .obar .pager').getBoundingClientRect())"],
         ["click", "main .pager button:last-child"], ["until", "document.querySelector('main .pager .file')?.textContent === '51 to 100'"],
         ["fill", "main .obar input", was["cafe_name"]], ["until", "document.querySelectorAll('main .pick tr[data-r]').length === 1"],
-        ["text", "row", "main .pick tr[data-r]"], ["click", "main .pick tr[data-r]"], ["until", KV],
+        ["get", "row", "(tr => ['Café', 'City', 'Region'].map(n => tr.cells[(n => [...document.querySelectorAll('main .pick th')].findIndex(th => th.textContent.trim() === n))(n)].textContent).join('\\t'))(document.querySelector('main .pick tr[data-r]'))"],
+        ["click", "main .pick tr[data-r]"], ["until", KV],
         ["until", "document.querySelectorAll('main .cards > .card.wide .pick table').length === 2"], ["wait", "main .cards > .card:last-child :is(table, p.empty)"],
         ["text", "h1", "main .pghead h1"], ["text", "eyebrow", "main .pghead .eyebrow"], ["get", "cur", "CUR"],
         ["wait", "main .kpis .kpi"], ["all", "cards", "main .cards > .card > h3"], ["text", "kv", "main .kv"], ["all", "kpis", "main .kpis .kpi"], ["text", "main", "main"],
@@ -630,14 +631,14 @@ def test_object_page_renders(objs, tmp_path):
         ["get", "stale", "plainErr(\"No action type 'flag_visit' on object type 'cafe' in project 'pi_pages_objs': `ontology` lists them.\")"]])
     assert "objects" in out["nav"] and out["nav"].index("objects") == out["nav"].index("model") + 1, "Objects sits in Data Model"
     assert out["chips"] == ["Overview", "Cafés", "Customers", "Orders"] and out["rows"] == 50 and out["pager"] == ["Previous", "Next"], out
-    assert out["heads"] == ["Café", "City", "Region", "Opened", "Seats", "Format", names["revenue"], names["orders_rows"]], out["heads"]  # round 2 (B1): the title's header is the type's name
+    assert out["heads"] == ["Café", names["revenue"], names["orders_rows"], "City", "Region", "Opened", "Seats", "Format"], out["heads"]  # round 2 (B1): the title's header is the type's name; 1.2.7 9b: its figures right after it
     assert all(re.fullmatch(r"[\d,]+\.\d\d", x) for x in out["money"]), f"every figure with the measure's own decimals: {out['money'][:6]}"
     assert all(re.fullmatch(r"\w{3} \d{1,2}, \d{4}", x) for x in out["days"]) and out["pager_seen"] and out["pager_top"] == ["Previous", "Next"], f"days as the app writes them; the pager in reach: {out['days'][:3]}"
     assert out["tips"] == "", "a header's tooltip never shows a column id"
     assert [f[0] for f in out["facets"]] == ["Region", "Format"] and {"North", "South"} < set(out["facets"][0][1]), out["facets"]
     assert out["row"].split("\t")[:3] == [was["cafe_name"], was["city"], was["region"]], out["row"]
     assert out["h1"] == was["cafe_name"] and out["eyebrow"].lower() == "café" and out["cur"] == okey("cafe", good), out
-    assert [c.split("\n")[0] for c in out["cards"]] == ["Properties", "Measures", "Orders", "Customers who visited", "History"], out["cards"]
+    assert [c.split("\n")[0] for c in out["cards"]] == ["Measures", "Properties", "Orders", "Customers who visited", "History"], out["cards"]
     for label, value in (("City", was["city"]), ("Region", was["region"]), ("Manager", "Ada Example"), ("Visit reason", "first"), ("Seats", str(was["seats"]))):
         assert f"{label}\n{value}" in out["kv"], (label, out["kv"])
     assert [k.split("\n")[-1] for k in out["kpis"]] == [names["revenue"], names["orders_rows"]], out["kpis"]
@@ -866,7 +867,8 @@ def test_action_form_confirms(objs, tmp_path):
 
 def test_object_graph_has_every_link(objs, people, tmp_path):
     """The object-type graph: every type a box, every link a line with its name and cardinality, on the canvas and in
-    the page's offline HTML (render.diagram). A project without an ontology has neither, and no Objects page."""
+    the page's offline HTML (render.diagram). A project without an ontology has neither; its Objects page (1.2.7 9a) says
+    what objects are, with the one button that asks ALL to propose them (the owner, in Developer, on a computer)."""
     o = abi.call("ontology", project=PO)
     said = sorted(f"{ln['name']} · {ln['cardinality'].replace('-', ' ')}" for ln in o["links"])
     assert len(said) == 3 and {ln["cardinality"] for ln in o["links"]} == {"many-to-one", "many-to-many"}, o["links"]
@@ -886,15 +888,20 @@ def test_object_graph_has_every_link(objs, people, tmp_path):
         ["get", "labels", "[...document.querySelectorAll('main .canvas text.lbl')].map(t => t.textContent)"], ["all", "boxes", "main .canvas .tbl .th > span"], ["text", "heading", "main h4.sub"],
         ["get", "paths", "document.querySelectorAll('main .canvas path.ln').length"],
         ["click", "main .canvas .tbl .badge"], ["wait", "main .pick tr[data-r]"], ["get", "cur", "CUR"]])
-    assert sorted(out["labels"]) == said and out["paths"] == 3 and sorted(out["boxes"]) == ["Cafés", "Customers", "Orders"], out
+    assert sorted(out["labels"]) == ["customer visited cafés", "each order has one café", "each order has one customer"] and out["paths"] == 3 and sorted(out["boxes"]) == ["Cafés", "Customers", "Orders"], out
+    columns = {c for cs in abi.call("semantic_model", project=PO, all=True)["columns"].values() for c in cs}
+    assert not [x for x in out["labels"] if "many to one" in x or "one to many" in x or set(re.findall(r"[\w]+", x)) & columns], out["labels"]
     assert out["heading"] == "Objects and connections" and out["cur"].startswith("obj:"), out
     # no ontology: the page data, the sidebar and the pages are as before
     page = people["owner"].page()
     assert page["ontology"]["objects"] == [] and "Objects" not in page["sections"], page["ontology"]
     none = drive(people["owner"], tmp_path, [
         ["get", "nav", "[...document.querySelectorAll('aside button.it')].map(b => b.dataset.k)"],
-        ["show", "obj:cafe"], ["get", "cur", "CUR"], ["get", "keys", "Object.keys(PAGES).filter(k => k.startsWith('obj'))"]])
-    assert "objects" not in none["nav"] and none["cur"] == "home" and none["keys"] == [], none
+        ["show", "obj:cafe"], ["get", "cur", "CUR"], ["get", "keys", "Object.keys(PAGES).filter(k => k.startsWith('obj'))"],
+        ["show", "objects"], ["wait", "main .emptyx"], ["text", "empty", "main .emptyx p"],
+        ["get", "buttons", "[...document.querySelectorAll('main .btn')].filter(b => b.offsetParent).map(b => [b.textContent, b.classList.contains('pri')])"]])
+    assert "objects" in none["nav"] and none["cur"] == "home" and none["keys"] == ["objects"], none  # 1.2.7 9a: the entry is always there
+    assert none["empty"].startswith("Objects are the things your business talks about") and none["buttons"] == [["Let ALL propose them", True]], none
 
 
 def test_the_objects_picture_keeps_every_label_apart_and_whole(objs, tmp_path):

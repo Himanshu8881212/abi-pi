@@ -1300,6 +1300,7 @@ def test_two_editors_decide_at_once(er):
         assert len(rows) == 2 and all(yes for *_, yes in rows) and len({b for _, b, _ in rows}) == 2, rows
         rev = by("revenue")
         assert [rev[k] for k in (103, 109, 110) if k in rev] == [30], "the three are one customer (under the ID the first decision gave)"
+        assert len({103, 109, 110} & rev.keys()) == 1, "the merged group's single ID, and no other record of it"
         src = (ROOT / "engine/backend/abi/writeback/__init__.py").read_text()
         assert "if decision and (sql := effective_sql(cur, t)):" in src and "Someone else decided about these records at the same moment, and with both decisions" in src
     finally:
