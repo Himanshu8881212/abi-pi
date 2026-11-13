@@ -3,15 +3,20 @@
 Rules live in the repo as security/rls.json (schemas/v1/rls.json). They restrict users whose project role is below
 Editor; a restricted user missing from a rule on T sees no rows of T (default deny), and a fact related to a filtered
 table sees only rows whose key the user may see. `semantic.execute` applies the context: unqualified table names
-resolve to `memory.rls_<hash>.<t>` views (constant-list filters over the effective tables, never a join or subquery,
-so row order holds per GATE-4-fix-1), and `check` refuses SQL that could name anything else."""
+resolve to `memory.rls_<hash>.<t>` views (filters over the effective tables that are constant lists or, for the keys a
+follow link gives, a cast to an ENUM type of those keys, `memory.rls_keys.k_<hash>`: never a join or subquery, so row
+order holds per GATE-4-fix-1; 1.2.7 M0 measured that a semi-join and a list read from a table both lose it,
+bench/RESULTS.md), and `check` refuses SQL that could name anything else, a type too."""
 
+import contextlib
 import functools
 import hashlib
 import json
 import math
 import re
+import secrets
 import threading
+import time
 import weakref
 from itertools import pairwise
 from typing import Annotated
@@ -38,6 +43,7 @@ MARK = "[hidden by row-level security]"  # D-47: in place of data-derived text i
 _built: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # lake connection -> {schema names built}
 _ctx: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # lake connection -> {(user, snap, rules sha): ctx}
 _where: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # lake connection -> {schema: {table: its row filter}}
+_keys: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # lake connection -> its key types (`_key_type`)
 _outputs: dict = {}  # (project, bundle sha) -> unfiltered_outputs
 _outputs_lock = threading.Lock()
 _passed: dict = {}  # (SQL, its known table names) that `check` let through: the same pair always passes
@@ -116,6 +122,7 @@ def _restricted(project: str, user_id: int) -> bool:
     return not row or not (row["workspace_owner"] or (row["role"] and Role[row["role"]] >= Role.editor))
 
 
+# Without a key type (`conditions` called with no `keep`: the tests' oracle, never a person's views since 1.2.7 M0):
 IN_SQL = True  # a follow link's key list is written by DuckDB (`conditions.listed`); False: by `_in`, key by key (tests compare the two)
 SETTLE = True  # `conditions` settles rules and relationships before the follow links join; False: all in one iteration
 
@@ -148,6 +155,84 @@ def _list_sql(col: str, src: str) -> str:
     return ("SELECT bool_and(regexp_full_match(typeof(c), '[A-Z0-9_ ]+(\\(\\d+(,\\s*\\d+)?\\))?')),"
             " string_agg('CAST(''' || replace(CAST(c AS VARCHAR), '''', '''''') || ''' AS ' || typeof(c) || ')', ', '"
             f" ORDER BY CAST(c AS VARCHAR), typeof(c)) FROM (SELECT DISTINCT {storage._q(col)} AS c FROM {src}) WHERE c IS NOT NULL")
+
+
+KEEP_S = 600  # a key type of an older snapshot stays this long after a newer snapshot's build: a read that began before it ends
+_SALT = secrets.token_hex(16)  # in every key type's name: not to be worked out from the keys or the rules
+
+
+def _key_text(cols) -> str:
+    """One text per key of `cols`, the same for the same key and never for two: a column's own text as DuckDB renders its
+    type (an ENUM column's label: no type name is ever written), several columns each with its length before it. NULL
+    when a column is NULL."""
+    parts = [f"CAST({storage._q(c)} AS VARCHAR)" for c in cols]
+    return parts[0] if len(parts) == 1 else " || ".join(f"CAST(length({p}) AS VARCHAR) || ':' || {p}" for p in parts)
+
+
+def _key_test(cols, name: str) -> str:
+    """The filter keeping rows whose `cols` are a key of ENUM type `name`: a cast inside the scan (a hash lookup, no
+    join, so row order holds). A key the type lacks, a NULL and an empty type keep no row, and none of them raises."""
+    return f"TRY_CAST({_key_text(cols)} AS {name}) IS NOT NULL"
+
+
+def _key_type(project: str, con, snap: int, src: str, cols) -> str:
+    """1.2.7 M0: the ENUM type in `memory.rls_keys` of the distinct non-NULL keys `cols` of DuckDB `FROM src` (a system
+    read of the source rows at `con`, logged as the key reads were), for `_key_test`. Named by its keys and a salt of
+    this process: the same keys are one type (two people with the same condition share it, and the fixpoint of
+    `conditions` settles when the keys do), and the name can't be guessed. Read once per snapshot and read; raises
+    duckdb.Error on a missing table or column (the caller denies)."""
+    from abi import semantic  # not at top: it imports this module
+
+    sql = f"SELECT DISTINCT k FROM (SELECT {_key_text(cols)} AS k FROM {src}) WHERE k IS NOT NULL"
+    # ponytail: 16 locks per project, so two people's different key reads may wait for each other; one per read if it shows
+    with storage.project_lock(f"rls keys {int(hashlib.sha256(sql.encode()).hexdigest()[:2], 16) % 16}", project):
+        with storage.project_lock("rls", project):
+            held = _keys.setdefault(con, {"names": {}, "types": {}})
+            name = held["names"].get((snap, sql))
+        if name is None or name not in held["types"]:
+            cur, start, rows, error = con.cursor(), time.perf_counter(), None, None
+            try:
+                semantic._effective(cur, con, snap)
+                cur.execute(f"CREATE OR REPLACE TEMP TABLE __rls_k AS {sql}")  # the cursor's own: no other read sees it
+                rows, digest = cur.execute("SELECT count(*), sha256(coalesce(string_agg(CAST(length(k) AS VARCHAR) || ':' || k, ''"
+                                           " ORDER BY k), '')) FROM __rls_k").fetchone()
+                name = "k_" + hashlib.sha256(f"{_SALT}{digest}".encode()).hexdigest()[:32]
+                with storage.project_lock("rls", project):  # one catalog write of the schema at a time
+                    if name not in held["types"]:
+                        cur.execute("CREATE SCHEMA IF NOT EXISTS memory.rls_keys")
+                        cur.execute(f"DROP TYPE IF EXISTS memory.rls_keys.{name}")
+                        cur.execute(f"CREATE TYPE memory.rls_keys.{name} AS ENUM (SELECT k FROM __rls_k)")
+                        held["types"][name] = [snap, None]
+                    held["names"][snap, sql] = name
+            except duckdb.Error as e:
+                error = str(e)
+                raise
+            finally:
+                with contextlib.suppress(duckdb.Error):
+                    cur.execute("DROP TABLE IF EXISTS __rls_k")
+                logged = actions.redacted(sql) if actions.inbound() else sql  # D-32, as `semantic._partials`
+                semantic._log(None, project, {"rls": "keys"}, logged, snap, False, rows,
+                              start, error and f"<sha256:{actions.sha(error)}>" if actions.inbound() else error)
+        with storage.project_lock("rls", project):
+            if (at := held["types"].get(name)) and snap >= at[0]:
+                at[:] = [snap, None]  # in use at this snapshot
+    return f"memory.rls_keys.{name}"
+
+
+def _sweep_keys(con, snap: int) -> None:
+    """Key types no build of snapshot `snap` or newer used go, KEEP_S after the first such build (under the "rls" lock).
+    A view of an older snapshot that still names one then fails, closed."""
+    held, now = _keys.get(con), time.monotonic()
+    if not held:
+        return
+    held["names"] = {k: v for k, v in held["names"].items() if k[0] >= snap}
+    for name, at in list(held["types"].items()):
+        if at[0] < snap:
+            at[1] = at[1] or now
+            if at[1] <= now - KEEP_S:
+                with contextlib.suppress(duckdb.Error):
+                    con.cursor().execute(f"DROP TYPE IF EXISTS memory.rls_keys.{name}")
+                del held["types"][name]
 
 
 def _int(text: str) -> tuple[bool, str]:
@@ -204,7 +289,7 @@ def _ch_in(cols: tuple[str, ...], types: dict[str, str], keys: list[tuple]) -> s
     return exp.paren(exp.or_(*ors)).sql("clickhouse") if ors else "FALSE"
 
 
-def conditions(project: str, user_id: int, read, types: dict | None = None) -> dict[str, str]:
+def conditions(project: str, user_id: int, read, types: dict | None = None, keep=None) -> dict[str, str]:
     """{table: the filter of every row this user may see}: its own rules ANDed, plus `fk IN (<keys>)` for each
     relationship to a filtered table (SE-2 direction, any depth). DuckDB SQL for lake tables, ClickHouse SQL for live
     ones (E-02.6). `read(sql, reads)` runs an unfiltered system read (`reads`: ClickHouse reads, as `execute`).
@@ -215,7 +300,11 @@ def conditions(project: str, user_id: int, read, types: dict | None = None) -> d
     of its `to` table T>)` once T is filtered, read over the link's `via` through the visible rows of every table on
     the way (a system read; only those keys are inlined, so views stay constant lists). That filter travels on to
     tables pointing at F, but never back along the link's own `via` relationships (a NULL foreign key there, as an
-    anonymous order, would hide the row)."""
+    anonymous order, would hide the row).
+    1.2.7 M0: with `keep(src, cols)` (`_context`'s: `_key_type` on the reader's lake connection) every filter part made
+    from a follow link, on F and on the tables pointing at it, tests its columns against a key type instead of holding
+    the keys (25,000 customers were 684 KB of text in every view of them): the same rows, in the same order. Without
+    `keep` the keys are inlined as before: what the tests compare with."""
     from abi.semantic import live, model, ontology  # not at top: circular imports
 
     lv = live.columns(project)
@@ -254,7 +343,17 @@ def conditions(project: str, user_id: int, read, types: dict | None = None) -> d
     rels, fl, ent = mj.get("relationships", []), follows(project, mj), ontology._keys(mj)
     back = {f["id"]: f["back"] for f in fl}
     vis = lambda x, conds: " AND ".join(c for _, c in conds.get(x, []))  # noqa: E731
-    blank, hid = (_blanks(project, user_id, types), _hidden(project, user_id)) if fl else (None, {})
+    denied = unfiltered_outputs(project)  # once per build: it hashes every file of the project
+    blank, hid = (_blanks(project, user_id, types, denied), _hidden(project, user_id)) if fl else (None, {})
+
+    @functools.cache  # fixpoint rounds repeat unchanged reads: run each once
+    def held(src: str, cols: tuple[str, ...], on: tuple[str, ...]) -> str:
+        """The filter keeping rows whose `on` columns are a `cols` row of DuckDB `FROM src`, by a key type; a missing
+        table or column denies."""
+        try:
+            return _key_test(on, keep(src, cols))
+        except (duckdb.Error, ActionFailed):
+            return "FALSE"
 
     def groups(r: dict, conds: dict) -> list[tuple[frozenset, list[str]]]:
         """The parts of r's target's filter that cross r (`crosses`), one group per tag (the follow link a part is
@@ -282,7 +381,8 @@ def conditions(project: str, user_id: int, read, types: dict | None = None) -> d
             sub = f"SELECT {', '.join(map(storage._q, mine['columns']))} FROM {storage._q(at)}" + (f" WHERE {where}" if where else "")
             at = theirs["table"]
             where = " AND ".join(x for x in (f"{ontology._tuple(theirs['columns'])} IN ({sub})", vis(at, conds) if at != f["from"] else "") if x)
-        # ponytail: F's linked values inlined as constants (60k customers: 1.6 MB of view text); a lake table if slow
+        if keep:
+            return held(f"{storage._q(at)} WHERE {where}", tuple(f["cols"]), tuple(f["cols"]))
         return listed(at, f["cols"][0], where) if IN_SQL and len(f["cols"]) == 1 else allowed(at, tuple(f["cols"]), where)
 
     @functools.cache  # fixpoint rounds repeat unchanged reads: run each once
@@ -317,8 +417,12 @@ def conditions(project: str, user_id: int, read, types: dict | None = None) -> d
                     src, reads = '"__d" __d', (("__d", (d, q.sql("clickhouse"))),)
                 else:
                     src, reads = f"(SELECT * FROM {storage._q(d)} WHERE {' AND '.join(dc)}) __d", ()
+                same = d not in lv and all((types or {}).get(t, {}).get(f, 1) == (types or {}).get(d, {}).get(k, 2) for f, k in zip(fk, key))
                 if t in lv:
                     cs.append((tag, ch(t, fk, src, key, reads)))
+                elif tag and keep and d not in lv:  # made from a follow link: d's visible keys are as many as the link's
+                    on = " AND ".join(f"__d.{storage._q(k)} = {storage._q(t)}.{storage._q(f)}" for f, k in zip(fk, key))
+                    cs.append((tag, held(src, key, fk) if same else held(f"{storage._q(t)} WHERE EXISTS (SELECT 1 FROM {src} WHERE {on})", fk, fk)))
                 elif d not in lv and all((types or {}).get(t, {}).get(f, 1) == (types or {}).get(d, {}).get(k, 2)
                                          for f, k in zip(fk, key)):
                     try:
@@ -357,8 +461,8 @@ def conditions(project: str, user_id: int, read, types: dict | None = None) -> d
             last, conds = conds, {t: cs for t in tables if (cs := step(t, conds, follow))}
             grew += skeleton(conds) != skeleton(last)  # parts only ever join (tags never change), so this stays small
             if fl and grew > CAP + 10 * len(tables):  # never: fail closed if it ever does
-                return {t: "FALSE" for t in {*tables, *unfiltered_outputs(project)}}
-    return {t: " AND ".join(c for _, c in cs) for t, cs in conds.items()} | {t: "FALSE" for t in unfiltered_outputs(project)}
+                return {t: "FALSE" for t in {*tables, *denied}}
+    return {t: " AND ".join(c for _, c in cs) for t, cs in conds.items()} | {t: "FALSE" for t in denied}
 
 
 def where(con, schema: str, t: str) -> str | None:
@@ -376,12 +480,12 @@ def crosses(back: dict, r: dict, tag: frozenset) -> bool:
     return not any((r["id"], r["from"]["table"]) in back.get(x, ()) for x in tag)
 
 
-def _blanks(project: str, user_id: int | None, types: dict | None = None):
+def _blanks(project: str, user_id: int | None, types: dict | None = None, denied: list | None = None):
     """t -> t shows this user no rows whatever its filter: made from filtered rows (`unfiltered_outputs`) or every
     column hidden (`context`). A follow link reading such a table denies its F."""
     from abi.semantic import model  # not at top: model imports the semantic package
 
-    denied, hid = set(unfiltered_outputs(project)), _hidden(project, user_id)
+    denied, hid = set(unfiltered_outputs(project) if denied is None else denied), _hidden(project, user_id)
 
     def blank(t: str) -> bool:
         if t in denied:
@@ -591,7 +695,8 @@ def _context(project: str, user_id: int, con, snap: int, edited: frozenset, mode
     # built from the files as they are now, kept under the action's digest only if that is still theirs (a rule
     # committed since the action began, or during this build, would put one version's views under another's key)
     fresh = fresh or _digest(project) != key[2]
-    conds = conditions(project, user_id, read, {t: c for t, c in model_columns.items() if t not in edited})
+    conds = conditions(project, user_id, read, {t: c for t, c in model_columns.items() if t not in edited},
+                       lambda src, cols: _key_type(project, con, snap, src, cols))
     # 1.2.6 M11: a same-as table (same.py) holds the type's key values of the records people decided about, also where
     # the key column is hidden from this reader, and no restricted reader needs it (the views read the base table, proposals
     # and decisions are an Editor's): it shows them no rows, whatever else filters it
@@ -630,6 +735,7 @@ def _context(project: str, user_id: int, con, snap: int, edited: frozenset, mode
         cache = _ctx.setdefault(con, {})
         for k in [k for k in cache if k[1] < snap]:  # older snapshots never come back
             del cache[k]
+        _sweep_keys(con, snap)
         if not fresh and _digest(project) == key[2]:
             cache[key] = out
     return out
@@ -693,6 +799,11 @@ def check(project: str, user_id: int, sql: str, known: set[str]) -> None:
                 raise ValueError(f"reads {t.sql('duckdb')}")
         if bad := refused_calls(sql, tree):
             raise ValueError(f"calls {', '.join(sorted(bad))}")
+        # 1.2.7 M0: no type but DuckDB's own. A cast to a key type (`_key_type`) would tell which keys another person
+        # sees, also by a guessed name; and the key types' schema is never named, as anything
+        if any(d.this == exp.DataType.Type.USERDEFINED for d in tree.find_all(exp.DataType)) or any(
+                t.text.lower() == "rls_keys" for t in DuckDB().tokenize(sql) if t.token_type in (TokenType.VAR, TokenType.IDENTIFIER)):
+            raise ValueError("names a type outside DuckDB's own")
         with _outputs_lock:
             _passed[key] = None
             while len(_passed) > 4096:  # oldest first

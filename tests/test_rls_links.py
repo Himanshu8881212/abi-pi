@@ -8,6 +8,7 @@ and a confirmation naming who sees fewer rows. The owner's sql_query is the refe
 import contextlib
 import copy
 import json
+import re
 import secrets
 import time
 
@@ -1122,3 +1123,354 @@ def test_a_key_list_written_by_the_lake_equals_the_one_built_key_by_key():
                    "day t": [True, 3, [3, 3, 0], False, False], "day t WHERE false": [True, 0, [0, 0, 0], True, True],
                    "s t": [True, 4, [4, 4, 0], False, False], "s t WHERE false": [True, 0, [0, 0, 0], True, True],
                    "nothing t": [True, 0, [0, 0, 0], True, True], "nothing t WHERE false": [True, 0, [0, 0, 0], True, True], "enum": False}, got
+
+
+# ---------- 1.2.7 M0 item 2: a follow link's keys are an ENUM type the view casts to, not a list in the view ----------
+
+# One restricted person's views as the engine builds them, in a process of its own (its own lake connection):
+#   look     the views' text, the key types, the plan of a read of customers
+#   equal    every view's filter against the inlined lists (`conditions` without a key type, both ways of writing them)
+#   share    several people one after another: their schemas and the key types after each
+#   drop     a new snapshot with other keys: the older type stays KEEP_S, then goes, and its views fail closed
+KT = r"""
+import json, sys
+import duckdb
+import abi.app  # noqa: F401  registers every action, as the engine does
+from abi import actions, db, security, semantic, storage
+from abi.semantic import rls
+a = json.loads(sys.stdin.read())
+P, con, q = a["project"], storage.lake(a["project"]), storage._q
+def look(uid):
+    snap = semantic._snapshot(con)
+    schema = semantic._rls(P, uid, con, snap, None)[0]
+    cur = con.cursor()
+    semantic._effective(cur, con, snap, schema)
+    views = dict(cur.execute("SELECT view_name, sql FROM duckdb_views() WHERE database_name = 'memory' AND schema_name = ?", [schema]).fetchall())
+    types = sorted(r[0] for r in cur.execute("SELECT type_name FROM duckdb_types() WHERE database_name = 'memory' AND schema_name = 'rls_keys'").fetchall())
+    return snap, schema, views, types, cur
+out = {}
+if a["mode"] == "look":
+    snap, schema, views, types, cur = look(a["uid"])
+    plan = cur.execute("EXPLAIN SELECT * FROM customers LIMIT 10 OFFSET 100").fetchall()[0][1]
+    out = {"views": views, "types": types, "joins": plan.upper().count("JOIN"), "explain": rls.explain(P, a["uid"]),
+           "seen": cur.execute("SELECT count(*) FROM customers").fetchone()[0]}
+elif a["mode"] == "equal":
+    snap, schema, views, types, cur = look(a["uid"])
+    semantic._effective(cur, con, snap)  # the source rows: each filter is tried on its own table
+    read = lambda sql, reads: semantic.execute(P, sql, {"test": "key types"}, reads=reads)
+    cols = semantic._columns_of(con.cursor(), "model")
+    plain = {t: c for t, c in cols.items() if t not in semantic._edited(con, snap)}
+    for way in ((True, True), (False, False)):
+        rls.IN_SQL, rls.SETTLE = way
+        old = rls.conditions(P, a["uid"], read, plain)
+        for t in views:
+            new, was = rls.where(con, schema, t), old.get(t)
+            if new is None or was is None:
+                out[f"{t} {way}"] = [new, was]
+                continue
+            out[f"{t} {way}"] = list(cur.execute(
+                f"SELECT count(*), count(*) FILTER (WHERE {was}), count(*) FILTER (WHERE {new}),"
+                f" count(*) FILTER (WHERE coalesce(({new}), false) <> coalesce(({was}), false)) FROM {q(t)}").fetchone()) + [
+                "rls_keys" in new, "list_contains" in was or was == "FALSE"]
+    rls.IN_SQL, rls.SETTLE = True, True
+elif a["mode"] == "share":
+    for w, uid in a["uids"].items():
+        snap, schema, views, types, cur = look(uid)
+        out[w] = {"schema": schema, "types": types, "seen": cur.execute("SELECT count(*) FROM customers").fetchone()[0],
+                  "key_reads": len(rls._keys[con]["names"])}
+elif a["mode"] == "drop":
+    with db.connect() as c:
+        owner = security.user(c, c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"])
+    snap1, schema1, _, types1, cur = look(a["uid"])
+    n1 = cur.execute("SELECT count(*) FROM customers").fetchone()[0]
+    actions.run("edit_cells", {"project": P, "table": "customers", "add": [a["customer"]]}, owner, "rest")
+    actions.run("edit_cells", {"project": P, "table": "orders", "add": [a["order"]]}, owner, "rest")
+    snap2, schema2, _, types2, cur = look(a["uid"])  # the new snapshot's build: the older type is kept for a read that began before it
+    n2 = cur.execute("SELECT count(*) FROM customers").fetchone()[0]
+    old = con.cursor().execute(f"SELECT count(*) FROM memory.{schema1}.customers").fetchone()[0]
+    rls.KEEP_S = 0
+    rls._ctx[con].clear()
+    snap3, schema3, _, types3, cur = look(a["uid"])
+    try:
+        con.cursor().execute(f"SELECT count(*) FROM memory.{schema1}.customers").fetchall()
+        gone = "still reads"
+    except duckdb.Error as e:
+        gone = type(e).__name__
+    out = {"snaps": [snap1, snap2, snap3], "schemas": [schema1, schema2, schema3], "types": [types1, types2, types3],
+           "seen": [n1, n2, old, cur.execute("SELECT count(*) FROM customers").fetchone()[0]], "old_view": gone}
+print(json.dumps(out, default=str))
+"""
+
+
+def kt(mode: str, **more) -> dict:
+    r = engine(KT, timeout=300, stdin=json.dumps({"project": P, "mode": mode, **more}))
+    assert r.returncode == 0, r.stderr[-3000:]
+    return json.loads(r.stdout.splitlines()[-1])
+
+
+ODD = ["C'9\\9", "a,b", "Zoë ☕ 東京", "", "x" * 5000, '"q"', "it's) OR true --"]  # a quote, a backslash, a comma, other scripts, no text, long text
+
+
+@contextlib.contextmanager
+def odd_customers():
+    """Customers whose keys are ODD, each with one order at a North café (so the North Viewer follows to them)."""
+    [cust] = [abi.call("sql_query", project=P, sql="SELECT * FROM customers LIMIT 1")]
+    one = dict(zip(cust["columns"], cust["rows"][0]))
+    order = dict(zip(*(lambda r: (r["columns"], r["rows"][0]))(abi.call("sql_query", project=P, sql=(
+        "SELECT o.* FROM orders o JOIN cafes c USING (cafe_id) WHERE c.region = 'North' LIMIT 1")))))
+    abi.call("edit_cells", project=P, table="customers", add=[one | {"customer_id": k} for k in ODD])
+    abi.call("edit_cells", project=P, table="orders", add=[order | {"customer_id": k, "order_id": f"ORD-ODD-{i}"} for i, k in enumerate(ODD)])
+    try:
+        yield
+    finally:
+        abi.call("edit_cells", project=P, table="orders", delete=[[f"ORD-ODD-{i}"] for i in range(len(ODD))])
+        abi.call("edit_cells", project=P, table="customers", delete=[[k] for k in ODD])
+
+
+def test_follow_view_holds_no_key_list(links):
+    """The view of customers tests the key against an ENUM type in memory.rls_keys instead of holding the keys: its
+    text is far under 4 KB (it was about 25 KB here and 684 KB at 25,000 customers), it has no join (so the rows keep
+    their order) and no literal of a key; the Viewer sees the same customers; explain never names the type."""
+    got = kt("look", uid=links["uid"])
+    text = got["views"]["customers"]
+    assert len(text) < 4096 and all(len(v) < 4096 for t, v in got["views"].items() if t != "cafes"), {t: len(v) for t, v in got["views"].items()}
+    assert "TRY_CAST(" in text and "memory.rls_keys.k_" in text and "list_contains" not in text and "CAST('" not in text, text
+    assert " JOIN " not in text.upper() and " IN (" not in text.upper() and got["joins"] == 0, text
+    assert len(got["types"]) == 1 and re.fullmatch(r"k_[0-9a-f]{32}", got["types"][0]), got["types"]
+    assert got["seen"] == len(sql(VISITED)) > 1000
+    assert "rls_keys" not in got["explain"] and got["types"][0] not in got["explain"]
+
+
+def test_follow_key_type_equals_inlined_list(links):
+    """Every filter of the Viewer's views keeps exactly the rows the inlined key lists keep (`conditions` without a key
+    type: the list written by DuckDB, and key by key as before 1.2.6 M10), row for row, also for keys with a quote, a
+    backslash, a comma, other scripts, no text at all and 5,000 characters; a customer without an order at a North café
+    stays hidden; nothing raises for a key the type lacks."""
+    with odd_customers():
+        got = kt("equal", uid=links["uid"])
+        assert {k.split(" ")[0] for k in got} >= {"cafes", "customers", "orders"}, sorted(got)
+        for k, v in got.items():
+            if k.startswith("ml_churn"):  # denied (made from filtered rows): no rows both ways
+                assert v[1] == 0 == v[2], (k, v)
+                continue
+            total, was, new, differ, typed, listed = v
+            assert differ == 0 and was == new and 0 < new < total and listed, (k, v)
+            assert typed == k.startswith("customers"), (k, v)
+        seen = {r[0] for r in mine(links, "sql_query", sql="SELECT customer_id FROM customers")["rows"]}
+        assert set(ODD) <= seen and len(seen) == len(sql(VISITED)), "the odd keys are followed to, as written"
+        for k in ODD:
+            assert mine(links, "get_object", type="customer", key=[k])["key"] == [k]
+    hidden = sql(f"SELECT min(customer_id) FROM customers WHERE customer_id NOT IN ({VISITED})")[0][0]
+    for k in (hidden, "no such customer", ODD[0]):  # a hidden one, one nobody has, one that is gone again: all alike
+        with pytest.raises(abi.ActionError) as e:
+            mine(links, "get_object", type="customer", key=[k])
+        assert e.value.status == 404, (k, e.value.body)
+    assert mine(links, "sql_query", sql=f"SELECT count(*) FROM customers WHERE customer_id = '{hidden}'")["rows"] == [[0]]
+
+
+NAMES = ["SELECT * FROM memory.rls_keys.{k}", 'SELECT * FROM "memory"."rls_keys"."{k}"', "SELECT * FROM rls_keys.{k}", "SELECT * FROM {k}",
+         "SELECT type_name FROM duckdb_types()", "SELECT * FROM duckdb_types() WHERE schema_name = 'rls_keys'",
+         "SELECT * FROM information_schema.schemata", "SELECT * FROM pg_catalog.pg_type", "SELECT * FROM pg_type",
+         "SELECT enum_range(NULL::memory.rls_keys.{k})", "SELECT enum_first(NULL::memory.rls_keys.{k})",
+         "SELECT enum_last(NULL::memory.rls_keys.{k})", "SELECT enum_code(customer_id::memory.rls_keys.{k}) FROM customers",
+         "SELECT enum_range_boundary(NULL::memory.rls_keys.{k}, NULL)", "SELECT sql FROM duckdb_views()", "DESCRIBE memory.rls_keys.{k}",
+         "SELECT 1 AS rls_keys"]
+CASTS = ["SELECT CAST('C1' AS memory.rls_keys.{k})", "SELECT TRY_CAST('C1' AS memory.rls_keys.{k}) IS NOT NULL",
+         "SELECT 'C1'::memory.rls_keys.{k}", "SELECT TRY_CAST(customer_id AS memory.rls_keys.{k}) FROM customers",
+         "SELECT CAST('C1' AS rls_keys.{k})", "SELECT CAST('C1' AS {k})", "SELECT 'C1'::{k}", 'SELECT CAST(\'C1\' AS "memory"."rls_keys"."{k}")',
+         "SELECT count(*) FROM customers WHERE customer_id::{k} IS NOT NULL", "SELECT [customer_id]::{k}[] FROM customers",
+         "SELECT CAST(customer_id AS STRUCT(a {k})) FROM customers", "WITH x AS (SELECT 'C1'::{k} AS v) SELECT * FROM x"]
+
+
+def refusals(links, forms: list, name: str) -> list:
+    out = []
+    for f in forms:
+        with pytest.raises(abi.ActionError) as e:
+            mine(links, "sql_query", sql=f.format(k=name))
+        assert e.value.status == 403, (f, e.value.status, e.value.body)
+        out.append(e.value.body["message"].replace(name, "<name>"))
+    return out
+
+
+def test_follow_key_type_not_nameable(links):
+    """No SQL a restricted person writes reaches a key type: not its name as a table, not the catalog's lists of types,
+    schemas or views, not an ENUM function. The type's name is 128 random-looking bits made with a salt of the engine's
+    process, and it is in nothing the person is shown (their rules, explain, a column's type)."""
+    real = kt("look", uid=links["uid"])["types"][0]
+    said = refusals(links, NAMES, real)
+    assert all(m.startswith("Row-level security: this read names a table or function outside the model tables") for m in said), said
+    assert said == refusals(links, NAMES, "k_" + "0" * 32), "a name that exists and one that doesn't are refused alike"
+    assert mine(links, "sql_query", sql="SELECT DISTINCT typeof(customer_id) FROM customers")["rows"] == [["VARCHAR"]]
+    assert real not in json.dumps(mine(links, "rls_rules")) and "rls_keys" not in json.dumps(mine(links, "rls_rules"))
+    again = kt("look", uid=links["uid"])["types"][0]
+    assert again != real, "another process, another salt: the same keys get another name"
+
+
+def test_restricted_sql_cast_to_a_key_type_refused(links):
+    """A cast to a key type would say which keys someone else sees ("is C1 one of theirs?"), also through a guessed
+    name. A restricted person's SQL may cast to DuckDB's own types only: `::`, CAST and TRY_CAST to any other type are
+    refused before anything runs, with the same answer whether the type exists or not; the casts ABI's own SQL makes
+    still pass. Every door a person's or an agent's SQL comes through is `semantic.execute`, which asks `rls.check`."""
+    real = kt("look", uid=links["uid"])["types"][0]
+    said = refusals(links, CASTS, real)
+    assert said == refusals(links, CASTS, "k_" + "0" * 32), said
+    assert all("outside the model tables" in m for m in said)
+    ok = mine(links, "sql_query", sql="SELECT CAST(count(*) AS VARCHAR), TRY_CAST('1.5' AS DOUBLE), '2026-01-02'::DATE,"
+                                      " CAST(max(customer_id) AS VARCHAR) IS NOT NULL FROM customers")["rows"]
+    assert ok[0][0] == str(len(sql(VISITED))) and ok[0][3] is True, ok
+    r = engine(CHECKS, timeout=120, stdin=json.dumps({"project": P, "uid": links["uid"], "name": real, "forms": NAMES + CASTS}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    got = json.loads(r.stdout.splitlines()[-1])
+    assert got["refused"] == len(NAMES + CASTS) and got["passed"] == [], got
+
+
+CHECKS = r"""
+import json, sys
+from abi.actions import ActionFailed
+from abi.semantic import rls
+a = json.loads(sys.stdin.read())
+known, refused, passed = {"customers", "cafes", "orders"}, 0, []
+for f in a["forms"]:
+    for name in (a["name"], a["name"].upper(), "k_" + "0" * 32):
+        try:
+            rls.check(a["project"], a["uid"], f.format(k=name), known)
+            passed.append(f)
+        except ActionFailed as e:
+            assert e.status == 403, e.status
+    refused += f not in passed
+print(json.dumps({"refused": refused, "passed": passed}))
+"""
+
+TYPED = r"""
+import json
+import duckdb
+from abi.semantic import rls
+con = duckdb.connect()
+con.execute("CREATE SCHEMA rls_keys")
+con.execute("CREATE TYPE mood AS ENUM ('ok', 'it''s) OR true --', 'a,b')")
+con.execute("CREATE TABLE t (i INTEGER, d DECIMAL(10,2), day DATE, s VARCHAR, nothing INTEGER, m mood, pick BOOLEAN)")
+con.execute("INSERT INTO t VALUES (1, 1.50, DATE '2026-01-02', 'it''s', NULL, 'ok', true), (2, -0.05, DATE '2026-01-03', 'a\\b', NULL, 'it''s) OR true --', true),"
+            " (2, 1.50, NULL, NULL, NULL, NULL, true), (NULL, NULL, NULL, '', NULL, NULL, true), (10, 100.00, DATE '1999-12-31', 'ü', NULL, 'a,b', false),"
+            " (11, 7.00, DATE '2000-01-01', repeat('x', 5000), NULL, 'ok', true), (12, 1.50, DATE '2026-01-02', 'a,b', NULL, NULL, true)")
+out, n = {}, 0
+def typed(cols, src):
+    global n
+    n += 1
+    con.execute(f"CREATE TYPE memory.rls_keys.k_{n} AS ENUM (SELECT DISTINCT k FROM (SELECT {rls._key_text(cols)} AS k FROM {src}) WHERE k IS NOT NULL)")
+    return rls._key_test(cols, f"memory.rls_keys.k_{n}")
+for cols in (("i",), ("d",), ("day",), ("s",), ("nothing",), ("m",), ("i", "s"), ("m", "d"), ("s", "s")):
+    for src in ("t WHERE pick", "t WHERE false"):
+        new = typed(cols, src)
+        sel = ", ".join(f'CAST("{c}" AS VARCHAR), typeof("{c}")' for c in cols)
+        if "m" in cols:  # the earlier way wrote an ENUM column's type name into the filter; the reference here is plain SQL
+            old = f"({', '.join(cols)}) IN (SELECT {', '.join(cols)} FROM {src})"
+        else:
+            old = rls._in(cols, sorted(con.execute(f"SELECT DISTINCT {sel} FROM {src}").fetchall(), key=str))
+        rows = con.execute(f"SELECT count(*) FILTER (WHERE {new}), count(*) FILTER (WHERE {old}),"
+                           f" count(*) FILTER (WHERE coalesce(({new}), false) <> coalesce(({old}), false)) FROM t").fetchone()
+        out[f"{'+'.join(cols)} {src[8:]}"] = [list(rows), "ENUM" not in new and "mood" not in new and "'" not in new.replace("':'", "")]
+print(json.dumps(out))
+"""
+
+
+def test_follow_enum_key():
+    """A key column of an ENUM type (its type's name holds its values, quotes and all; 1.2.6 fell back to writing that
+    name into the filter unquoted) is tested like any other: by its label's text, cast to the key type, with no type
+    name and no value in the filter. The same for an INTEGER, a DECIMAL, a DATE, a text column (a quote, a backslash, a
+    comma, no text, 5,000 characters) and two columns together (each text with its length, so ('a,b', 'c') is not
+    ('a', 'b,c')): the rows the inlined list keeps. A NULL key, a column of NULLs and an empty set keep no row."""
+    r = engine(TYPED, timeout=120)
+    assert r.returncode == 0, r.stderr[-3000:]
+    got = json.loads(r.stdout.splitlines()[-1])
+    want = {"i pick": 5, "d pick": 5, "day pick": 4, "s pick": 5, "nothing pick": 0, "m pick": 3, "i+s pick": 4, "m+d pick": 3, "s+s pick": 5}
+    for k, (rows, clean) in got.items():
+        new, old, differ = rows
+        assert differ == 0 and new == old and clean, (k, rows, clean)
+        assert new == (want[k] if k.endswith(" pick") else 0), (k, rows)
+
+
+ORDERED = r"""
+import hashlib, json
+import duckdb
+from abi.semantic import rls
+con = duckdb.connect(config={"threads": 4})
+con.execute("CREATE SCHEMA rls_keys")
+con.execute("CREATE TABLE t AS SELECT i AS id, 'C' || (i * 7919 % 5000) AS k, i % 97 AS m FROM range(600000) r(i)")  # 5 row groups
+src = "t WHERE id < 1500"
+con.execute(f"CREATE TYPE memory.rls_keys.k_t AS ENUM (SELECT DISTINCT k FROM (SELECT {rls._key_text(('k',))} AS k FROM {src}) WHERE k IS NOT NULL)")
+keys = sorted(con.execute(f"SELECT DISTINCT CAST(k AS VARCHAR), typeof(k) FROM {src}").fetchall(), key=str)
+ways = {"list": rls._in(("k",), keys), "type": rls._key_test(("k",), "memory.rls_keys.k_t"), "join": "k IN (SELECT DISTINCT k FROM t WHERE id < 1500)"}
+out = {}
+for w, cond in ways.items():
+    con.execute(f"CREATE OR REPLACE VIEW v AS SELECT * FROM t WHERE {cond}")
+    pages = [hashlib.sha256(json.dumps(con.execute(f"SELECT COLUMNS(*)::VARCHAR FROM v LIMIT 200 OFFSET {off}").fetchall()).encode()).hexdigest()
+             for _ in range(3) for off in (0, 30000, 90000, 170000)]
+    ids = [r[0] for r in con.execute("SELECT id FROM v").fetchall()]
+    out[w] = {"pages": pages, "rows": len(ids), "in_order": ids == sorted(ids), "ids": hashlib.sha256(json.dumps(ids).encode()).hexdigest(),
+              "joins": con.execute("EXPLAIN SELECT * FROM v LIMIT 200 OFFSET 170000").fetchall()[0][1].upper().count("JOIN")}
+print(json.dumps(out))
+"""
+
+
+def test_follow_row_order_kept():
+    """GATE-4-fix-1 for the key type: over a table of several row groups, read by four threads, the grid's pages
+    (LIMIT 200 OFFSET n, no ORDER BY) through a view that casts to the key type are the pages through the inlined list,
+    read after read, and the whole view comes in the table's own order. The cast is in the scan: the plan has no join
+    (the semi-join the plan first named has one, which is why it was not built: bench/RESULTS.md, 1.2.7 M0)."""
+    r = engine(ORDERED, timeout=300)
+    assert r.returncode == 0, r.stderr[-3000:]
+    got = json.loads(r.stdout.splitlines()[-1])
+    lst, typ = got["list"], got["type"]
+    assert typ["rows"] == lst["rows"] > 150000 and typ["in_order"] and lst["in_order"] and typ["ids"] == lst["ids"], (typ["rows"], lst["rows"])
+    assert typ["pages"] == lst["pages"] and typ["pages"][:4] == typ["pages"][4:8] == typ["pages"][8:] and len(set(typ["pages"][:4])) == 4
+    assert typ["joins"] == 0 == lst["joins"] and got["join"]["joins"] >= 1 and got["join"]["rows"] == typ["rows"]
+
+
+def test_follow_key_type_dropped_with_snapshot(links):
+    """A key type lives as long as its snapshot's views: after new data (a new visitor: other keys, so another type and
+    other views) the older type stays for KEEP_S, for a read that began before, and the older views still read; then it
+    is dropped, and a view that still names it fails instead of showing anything. One type per key set is kept, not one
+    per build."""
+    odd = "C-DROP-1"
+    [cust] = [abi.call("sql_query", project=P, sql="SELECT * FROM customers LIMIT 1")]
+    one = dict(zip(cust["columns"], cust["rows"][0])) | {"customer_id": odd}
+    order = dict(zip(*(lambda r: (r["columns"], r["rows"][0]))(abi.call("sql_query", project=P, sql=(
+        "SELECT o.* FROM orders o JOIN cafes c USING (cafe_id) WHERE c.region = 'North' LIMIT 1"))))) | {"customer_id": odd, "order_id": "ORD-DROP-1"}
+    try:
+        got = kt("drop", uid=links["uid"], customer=one, order=order)
+    finally:
+        with contextlib.suppress(abi.ActionError):
+            abi.call("edit_cells", project=P, table="orders", delete=[["ORD-DROP-1"]])
+        with contextlib.suppress(abi.ActionError):
+            abi.call("edit_cells", project=P, table="customers", delete=[[odd]])
+    (t1,), t2, t3 = got["types"]
+    n = len(sql(VISITED))
+    assert got["snaps"][0] < got["snaps"][1] == got["snaps"][2] and got["schemas"][0] != got["schemas"][1] == got["schemas"][2], got
+    assert len(t2) == 2 and t1 in t2 and got["seen"][:3] == [n, n + 1, n], "kept beside the new one; the older views read the older keys"
+    assert len(t3) == 1 and t1 not in t3 and t3[0] in t2 and got["seen"][3] == n + 1, got["types"]
+    assert got["old_view"] in ("CatalogException", "BinderException"), got["old_view"]
+
+
+def test_two_people_same_condition_share_one_key_type(links):
+    """Two Viewers of the same region read through the same views and one key type, read once; a Viewer of another
+    region gets their own. No one's type holds a key they may not see: each sees exactly their region's visitors."""
+    made, uid = {}, {}
+    try:
+        for w in ("twin", "south"):
+            made[w] = f"pi_links_{w}_{time.strftime('%H%M%S')}"
+            abi.call("create_user", name=made[w], password=secrets.token_urlsafe(16))
+            abi.call("set_role", project=P, user=made[w], role="viewer")
+        ids = {u["name"]: u["id"] for u in abi.call("rls_rules", project=P)["accounts"]}
+        uid = {"first": links["uid"], "twin": ids[made["twin"]], "south": ids[made["south"]]}
+        sure("set_rls_rule", project=P, id="region", table="cafes", column="region",
+             users={uid["first"]: ["North"], uid["twin"]: ["North"], uid["south"]: ["South"]})
+        got = kt("share", uids=uid)
+    finally:
+        sure("set_rls_rule", project=P, id="region", table="cafes", column="region", users={links["uid"]: ["North"]})
+        for n in made.values():
+            sure("delete_user", name=n)
+    first, twin, south = got["first"], got["twin"], got["south"]
+    assert first["schema"] == twin["schema"] and first["types"] == twin["types"] and len(first["types"]) == 1, (first, twin)
+    assert first["key_reads"] == twin["key_reads"] == 1 and south["key_reads"] == 2, "the twin's build read no keys"
+    assert south["schema"] != first["schema"] and len(south["types"]) == 2 and first["types"][0] in south["types"]
+    assert first["seen"] == twin["seen"] == len(sql(VISITED)) and south["seen"] == len(sql(VISITED.replace("'North'", "'South'"))) != first["seen"]
