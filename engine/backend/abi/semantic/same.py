@@ -432,9 +432,11 @@ def _log(project: str, s: str, window: int | None = WINDOW) -> list[dict]:
     thousands of decisions). A system read: its callers are Editors."""
     try:
         got = semantic.execute(project, f'SELECT row_key, "user", CAST("timestamp" AS VARCHAR), comment, batch_id, status FROM lake.edits.{_q(s)}'
-                                        f" WHERE reviewed_by = '{MARK}' ORDER BY coalesce(reviewed_at, \"timestamp\") DESC, batch_id DESC, row_key,"
+                                        # active or undone: a proposal a person named like the mark rejected is no decision
+                                        f" WHERE reviewed_by = '{MARK}' AND status IN ('active', 'undone')"
+                                        f' ORDER BY coalesce(reviewed_at, "timestamp") DESC, batch_id DESC, row_key,'
                                         f' "column" NULLS FIRST' + (f" LIMIT {window + 1}" if window else ""), {"same_as": s}, None, raw=True)
-    except duckdb.Error:  # no decisions table, or no edit log yet
+    except duckdb.CatalogException:  # no decisions table, or no edit log yet; any other failure is not "no decisions"
         return []
     cut = got[window][4] if window and len(got) > window else None  # never half a decision
     out: dict[str, dict] = {}
@@ -504,25 +506,36 @@ def kept(project: str, t: str) -> dict | None:
     return next((x for x in _objects(project) if "resolve" in x and table(x["table"]) == t), None) if t.startswith("same_as_") else None
 
 
-def undo_words(conn, user: User, project: str, t: str, batch: str) -> tuple[str, str | None, str | None] | None:
+def undo_words(conn, user: User, project: str, t: str, batch: str) -> tuple[str, str | None, str | None, list] | None:
     """For a table that holds decisions (named same_as_…, with rows decide_same wrote), whether or not a type resolves
     through it now: (what undoing batch `batch` takes back, in the person's words; the newer decision to undo first, in
-    words, or None: `_newer`; why it can't be undone at all now, or None). writeback.undo_edits asks with the first and
-    refuses with the others. Fail closed: read from the whole log, never a window of it, and a batch that can't be
-    checked is not undone. None for any other table (one of that name that never held a decision too)."""
+    words, or None: `_newer`; why it can't be undone at all now, or None; the decisions this was judged on: `marked`).
+    writeback.undo_edits asks with the first, refuses with the next two and checks the last again inside its write.
+    Fail closed: read from the whole log, never a window of it, and a batch that can't be checked is not undone. None
+    for any other table (one of that name that never held a decision too)."""
     if not t.startswith("same_as_") or not (log := _log(project, t, None)):
         return None
+    seen = sorted([d["batch"], d["undone"]] for d in log)
     if (x := kept(project, t)) is None:  # the newest-first rule needs the type: nothing is undone without it
         return "a decision about which records are the same one", None, (
             "These decisions belong to a type whose matching rules were removed: put the rules back first, then undo."
-            f" (For a developer: `resolve` on the object type over table '{t[8:]}' in model/ontology.json.)")
+            f" (For a developer: `resolve` on the object type over table '{t[8:]}' in model/ontology.json.)"), seen
     cols, one = model.lake_columns(project), x["name"].lower()
     k = (ontology._keys(model._read(project, "model.json")).get(x["table"]) or [None])[0]
-    ds = _decisions(conn, user, project, x, k, cols[x["table"]][k], None, len(log), None) if k in cols.get(x["table"], {}) else []
+    # the batch first: the newest-first rule is worked out for the decisions about its records only
+    mine = next((d for d in log if d["batch"] == batch), None)
+    ds = _decisions(conn, user, project, x, k, cols[x["table"]][k], set(mine["keys"]), len(log), None) if mine and k in cols.get(x["table"], {}) else []
     if (d := next((d for d in ds if d["batch"] == batch), None)) is None:  # not a decision's batch, or the type's key is gone
         return f"a decision about which {x['plural'].lower()} are the same one", None, (
-            f"This isn't a decision about {x['plural'].lower()} that can be undone: take one of those listed under Decided.")
-    return _words(d, one), d["blocked"] and _words(d["blocked"], one), None
+            f"This isn't a decision about {x['plural'].lower()} that can be undone: take one of those listed under Decided."), seen
+    return _words(d, one), d["blocked"] and _words(d["blocked"], one), None, seen
+
+
+def marked(cur, t: str) -> list:
+    """The decisions in table t's log now, read inside a write's transaction: [[batch, undone]], as `undo_words` saw them
+    or not (two Editors at once: the second one's check was made on a log the first has changed since)."""
+    return sorted([b, s == "undone"] for b, s in cur.execute(
+        f"SELECT DISTINCT batch_id, status FROM lake.edits.{_q(t)} WHERE reviewed_by = '{MARK}' AND status IN ('active', 'undone')").fetchall())
 
 
 def unsound(state: dict) -> str | None:

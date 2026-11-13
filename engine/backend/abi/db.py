@@ -387,6 +387,8 @@ CREATE TABLE IF NOT EXISTS optimizer_runs (
   result jsonb,
   error text
 );
+-- a database that made the table before `started` was added (M12 rounds 1 and 2)
+ALTER TABLE optimizer_runs ADD COLUMN IF NOT EXISTS started timestamptz;
 CREATE INDEX IF NOT EXISTS optimizer_runs_latest ON optimizer_runs (project, optimizer, created DESC);
 -- one run at a time per person and optimiser: run_optimizer's INSERT ... ON CONFLICT DO NOTHING is its guard
 CREATE UNIQUE INDEX IF NOT EXISTS optimizer_runs_open ON optimizer_runs (project, optimizer, user_id) WHERE status IN ('queued', 'running');

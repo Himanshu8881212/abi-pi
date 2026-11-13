@@ -281,6 +281,16 @@ PERSON_CLICK = frozenset({"set_role", "set_tenant_admin", "set_user_tenant", "ma
                           "set_remote"})  # set_project_tenant confirms itself (confirms=True)
 
 
+# The harness's confirm bridge (.pi/extensions/abi/index.ts confirmBridge, abi_pending) replays an agent's call over REST
+# with the person's session: first with `X-Abi-Confirm: ask`, to learn what ABI asks, then with the token after their
+# yes. The asking call is the agent's, so it goes through the agent's door (as MCP, D-33): every agent rule holds (edits
+# become proposals, sends are grounded, nothing counts as typed by a person), a call that asks nothing does no more than
+# the agent's own would, and what an agent may never call (agent._secret, PERSON_CLICK) is refused. SHOWN_ONCE: their
+# answer is a credential for the person's screen (SC-4); the bridge would hand it to the model, so no token goes there.
+ASK = "ask"
+SHOWN_ONCE = frozenset({"create_share_link", "create_embed_key", "rotate_webhook_token"})
+
+
 def production_refusal(name: str, project, role: Role | None = None) -> str | None:
     """D-56: why `name` may not run on `project` now (a production environment) for a caller with `role`; None if it
     may. A flow dev defined runs its own steps (via="flow"); an agent's tool calls, in a flow too, never change design."""
@@ -412,7 +422,17 @@ def call_action(
     x_abi_confirm: Annotated[str | None, Header()] = None,
 ):
     CLIENT.set(request.client.host if request.client else "")  # SC-10: set_password counts failures per IP
+    via = "rest"
+    if x_abi_confirm == ASK:
+        from abi import agent  # not at top: agent imports this module
+
+        act = ACTIONS.get(name)
+        if name in SHOWN_ONCE | PERSON_CLICK or act and agent._secret(act):
+            with db.connect() as conn:
+                audit(conn, user, "mcp", name, None, None, 403, "not an agent's to replay")
+            raise HTTPException(403, {"message": f"'{name}' is not available to an agent: the person does it in the app."})
+        via, x_abi_confirm = "mcp", None
     try:
-        return run(name, payload, user, "rest", x_abi_confirm)
+        return run(name, payload, user, via, x_abi_confirm)
     except ActionFailed as e:
         raise HTTPException(e.status, e.body)

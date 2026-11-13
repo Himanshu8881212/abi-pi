@@ -798,6 +798,10 @@ def test_er_undo_stays_a_persons_without_resolve(er):
             abi.call("undo_edits", confirm="ask", project=P, table=S, batch=out["batch"])
         assert e.value.status == 409 and e.value.body["confirm_token"]
         assert e.value.body["message"] == "Undo: a decision about which records are the same one. Confirm to proceed."
+        with pytest.raises(abi.ActionError) as yes:  # M10: asked first, in the person's words; after their yes still refused, with what to do
+            abi.call("undo_edits", confirm=e.value.body["confirm_token"], project=P, table=S, batch=out["batch"])
+        assert yes.value.status == 409 and "confirm_token" not in yes.value.body
+        assert yes.value.body["message"].startswith("These decisions belong to a type whose matching rules were removed: put the rules back first")
         with pytest.raises(abi.ActionError) as e:
             call("edit_cells", table=S, add=[{"a": 107, "b": 108, "same": True}], comment="same")
         assert e.value.status == 409 and "Tables named same_as_" in e.value.body["message"]
@@ -855,6 +859,49 @@ def test_er_undo_fails_closed(er):
     assert oldest not in [b for b, _ in got["cut"]] and got["oldest"][0].endswith("the same customer") and got["oldest"][2] is None
     first = next(b for b, rows in got["full"] if rows == [["103", "104"]])
     assert refused(first) == "A newer decision builds on this one: undo “Bäckerei Müller and Kaffee Kontor are the same customer” first."
+
+
+# another Editor's undo lands between an undo's check and its write
+RACE = r"""
+import json, sys
+import abi.app  # noqa: F401
+from abi import actions, db, security
+from abi.semantic import same
+a = json.loads(sys.stdin.read())
+with db.connect() as c:
+    u = security.user(c, c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"])
+real, once = same.undo_words, []
+def words(conn, user, project, t, batch):
+    out = real(conn, user, project, t, batch)
+    if not once:
+        once.append(1)
+        actions.run("undo_edits", {"project": project, "table": t, "batch": a["other"]}, u, "rest")
+    return out
+same.undo_words = words
+try:
+    actions.run("undo_edits", {"project": a["project"], "table": a["table"], "batch": a["batch"]}, u, "rest")
+    print(json.dumps("ran"))
+except actions.ActionFailed as e:
+    print(json.dumps([e.status, e.body["message"]]))
+"""
+
+
+def test_er_undo_checks_again_inside_its_write(er):
+    """M10 (round 5's LOWs): the newest-first rule is judged on the log an undo read; when the log changed before its
+    write (two Editors at once) nothing is undone and the person is told to look again. What is no decision of the
+    table's is refused by name, and a rejected proposal's rows never count as decisions."""
+    first, other = decide("same", 103, 104), decide("same", 109, 110)
+    was = stored()
+    r = engine(RACE, timeout=120, stdin=json.dumps({"project": P, "table": S, "batch": first["batch"], "other": other["batch"]}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert json.loads(r.stdout.splitlines()[-1]) == [409, "Someone else decided about these records at the same moment, so nothing is undone."
+                                                          " Look at Decided again, then undo."]
+    rev = by("revenue")
+    assert rev[103] == 30 and 104 not in rev, "the first decision stands"
+    assert rev[109] == 9 and rev[110] == 11 and stored() != was, "the other Editor's undo landed"
+    assert refused("0" * 32) == "This isn't a decision about customers that can be undone: take one of those listed under Decided."
+    call("undo_edits", table=S, batch=first["batch"])
+    assert by("revenue")[104] == 20
 
 
 def test_er_phone_conflicting_keys_and_production(tmp_path):

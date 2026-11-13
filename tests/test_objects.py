@@ -829,3 +829,34 @@ def test_a_probability_says_which_outcome_it_is_for(objs):
     assert theirs() == north_n, "and the Viewer their cafés' rows again, no other"
     sure("delete_ml_model", project=P, model="side")
     assert PROPS_OF_SIDE() == [] and theirs() == [[0]]
+
+
+# a scoring run queued with an older copy of the model's file: what the job hands to the scoring
+STALE = r"""
+import json, sys, uuid
+import abi.app  # noqa: F401
+from abi import db, ml
+a = json.loads(sys.stdin.read())
+seen = []
+ml._predictions = lambda project, spec, trained, query, user: seen.append(spec.get("object")) or {}
+with db.connect() as c:
+    u = c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"]
+for model, was in a["runs"]:
+    run = str(uuid.uuid4())
+    with db.connect() as c:
+        c.execute("INSERT INTO ml_runs (id, project, model, status, user_id, spec, kind, query) VALUES (%s, %s, %s, 'queued', %s, %s, 'score', '{}')",
+                  [run, a["project"], model, u, json.dumps({"id": model, "object": was})])
+    ml.job(run)
+    with db.connect() as c:
+        c.execute("DELETE FROM ml_runs WHERE id = %s", [run])
+print(json.dumps(seen))
+"""
+
+
+def test_a_queued_scoring_takes_object_from_the_file_as_it_is_now(objs):
+    """M10 (M9's LOW): a scoring run queued before the model was moved to another object type, taken off its type or
+    deleted scores with the file's `object` as it is now, so it puts no property back on a type the model left."""
+    revenue()
+    r = engine(STALE, stdin=json.dumps({"project": P, "runs": [[DOC[1]["id"], "customer"], ["pi_model_that_is_gone", "cafe"]]}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert json.loads(r.stdout.splitlines()[-1]) == ["cafe", None]

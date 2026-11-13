@@ -184,3 +184,16 @@ def test_a_custom_agents_scope_holds_what_its_expressions_read():
                         "IGNORE([orders_rows], cafes.region)"], cwd=abi.ROOT, capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stderr[-2000:]
     assert json.loads(r.stdout.splitlines()[-1]) == [None, "Outside your scope: revenue.", "Outside your scope: cafes."]
+
+
+def test_a_custom_agents_scope_refuses_a_table_that_is_no_name():
+    """M10 (M6's LOW): refresh and propose_edit name one table of the agent's scope; a list or a dict there is refused
+    like a table outside the scope, not an error of the check itself."""
+    code = ("import json\nfrom abi.agents import runs\nfrom abi.semantic import lineage\n"
+            "print(json.dumps([runs._refused(n, {'table': t}, ['refresh', 'propose_edit'], {}, lineage.graph({}), set(), {'orders'}, [])"
+            " for n in ('refresh', 'propose_edit') for t in (['orders'], {'orders': 1}, 'cafes', 'orders')]))")
+    r = subprocess.run(["sh", "-c", 'eval "$(scripts/engine.sh env)"; cd engine/backend; exec .venv/bin/python -c "$0"', code],
+                       cwd=abi.ROOT, capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr[-2000:]
+    out = json.loads(r.stdout.splitlines()[-1])
+    assert out[3] is None and out[7] is None and all(x and x.endswith("is outside your scope.") for x in out[:3] + out[4:7]), out

@@ -1690,7 +1690,8 @@ function sameCard(box,T,key){if(!T.resolve||MODE==='viewer'||myRank()<2)return;c
    r.decisions.slice(0,key?20:5).forEach(x=>{const d=h('div','item');
     d.append(h('div','file',[cell(String(x.at).replace(' ','T')+'Z'),x.user,x.undone?'undone':''].filter(Boolean).join(' · ')),
      x.out&&x.of?line(`Taken out of ${x.of.title??'it'}:`,x.out):line({same:'The same one:',different:'Not the same:',split:'Taken apart:'}[x.decision]||'Changed by hand:',x.objects));
-    if(!x.undone&&!x.blocked){const a=h('div','row acts');a.append(btn('Undo',()=>go({table:r.table,batch:x.batch},'Taken back.','undo_edits')));d.append(a)}dc.append(d)})}}).catch(e=>{if(c.isConnected){c.append(h('p','empty',e.message));c.hidden=false}})}
+    if(!x.undone&&!x.blocked){const a=h('div','row acts');a.append(btn('Undo',()=>go({table:r.table,batch:x.batch},'Taken back.','undo_edits')));d.append(a)}
+    else if(x.blocked)d.append(h('div','file','Undo the newer decision about them first.'));dc.append(d)})}}).catch(e=>{if(c.isConnected){c.append(h('p','empty',e.message));c.hidden=false}})}
 // Data Model › Objects: the types as boxes and their connections as named lines with how many meet how many. A phone has
 // no canvas: it reads the picture ABI draws from the project's files (render.sections) and each type as a card
 function objectsHome(box){objBar(box,'objects');const L=(D.ontology.links||[]).filter(l=>otype(l.from)&&otype(l.to)),ids=OT().map(t=>t.id);
@@ -2080,11 +2081,13 @@ function plans(box){const g=h('div','cards');box.append(g);
    if(!r){out.append(h('p','empty',MODE==='developer'?'Not worked out yet.':'No plan to show yet. A plan is worked out in Developer: ask one of the project\'s builders for it.'));return}
    if(['queued','running'].includes(r.status)){out.append(h('p','file','Working it out…'));return}
    if(r.status==='failed'){out.append(h('p','bad',r.error||'It could not be worked out.'));return}
-   out.append(h('p','txt',r.text||''));const rows=r.rows||[],objs=rows.filter(x=>x[5]);
-   const lims=['best','found'].includes(r.outcome)?rows.filter(x=>/^(Limit|At least|Exactly)/.test(x[0])).sort((a,b)=>/used|met/.test(b[0])-/used|met/.test(a[0])):[];  // the ones that bind first
+   out.append(h('p','txt',r.text||''));const rows=r.rows||[],objs=rows.filter(x=>x[5]&&x[0]!=='Limit in conflict');  // an object's own two bounds in conflict are in the sentence, not objects of a plan
+   // a limit the rounded plan went past first, then the ones that bind
+   const past=x=>x[2]!==null&&x[4]!==null&&(/^At least/.test(x[0])?x[2]<x[4]:x[0]==='Exactly'?x[2]!==x[4]:x[2]>x[4]),rank=x=>past(x)?2:/used|met/.test(x[0])?1:0;
+   const lims=['best','found'].includes(r.outcome)?rows.filter(x=>/^(Limit|At least|Exactly)/.test(x[0])).sort((a,b)=>rank(b)-rank(a)):[];
    lims.slice(0,8).forEach(x=>out.append(h('div','file',/^At least/.test(x[0])?`${x[1]}: at least ${fmt(x[4])}: ${fmt(x[2])}${/just met/.test(x[0])?' (just met)':''}`:
     x[0]==='Exactly'?`${x[1]}: exactly ${fmt(x[4])}`:`${x[1]}: ${fmt(x[2])}${x[4]===null?'':' of '+fmt(x[4])}${x[0]==='Limit fully used'?' (fully used)':''}`)));
-   if(lims.length>8)out.append(h('div','file','The other limits hold too.'));
+   if(lims.length>8)out.append(h('div','file',lims.slice(8).some(past)?'More limits are not shown here; rounding took the plan slightly past some of them.':'The other limits hold too.'));
    if(objs.length){const tb=h('table'),hd=tb.createTHead().insertRow(),bd=tb.createTBody();[T?T.name:'Name','Now',o.decide.name,''].forEach(t=>hd.append(h('th','',t)));
     objs.slice(0,200).forEach(x=>{const tr=bd.insertRow(),nm=h('button','flink oopen',String(x[1]));nm.onclick=()=>openObj(r.type,x[5]);tr.insertCell().append(nm);[x[3]===null?'—':fmt(x[3]),fmt(x[2]),x[4]||''].forEach(v=>tr.insertCell().textContent=v)});
     const sc=h('div','scroll');sc.append(tb);out.append(sc);if(objs.length>200)out.append(h('p','file','The first 200 are shown.'))}
@@ -2093,7 +2096,7 @@ function plans(box){const g=h('div','cards');box.append(g);
   draw();
   if(MODE==='developer')act(c,'Find the best plan',async m=>{await api('run_optimizer',{optimizer:o.id});say(m,'Working it out…');
    for(let k=0;k<330;k++){await wait(2000);const x=(await api('optimizers',{})).optimizers.find(y=>y.id===o.id);if(x){o.latest_run=x.latest_run;draw()}
-    if(['ok','failed'].includes(o.latest_run?.status))return o.latest_run.status==='ok'?'Done.':'It could not be worked out.'}return 'Still working: open this page again in a moment.'},!i);
+    if(['ok','failed'].includes(o.latest_run?.status))return o.latest_run.status!=='ok'?'It could not be worked out.':['best','found'].includes(o.latest_run.outcome)?'Done.':'No plan this time: the reason is above.'}return 'Still working: open this page again in a moment.'},!i);
   g.append(c)})}
 function tools(box){newBtn(box,'tool');const g=h('div','cards');box.append(g);if(!D.tools.length)box.append(emptyBox('tools','No tools yet',MODE==='viewer'?vEmpty('A tool is a calculation the agents can call. The project\'s builders set them up.'):'A tool is a calculation your agents can call with inputs, such as store KPIs for a month. It has tests and is published when they pass.',MODE==='developer'?['New tool',()=>$('main .bar.top .btn.pri')?.click()]:['Ask the agent',()=>openChat(true)]));
  D.tools.forEach(t=>{const c=card(t.name||t.id,`tools/${t.id}.json · ${t.status||''}`);c.append(h('div','',t.description||''));const ins={};

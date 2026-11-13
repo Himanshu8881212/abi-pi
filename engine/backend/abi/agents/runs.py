@@ -108,8 +108,8 @@ def _refused(name: str, payload: dict, allowed: list[str], files: dict, g: dict,
     snap = _snapshot(files, payload if name == "report_snapshot" else payload.get("report"))
     if out := list(dict.fromkeys(x for r in [q, tool, cond, *snap] if isinstance(r, dict) for x in studio.outside(r, measures, tables, g, files))):
         return f"Outside your scope: {', '.join(out)}."
-    if name in ("refresh", "propose_edit") and payload.get("table") not in tables:
-        return f"Table '{payload.get('table')}' is outside your scope."
+    if name in ("refresh", "propose_edit") and not (isinstance(t := payload.get("table"), str) and t in tables):  # a list or a dict is no table
+        return f"Table '{t}' is outside your scope."
     return None
 
 

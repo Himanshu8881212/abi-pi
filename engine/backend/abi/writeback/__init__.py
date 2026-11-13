@@ -550,6 +550,9 @@ def undo_edits(conn, user: User, args: Proposal) -> dict:
         actions.require_confirmation(f"Undo edit batch {args.batch} of '{t}'.")  # (also when the harness replays its call over REST)
 
     def run(cur):
+        if decisions and t in _logs(cur) and same.marked(cur, t) != decisions[3]:  # the newest-first rule, in this transaction
+            raise ActionFailed(409, "Someone else decided about these records at the same moment, so nothing is undone."
+                                    " Look at Decided again, then undo.")
         if t not in _logs(cur) or not cur.execute(f"UPDATE lake.edits.{_q(t)} SET status = 'undone' WHERE batch_id = ?"
                                                   " AND status = 'active'", [args.batch]).fetchone()[0]:
             raise ActionFailed(404, f"No applied edit batch {args.batch} on '{t}'.")

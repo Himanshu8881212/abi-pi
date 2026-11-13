@@ -600,8 +600,11 @@ export default async function abi(pi: ExtensionAPI) {
 
 	async function confirmBridge(tool: string, input: unknown, ctx: ExtensionContext) {
 		if (PERSON_CLICK.has(tool)) return { status: "This changes access or where the project goes: the person does it in ABI's app, never from an agent." };
-		// a confirm header makes ABI ask everything it asks an agent (a new host to load from, a first send), as the MCP call
-		// replayed here did: without one, this REST call is the person's own, one step (actions.needs_click)
+		// "ask" makes ABI treat this call as the agent's own (abi.actions.ASK: the agent's door, as the MCP call replayed
+		// here): it asks everything it asks an agent (a new host to load from, a first send), a step that asks nothing
+		// (abi_pending takes any step a specialist names) does only what the agent's own call would, and what is never
+		// an agent's (credentials shown once, account mail, tokens) is refused. Without it this REST call would be the
+		// person's own, one step. Only a 409 with a token is ever run as the person, after their yes
 		const first = await rest(tool, input, "ask");
 		if (first.status !== 409 || !first.body?.confirm_token) {
 			return first.status < 300 ? { result: first.body } : { error: first.body };

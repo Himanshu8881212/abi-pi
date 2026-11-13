@@ -252,3 +252,30 @@ print(json.dumps(out))
     assert json.loads(r.stdout.strip().splitlines()[-1]) == {
         "files": 2, "taken": [True, False, True], "moves": [[f"{lake}/pi_loc_a/", f"{lake}/pi_loc_b/"]], "rows": 6,
         "left": []}, r.stderr[-2000:]
+
+
+@pytest.mark.skipif(not PY.exists() or engine("from abi import db; db.connect().close()").returncode, reason="engine's Postgres not running")
+def test_a_lake_of_a_project_that_is_gone_is_forgotten():
+    """M10: a process kept the lake (a DuckDB instance, its memory and its catalog connection) of every project it ever
+    read, also once the project was deleted or renamed, so a worker that saw projects come and go only grew. Within a
+    minute of the next read the lakes of projects that are gone are forgotten; those that exist stay."""
+    r = engine("""
+import json, psycopg
+from abi import storage
+a, b = "pi_lake_gone_a", "pi_lake_kept_b"
+con = {p: storage.lake(p) for p in (a, b)}
+with psycopg.connect(autocommit=True) as pg:
+    pg.execute(f'ALTER SCHEMA "{a}" RENAME TO "_deleted_1_{a}"')  # as delete_project leaves it
+storage.lake(b)
+soon = sorted(p for p in (a, b) if p in storage._lakes)
+storage._swept[0] = 0.0  # a minute later
+kept = storage.lake(b) is con[b]
+after = sorted(p for p in (a, b) if p in storage._lakes)
+storage._close_lakes()
+with psycopg.connect(autocommit=True) as pg:
+    for s in (f"_deleted_1_{a}", b):
+        pg.execute(f'DROP SCHEMA IF EXISTS "{s}" CASCADE')
+print(json.dumps([soon, after, kept]))
+""", timeout=120)
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert json.loads(r.stdout.splitlines()[-1]) == [["pi_lake_gone_a", "pi_lake_kept_b"], ["pi_lake_kept_b"], True]

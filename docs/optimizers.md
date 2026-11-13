@@ -33,9 +33,11 @@ in the engine knows an industry.
 
 `run_optimizer` (the app: Automate > Plans, "Find the best plan") queues the run for the worker; `optimizers` reads it.
 The answer is a sentence and rows, in this order: the total (and what it is now), the number of values the proposal
-changes, each object with its number now and in the plan (the largest first), then each limit with what the plan uses
-of it (an at-most limit says when it is fully used, an at-least limit when it is just met). Every figure in the
-sentence is a value of the rows, and of the first rows: an agent is shown the first 20. When no plan fits, the answer
+changes, the limits the sentence names, each object with its number now and in the plan (the largest first), then
+the other limits. A limit's row holds what the plan uses of it (an at-most limit says when it is fully used, an
+at-least limit when it is just met). The sentence names up to three limits that are fully used, three that are just
+met and three that rounding took the plan past, then "and other limits"; every figure and every limit it names is in
+the first rows (at most 11 before the objects): an agent is shown the first 20. When no plan fits, the answer
 names the limits that can't hold together, and only those (a limit with a least and a most: the bound that is in the
 way); an object whose own least is above its own most is named before anything is worked out. A plan with no end, over
 nothing, or over more objects than one run takes says so and what to do.
@@ -50,10 +52,14 @@ ends with at most one open proposal of that optimiser:
 - it finds a plan that changes something: the new proposal is stored first, then the proposals earlier runs left open
   are withdrawn (rejected; they stay in the edit history), and the answer says so;
 - it finds a plan the objects already have: nothing is proposed, and an earlier open proposal is withdrawn;
-- it finds no plan (the limits conflict, the plan has no end, the time ran out without a plan): an earlier open
-  proposal is withdrawn, and the answer says so;
+- it finds that there is no plan (the limits conflict, or the plan has no end): an earlier open proposal is
+  withdrawn, and the answer says so;
+- the time runs out without a plan: nothing was learned, so nothing is withdrawn;
+- there is nothing to plan (no object the person sees, or none that matches the filters): nothing is withdrawn, and
+  the answer says what to do;
 - it is refused before anything is worked out (an object without a number, too many objects, a file that no longer
   fits the model): nothing is withdrawn.
+A run that fails after its proposal was stored takes that proposal back.
 A proposal a person already approved or rejected is never touched.
 
 The agent can set an optimiser up (`save_optimizer`) and run it; a flow runs it with a step
@@ -90,14 +96,16 @@ approved plan wrote reaches it with the data, as every edit does.
 - The plan's numbers are rounded the way `decide.write` holds them (a DECIMAL(10,2) column: two decimals; otherwise
   six) after the best plan is found. Which limits are fully used or just met is judged on the plan before rounding;
   the rows show what the rounded plan uses, and when rounding takes it past a limit (by less than half a unit of the
-  last decimal per object) the sentence says so with both figures: the plan is not re-solved in the column's units. A
+  last decimal, times the limit's `per_unit`, per object) the sentence says so ("After rounding, the plan is slightly
+  over: …") with both figures, unless they read the same: the plan is not re-solved in the column's units. A
   whole-number column, a DECIMAL without decimals included, needs `integer: true`.
 - Among plans that are equally good, which one comes out is not specified.
 - "Which limits conflict" is one smallest set; other sets may exist. For a limit with `group` it does not say which
   group.
 - Runs are kept in the engine's database, not in Git: the latest 5 finished runs per optimiser and person, and any
   run whose proposal may still be open. At most one run per person and optimiser at a time, 3 per person and 10 in a
-  project queued or running. A run whose worker died ends failed (within about a minute; at the latest when it has
-  been running for 30 minutes, or waiting for 6 hours, and the project's next run starts).
+  project queued or running (a flow's step that meets these is tried again later). A run whose worker died ends
+  failed (within about a minute; at the latest when it has been running for 30 minutes, or waiting for 6 hours, and
+  the project's next run starts).
 - The app shows and runs plans; setting one up is done with the agent or by editing the file. The generated
   project documentation and the lineage map do not list optimisers yet.

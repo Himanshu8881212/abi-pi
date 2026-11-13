@@ -129,6 +129,33 @@ _lakes: dict[str, duckdb.DuckDBPyConnection] = {}  # a project's entry changes o
 _oid: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # Postgres-catalog connection -> its schema's OID
 _checked: dict[str, float] = {}  # project -> monotonic time its cached lake was last matched against the catalog
 RECHECK_S = 1.0
+SWEEP_S = 60.0  # how often the cached lakes are matched against the projects that still exist
+_swept = [0.0]
+_sweeping = threading.Lock()
+
+
+def _forget_gone(now: float) -> None:
+    """Forget the cached lakes of projects that are gone (deleted or renamed). Nothing asks for such a name again, so
+    each one kept its DuckDB instance, the memory that holds and its catalog connection for as long as the process
+    lived: a worker that saw many projects come and go only ever grew (16 GB after six days, found 12 Nov 2026). Not
+    closed: a thread may still read one; it closes when its last reader lets go. At most once per SWEEP_S, by one
+    thread, one catalog query; never while holding a project's lock."""
+    if now - _swept[0] < SWEEP_S or not _sweeping.acquire(blocking=False):
+        return
+    try:
+        _swept[0] = now
+        names = [p for p, con in list(_lakes.items()) if con in _oid]  # lakes with a Postgres catalog
+        if not names:
+            return
+        with psycopg.connect(os.environ.get("ABI_LAKE_CATALOG", "postgres:").removeprefix("postgres:")) as pg:
+            live = {r[0] for r in pg.execute("SELECT nspname FROM pg_namespace WHERE nspname = ANY(%s)", [names]).fetchall()}
+        for p in names:
+            if p not in live:
+                with project_lock("lake", p):
+                    _lakes.pop(p, None)
+                    _checked.pop(p, None)
+    finally:
+        _sweeping.release()
 
 
 def lake(project: str) -> duckdb.DuckDBPyConnection:
@@ -140,6 +167,7 @@ def lake(project: str) -> duckdb.DuckDBPyConnection:
     # ponytail: one DuckDB instance per project; attach several lakes to one instance if projects get many
     # ponytail: matched at most once per RECHECK_S, so a lake recreated under the name is missed for up to that long;
     # LISTEN/NOTIFY from delete/rename_project if that window matters
+    _forget_gone(time.monotonic())
     with project_lock("lake", project):
         con, now = _lakes.get(project), time.monotonic()
         if con in _oid and now - _checked.get(project, 0) > RECHECK_S:

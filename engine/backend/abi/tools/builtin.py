@@ -859,7 +859,7 @@ def refresh(conn, user: User, args: TableRef) -> dict:
     return storage.made(storage.snapshot_id(storage.lake(args.project)), table=args.table)  # ST-3: the id to restore before
 
 
-SENT = {"type": "object", "properties": {"sent": {"const": True}}}
+SENT = {"type": "object", "properties": {"sent": {"type": "boolean"}}}  # false: it reached nobody (a per-object alert's recipients)
 BUILTIN_TOOLS = {  # TL-2: name -> output JSON Schema; inputs come from the action's model
     "semantic_query": {"type": "object", "properties": {"columns": {"type": "array", "items": {"type": "string"}},
                        "measures": {"type": "object"}, "rows": {"type": "array", "items": {"type": "array"}}}},

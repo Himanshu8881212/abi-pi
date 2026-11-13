@@ -985,7 +985,9 @@ def run_object_action(conn, user: User, args: RunAction) -> dict:
     if a.get("flow"):
         preview["flow"] = a["flow"]
     proposed = bool(w) and bool(a.get("approval") or actions.by_agent() or actions.inbound())
-    if a.get("confirm") or a.get("flow") and actions.by_agent():  # (5) the token signs the preview: a changed old value asks again
+    # (5) the token signs the preview: a changed old value asks again. A flow is started by a person's own click only: an
+    # agent's call asks, and the Confirm click (or the harness's replay) that follows is checked against what was shown
+    if a.get("confirm") or a.get("flow") and (actions.by_agent() or actions._call.get((None,) * 4)[3]):
         said = [f"{t}.{c['column']}: {json.dumps(c['old'])} → {json.dumps(c['new'])}" for c in preview.get("writes", {}).get("changes", [])]
         require_confirmation(f"Run '{a['name']}' on {x['name']} {json.dumps(preview['object']['title'])}: " + "; ".join(
             said + ([f"starts flow '{a['flow']}'"] if a.get("flow") and not proposed else [])) + "." + (

@@ -20,6 +20,7 @@ and its rows follow the object's row-level security through that relationship (r
 the flows that trigger on ml_<id>. scikit-learn, LightGBM and statsforecast are imported inside the functions that fit (cold import ~seconds).
 """
 
+import contextlib
 import contextvars
 import hashlib
 import json
@@ -701,7 +702,11 @@ def job(run_id: str) -> None:
             raise ActionFailed(400, "The user who asked for this scoring run no longer exists.")
         else:
             with git.change(r["project"], u, "score_model"):
-                out = _predictions(r["project"], r["spec"], r["trained"], r["query"], u)
+                # `object` as the model's file has it now: a run queued before the model was taken off its object type
+                # (or deleted) writes its predictions and puts no property back on the type
+                now = (bundle(git.path(r["project"])).get(f"ml/{r['spec']['id']}.json") or {}).get("object")
+                spec = {k: v for k, v in r["spec"].items() if k != "object"} | ({"object": now} if now else {})
+                out = _predictions(r["project"], spec, r["trained"], r["query"], u)
     except Exception as e:  # noqa: BLE001 - any failure is the run's outcome
         error = str(e)
     with db.connect() as conn:
@@ -998,7 +1003,9 @@ def _off_object(project: str, oid: str, mid: str, to: str | None = None) -> None
         mj = semantic_model.load(project)
         if (mj["tables"].get(t) or {}).get("key"):
             mj["tables"][t]["key"] = None
-            semantic_model.save(project, mj)
+            with contextlib.suppress(ActionFailed):  # an object type or a link still needs that key: it stays
+                ontology.guard(project, semantic_model._file(mj), f"Table '{t}'")
+                semantic_model.save(project, mj)
 
 
 def after_refresh(project: str, table: str, snapshot: int) -> None:
