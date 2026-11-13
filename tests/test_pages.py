@@ -1055,6 +1055,25 @@ def test_report_form_card_runs_action(objs, tmp_path):
     assert int(out["kpi2"]) == int(out["kpi"]) + 1, f"the page's visuals read their rows again: {out['kpi']} → {out['kpi2']}"
 
 
+def test_objects_entry_shows_before_any_object_exists(people, tmp_path):
+    """1.2.7 M0 (9a): a project with no object types showed no Objects at all, so nobody could find where they start.
+    The sidebar always has the entry; its page says what objects are. In Developer on a computer it has one primary
+    button that opens the chat with the request filled in (not sent); in Viewer mode and at phone width there is no
+    button, and a sentence says where objects are made."""
+    steps = [["get", "nav", "[...document.querySelectorAll('aside button.it')].map(b => b.textContent).filter(t => t.includes('Objects')).length"],
+             ["show", "objects"], ["wait", "main .emptyx"], ["text", "title", "main .emptyx h3"], ["text", "said", "main .emptyx p"],
+             ["get", "buttons", "[...document.querySelectorAll('main .btn')].filter(b => b.offsetParent).map(b => [b.textContent, b.classList.contains('pri')])"]]
+    dev = drive(people["people"]["d"], tmp_path, steps + [["click", "main .emptyx .btn"], ["until", "inp.value !== ''"], ["get", "asked", "inp.value"]])
+    assert dev["nav"] == 1 and dev["title"] == "No objects yet" and dev["said"].startswith("Objects are the things your business talks about"), dev
+    assert dev["buttons"] == [["Let ALL propose them", True]] and dev["asked"] == "Propose objects for this project.", dev
+    assert "computer" not in dev["said"] and "Publish" not in dev["said"]
+    viewer = drive(people["people"]["a"], tmp_path, steps)
+    assert viewer["nav"] == 1 and viewer["buttons"] == [] and viewer["said"].endswith(
+        "A builder of this project makes them on a computer; they show here after Publish."), viewer
+    phone = drive(people["people"]["d"], tmp_path, [s for s in steps if s[1] != "nav"], width=390)
+    assert phone["buttons"] == [] and phone["said"] == viewer["said"], phone  # (a phone reads the published version: Viewer)
+
+
 def test_form_card_gap_closes(objs, tmp_path):
     """1.2.7 M0 (item 8): a form card a person may not use is not drawn, and its place in the row stayed empty: the
     chart beside it kept half the page. Now the row's other cards share the row: for the Viewer "Revenue by region" is

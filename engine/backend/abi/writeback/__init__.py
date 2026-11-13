@@ -345,7 +345,7 @@ def _batch(user: User, args: Edits, status: str, decision: bool = False) -> dict
                 if why := same.unsound({(a, b): yes for a, b, yes in cur.execute(
                         f'SELECT CAST(a AS VARCHAR), CAST(b AS VARCHAR), "same" FROM ({sql})').fetchall()}):
                     raise ActionFailed(409, f"Someone else decided about these records at the same moment, and with both decisions {why}."
-                                            " Nothing changed: look at the records again (find_same), then decide.")
+                                            " Nothing changed: look at the records again, then decide.")
 
     try:
         snap = storage._commit(con, run, user.name, f"{'propose' if status == 'proposed' else 'edit'} {t} ({len(log)} changes)")

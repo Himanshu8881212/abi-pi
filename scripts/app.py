@@ -1710,7 +1710,11 @@ function sameCard(box,T,key){if(!T.resolve||MODE==='viewer'||myRank()<2)return;c
     else if(x.blocked)d.append(h('div','file',x.blocked_by?`A newer decision builds on this one. Undo “${x.blocked_by}” first.`:'Undo the newer decision about them first.'));dc.append(d)})}}).catch(e=>{if(c.isConnected){c.append(h('p','empty',e.message));c.hidden=false}})}
 // Data Model › Objects: the types as boxes and their connections as named lines with how many meet how many. A phone has
 // no canvas: it reads the picture ABI draws from the project's files (render.sections) and each type as a card
-function objectsHome(box){objBar(box,'objects');const L=(D.ontology.links||[]).filter(l=>otype(l.from)&&otype(l.to)),ids=OT().map(t=>t.id);
+// 1.2.7 M0 (9a): the entry is always there; before any object type exists the page says what objects are and how they come
+const NO_OBJECTS='Objects are the things your business talks about, such as a customer, a café or an order. Each gets a page of its own with its figures, what it is connected to and what can be done with it.';
+function objectsHome(box){if(!OT().length){box.append(emptyBox('objects','No objects yet',NO_OBJECTS+(MODE==='viewer'||MOBILE?' A builder of this project makes them on a computer; they show here after Publish.':''),
+  MODE==='developer'&&!MOBILE?['Let ALL propose them',()=>{openChat(true);inp.value='Propose objects for this project.';inp.focus()}]:null));return}
+ objBar(box,'objects');const L=(D.ontology.links||[]).filter(l=>otype(l.from)&&otype(l.to)),ids=OT().map(t=>t.id);
  const props=T=>{const p=T.properties.filter(p=>(p.name||p.meaning)&&p.column!==T.title);return (p.length?p:T.properties).slice(0,6)};
  if(MOBILE){const pic=h('div','odiag'),g=h('div','cards mlist2');{const t=h('div');t.insertAdjacentHTML('beforeend',D.sections?.Objects||'');const svg=t.querySelector('svg');if(svg){pic.append(svg);box.append(pic)}}
   OT().forEach(T=>{const c=card(T.plural),cl=h('div','stepchips');if(T.description&&T.description!==MASK)c.append(h('p','mtext',T.description));
@@ -2235,7 +2239,7 @@ const VLEDE={objects:'The things the business works with (a café, a customer): 
 function nav(){const all=navAll(),me=window.ME||{admin:true};return all.filter(([g,items])=>items.length&&(g==='Start'||!me.sections||me.sections.includes(g)))}
 function navAll(){return [['Start',[['home','Home',home],['chat','Chat',chatPage]]],
  ['Data',[...(MODE==='viewer'?[]:[['sources','Sources',sources,D.sources.length],['staged','Staged',stagedPage,(D.layers||[]).filter(t=>t.layer==='silver').length]]),['tables','Tables',tablesPage,(D.model?Object.keys(D.model.tables||{}).length:D.tables.length)],...(MODE==='viewer'?[]:[['edits','Edits',editsPage]])]],
- ['Data Model',[['model','Data models',modelsPage,(D.models||[]).length+1],...(OT().length?[['objects','Objects',objectsHome,OT().length]]:[]),['measures','Measures',measures,D.measures.length],
+ ['Data Model',[['model','Data models',modelsPage,(D.models||[]).length+1],['objects','Objects',objectsHome,OT().length],['measures','Measures',measures,D.measures.length],
  ['glossary','Glossary',glossary,D.glossary.length],['datasets','Queries',datasets,D.datasets.length]]],
  ['Visualizations',[['reports','Reports',reportsPage,D.reports.length],['monitor','Monitor',monitorPage],['inbox','Inbox',inboxPage,INBOXN],['explore','Explore',explore,MINE.length||'']]],
  ['Export',[['boardpack','Board pack',boardPage,(D.app?.packs||[]).length],['documents','Documents',documentsPage],['onepager','One-pager',onePagerPage],['dataexport','Data',dataExportPage],['video','Video',videoPage],['transfer','Project',transferPage]]],
