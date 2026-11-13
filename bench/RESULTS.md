@@ -1609,7 +1609,7 @@ be made and shows no rows, and a view over a dropped one fails (closed).
 | prototype: semi-join | followed | 5.56 / 8.94 | 3.05 / 4.67, 3.13 / 4.79, 3.10 / 4.89 | 4.780 | x1.27 |
 | prototype: one-row list | followed | 5.84 / 9.24 | 3.22 / 4.75, 3.19 / 4.70, 3.06 / 4.69 | 4.711 | x1.25 |
 | prototype: ENUM | followed | 6.01 / 9.40 | 3.18 / 4.63, 3.09 / 4.74, 3.37 / 4.82 | 4.731 | x1.26 |
-| prototype: ENUM, and the denied tables read once per filter build | followed | (no restart before it) | 3.10 / 4.44, 2.99 / 4.55, 3.05 / 4.40 | 4.464 | x1.19 |
+| prototype: ENUM, and the denied tables read once per filter build | followed | 5.77 / 9.15 | 3.10 / 4.44, 2.99 / 4.55, 3.05 / 4.40 | 4.464 | x1.19 |
 
 The target is x1.2 of 1.2.5: 4.510 s. What the table says:
 
