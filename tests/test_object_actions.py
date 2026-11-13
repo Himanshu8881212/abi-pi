@@ -1245,3 +1245,40 @@ def test_a_replayed_call_is_the_agents_call(acts):
     finally:
         sure("import_project", project=P, bundle=bundle)
     assert abi.call("remote_settings", project=P)["remote"] is None
+
+
+def test_long_input_refused_before_the_question(acts):
+    """1.2.7 M0 (item 4): the dialog an agent's question goes through shows 4,000 characters of the preview and says the
+    rest is cut, so a long typed value was approved unseen. An agent's run whose preview would be cut is refused before
+    anything is asked, saying by how much to shorten the value; shortened by that much it is asked, and the preview then
+    fits whole. The person's own click in the app is asked as before: that dialog shows all of it."""
+    good, base = acts["good"], onto(acts["format"])
+    wide = {"type": "object", "required": ["reason"], "additionalProperties": False, "properties": {"reason": {"type": "string", "maxLength": 20000}}}
+    sure("save_ontology", project=P, ontology={**base, "actions": [*base["actions"], {
+        "id": "long_note", "object": "cafe", "name": "Long note", "confirm": True, "inputs": wide,
+        "writes": {"table": "cafe_contacts", "set": {"visit_reason": "{{ data.inputs.reason }}"}}}]})
+    try:
+        was, long = contact(good), "The roof leaks. " * 400  # 6,400 characters, typed
+        e = asked("run_object_action", project=P, type="cafe", key=[good], action="long_note", inputs={"reason": long})
+        assert e.status == 422 and "confirm_token" not in e.body and "preview" not in e.body and contact(good) == was, e.body
+        said = e.body["message"]
+        assert "shows at most 4,000" in said and "Nothing was asked." in said and "Shorten 'reason' (6,400 characters) by " in said, said
+        cut = int(said.split("characters) by ")[1].split(" ")[0].replace(",", ""))
+        # the sentence is true: that much shorter, it is asked, and all of it fits what the dialog shows
+        e = asked("run_object_action", project=P, type="cafe", key=[good], action="long_note", inputs={"reason": long[:len(long) - cut]})
+        assert e.status == 409 and e.body["confirm_token"], e.body
+        assert len(json.dumps(e.body["preview"], indent=1, ensure_ascii=False)) <= 4000, "nothing of it is cut"
+        e = asked("run_object_action", project=P, type="cafe", key=[good], action="long_note", inputs={"reason": long[:len(long) - cut + 1]})
+        assert e.status == 422, "one character more is one too many"
+        # marks the dialog writes out count as it writes them (6 characters more each)
+        e = asked("run_object_action", project=P, type="cafe", key=[good], action="long_note", inputs={"reason": "x‮" * 400})
+        assert e.status == 422 and "Shorten 'reason' (800 characters)" in e.body["message"], e.body
+        # ABI's own agent is refused the same way; the person's own click is asked, whole
+        out = engine(AS, timeout=120, stdin=json.dumps({"uid": acts["uid"]["editor"], "via": "agent", "action": "run_object_action",
+                                                        "args": {"project": P, "type": "cafe", "key": [good], "action": "long_note", "inputs": {"reason": long}}}))
+        got = json.loads(out.stdout.splitlines()[-1])
+        assert got["status"] == 422 and "confirm_token" not in got["body"], got
+        body = refused(None, 409, type="cafe", key=[good], action="long_note", inputs={"reason": long})
+        assert body["confirm_token"] and body["preview"]["inputs"]["reason"] == long and contact(good) == was
+    finally:
+        sure("save_ontology", project=P, ontology=base)

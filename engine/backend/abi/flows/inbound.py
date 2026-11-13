@@ -297,8 +297,15 @@ def message_flows(call: "Call", entries: list[dict], key: str) -> int:
     return n
 
 
+NEVER = frozenset({"create_share_link", "create_embed_key"})  # refused to every agent before anything is asked (reports/share.py, embed.py)
+
+
 def defer(project: str, agent: str, run_id: str, name: str, payload: dict, user: User) -> dict:
-    """Queue an inbound run's action tool call for `user`'s approval in the app, with a private inbox notice."""
+    """Queue an inbound run's action tool call for `user`'s approval in the app, with a private inbox notice. 1.2.7 M0:
+    never a public link or an embed key: no agent may ask for one, so it is refused here, not queued."""
+    if name in NEVER:
+        return {"status": f"Not run and not queued: {name} is never an agent's to ask for. A workspace owner can use Share on the"
+                          " report instead: the people they pick open it after signing in."}
     with db.connect() as conn:
         conn.execute("INSERT INTO inbound_approvals (project, user_id, run_id, agent, action, input) VALUES (%s, %s, %s, %s, %s, %s)",
                      [project, user.id, run_id, agent, name, Jsonb(payload | {"project": project})])

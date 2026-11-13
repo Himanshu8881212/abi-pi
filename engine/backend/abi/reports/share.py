@@ -39,7 +39,8 @@ class NewLink(ReportRef):
 @action(Role.editor)
 def create_share_link(conn, user: User, args: NewLink) -> dict:
     """Not for an agent: answers that a public link isn't available here and what the person does instead (Share on the report, for people who sign in). From ABI's own screens: makes a view-only link to a report (or one page) that anyone holding it opens read-only, as you, until it expires (1-30 days, default 7) or is revoked, after a confirmation."""
-    if actions.VIA.get() != "rest":  # before anything is asked. SC-4: the link is a credential; and in this install the page it
+    # 1.2.7 M0: nor for an action an agent queued for a message from outside, which the person's approval runs as "rest"
+    if actions.VIA.get() != "rest" or actions.inbound():  # before anything is asked. SC-4: the link is a credential; and in this install the page it
         # opens is served by the engine only, which the address people open ABI at does not reach (RELEASE.md, known limits)
         raise ActionFailed(403, "A public link isn't available in this install. A workspace owner can use Share on the report instead:"
                                 " the people they pick open it after signing in.")

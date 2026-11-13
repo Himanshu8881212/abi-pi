@@ -358,3 +358,55 @@ def test_a_destructive_question_names_what_it_acts_on_and_nothing_typed_passes_f
     with pytest.raises(abi.ActionError) as e:
         abi.call("delete_user", name="0123456789abcdef-0123")
     assert e.value.status == 409 and "It acts on" not in e.value.body["message"], e.value.body
+
+
+QUEUE = r"""
+import json, sys, uuid
+import abi.app  # noqa: F401  registers every action, as the engine does
+from psycopg.types.json import Jsonb
+from abi import db, security
+from abi.flows import inbound
+P = json.loads(sys.stdin.read())["project"]
+with db.connect() as c:
+    u = security.user(c, c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"])
+run, out = str(uuid.uuid4()), {}
+for name, args in (("create_share_link", {"report": "overview"}), ("create_embed_key", {"name": "x", "origins": ["https://x.example.com"]})):
+    out[name] = inbound.defer(P, "helper", run, name, args, u)["status"]
+with db.connect() as c:
+    out["queued"] = c.execute("SELECT count(*) AS n FROM inbound_approvals WHERE project = %s", [P]).fetchone()["n"]
+    out["inbox"] = c.execute("SELECT count(*) AS n FROM inbox WHERE project = %s", [P]).fetchone()["n"]
+    # a row as 1.2.6 could leave it: queued before the upgrade, approved after it
+    out["id"] = c.execute("INSERT INTO inbound_approvals (project, user_id, run_id, agent, action, input) VALUES (%s, %s, %s, %s, %s, %s)"
+                          " RETURNING id", [P, u.id, run, "helper", "create_share_link", Jsonb({"project": P, "report": "overview"})]).fetchone()["id"]
+print(json.dumps(out))
+"""
+
+
+def test_outside_agent_cannot_queue_public_link():
+    """1.2.7 M0 (item 4): an agent answering a message from outside cannot get a public link or an embed key queued for
+    the person's approval: the queue refuses it and says what the person does instead, and nothing is queued or sent
+    to the inbox. A row queued before (1.2.6 could hold one) makes no link either: the approval's own run is refused
+    as every agent's call is, after the yes too."""
+    from test_engine import engine
+
+    p = "pi_doors_link"
+    drop([p] if p in projects() else [])
+    abi.call("create_project", project=p, name=p)
+    try:
+        r = engine(QUEUE, timeout=120, stdin=json.dumps({"project": p}))
+        assert r.returncode == 0, r.stderr[-2000:]
+        got = json.loads(r.stdout.splitlines()[-1])
+        for name in ("create_share_link", "create_embed_key"):
+            assert got[name].startswith(f"Not run and not queued: {name} is never an agent's to ask for.") and "Share on the report" in got[name], got
+        assert got["queued"] == 0 and got["inbox"] == 0, got
+        with pytest.raises(abi.ActionError) as e:
+            abi.call("approve_inbound_action", project=p, id=got["id"])
+        assert e.value.status == 409 and e.value.body["confirm_token"], e.value.body
+        with pytest.raises(abi.ActionError) as e2:
+            abi.call("approve_inbound_action", confirm=e.value.body["confirm_token"], project=p, id=got["id"])
+        assert e2.value.status == 403 and e2.value.body["message"].startswith("A public link isn't available in this install."), e2.value.body
+        assert "confirm_token" not in e2.value.body and not abi.call("list_share_links", project=p).get("links")
+        abi.call("reject_inbound_action", project=p, id=got["id"])
+        assert abi.call("inbound_approvals", project=p)["approvals"] == []
+    finally:
+        drop([p])

@@ -930,6 +930,17 @@ def _json(v):
     return json.loads(json.dumps(v, default=lambda y: float(y) if isinstance(y, Decimal) else str(y)))
 
 
+DIALOG = 4000  # characters of a preview the harness's dialog shows; a longer one is cut (.pi/extensions/abi/index.ts previewText)
+_MARKS = re.compile("[\u061C\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]")  # each written out there as \\uXXXX (plainMarks)
+
+
+def _shown(preview: dict) -> int:
+    """The length of `preview` as that dialog measures it: JSON indented by one, in UTF-16 units, invisible marks written
+    out. ponytail: a float beyond 1e16 prints up to 15 characters longer there; JS number text if such values get typed"""
+    t = json.dumps(preview, indent=1, ensure_ascii=False)
+    return len(t.encode("utf-16-le", "surrogatepass")) // 2 + 6 * len(_MARKS.findall(t))
+
+
 class RunAction(storage.ProjectRef):
     type: str = Field(description="an object type ID (`ontology`)")
     key: list[storage.Value] = Field(min_length=1, description="the object's key value(s), in key column order")
@@ -996,6 +1007,11 @@ def run_object_action(conn, user: User, args: RunAction) -> dict:
         preview["after_yes"] = {"write": None if not w else "proposal" if later else "applied", "starts_flow": bool(a.get("flow")) and not later}
         said = [f"{t}.{c['column']}: {json.dumps(c['old'])} → {json.dumps(c['new'])}" for c in preview.get("writes", {}).get("changes", [])]
         does = said + ([f"starts flow '{a['flow']}'"] if a.get("flow") and not later else [])  # nothing to list: no colon either
+        if actions.by_agent() and (n := _shown(preview)) > DIALOG:  # 1.2.7 M0: before the question, so a yes always covers all of it
+            k, size = max(((k, len(v)) for k, v in args.inputs.items() if isinstance(v, str)), key=lambda kv: kv[1], default=(None, 0))
+            raise ActionFailed(422, f"What '{a['name']}' would ask the person to confirm is {n:,} characters long, and the question an agent"
+                                    f" passes on shows at most {DIALOG:,}, so the yes would not cover all of it. Nothing was asked."
+                               + (f" Shorten '{k}' ({size:,} characters){f' by {n - DIALOG:,} characters or more' if size > n - DIALOG else ''}." if k else ""))
         require_confirmation(f"Run '{a['name']}' on {x['name']} {json.dumps(preview['object']['title'])}" + (": " + "; ".join(does) if does else "") + "." + (
             " The write is a proposal an Editor approves; no flow starts." if later else ""), preview)
     out: dict = {"action": a["id"], "type": x["id"], "key": key}
