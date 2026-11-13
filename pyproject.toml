@@ -1,6 +1,6 @@
 [project]
 name = "abi-pi"
-version = "1.2.5"
+version = "1.2.6"
 requires-python = ">=3.12"
 dependencies = [
     "cryptography>=44,<47",
