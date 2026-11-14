@@ -1155,7 +1155,8 @@ def test_link_headings_and_link_columns_name_the_type_once(objs, tmp_path):
              ["placed at", T("Café", "Cafés"), True], ["customers who visited", T("Customer", "Customers"), False],
              ["orders", T("Order", "Orders"), False], ["has store sales with", T("Store", "Stores"), True],
              ["has store sales with", T("Product", "Products"), True], ["restored", T("Store", "Stores"), True],
-             ["store", T("Store", "Stores"), False]]
+             ["store", T("Store", "Stores"), False], ["favourite café", T("Café", "Cafés"), False], ["uses c++", T("C++", "C++"), False],
+             ["cafés nearby", T("Caf", "Cafs"), True]]
     out = drive(objs["owner"], tmp_path, [["show", "objects"], ["wait", "main .tbl"],
         ["get", "verbs", "(cs => cs.map(([n, y]) => linkVerb(n, y)))(" + json.dumps([c[:2] for c in cases]) + ")"],
         ["get", "heads", "fkHeads({cafe_id: {id: 'cafe', name: 'Café'}, pickup_cafe_id: {id: 'cafe', name: 'Café'}, customer_id: {id: 'customer', name: 'Customer'}})"]])

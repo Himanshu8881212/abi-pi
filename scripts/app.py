@@ -1639,7 +1639,7 @@ const sayLink=(A,B,name,card)=>{const one=/one$/.test(card||''),lo=x=>x.name.toL
 const says=l=>sayLink(otype(l.from),otype(l.to),l.name,l.cardinality);
 // (review F2, G1, G2) a link name is a verb, so its section is headed by the linked type Y, when it is one of the
 // proposal's own ("is for", "has (pickup cafe)") or doesn't name Y as a whole word ("placed at"; "restored" names no Store)
-const linkVerb=(name,Y)=>{const nm=String(name||'').replace(/ \([^()]*\)$/,''),w=x=>new RegExp(`\\b${x.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}\\b`,'i');
+const linkVerb=(name,Y)=>{const nm=String(name||'').replace(/ \([^()]*\)$/,''),w=x=>new RegExp(`(?<![\\p{L}\\p{N}_])${x.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(?![\\p{L}\\p{N}_])`,'iu');  // a whole word in any script (\b is ASCII only)
  return /^(is for|has|belongs to|matches|has .+ with)$/i.test(nm)||!w(Y.name).test(nm)&&!w(Y.plural).test(nm)};
 // (review G3) a list's column that points at another type is headed by that type's name, or, when two columns point at
 // the same type, by each column's own words ("Pickup cafe")
