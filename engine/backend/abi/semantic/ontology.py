@@ -482,7 +482,7 @@ def propose(project: str, user_id: int | None) -> dict:
                 x["measures"] = can[:6]
         objects.append(x)
         types[t] = x
-    taken, links, cards = {x["id"] for x in objects}, [], {}
+    taken, links, cards, said = {x["id"] for x in objects}, [], {}, set()
     mj_table = lambda via: next(r["from"]["table"] for r in mj.get("relationships", []) if r["id"] == via[0])  # noqa: E731  the table two types meet in
     ruled = {r["table"] for r in rls.row_rules(project)}
 
@@ -496,6 +496,10 @@ def propose(project: str, user_id: int | None) -> dict:
         # "customer has orders with cafés" for two types that meet in a table
         through = _label(_singular(mj_table(via))).lower() + "s" if len(via) == 2 else None
         name, inverse = (f"has {through} with",) * 2 if through else ("is for", "has") if a.get("event") else ("belongs to", "has") if card == "many-to-one" else ("matches", "matches")
+        if (a["id"], b["id"], name) in said:  # (review F1) a second link between the same two types: told apart by its column
+            words = " ".join(_label(c.removesuffix("_id")).lower() for c in next(r for r in mj.get("relationships", []) if r["id"] == via[-1])["from"]["columns"])
+            name, inverse = f"{name} ({words})", f"{inverse} ({words})"
+        said.add((a["id"], b["id"], name))
         ln = {"id": lid, "from": a["id"], "to": b["id"], "name": name, "inverse": inverse, "via": via}
         if card != "many-to-one" and b["table"] in ruled:  # owner, 6 Nov 2026: proposed on, the Owner approves it
             ln["rls"] = "follow"

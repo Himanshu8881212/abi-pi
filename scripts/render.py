@@ -298,8 +298,8 @@ def report_pages(project: str, rid: str, rep: dict, measures: dict, ex=None) -> 
 
 def diagram(model: dict, kinds: dict) -> str:
     """Tables as boxes (facts left, filled) and relationships as lines. 1.2.6 M7, the object-type graph (`objects`):
-    the types in one column, so a phone reads the whole picture, and each link an arc on their right with its name and
-    `cardinality`."""
+    the types in one column, so a phone reads the whole picture, and each link an arc on their right with its sentence
+    (`label`, from `says`)."""
     tables = sorted(set(kinds) | {r[s]["table"] for r in model.get("relationships", []) for s in ("from", "to")})
     if not tables:
         return "<p class=empty>No model yet: build_model creates it.</p>"

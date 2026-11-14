@@ -234,10 +234,40 @@ import json, sys
 from abi.semantic import model, ontology
 a = json.loads(sys.stdin.read())
 load = model.load
-model.load = lambda p: (lambda m: m | {"tables": m["tables"] | {"orders": m["tables"]["orders"] | {"key": a["key"]}}})(load(p))
+# (review F3) and without the link from the key to the calendar, so a day key is told apart by its type alone
+cut = lambda rs: [r for r in rs if not (r["from"]["table"] == "orders" and r["from"]["columns"] == a["key"])]
+model.load = lambda p: (lambda m: m | {"tables": m["tables"] | {"orders": m["tables"]["orders"] | {"key": a["key"]}},
+                                       "relationships": cut(m["relationships"])})(load(p))
 r = ontology.propose(a["project"], None)
 print(json.dumps({"types": sorted(x["table"] for x in r["ontology"]["objects"]), "left_out": r.get("left_out", [])}))
 """
+
+
+TWICE = r"""
+import json, sys
+from abi.semantic import model, ontology
+P = json.loads(sys.stdin.read())["project"]
+extra = model._rel("orders.pickup_cafe_id", "cafes.cafe_id")  # a second way from an order to a café (a model file may hold it)
+load, read = model.load, model._read
+add = lambda rs: rs if extra in rs else [*rs, extra]  # once, whichever read the proposal makes
+model.load = lambda p: (lambda m: m | {"relationships": add(m["relationships"])})(load(p))
+model._read = lambda p, f: (lambda m: m | {"relationships": add(m.get("relationships", []))} if f == "model.json" else m)(read(p, f))
+r = ontology.propose(P, None)
+print(json.dumps([[l["name"], l["inverse"]] for l in r["ontology"]["links"] if l["from"] == "order" and l["to"] == "cafe" and len(l["via"]) == 1]))
+"""
+
+
+def test_two_links_to_one_type_have_different_names(onto):
+    """1.2.7 M0 review (F1): an order points at a café twice (where it was placed and where it is picked up). The two
+    links get different names, both ways, the second told apart by its column's words, so their sentences differ."""
+    r = engine(TWICE, timeout=300, stdin=json.dumps({"project": P}))
+    assert r.returncode == 0, r.stderr[-3000:]
+    got = json.loads(r.stdout.splitlines()[-1])
+    assert got == [["is for", "has"], ["is for (pickup cafe)", "has (pickup cafe)"]], got
+    import render  # the sentences the overview and the phone picture write
+    one, many = {"order": "Order", "cafe": "Café"}, {"order": "Orders", "cafe": "Cafés"}
+    said = {render.says({"from": "order", "to": "cafe", "name": n}, "many-to-one", one, many) for n, _ in got}
+    assert said == {"order is for café", "order is for (pickup cafe) café"}, said
 
 
 def test_proposal_says_why_a_fact_table_is_left_out(onto):

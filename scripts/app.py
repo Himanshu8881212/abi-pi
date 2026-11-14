@@ -1634,6 +1634,7 @@ const pname=(p,T)=>p.name||(T&&p.column===T.title?T.name:T&&T.key.length===1&&p.
 // 1.2.7 M0 (9b): a link as a sentence about its two types ("each order has one café", "customer visited cafés"),
 // the same words as render.says: never a column, never a cardinality. A the type it is read from, B the one it leads to
 const sayLink=(A,B,name,card)=>{const one=/one$/.test(card||''),lo=x=>x.name.toLowerCase(),nm=String(name||'').toLowerCase();
+ if(/ \(inverse\)$/.test(nm))return `${A.plural.toLowerCase()} have ${B.plural.toLowerCase()}`;  // a link read backwards with no inverse name of its own
  return [lo(B),B.plural.toLowerCase()].includes(nm)?(one?`each ${lo(A)} has one ${lo(B)}`:`${A.plural.toLowerCase()} have ${B.plural.toLowerCase()}`):`${lo(A)} ${name} ${one?lo(B):B.plural.toLowerCase()}`};
 const says=l=>sayLink(otype(l.from),otype(l.to),l.name,l.cardinality);
 const low=T=>T.name.toLowerCase(),RANK={viewer:1,editor:2,owner:3},myRank=()=>RANK[(window.ME||{role:'owner'}).role]||0,COPY=()=>MODE==='viewer'&&/_pub$/.test(D.project);
@@ -1691,7 +1692,7 @@ function objTable(box,T,fixed,n){n=n||50;const bar=h('div','row obar'),q=h('inpu
   const mark=()=>{out.querySelectorAll('th').forEach(th=>th.removeAttribute('title'));out.querySelectorAll('tr[data-r]').forEach(tr=>{tr.tabIndex=0;tr.setAttribute('role','link');
     Object.entries(to).forEach(([c,Z])=>{const j=d.columns.indexOf(c),td=tr.children[j],v=raw[c][tr.dataset.r];if(!td||td.dataset.o||v===null||v===undefined||v===MASK)return;td.dataset.o=1;
      // an object without a name, or one this person can't see: a dash, never its raw key
-     const nm=tt[c][String(v)];if(nm===undefined||nm===null){td.textContent='—';return}const b=h('button','flink oopen',String(nm));b.onclick=e=>{e.stopPropagation();openObj(Z.id,[v])};td.replaceChildren(b)})})};
+     const nm=tt[c][String(v)];if(nm===undefined||nm===null||nm===MASK){td.textContent='—';return}const b=h('button','flink oopen',String(nm));b.onclick=e=>{e.stopPropagation();openObj(Z.id,[v])};td.replaceChildren(b)})})};
   mark();new MutationObserver(mark).observe(out.querySelector('table'),{childList:true,subtree:true});
   // the pages: under the table, and for a whole list (50 rows a page) above it too, in reach without scrolling
   if(st.offset||r.more){const b=(t,on,fn)=>{const x=h('button','btn',t);x.disabled=!on;x.onclick=fn;return x};
@@ -1752,14 +1753,14 @@ function objectsHome(box){if(!OT().length){box.append(emptyBox('objects','No obj
  ids.forEach(t=>{const T=otype(t),b=h('div','tbl dim'),hd=h('div','th'),go=h('button','badge','Open'),cs=h('div','cols');b.style.left=pos[t].x+'px';b.style.top=pos[t].y+'px';go.title=`List the ${T.plural.toLowerCase()}`;go.onclick=()=>show('obj:'+t);
   hd.append(h('span','',T.plural),go);const cell=k=>{const r=h('div','col'),l=h('span','',k),v=h('span','file','…');l.style.gridColumn='1 / 3';v.style.cssText='grid-column:3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px';r.append(l,v);cs.append(r);return [r,v]};
   facts(T).forEach(([kind,id])=>{if(kind==='n'){const [r,v]=cell(T.event?'Recorded':'How many');r.dataset.f='n';api('list_objects',{type:t,limit:1,count:true}).then(x=>v.textContent=fmt(x.total)).catch(()=>v.textContent='—')}
-   else if(kind==='m'){const [r,v]=cell(((D.measures.find(m=>m.id===id)||{}).name||colName(id))+', whole project');r.dataset.f='m';r.dataset.m=id}
+   else if(kind==='m'){const [r,v]=cell(((D.measures.find(m=>m.id===id)||{}).name||colName(id))+(D.rls?.restricted?', all you can see':', whole project'));r.dataset.f='m';r.dataset.m=id}
    else{const as=OA().filter(a=>a.object===t).map(a=>a.name),[r,v]=cell('You can');r.dataset.f='a';v.textContent=as.slice(0,2).join(', ')+(as.length>2?` +${as.length-2}`:'');v.title=as.join(', ')}});
   if((T.measures||[]).length)api('visual_data',{query:{measures:T.measures.slice(0,4)},type:'kpi'}).then(d=>T.measures.slice(0,4).forEach((id,i)=>{const v=cs.querySelector(`[data-m="${id}"] .file`);if(v)v.textContent=d.rows[0]?.[i]==null?'—':fmt(d.rows[0][i],d.format?.[id])})).catch(()=>cs.querySelectorAll('[data-f=m] .file').forEach(v=>v.textContent='—'));
   b.append(hd,cs);stage.append(b);boxes[t]=b;
   hd.onpointerdown=e=>{if(e.target===go)return;e.preventDefault();const [sx,sy]=kit.local(e.clientX,e.clientY),ox=pos[t].x,oy=pos[t].y;hd.setPointerCapture(e.pointerId);
    hd.onpointermove=m=>{const [x,y]=kit.local(m.clientX,m.clientY);pos[t]={x:Math.max(0,ox+x-sx),y:Math.max(0,oy+y-sy)};b.style.left=pos[t].x+'px';b.style.top=pos[t].y+'px';extent();draw()};
    hd.onpointerup=()=>{hd.onpointermove=null;save()}}});
- // a connection: a line from its type to the one it leads to (the dot), its name and cardinality at the middle; two
+ // a connection: a line from its type to the one it leads to (the dot), its sentence (sayLink) at the middle; two
  // boxes of one column are joined by an arc on their right, and a second connection of the same two sits lower
  function draw(){svg.innerHTML='';svg.setAttribute('width',kit.w);svg.setAttribute('height',kit.ht);const n={};
   L.forEach(l=>{const A=pos[l.from],B=pos[l.to],ya=A.y+19,yb=B.y+19,pk=[l.from,l.to].sort().join(),k=n[pk]=(n[pk]||0)+1;let d,lx,ly,x2,anc='middle';

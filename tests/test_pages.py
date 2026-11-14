@@ -1089,6 +1089,15 @@ def test_object_page_shows_measures_and_linked_titles(objs, tmp_path):
     e = objs["editor"]
     o = json.loads((abi.ABI_PROJECTS / PO / "model/ontology.json").read_text())
     was = json.loads(json.dumps(o))
+    # (review F8) the café-order link named as a 9b proposal names it, so the café's page reads its sentence
+    next(ln for ln in o["links"] if ln["id"] == "order_cafe").update(name="is for", inverse="has")
+    sure("save_ontology", project=PO, ontology=o)
+    gen = app._GEN.get(PO, 0)
+    app.changed(PO)
+    for _ in range(300):
+        if app._GEN.get(PO, 0) > gen:
+            break
+        time.sleep(0.1)
     try:
         cust = objs["sql"]("SELECT min(customer_id) FROM orders WHERE customer_id IS NOT NULL")[0][0]
         cafes = {r[0]: r[1] for r in objs["sql"]("SELECT cafe_id, cafe_name FROM cafes")}
@@ -1096,12 +1105,14 @@ def test_object_page_shows_measures_and_linked_titles(objs, tmp_path):
         cards = "[...document.querySelectorAll('main .cards > .card > h3')].map(h => h.innerText.split('\\n')[0])"
         out = drive(e, tmp_path, [
             ["show", okey("cafe", objs["good"])], ["until", KV], ["get", "cards", cards],
+            ["get", "orders_card", "[...document.querySelectorAll('main .cards > .card > h3')].map(h => h.innerText).find(t => t.startsWith('Orders')) || ''"],
             ["show", "obj:cafe"], ["wait", "main .olist table tr[data-r]"], ["until", "document.querySelectorAll('main .olist th').length > 5"],
             ["get", "heads", "[...document.querySelectorAll('main .olist th')].map(th => th.textContent.trim())"],
             ["get", "figures", "(D.ontology.objects.find(t => t.id === 'cafe').measures || []).map(id => (D.measures.find(m => m.id === id) || {}).name)"],
             ["show", okey("customer", cust)], ["until", KV], ["wait", "main .olist table td button.oopen"],
             ["get", "orders_heads", "[...document.querySelectorAll('main .olist th')].map(th => th.textContent.trim())"],
             ["all", "linked", "main .olist table td button.oopen"],
+            ["get", "cafe_cells", "(i => [...document.querySelectorAll('main .olist table tr[data-r]')].map(tr => tr.cells[i].textContent))([...document.querySelectorAll('main .olist th')].findIndex(th => th.textContent.trim() === 'Café'))"],
             ["click", "main .olist table td button.oopen"], ["until", "CUR.startsWith('obj:cafe:')"], ["until", KV], ["text", "opened", "main .pghead h1"]])
         assert out["cards"].index("Measures") < out["cards"].index("Properties"), out["cards"]
         named = [h for h in out["heads"] if h in out["figures"]]
@@ -1110,8 +1121,16 @@ def test_object_page_shows_measures_and_linked_titles(objs, tmp_path):
         cafe_links = [x for x in out["linked"] if x != cust]  # (a customer's title is its ID in this project)
         assert cafe_links and set(cafe_links) <= set(cafes.values()) and not [x for x in cafe_links if x in cafes], out["linked"]
         assert out["opened"] == out["linked"][0], "the name opens that object's page"
+        assert out["cafe_cells"] and not [x for x in out["cafe_cells"] if x in cafes], ("no linked cell shows a raw key", out["cafe_cells"])
+        assert "café has orders" in out["orders_card"], out["orders_card"]
     finally:
         sure("save_ontology", project=PO, ontology=was)
+        gen = app._GEN.get(PO, 0)
+        app.changed(PO)  # saved behind the app's back: its pages read the ontology again before the next test
+        for _ in range(300):
+            if app._GEN.get(PO, 0) > gen:
+                break
+            time.sleep(0.1)
 
 
 def test_objects_overview_is_not_the_table_diagram(objs, tmp_path):
