@@ -151,15 +151,9 @@ def test_proposal_is_not_a_mirror_of_the_tables(onto):
     """1.2.7 M0 (9b): the draft is about the business's things, not a copy of the star schema. A type gets the measures
     that can be read per object of it (revenue on a café); a link is named in words both ways, never by the joining
     column or its cardinality; a column that points at another type is that type's link and no property (and no key
-    is one); the fact table is a type marked `event`, and a fact table without a date (figures per café and month) is
-    left out, with a sentence saying why. The draft is still a valid ontology file."""
-    sure("create_input_table", project=P, table="targets", key=["cafe_id", "month"],
-         columns=[{"name": "cafe_id", "type": "VARCHAR"}, {"name": "month", "type": "INTEGER"}, {"name": "target", "type": "DOUBLE"}])
-    try:
-        abi.call("add_relationship", project=P, **{"from": "targets.cafe_id", "to": "cafes.cafe_id"})
-        r = abi.call("propose_ontology", project=P)
-    finally:
-        sure("delete_table", project=P, table="targets")
+    is one); the fact table is a type marked `event`, and a table keyed by what it points at and a month (a number or a date) is
+    left out, with a sentence saying why in the business's words. The draft is still a valid ontology file."""
+    r = _proposed_with_targets("INTEGER")
     o = r["ontology"]
     assert not list(Draft202012Validator(SCHEMA).iter_errors(o)), "the draft is a valid ontology file"
     types = {x["table"]: x for x in o["objects"]}
@@ -168,7 +162,7 @@ def test_proposal_is_not_a_mirror_of_the_tables(onto):
         assert "revenue" in types[t]["measures"] and set(types[t]["measures"]) <= have and "event" not in types[t], (t, types[t].get("measures"))
     assert types["orders"].get("event") is True and "measures" not in types["orders"], "the fact table: what happened, not a thing"
     assert "targets" not in types and [x["table"] for x in r["left_out"]] == ["targets"], r.get("left_out")
-    assert r["left_out"][0]["why"].startswith("'Targets' holds figures per cafe id and month, not things with a page of their own"), r["left_out"]
+    assert r["left_out"][0]["why"].startswith("'Targets' holds figures per cafe and month, not things with a page of their own"), r["left_out"]
     keys = {"cafe_id", "customer_id", "product_id", "order_id"}
     for t, x in types.items():
         assert not keys & {p["column"] for p in x["properties"]}, (t, [p["column"] for p in x["properties"]])
@@ -180,6 +174,56 @@ def test_proposal_is_not_a_mirror_of_the_tables(onto):
     by = {(ln["from"], ln["to"]): ln for ln in o["links"] if len(ln["via"]) == 1}
     assert (by["order", "cafe"]["name"], by["order", "cafe"]["inverse"]) == ("is for", "has"), by["order", "cafe"]
     assert {ln["name"] for ln in o["links"] if len(ln["via"]) == 2} == {"has orders with"}
+    # (review C1, C9) the same helper table with the month as a DATE is no event: left out, in the business's words
+    dated = _proposed_with_targets("DATE")
+    assert "targets" not in {x["table"] for x in dated["ontology"]["objects"]} and [x["table"] for x in dated["left_out"]] == ["targets"], dated.get("left_out")
+    assert dated["left_out"][0]["why"].startswith("'Targets' holds figures per cafe and month, not things with a page of their own"), dated["left_out"]
+
+
+def _proposed_with_targets(month_type: str) -> dict:
+    """propose_ontology with a helper table beside Brewline: targets per café and month (month an INTEGER or a DATE)."""
+    sure("create_input_table", project=P, table="targets", key=["cafe_id", "month"],
+         columns=[{"name": "cafe_id", "type": "VARCHAR"}, {"name": "month", "type": month_type}, {"name": "target", "type": "DOUBLE"}])
+    try:
+        abi.call("add_relationship", project=P, **{"from": "targets.cafe_id", "to": "cafes.cafe_id"})
+        return abi.call("propose_ontology", project=P)
+    finally:
+        sure("delete_table", project=P, table="targets")
+
+
+SELF = r"""
+import json, sys
+from abi.semantic import model, ontology
+P = json.loads(sys.stdin.read())["project"]
+own = model._rel("employees.manager_id", "employees.emp_id")  # add_relationship refuses this; a model file may hold it
+load, read = model.load, model._read
+model.load = lambda p: (lambda m: m | {"relationships": [*m["relationships"], own]})(load(p))
+model._read = lambda p, f: (lambda m: m | {"relationships": [*m.get("relationships", []), own]} if f == "model.json" else m)(read(p, f))
+r = ontology.propose(P, None)
+print(json.dumps({"types": {x["table"]: x["id"] for x in r["ontology"]["objects"]}, "links": [[l["from"], l["to"], len(l["via"])] for l in r["ontology"]["links"]]}))
+"""
+
+
+def test_proposal_with_a_table_pointing_at_itself(onto):
+    """1.2.7 M0 review (C5): employees with a manager (a relationship from the table to itself, which a model file can
+    hold though add_relationship refuses it) and a department are proposed without an error: the employee type and its
+    link to its department, and no pair made of the table's link to itself."""
+    made = []
+    try:
+        for t, cols, key in (("depts", [("dept_id", "VARCHAR"), ("dept_name", "VARCHAR")], ["dept_id"]),
+                             ("employees", [("emp_id", "VARCHAR"), ("emp_name", "VARCHAR"), ("manager_id", "VARCHAR"), ("dept_id", "VARCHAR")], ["emp_id"])):
+            sure("create_input_table", project=P, table=t, key=key, columns=[{"name": n, "type": ty} for n, ty in cols])
+            made.append(t)
+        abi.call("add_relationship", project=P, **{"from": "employees.dept_id", "to": "depts.dept_id"})
+        r = engine(SELF, timeout=300, stdin=json.dumps({"project": P}))
+    finally:
+        for t in reversed(made):
+            sure("delete_table", project=P, table=t)
+    assert r.returncode == 0, r.stderr[-3000:]
+    got = json.loads(r.stdout.splitlines()[-1])
+    types, pairs = got["types"], got["links"]
+    assert {"employees", "depts"} <= set(types), types
+    assert [types["employees"], types["depts"], 1] in pairs and not [p for p in pairs if p[2] == 2 and types["employees"] in p[:2]], pairs
 
 
 def test_propose_writes_nothing(onto):

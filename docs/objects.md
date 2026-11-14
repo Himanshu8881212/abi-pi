@@ -45,6 +45,17 @@ What each part does:
   undone under Data › Edits. `confirm` shows the old and new values first; the person confirms.
 - `role` is who may run it through the API or an agent: `viewer`, `editor` (the default) or `owner`. In the app,
   actions run in Developer mode only, so by Editors and Owners (see "Who can use a form" below).
+- `measures` are shown first on each object's page and right after its name in its list, each filtered to that object.
+- `event: true` marks a type whose rows record something that happened (an order, a payment) rather than a thing.
+
+What ALL's first draft (`propose_ontology`) does, before anyone refines it:
+- each keyed dimension table becomes a type, with the measures that can be read per object of it already attached;
+- a fact table keyed by an ID of its own (an order) becomes a type marked `event`; a fact table keyed by what it
+  points at and a date or month (targets per café and month) is left out, and the draft's `left_out` says why;
+- a column that points at another type is not a property: it is that type's link, and the list shows the linked
+  object by its name, which opens its page;
+- links are named in words both ways: an event "is for" a thing, a thing "belongs to" another, the other side "has"
+  them, and two types that meet in a table "have orders with" each other. Rename them to the business's words.
 
 ## 2. The form card: a visual of type `form` in `reports/cafe-visits.json`
 

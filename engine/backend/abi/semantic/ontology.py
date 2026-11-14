@@ -430,18 +430,21 @@ def propose(project: str, user_id: int | None) -> dict:
     mj, cols = model._read(project, "model.json"), model.lake_columns(project)
     date, hid = (m["date_table"] or {}).get("table"), rls.hidden(project, user_id)
     objects, types, left = [], {}, []
-    # 1.2.7 M0 (9b): a type is a thing, not every table. A fact table records what happened: with a date it is a type
-    # marked `event` (an order); without one (figures per month and shop: targets) it is left out, and said so
+    # 1.2.7 M0 (9b): a type is a thing, not every table. A fact table records what happened: keyed by one column of
+    # its own (an order's ID) it is a type marked `event`; keyed by what it points at and by dates (figures per café
+    # and month: targets) it is left out, and said so
     ours = lambda t, i: i["key"] and t != date and t in cols and not (  # noqa: E731  M9: a model's predictions table is no type itself
         t.startswith("ml_") and (git.path(project) / "ml" / f"{t[3:]}.json").is_file())
-    dated = lambda t: any(re.match(r"DATE|TIMESTAMP", ty) for ty in cols[t].values())  # noqa: E731
-    kept = {t for t, i in m["tables"].items() if ours(t, i) and (i["kind"] != "fact" or dated(t))}
+    points = {(r["from"]["table"], c): r["to"]["table"] for r in m["relationships"] for c in r["from"]["columns"]}  # a column that points at a table
+    event = lambda t, i: len(i["key"]) == 1 and (t, i["key"][0]) not in points  # noqa: E731
+    kept = {t for t, i in m["tables"].items() if ours(t, i) and (i["kind"] != "fact" or event(t, i))}
     mine = [x for x in model._read(project, "measures.json").get("measures", []) if not x.get("hidden")]
     for t, i in m["tables"].items():
         if not ours(t, i):
             continue
         if t not in kept:
-            left.append({"table": t, "why": f"'{_label(t)}' holds figures per {' and '.join(_label(k).lower() for k in i['key'])}, not things with a page of"
+            per = [_label(_singular(points[t, k])).lower() if (t, k) in points else _label(k).lower() for k in i["key"]]  # what it points at, by name
+            left.append({"table": t, "why": f"'{_label(t)}' holds figures per {' and '.join(per)}, not things with a page of"
                                             " their own, so it is no object type here. Add it as one if people need to open its rows one by one."})
             continue
         fks = {c for r in m["relationships"] if r["from"]["table"] == t and r["to"]["table"] in kept for c in r["from"]["columns"]}
@@ -498,7 +501,7 @@ def propose(project: str, user_id: int | None) -> dict:
             add(types[r["from"]["table"]], types[r["to"]["table"]], [r["id"]])
     m2m = 0
     for f in dict.fromkeys(r["from"]["table"] for r in rels):  # each table linking two types: one link per pair of them
-        out = [r for r in rels if r["from"]["table"] == f]
+        out = [r for r in rels if r["from"]["table"] == f and r["to"]["table"] != f]  # (a table pointing at itself, a manager: no pair)
         for i, r1 in enumerate(out):
             for r2 in out[i + 1:]:
                 if r1["to"]["table"] != r2["to"]["table"] and m2m < M2M_CAP:
@@ -782,9 +785,11 @@ def _read(project: str, sql: str, asked: dict, user_id: int | None) -> list[tupl
     try:
         return [tuple(map(semantic.tidy, r)) for r in semantic.execute(project, sql, asked, user_id, timeout=semantic.TIMEOUT)]
     except duckdb.ConversionException as e:
-        log.info("a value that doesn't fit its column (%s): %s", asked, e)  # DuckDB's text names columns and types: the log's
+        # DuckDB's text names columns and types: the log's. D-32: an inbound message's values only as their hashes
+        log.info("a value that doesn't fit its column (%s): %s", actions.hashed(asked) if actions.inbound() else asked,
+                 f"<sha256:{actions.sha(str(e))}>" if actions.inbound() else e)
         raise ActionFailed(400, "A value doesn't fit its column: a key or a filter value has to be of the column's own kind (a number"
-                                " for a number, a date as YYYY-MM-DD). Take the key as `list_objects` shows it.") from None
+                                " for a number, a date as YYYY-MM-DD). Pick the object from its list instead.") from None
     except duckdb.Error as e:
         raise ActionFailed(400, f"The read failed: {e}") from None
 

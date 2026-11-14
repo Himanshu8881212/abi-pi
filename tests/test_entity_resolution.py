@@ -1384,3 +1384,40 @@ def test_object_key_that_does_not_cast_is_a_plain_400(er):
     said = e.value.body["message"]
     assert e.value.status == 400 and said.startswith("A value doesn't fit its column: a key or a filter value has to be"), said
     assert not re.search(r"Conversion Error|BIGINT|INT64|customer_id|CAST|LINE \d", said), said
+
+
+# an inbound message's read of an object whose key doesn't cast: what the engine's log gets
+INBOUND_CAST = r"""
+import json, logging, sys
+import abi.app  # noqa: F401
+from abi import actions, db, security
+a = json.loads(sys.stdin.read())
+with db.connect() as c:
+    u = security.user(c, c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"])
+got = []
+class Keep(logging.Handler):
+    def emit(self, r):
+        got.append(self.format(r))
+h = Keep(level=logging.DEBUG)
+logging.getLogger().addHandler(h)
+logging.getLogger().setLevel(logging.DEBUG)
+actions.INBOUND.set(True)
+try:
+    actions.run("list_objects", {"project": a["project"], "type": "customer", "filters": [{"property": "customer_id", "op": "=", "value": a["value"]}]}, u, "rest")
+    status = 200
+except actions.ActionFailed as e:
+    status = e.status
+print(json.dumps({"status": status, "logged": got}))
+"""
+
+
+def test_inbound_cast_error_logs_no_value(er):
+    """1.2.7 M0 review (S1): a value that doesn't cast, read for an inbound message (its text may be the message's),
+    reaches the engine's log only as its length and hash, and DuckDB's error text only as its hash."""
+    odd = "secret-text-from-a-message-0042"
+    r = engine(INBOUND_CAST, timeout=120, stdin=json.dumps({"project": P, "value": odd}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    got = json.loads(r.stdout.splitlines()[-1])
+    said = [x for x in got["logged"] if "doesn't fit its column" in x]
+    assert got["status"] == 400 and said, got
+    assert not [x for x in got["logged"] if odd in x or "Conversion Error" in x], said
