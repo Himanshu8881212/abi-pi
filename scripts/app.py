@@ -1631,6 +1631,11 @@ function modelCanvas(box,fit){const T=D.model?.tables||{},R=(D.model?.relationsh
 const OT=()=>D.ontology?.objects||[],OA=()=>D.ontology?.actions||[],otype=id=>OT().find(t=>t.id===id),cap=s=>{s=String(s??'');return s.charAt(0).toUpperCase()+s.slice(1)};
 // a property's name on a page: the type's own name for its title ("Café"), ID for its one key column, the name the type gives it, else the column's words
 const pname=(p,T)=>p.name||(T&&p.column===T.title?T.name:T&&T.key.length===1&&p.column===T.key[0]?'ID':colName(p.column));
+// 1.2.7 M0 (9b): a link as a sentence about its two types ("each order has one café", "customer visited cafés"),
+// the same words as render.says: never a column, never a cardinality. A the type it is read from, B the one it leads to
+const sayLink=(A,B,name,card)=>{const one=/one$/.test(card||''),lo=x=>x.name.toLowerCase(),nm=String(name||'').toLowerCase();
+ return [lo(B),B.plural.toLowerCase()].includes(nm)?(one?`each ${lo(A)} has one ${lo(B)}`:`${A.plural.toLowerCase()} have ${B.plural.toLowerCase()}`):`${lo(A)} ${name} ${one?lo(B):B.plural.toLowerCase()}`};
+const says=l=>sayLink(otype(l.from),otype(l.to),l.name,l.cardinality);
 const low=T=>T.name.toLowerCase(),RANK={viewer:1,editor:2,owner:3},myRank=()=>RANK[(window.ME||{role:'owner'}).role]||0,COPY=()=>MODE==='viewer'&&/_pub$/.test(D.project);
 // a property's value as a page shows it: an identifier as it is, a flag as Yes or No, a probability as a percentage, a day as 15 Mar 2022
 const dayOf=v=>{const d=new Date(v+'T00:00');return isNaN(d)?v:d.toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'})};
@@ -1677,14 +1682,16 @@ function objTable(box,T,fixed,n){n=n||50;const bar=h('div','row obar'),q=h('inpu
   if(ms.length&&d.columns.length>shown.length){const k=shown.length,mv=x=>[x[0],...x.slice(k),...x.slice(1,k)];d.columns=mv(d.columns);d.rows=d.rows.map(mv)}
   // ... and a column that points at another object shows that object by its name, which opens it: never its raw key
   const R=D.model?.relationships||[],to={},tt={};shown.forEach(c=>{const l=(D.ontology.links||[]).find(l=>l.from===T.id&&l.via.length===1&&otype(l.to)&&(r=>r&&r.from.table===T.table&&r.from.columns.length===1&&r.from.columns[0]===c)(R.find(r=>r.id===l.via[0])));if(l)to[c]=otype(l.to)});
-  await Promise.all(Object.entries(to).map(async([c,Z])=>{const j=d.columns.indexOf(c),vs=[...new Set(d.rows.map(x=>x[j]).filter(v=>v!==null))];d.measures[c]=Z.name;tt[c]={};if(!vs.length)return;
+  const raw={};Object.keys(to).forEach(c=>raw[c]=r.rows.map(x=>x[ix(c)]));  // the keys as read: the table shows them formatted
+  await Promise.all(Object.entries(to).map(async([c,Z])=>{const vs=[...new Set(raw[c].filter(v=>v!==null&&v!==MASK))];d.measures[c]=Z.name;tt[c]={};if(!vs.length)return;
    try{const z=await api('list_objects',{type:Z.id,filters:[{property:Z.key[0],op:'in',value:vs}],limit:Math.min(1000,vs.length)}),ki=z.columns.indexOf(Z.key[0]),ti=z.columns.indexOf(Z.title);z.rows.forEach(x=>tt[c][String(x[ki])]=ti<0?null:x[ti])}catch(e){}}));
   if(my!==st.n)return;
   rows(out,d);out.classList.add('pick');
   // after each draw (a sort draws again): no column id in a header's tooltip, a row reachable by keyboard
   const mark=()=>{out.querySelectorAll('th').forEach(th=>th.removeAttribute('title'));out.querySelectorAll('tr[data-r]').forEach(tr=>{tr.tabIndex=0;tr.setAttribute('role','link');
-    Object.entries(to).forEach(([c,Z])=>{const j=d.columns.indexOf(c),td=tr.children[j],v=d.rows[tr.dataset.r]?.[j];if(!td||td.dataset.o||v===null||v===undefined)return;td.dataset.o=1;
-     const nm=tt[c][String(v)];if(v===MASK||nm===undefined||nm===null)return;const b=h('button','flink oopen',String(nm));b.onclick=e=>{e.stopPropagation();openObj(Z.id,[v])};td.replaceChildren(b)})})};
+    Object.entries(to).forEach(([c,Z])=>{const j=d.columns.indexOf(c),td=tr.children[j],v=raw[c][tr.dataset.r];if(!td||td.dataset.o||v===null||v===undefined||v===MASK)return;td.dataset.o=1;
+     // an object without a name, or one this person can't see: a dash, never its raw key
+     const nm=tt[c][String(v)];if(nm===undefined||nm===null){td.textContent='—';return}const b=h('button','flink oopen',String(nm));b.onclick=e=>{e.stopPropagation();openObj(Z.id,[v])};td.replaceChildren(b)})})};
   mark();new MutationObserver(mark).observe(out.querySelector('table'),{childList:true,subtree:true});
   // the pages: under the table, and for a whole list (50 rows a page) above it too, in reach without scrolling
   if(st.offset||r.more){const b=(t,on,fn)=>{const x=h('button','btn',t);x.disabled=!on;x.onclick=fn;return x};
@@ -1728,11 +1735,9 @@ function objectsHome(box){if(!OT().length){box.append(emptyBox('objects','No obj
  // 1.2.7 M0 (9b): a box says what the business needs of a type: how many there are, its figures, what can be done with
  // one; never its columns (that is the Data models picture). A line reads as a sentence
  const facts=T=>[['n'],...(T.measures||[]).slice(0,4).map(id=>['m',id]),...(OA().some(a=>a.object===T.id)?[['a']]:[])];
- const says=l=>{const A=otype(l.from),B=otype(l.to),one=/one$/.test(l.cardinality||''),to=one?low(B):B.plural.toLowerCase(),nm=String(l.name||'').toLowerCase();
-  return [low(B),B.plural.toLowerCase()].includes(nm)?(one?`each ${low(A)} has one ${low(B)}`:`${A.plural.toLowerCase()} have ${B.plural.toLowerCase()}`):`${low(A)} ${l.name} ${to}`};
  if(MOBILE){const pic=h('div','odiag'),g=h('div','cards mlist2');{const t=h('div');t.insertAdjacentHTML('beforeend',D.sections?.Objects||'');const svg=t.querySelector('svg');if(svg){pic.append(svg);box.append(pic)}}
   OT().forEach(T=>{const c=card(T.plural),cl=h('div','stepchips');if(T.description&&T.description!==MASK)c.append(h('p','mtext',T.description));
-   if(T.links.length)cl.append(h('span','file','Connections'));T.links.forEach(w=>{const b=h('button','chip',`${w.name} → ${otype(w.to)?.plural||''}`);b.onclick=()=>show('obj:'+w.to);cl.append(b)});if(T.links.length)c.append(cl);
+   if(T.links.length)cl.append(h('span','file','Connections'));T.links.forEach(w=>{const Y=otype(w.to);if(!Y)return;const b=h('button','chip',sayLink(T,Y,w.name,w.cardinality));b.onclick=()=>show('obj:'+w.to);cl.append(b)});if(T.links.length)c.append(cl);
    act(c,'Open',async()=>show('obj:'+T.id));g.append(c)});box.append(g);return}
  box.append(h('h4','sub','Objects and connections'),h('p','file','Each box is a kind of thing the business works with: how many there are, its figures and what you can do with one. Each line is a connection between two of them, read along the line. Drag a box by its title to move it; Open lists its objects.'));
  const W=250,key='abi-opos-'+D.project,hgt=t=>46+facts(otype(t)).length*27,depth={};let pos={};try{pos=JSON.parse(localStorage.getItem(key)||'{}')}catch(e){}
@@ -1747,7 +1752,7 @@ function objectsHome(box){if(!OT().length){box.append(emptyBox('objects','No obj
  ids.forEach(t=>{const T=otype(t),b=h('div','tbl dim'),hd=h('div','th'),go=h('button','badge','Open'),cs=h('div','cols');b.style.left=pos[t].x+'px';b.style.top=pos[t].y+'px';go.title=`List the ${T.plural.toLowerCase()}`;go.onclick=()=>show('obj:'+t);
   hd.append(h('span','',T.plural),go);const cell=k=>{const r=h('div','col'),l=h('span','',k),v=h('span','file','…');l.style.gridColumn='1 / 3';v.style.cssText='grid-column:3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px';r.append(l,v);cs.append(r);return [r,v]};
   facts(T).forEach(([kind,id])=>{if(kind==='n'){const [r,v]=cell(T.event?'Recorded':'How many');r.dataset.f='n';api('list_objects',{type:t,limit:1,count:true}).then(x=>v.textContent=fmt(x.total)).catch(()=>v.textContent='—')}
-   else if(kind==='m'){const [r,v]=cell(((D.measures.find(m=>m.id===id)||{}).name||colName(id))+' in all');r.dataset.f='m';r.dataset.m=id}
+   else if(kind==='m'){const [r,v]=cell(((D.measures.find(m=>m.id===id)||{}).name||colName(id))+', whole project');r.dataset.f='m';r.dataset.m=id}
    else{const as=OA().filter(a=>a.object===t).map(a=>a.name),[r,v]=cell('You can');r.dataset.f='a';v.textContent=as.slice(0,2).join(', ')+(as.length>2?` +${as.length-2}`:'');v.title=as.join(', ')}});
   if((T.measures||[]).length)api('visual_data',{query:{measures:T.measures.slice(0,4)},type:'kpi'}).then(d=>T.measures.slice(0,4).forEach((id,i)=>{const v=cs.querySelector(`[data-m="${id}"] .file`);if(v)v.textContent=d.rows[0]?.[i]==null?'—':fmt(d.rows[0][i],d.format?.[id])})).catch(()=>cs.querySelectorAll('[data-f=m] .file').forEach(v=>v.textContent='—'));
   b.append(hd,cs);stage.append(b);boxes[t]=b;
@@ -1788,7 +1793,10 @@ async function objectPage(box,T,key){const bar=h('div','row bar lead');bar.appen
  g.append(pc);
  // ponytail: an object with a several-column key asks one condition per key column (each must hold for a linked object)
  sameCard(g,T,o.key);
- T.links.slice(0,12).forEach(w=>{const Y=otype(w.to);if(!Y||w.inverse&&w.to===T.id)return;const c=card(cap(w.name));c.classList.add('wide');if(cap(w.name)!==Y.plural)c.querySelector('h3').append(h('span','file',Y.plural));
+ T.links.slice(0,12).forEach(w=>{const Y=otype(w.to);if(!Y||w.inverse&&w.to===T.id)return;
+  // 1.2.7 M0 (9b): a proposal names a link by a verb ("is for", "has"): the section is then the linked type, its sentence under it
+  const verb=/^(is for|has|belongs to|matches|has .+ with)$/i.test(String(w.name||'')),c=card(verb?Y.plural:cap(w.name));c.classList.add('wide');
+  if(verb)c.querySelector('h3').append(h('span','file',sayLink(T,Y,w.name,w.cardinality)));else if(cap(w.name)!==Y.plural)c.querySelector('h3').append(h('span','file',Y.plural));
   objTable(c,Y,key.map((v,i)=>({link:w.link,property:T.key[i],op:'=',value:v})),10);g.append(c)});
  const hc=card('History');hc.classList.add('wide');g.append(hc);box.append(g);
  // the published copy keeps no history: it is the working project's

@@ -364,7 +364,7 @@ def says(ln: dict, cardinality: str, one: dict, many: dict) -> str:
 
 def objects(o: dict, model: dict) -> str:
     """1.2.6 M7: the object-type graph of model/ontology.json as `diagram` draws it: each type a box by its plural
-    name (as the app's canvas and lists say it), each link an arc with its name and cardinality.
+    name (as the app's canvas and lists say it), each link an arc with its sentence (`says`, 1.2.7 9b).
     ponytail: types are told apart by their display names; two types of one name would share a box."""
     name, table = {x["id"]: x["plural"] for x in o.get("objects", [])}, {x["id"]: x["table"] for x in o.get("objects", [])}
     one = {x["id"]: x["name"] for x in o.get("objects", [])}

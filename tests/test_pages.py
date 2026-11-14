@@ -866,7 +866,7 @@ def test_action_form_confirms(objs, tmp_path):
 
 
 def test_object_graph_has_every_link(objs, people, tmp_path):
-    """The object-type graph: every type a box, every link a line with its name and cardinality, on the canvas and in
+    """The object-type graph: every type a box, every link a line with its sentence (1.2.7 9b), on the canvas and in
     the page's offline HTML (render.diagram). A project without an ontology has neither; its Objects page (1.2.7 9a) says
     what objects are, with the one button that asks ALL to propose them (the owner, in Developer, on a computer)."""
     o = abi.call("ontology", project=PO)
@@ -1125,7 +1125,7 @@ def test_objects_overview_is_not_the_table_diagram(objs, tmp_path):
         ["show", "objects"], ["wait", "main .tbl"], ["until", f"!{box}.innerText.includes('…')"],
         ["get", "cafe", f"[...{box}.querySelectorAll('.col')].map(r => [r.dataset.f, r.children[0].textContent, r.children[1].textContent])"],
         ["get", "lines", "[...document.querySelectorAll('main svg text.lbl')].map(t => t.textContent)"],
-        ["get", "revenue", "(D.measures.find(m => m.id === 'revenue') || {}).name + ' in all'"]])  # 1.2.7 review C6: the box's figure is the whole project's
+        ["get", "revenue", "(D.measures.find(m => m.id === 'revenue') || {}).name + ', whole project'"]])  # 1.2.7 review C6, R7: the box's figure is the whole project's
     rows = {r[1]: r for r in out["cafe"]}
     n = objs["sql"]("SELECT count(*) FROM cafes")[0][0]
     assert [r[0] for r in out["cafe"]] == ["n", "m", "m", "a"], out["cafe"]
