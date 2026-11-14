@@ -151,7 +151,10 @@ def _forget_gone(now: float | None = None) -> None:
         # up to the instance's memory limit) for as long as it existed. The next read attaches it again; its views,
         # key types and shared partials are made again then.
         # ponytail: swept when some project is read or the worker ticks; a process nobody asks anything keeps its lakes
-        idle = float(os.environ.get("ABI_IDLE_CLOSE_MIN") or 30) * 60
+        try:  # (review N5) not a number: the default; a negative one: never
+            idle = max(0.0, float(os.environ.get("ABI_IDLE_CLOSE_MIN") or 30)) * 60
+        except ValueError:
+            idle = 30 * 60.0
         for p in [p for p, t in list(_used.items()) if idle and now - t > idle]:
             with project_lock("lake", p):
                 if now - _used.get(p, now) > idle:  # not read meanwhile

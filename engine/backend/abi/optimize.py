@@ -192,9 +192,12 @@ def _seen(project: str, user_id: int) -> str | None:
     objects and totals they may not see any more."""
     if not rls.restricted(project, user_id):
         return None
-    f = rls._file(project)
+    f, filtered = rls._file(project), rls.filtered(project)
+    # (review N2) and what decides which tables those rules reach: the relationships into filtered tables, the tables denied
+    rels = sorted([r["id"], r["from"], r["to"]] for r in model._read(project, "model.json").get("relationships", []) if r["to"]["table"] in filtered)
     return hashlib.sha256(json.dumps([[[r["id"], r["table"], r["column"], r["users"].get(str(user_id))] for r in f.get("rules", [])], f.get("columns", []),
-                                      sorted([x["id"], x["from"], x["to"], x["via"]] for x in rls.follows(project))], sort_keys=True).encode()).hexdigest()
+                                      sorted([x["id"], x["from"], x["to"], x["via"]] for x in rls.follows(project)), rels,
+                                      sorted(rls.unfiltered_outputs(project))], sort_keys=True).encode()).hexdigest()
 
 
 def _withdraw(conn, project: str, o: dict, user: User, keep: str | None = None) -> bool:
@@ -482,6 +485,8 @@ def job(run_id: str) -> None:
         r = conn.execute("UPDATE optimizer_runs SET status = 'running', started = now() WHERE id = %s AND status = 'queued'"
                          " RETURNING project, spec, user_id", [run_id]).fetchone()
         u = r and security.user(conn, r["user_id"])
+        if u is not None:  # (review N2) what the runner sees as the run starts, not as it was queued
+            conn.execute("UPDATE optimizer_runs SET rules = %s WHERE id = %s", [_seen(r["project"], u.id), run_id])
     if r is None or u is None:  # not queued any more; a deleted account's runs went with it
         return
     with db.connect() as conn:

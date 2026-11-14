@@ -1029,6 +1029,16 @@ def test_narrowed_rule_drops_old_run(opt):
     with abi.as_user(tok):
         back = call("optimizers", optimizer="hours")
     assert back["run"] == was["run"] and back["rows"] == was["rows"], "the rule as it was: the run made of it"
+    # (review N2) a relationship into a filtered table changes which rows the rules reach: the run is not theirs meanwhile
+    sure("create_input_table", project=P, table="cafe_notes", key=["note_id"], columns=[{"name": "note_id", "type": "INTEGER"}, {"name": "cafe_id", "type": "INTEGER"}])
+    try:
+        call("add_relationship", **{"from": "cafe_notes.cafe_id", "to": "cafes.cafe_id"})
+        with abi.as_user(tok):
+            assert call("optimizers", optimizer="hours")["status"] == "never run"
+    finally:
+        sure("delete_table", project=P, table="cafe_notes")
+    with abi.as_user(tok):
+        assert call("optimizers", optimizer="hours")["run"] == was["run"], "the relationship gone: the run is theirs again"
 
 
 def test_viewer_run_keeps_editor_review(opt):

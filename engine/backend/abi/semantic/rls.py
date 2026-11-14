@@ -186,36 +186,38 @@ def _key_type(project: str, con, snap: int, src: str, cols) -> str:
     sql = f"SELECT DISTINCT k FROM (SELECT {_key_text(cols)} AS k FROM {src}) WHERE k IS NOT NULL"
     # ponytail: 16 locks per project, so two people's different key reads may wait for each other; one per read if it shows
     with storage.project_lock(f"rls keys {int(hashlib.sha256(sql.encode()).hexdigest()[:2], 16) % 16}", project):
-        with storage.project_lock("rls", project):
+        with storage.project_lock("rls", project):  # (review N3) found and marked in use under one lock: no sweep between
             held = _keys.setdefault(con, {"names": {}, "types": {}})
             name = held["names"].get((snap, sql))
-        if name is None or name not in held["types"]:
-            cur, start, rows, error = con.cursor(), time.perf_counter(), None, None
-            try:
-                semantic._effective(cur, con, snap)
-                cur.execute(f"CREATE OR REPLACE TEMP TABLE __rls_k AS {sql}")  # the cursor's own: no other read sees it
-                rows, digest = cur.execute("SELECT count(*), sha256(coalesce(string_agg(CAST(length(k) AS VARCHAR) || ':' || k, ''"
-                                           " ORDER BY k), '')) FROM __rls_k").fetchone()
-                name = "k_" + hashlib.sha256(f"{_SALT}{digest}".encode()).hexdigest()[:32]
-                with storage.project_lock("rls", project):  # one catalog write of the schema at a time
-                    if name not in held["types"]:
-                        cur.execute("CREATE SCHEMA IF NOT EXISTS memory.rls_keys")
-                        cur.execute(f"DROP TYPE IF EXISTS memory.rls_keys.{name}")
-                        cur.execute(f"CREATE TYPE memory.rls_keys.{name} AS ENUM (SELECT k FROM __rls_k)")
-                        held["types"][name] = [snap, None]
-                    held["names"][snap, sql] = name
-            except duckdb.Error as e:
-                error = str(e)
-                raise
-            finally:
-                with contextlib.suppress(duckdb.Error):
-                    cur.execute("DROP TABLE IF EXISTS __rls_k")
-                logged = actions.redacted(sql) if actions.inbound() else sql  # D-32, as `semantic._partials`
-                semantic._log(None, project, {"rls": "keys"}, logged, snap, False, rows,
-                              start, error and f"<sha256:{actions.sha(error)}>" if actions.inbound() else error)
-        with storage.project_lock("rls", project):
-            if (at := held["types"].get(name)) and snap >= at[0]:
-                at[:] = [snap, None]  # in use at this snapshot
+            if (at := held["types"].get(name)) is not None:
+                if snap >= at[0]:
+                    at[:] = [snap, None]  # in use at this snapshot
+                return f"memory.rls_keys.{name}"
+        cur, start, rows, error = con.cursor(), time.perf_counter(), None, None
+        try:
+            semantic._effective(cur, con, snap)
+            cur.execute(f"CREATE OR REPLACE TEMP TABLE __rls_k AS {sql}")  # the cursor's own: no other read sees it
+            rows, digest = cur.execute("SELECT count(*), sha256(coalesce(string_agg(CAST(length(k) AS VARCHAR) || ':' || k, ''"
+                                       " ORDER BY k), '')) FROM __rls_k").fetchone()
+            name = "k_" + hashlib.sha256(f"{_SALT}{digest}".encode()).hexdigest()[:32]
+            with storage.project_lock("rls", project):  # one catalog write of the schema at a time
+                if name not in held["types"]:
+                    cur.execute("CREATE SCHEMA IF NOT EXISTS memory.rls_keys")
+                    cur.execute(f"DROP TYPE IF EXISTS memory.rls_keys.{name}")
+                    cur.execute(f"CREATE TYPE memory.rls_keys.{name} AS ENUM (SELECT k FROM __rls_k)")
+                    held["types"][name] = [snap, None]
+                elif snap >= held["types"][name][0]:
+                    held["types"][name][:] = [snap, None]  # in use at this snapshot (another read's keys, the same set)
+                held["names"][snap, sql] = name
+        except duckdb.Error as e:
+            error = str(e)
+            raise
+        finally:
+            with contextlib.suppress(duckdb.Error):
+                cur.execute("DROP TABLE IF EXISTS __rls_k")
+            logged = actions.redacted(sql) if actions.inbound() else sql  # D-32, as `semantic._partials`
+            semantic._log(None, project, {"rls": "keys"}, logged, snap, False, rows,
+                          start, error and f"<sha256:{actions.sha(error)}>" if actions.inbound() else error)
     return f"memory.rls_keys.{name}"
 
 
