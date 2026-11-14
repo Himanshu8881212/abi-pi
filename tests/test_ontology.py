@@ -200,7 +200,8 @@ load, read = model.load, model._read
 model.load = lambda p: (lambda m: m | {"relationships": [*m["relationships"], own]})(load(p))
 model._read = lambda p, f: (lambda m: m | {"relationships": [*m.get("relationships", []), own]} if f == "model.json" else m)(read(p, f))
 r = ontology.propose(P, None)
-print(json.dumps({"types": {x["table"]: x["id"] for x in r["ontology"]["objects"]}, "links": [[l["from"], l["to"], len(l["via"])] for l in r["ontology"]["links"]]}))
+print(json.dumps({"types": {x["table"]: x["id"] for x in r["ontology"]["objects"]}, "links": [[l["from"], l["to"], len(l["via"])] for l in r["ontology"]["links"]],
+                  "props": {x["table"]: [p["column"] for p in x["properties"]] for x in r["ontology"]["objects"]}}))
 """
 
 
@@ -224,6 +225,35 @@ def test_proposal_with_a_table_pointing_at_itself(onto):
     types, pairs = got["types"], got["links"]
     assert {"employees", "depts"} <= set(types), types
     assert [types["employees"], types["depts"], 1] in pairs and not [p for p in pairs if p[2] == 2 and types["employees"] in p[:2]], pairs
+    assert "manager_id" in got["props"]["employees"] and "dept_id" not in got["props"]["employees"], got["props"]  # (review R1)
+
+
+# the proposal over Brewline with the orders table declared otherwise in the model it reads (nothing is saved)
+KEYED = r"""
+import json, sys
+from abi.semantic import model, ontology
+a = json.loads(sys.stdin.read())
+load = model.load
+model.load = lambda p: (lambda m: m | {"tables": m["tables"] | {"orders": m["tables"]["orders"] | {"key": a["key"]}}})(load(p))
+r = ontology.propose(a["project"], None)
+print(json.dumps({"types": sorted(x["table"] for x in r["ontology"]["objects"]), "left_out": r.get("left_out", [])}))
+"""
+
+
+def test_proposal_says_why_a_fact_table_is_left_out(onto):
+    """1.2.7 M0 review (R3, R6): a fact table without a key, and one keyed by a day alone (daily totals), become no type,
+    and each gets its sentence in `left_out` saying why, with what the person does about it."""
+    said = {}
+    for key in (None, ["order_date"]):
+        r = engine(KEYED, timeout=300, stdin=json.dumps({"project": P, "key": key}))
+        assert r.returncode == 0, r.stderr[-3000:]
+        got = json.loads(r.stdout.splitlines()[-1])
+        assert "orders" not in got["types"] and [x["table"] for x in got["left_out"]] == ["orders"], (key, got)
+        said[str(key)] = got["left_out"][0]["why"]
+    assert said["None"] == ("'Orders' has no key, so its rows can't be opened one by one. Declare its key in the data model (the table's"
+                            " settings) to make it a type."), said
+    assert said["['order_date']"].startswith("'Orders' holds figures per order date, not things with a page of their own"), said
+    assert not [w for w in said.values() if "set_table" in w or "save_ontology" in w], "no tool named to a person"
 
 
 def test_propose_writes_nothing(onto):

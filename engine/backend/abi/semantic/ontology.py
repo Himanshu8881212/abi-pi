@@ -436,18 +436,24 @@ def propose(project: str, user_id: int | None) -> dict:
     ours = lambda t, i: i["key"] and t != date and t in cols and not (  # noqa: E731  M9: a model's predictions table is no type itself
         t.startswith("ml_") and (git.path(project) / "ml" / f"{t[3:]}.json").is_file())
     points = {(r["from"]["table"], c): r["to"]["table"] for r in m["relationships"] for c in r["from"]["columns"]}  # a column that points at a table
-    event = lambda t, i: len(i["key"]) == 1 and (t, i["key"][0]) not in points  # noqa: E731
+    # (review R6) and not a day or a time: daily totals are figures per day, not records of what happened
+    event = lambda t, i: len(i["key"]) == 1 and (t, i["key"][0]) not in points and not re.match(r"DATE|TIMESTAMP", cols[t].get(i["key"][0], ""))  # noqa: E731
     kept = {t for t, i in m["tables"].items() if ours(t, i) and (i["kind"] != "fact" or event(t, i))}
     mine = [x for x in model._read(project, "measures.json").get("measures", []) if not x.get("hidden")]
     for t, i in m["tables"].items():
+        if i["kind"] == "fact" and not i["key"] and t != date and t in cols and not t.startswith("ml_"):  # (review R3) said, not dropped silently
+            left.append({"table": t, "why": f"'{_label(t)}' has no key, so its rows can't be opened one by one. Declare its key in the data model"
+                                            " (the table's settings) to make it a type."})
         if not ours(t, i):
             continue
         if t not in kept:
-            per = [_label(_singular(points[t, k])).lower() if (t, k) in points else _label(k).lower() for k in i["key"]]  # what it points at, by name
+            per = [_label(_singular(points[t, k])).lower() if points.get((t, k)) not in (None, date) else _label(k).lower()  # what it points at,
+                   for k in i["key"]]  # by name; a day by its own name (never "calendar")
             left.append({"table": t, "why": f"'{_label(t)}' holds figures per {' and '.join(per)}, not things with a page of"
                                             " their own, so it is no object type here. Add it as one if people need to open its rows one by one."})
             continue
-        fks = {c for r in m["relationships"] if r["from"]["table"] == t and r["to"]["table"] in kept for c in r["from"]["columns"]}
+        fks = {c for r in m["relationships"] if r["from"]["table"] == t and r["to"]["table"] in kept and r["to"]["table"] != t  # (a manager: kept)
+               for c in r["from"]["columns"]}
         tc = {c: ty for c, ty in cols[t].items() if c.lower() not in hid.get(t, ())}  # D-110: never a hidden column
         text = [c for c, ty in tc.items() if ty == "VARCHAR"]
         rows, n = 0, []
@@ -523,7 +529,7 @@ def propose(project: str, user_id: int | None) -> dict:
 
 @action(Role.viewer)
 def propose_ontology(conn, user: User, args: storage.ProjectRef) -> dict:
-    """Drafts an ontology from the model and the data, as you (row-level security applies), and saves nothing: each visible keyed dimension table as an object type (title column, property meanings from names, types and value counts, the measures that can be read per object), a keyed fact table with a date as a type marked `event`, any other fact table left out (`left_out` says why); each relationship between two types as a link named in words both ways, each table linking two types as a many-to-many link per pair (several ways between two types stay separate links; none is picked); `glossary` suggests the glossary terms to attach to a type. Refine names and descriptions, then save_ontology."""
+    """Drafts an ontology from the model and the data, as you (row-level security applies); saves nothing. Keyed dimension tables become object types with their measures; a fact table keyed by one ID of its own becomes a type marked `event`; other fact tables are listed in `left_out` with why. Links are named in words. Refine, then save_ontology."""
     return propose(args.project, user.id)
 
 

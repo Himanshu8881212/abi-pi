@@ -49,13 +49,16 @@ What each part does:
 - `event: true` marks a type whose rows record something that happened (an order, a payment) rather than a thing.
 
 What ALL's first draft (`propose_ontology`) does, before anyone refines it:
-- each keyed dimension table becomes a type, with the measures that can be read per object of it already attached;
+- each keyed dimension table becomes a type; one keyed by a single column gets the measures that can be read per
+  object of it already attached;
 - a fact table keyed by an ID of its own (an order) becomes a type marked `event`; a fact table keyed by what it
-  points at and a date or month (targets per café and month) is left out, and the draft's `left_out` says why;
+  points at and a date or month (targets per café and month), or by a day alone (daily totals), is left out, and the
+  draft's `left_out` says why; so is a table without a key (declare its key in the data model to make it a type);
 - a column that points at another type is not a property: it is that type's link, and the list shows the linked
   object by its name, which opens its page;
 - links are named in words both ways: an event "is for" a thing, a thing "belongs to" another, the other side "has"
-  them, and two types that meet in a table "have orders with" each other. Rename them to the business's words.
+  them, two types that meet in a table "have orders with" each other, and a one-to-one link "matches". Rename them
+  to the business's words.
 
 ## 2. The form card: a visual of type `form` in `reports/cafe-visits.json`
 

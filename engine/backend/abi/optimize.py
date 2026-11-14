@@ -486,7 +486,8 @@ def job(run_id: str) -> None:
                          " RETURNING project, spec, user_id", [run_id]).fetchone()
         u = r and security.user(conn, r["user_id"])
         if u is not None:  # (review N2) what the runner sees as the run starts, not as it was queued
-            conn.execute("UPDATE optimizer_runs SET rules = %s WHERE id = %s", [_seen(r["project"], u.id), run_id])
+            conn.execute("UPDATE optimizer_runs SET rules = %s, restricted = %s WHERE id = %s",
+                         [_seen(r["project"], u.id), rls.restricted(r["project"], u.id), run_id])  # (review R9) both as it starts
     if r is None or u is None:  # not queued any more; a deleted account's runs went with it
         return
     with db.connect() as conn:
