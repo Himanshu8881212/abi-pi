@@ -1090,7 +1090,7 @@ def test_object_page_shows_measures_and_linked_titles(objs, tmp_path):
     o = json.loads((abi.ABI_PROJECTS / PO / "model/ontology.json").read_text())
     was = json.loads(json.dumps(o))
     # (review F8) the café-order link named as a 9b proposal names it, so the café's page reads its sentence
-    next(ln for ln in o["links"] if ln["id"] == "order_cafe").update(name="is for", inverse="has")
+    next(ln for ln in o["links"] if ln["id"] == "order_cafe").update(name="placed at", inverse="has")  # (review F2: a renamed verb)
     sure("save_ontology", project=PO, ontology=o)
     gen = app._GEN.get(PO, 0)
     app.changed(PO)
@@ -1101,11 +1101,14 @@ def test_object_page_shows_measures_and_linked_titles(objs, tmp_path):
     try:
         cust = objs["sql"]("SELECT min(customer_id) FROM orders WHERE customer_id IS NOT NULL")[0][0]
         cafes = {r[0]: r[1] for r in objs["sql"]("SELECT cafe_id, cafe_name FROM cafes")}
+        order = objs["sql"]("SELECT min(order_id) FROM orders")[0][0]
         e.page()
         cards = "[...document.querySelectorAll('main .cards > .card > h3')].map(h => h.innerText.split('\\n')[0])"
         out = drive(e, tmp_path, [
             ["show", okey("cafe", objs["good"])], ["until", KV], ["get", "cards", cards],
             ["get", "orders_card", "[...document.querySelectorAll('main .cards > .card > h3')].map(h => h.innerText).find(t => t.startsWith('Orders')) || ''"],
+            ["show", okey("order", order)], ["until", KV], ["get", "order_cards", cards],
+            ["get", "cafe_card", "[...document.querySelectorAll('main .cards > .card > h3')].map(h => h.innerText).find(t => t.startsWith('Café')) || ''"],
             ["show", "obj:cafe"], ["wait", "main .olist table tr[data-r]"], ["until", "document.querySelectorAll('main .olist th').length > 5"],
             ["get", "heads", "[...document.querySelectorAll('main .olist th')].map(th => th.textContent.trim())"],
             ["get", "figures", "(D.ontology.objects.find(t => t.id === 'cafe').measures || []).map(id => (D.measures.find(m => m.id === id) || {}).name)"],
@@ -1123,6 +1126,7 @@ def test_object_page_shows_measures_and_linked_titles(objs, tmp_path):
         assert out["opened"] == out["linked"][0], "the name opens that object's page"
         assert out["cafe_cells"] and not [x for x in out["cafe_cells"] if x in cafes], ("no linked cell shows a raw key", out["cafe_cells"])
         assert "café has orders" in out["orders_card"], out["orders_card"]
+        assert "Café" in out["order_cards"] and "order placed at café" in out["cafe_card"], (out["order_cards"], out["cafe_card"])
     finally:
         sure("save_ontology", project=PO, ontology=was)
         gen = app._GEN.get(PO, 0)

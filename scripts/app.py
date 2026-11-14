@@ -1796,7 +1796,9 @@ async function objectPage(box,T,key){const bar=h('div','row bar lead');bar.appen
  sameCard(g,T,o.key);
  T.links.slice(0,12).forEach(w=>{const Y=otype(w.to);if(!Y||w.inverse&&w.to===T.id)return;
   // 1.2.7 M0 (9b): a proposal names a link by a verb ("is for", "has"): the section is then the linked type, its sentence under it
-  const verb=/^(is for|has|belongs to|matches|has .+ with)$/i.test(String(w.name||'')),c=card(verb?Y.plural:cap(w.name));c.classList.add('wide');
+  // (review F2) a name that doesn't name the linked type ("is for", "placed at") is a verb: headed by the type
+  const nm=String(w.name||'').toLowerCase(),verb=!nm.includes(Y.name.toLowerCase())&&!nm.includes(Y.plural.toLowerCase()),
+   c=card(verb?(/one$/.test(w.cardinality||'')?Y.name:Y.plural):cap(w.name));c.classList.add('wide');
   if(verb)c.querySelector('h3').append(h('span','file',sayLink(T,Y,w.name,w.cardinality)));else if(cap(w.name)!==Y.plural)c.querySelector('h3').append(h('span','file',Y.plural));
   objTable(c,Y,key.map((v,i)=>({link:w.link,property:T.key[i],op:'=',value:v})),10);g.append(c)});
  const hc=card('History');hc.classList.add('wide');g.append(hc);box.append(g);
