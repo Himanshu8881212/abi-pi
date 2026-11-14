@@ -57,8 +57,8 @@ What ALL's first draft (`propose_ontology`) does, before anyone refines it:
 - a column that points at another type is not a property: it is that type's link, and the list shows the linked
   object by its name, which opens its page;
 - links are named in words both ways: an event "is for" a thing, a thing "belongs to" another, the other side "has"
-  them, two types that meet in a table "have orders with" each other, and a one-to-one link "matches". Rename them
-  to the business's words.
+  them, two types that meet in a table "have orders with" each other, and a one-to-one link "matches". A second link
+  to the same type gets its column's words in brackets ("is for (pickup cafe)"). Rename them to the business's words.
 
 ## 2. The form card: a visual of type `form` in `reports/cafe-visits.json`
 

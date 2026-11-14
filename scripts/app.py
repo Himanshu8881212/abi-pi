@@ -1637,6 +1637,13 @@ const sayLink=(A,B,name,card)=>{const one=/one$/.test(card||''),lo=x=>x.name.toL
  if(/ \(inverse\)$/.test(nm))return `${A.plural.toLowerCase()} have ${B.plural.toLowerCase()}`;  // a link read backwards with no inverse name of its own
  return [lo(B),B.plural.toLowerCase()].includes(nm)?(one?`each ${lo(A)} has one ${lo(B)}`:`${A.plural.toLowerCase()} have ${B.plural.toLowerCase()}`):`${lo(A)} ${name} ${one?lo(B):B.plural.toLowerCase()}`};
 const says=l=>sayLink(otype(l.from),otype(l.to),l.name,l.cardinality);
+// (review F2, G1, G2) a link name is a verb, so its section is headed by the linked type Y, when it is one of the
+// proposal's own ("is for", "has (pickup cafe)") or doesn't name Y as a whole word ("placed at"; "restored" names no Store)
+const linkVerb=(name,Y)=>{const nm=String(name||'').replace(/ \([^()]*\)$/,''),w=x=>new RegExp(`\\b${x.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}\\b`,'i');
+ return /^(is for|has|belongs to|matches|has .+ with)$/i.test(nm)||!w(Y.name).test(nm)&&!w(Y.plural).test(nm)};
+// (review G3) a list's column that points at another type is headed by that type's name, or, when two columns point at
+// the same type, by each column's own words ("Pickup cafe")
+const fkHeads=to=>{const n={};Object.values(to).forEach(Z=>n[Z.id]=(n[Z.id]||0)+1);return Object.fromEntries(Object.entries(to).map(([c,Z])=>[c,n[Z.id]>1?colName(c.replace(/_id$/,'')):Z.name]))};
 const low=T=>T.name.toLowerCase(),RANK={viewer:1,editor:2,owner:3},myRank=()=>RANK[(window.ME||{role:'owner'}).role]||0,COPY=()=>MODE==='viewer'&&/_pub$/.test(D.project);
 // a property's value as a page shows it: an identifier as it is, a flag as Yes or No, a probability as a percentage, a day as 15 Mar 2022
 const dayOf=v=>{const d=new Date(v+'T00:00');return isNaN(d)?v:d.toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'})};
@@ -1684,7 +1691,7 @@ function objTable(box,T,fixed,n){n=n||50;const bar=h('div','row obar'),q=h('inpu
   // ... and a column that points at another object shows that object by its name, which opens it: never its raw key
   const R=D.model?.relationships||[],to={},tt={};shown.forEach(c=>{const l=(D.ontology.links||[]).find(l=>l.from===T.id&&l.via.length===1&&otype(l.to)&&(r=>r&&r.from.table===T.table&&r.from.columns.length===1&&r.from.columns[0]===c)(R.find(r=>r.id===l.via[0])));if(l)to[c]=otype(l.to)});
   const raw={};Object.keys(to).forEach(c=>raw[c]=r.rows.map(x=>x[ix(c)]));  // the keys as read: the table shows them formatted
-  await Promise.all(Object.entries(to).map(async([c,Z])=>{const vs=[...new Set(raw[c].filter(v=>v!==null&&v!==MASK))];d.measures[c]=Z.name;tt[c]={};if(!vs.length)return;
+  const heads=fkHeads(to);await Promise.all(Object.entries(to).map(async([c,Z])=>{const vs=[...new Set(raw[c].filter(v=>v!==null&&v!==MASK))];d.measures[c]=heads[c];tt[c]={};if(!vs.length)return;
    try{const z=await api('list_objects',{type:Z.id,filters:[{property:Z.key[0],op:'in',value:vs}],limit:Math.min(1000,vs.length)}),ki=z.columns.indexOf(Z.key[0]),ti=z.columns.indexOf(Z.title);z.rows.forEach(x=>tt[c][String(x[ki])]=ti<0?null:x[ti])}catch(e){}}));
   if(my!==st.n)return;
   rows(out,d);out.classList.add('pick');
@@ -1797,8 +1804,7 @@ async function objectPage(box,T,key){const bar=h('div','row bar lead');bar.appen
  T.links.slice(0,12).forEach(w=>{const Y=otype(w.to);if(!Y||w.inverse&&w.to===T.id)return;
   // 1.2.7 M0 (9b): a proposal names a link by a verb ("is for", "has"): the section is then the linked type, its sentence under it
   // (review F2) a name that doesn't name the linked type ("is for", "placed at") is a verb: headed by the type
-  const nm=String(w.name||'').toLowerCase(),verb=!nm.includes(Y.name.toLowerCase())&&!nm.includes(Y.plural.toLowerCase()),
-   c=card(verb?(/one$/.test(w.cardinality||'')?Y.name:Y.plural):cap(w.name));c.classList.add('wide');
+  const verb=linkVerb(w.name,Y),c=card(verb?(/one$/.test(w.cardinality||'')?Y.name:Y.plural):cap(w.name));c.classList.add('wide');
   if(verb)c.querySelector('h3').append(h('span','file',sayLink(T,Y,w.name,w.cardinality)));else if(cap(w.name)!==Y.plural)c.querySelector('h3').append(h('span','file',Y.plural));
   objTable(c,Y,key.map((v,i)=>({link:w.link,property:T.key[i],op:'=',value:v})),10);g.append(c)});
  const hc=card('History');hc.classList.add('wide');g.append(hc);box.append(g);

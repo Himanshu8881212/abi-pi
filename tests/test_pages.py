@@ -1092,13 +1092,15 @@ def test_object_page_shows_measures_and_linked_titles(objs, tmp_path):
     # (review F8) the café-order link named as a 9b proposal names it, so the café's page reads its sentence
     next(ln for ln in o["links"] if ln["id"] == "order_cafe").update(name="placed at", inverse="has")  # (review F2: a renamed verb)
     sure("save_ontology", project=PO, ontology=o)
-    gen = app._GEN.get(PO, 0)
-    app.changed(PO)
-    for _ in range(300):
-        if app._GEN.get(PO, 0) > gen:
-            break
-        time.sleep(0.1)
-    try:
+    try:  # (review G5) restored whatever happens from here on
+        gen = app._GEN.get(PO, 0)
+        app.changed(PO)
+        for _ in range(300):
+            if app._GEN.get(PO, 0) > gen:
+                break
+            time.sleep(0.1)
+        else:
+            raise AssertionError("app did not reload")
         cust = objs["sql"]("SELECT min(customer_id) FROM orders WHERE customer_id IS NOT NULL")[0][0]
         cafes = {r[0]: r[1] for r in objs["sql"]("SELECT cafe_id, cafe_name FROM cafes")}
         order = objs["sql"]("SELECT min(order_id) FROM orders")[0][0]
@@ -1135,6 +1137,30 @@ def test_object_page_shows_measures_and_linked_titles(objs, tmp_path):
             if app._GEN.get(PO, 0) > gen:
                 break
             time.sleep(0.1)
+        else:
+            raise AssertionError("app did not reload")
+
+
+def test_link_headings_and_link_columns_name_the_type_once(objs, tmp_path):
+    """1.2.7 M0 review (G1-G3): which link sections the page heads by the linked type, and what a list's columns that
+    point at another type are headed, on the app's own helpers (as the page runs them).
+    - A proposal's second link "is for (pickup cafe)" is a verb also beside a type called Cafe (its words in brackets
+      are no type name), as are "is for", "has" and "placed at".
+    - A link that names the other type keeps its own heading ("customers who visited", "orders").
+    - "has store sales with" is a verb from both sides (a Store's page and a Product's).
+    - "restored" does not name Store: only a whole word does.
+    - Two columns pointing at one type are headed by their own words, one column by the type's name."""
+    T = lambda n, p: {"id": n.lower(), "name": n, "plural": p}  # noqa: E731
+    cases = [["is for (pickup cafe)", T("Cafe", "Cafes"), True], ["is for", T("Café", "Cafés"), True], ["has", T("Order", "Orders"), True],
+             ["placed at", T("Café", "Cafés"), True], ["customers who visited", T("Customer", "Customers"), False],
+             ["orders", T("Order", "Orders"), False], ["has store sales with", T("Store", "Stores"), True],
+             ["has store sales with", T("Product", "Products"), True], ["restored", T("Store", "Stores"), True],
+             ["store", T("Store", "Stores"), False]]
+    out = drive(objs["owner"], tmp_path, [["show", "objects"], ["wait", "main .tbl"],
+        ["get", "verbs", "(cs => cs.map(([n, y]) => linkVerb(n, y)))(" + json.dumps([c[:2] for c in cases]) + ")"],
+        ["get", "heads", "fkHeads({cafe_id: {id: 'cafe', name: 'Café'}, pickup_cafe_id: {id: 'cafe', name: 'Café'}, customer_id: {id: 'customer', name: 'Customer'}})"]])
+    assert out["verbs"] == [c[2] for c in cases], list(zip([c[0] for c in cases], out["verbs"]))
+    assert out["heads"] == {"cafe_id": "Cafe", "pickup_cafe_id": "Pickup cafe", "customer_id": "Customer"}, out["heads"]
 
 
 def test_objects_overview_is_not_the_table_diagram(objs, tmp_path):
