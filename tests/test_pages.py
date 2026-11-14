@@ -880,8 +880,9 @@ def test_object_graph_has_every_link(objs, people, tmp_path):
         ["get", "small", "(s => Math.min(...[...s.querySelectorAll('text')].filter(t => t.textContent.trim()).map(t => t.getBoundingClientRect().height)))(document.querySelector('main .odiag svg'))"]], width=390)
     html = pic["html"]
     assert pic["pan"] <= 1 and pic["cut"] == 0 and pic["small"] >= 9, f"the whole picture in a phone's frame, readable, nothing cut: {pic['pan'], pic['cut'], pic['small']}"
-    for ln in o["links"]:
-        assert f">{ln['name']} · {ln['cardinality']}</text>" in html, ln
+    for said_now in ("each order has one café", "each order has one customer", "customer visited cafés"):  # 1.2.7 9b: the app's sentences
+        assert f">{said_now}</text>" in html and f"<title>{said_now}</title>" in html, (said_now, html[:600])
+    assert not re.search(r"many-to-one|many to one|one to many|one-to-many| · ", html), html[:600]
     assert all(f">{t['plural']}</text>" in html for t in o["objects"]) and html.count("<rect") == len(o["objects"]), html[:300]
     out = drive(objs["owner"], tmp_path, [
         ["show", "objects"], ["wait", "main .canvas .tbl"], ["until", "document.querySelectorAll('main .canvas text.lbl').length > 0"],
@@ -1088,9 +1089,6 @@ def test_object_page_shows_measures_and_linked_titles(objs, tmp_path):
     e = objs["editor"]
     o = json.loads((abi.ABI_PROJECTS / PO / "model/ontology.json").read_text())
     was = json.loads(json.dumps(o))
-    order = next(x for x in o["objects"] if x["id"] == "order")
-    order["properties"] = [{"column": "cafe_id", "meaning": "identifier"}, {"column": "customer_id", "meaning": "identifier"}, *order["properties"]]
-    sure("save_ontology", project=PO, ontology=o)
     try:
         cust = objs["sql"]("SELECT min(customer_id) FROM orders WHERE customer_id IS NOT NULL")[0][0]
         cafes = {r[0]: r[1] for r in objs["sql"]("SELECT cafe_id, cafe_name FROM cafes")}
@@ -1127,7 +1125,7 @@ def test_objects_overview_is_not_the_table_diagram(objs, tmp_path):
         ["show", "objects"], ["wait", "main .tbl"], ["until", f"!{box}.innerText.includes('…')"],
         ["get", "cafe", f"[...{box}.querySelectorAll('.col')].map(r => [r.dataset.f, r.children[0].textContent, r.children[1].textContent])"],
         ["get", "lines", "[...document.querySelectorAll('main svg text.lbl')].map(t => t.textContent)"],
-        ["get", "revenue", "(D.measures.find(m => m.id === 'revenue') || {}).name"]])
+        ["get", "revenue", "(D.measures.find(m => m.id === 'revenue') || {}).name + ' in all'"]])  # 1.2.7 review C6: the box's figure is the whole project's
     rows = {r[1]: r for r in out["cafe"]}
     n = objs["sql"]("SELECT count(*) FROM cafes")[0][0]
     assert [r[0] for r in out["cafe"]] == ["n", "m", "m", "a"], out["cafe"]

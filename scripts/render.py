@@ -315,10 +315,12 @@ def diagram(model: dict, kinds: dict) -> str:
         d, b = f"M{x1 + 200},{y1 + 18} C{x1 + 300},{y1 + 18} {x2 - 100},{y2 + 18} {x2},{y2 + 18}", 40 + 24 * (i % 4)
         if named:  # the arc bulges a little more for each link, so two between the same boxes stay apart
             d = f"M{x1 + 200},{y1 + 18} C{x1 + 200 + b},{y1 + 18} {x1 + 200 + b},{y2 + 18} {x1 + 200},{y2 + 18}"
-        out.append(f"<path d='{d}' fill=none stroke='var(--ink)' stroke-width=1.5>"
-                   f"<title>{esc(r['from']['table'])}.{esc(','.join(r['from']['columns']))} → {esc(r['to']['table'])}.{esc(','.join(r['to']['columns']))} ({esc(r.get('cardinality') or 'many-to-one')})</title></path>")
+        said = r.get("label") or f"{r['name']} · {r.get('cardinality') or ''}" if named else None  # `objects` gives the sentence
+        tip = said if named else (f"{r['from']['table']}.{','.join(r['from']['columns'])} → {r['to']['table']}.{','.join(r['to']['columns'])}"
+                                        f" ({r.get('cardinality') or 'many-to-one'})")
+        out.append(f"<path d='{d}' fill=none stroke='var(--ink)' stroke-width=1.5><title>{esc(tip)}</title></path>")
         if named:
-            lx, ly, label = x1 + 206 + b * 3 // 4, (y1 + y2) // 2 + 23, f"{r['name']} · {r.get('cardinality') or ''}"
+            lx, ly, label = x1 + 206 + b * 3 // 4, (y1 + y2) // 2 + 23, said
             while ly in taken:  # two links whose rows add up the same: the next free line below
                 ly += 20
             taken.add(ly)
@@ -349,13 +351,25 @@ def _cardinality(model: dict, start: str, via: list[str]) -> str:
     return {frozenset(): "one-to-one", frozenset({True}): "many-to-one", frozenset({False}): "one-to-many"}.get(frozenset(kinds), "many-to-many")
 
 
+def says(ln: dict, cardinality: str, one: dict, many: dict) -> str:
+    """1.2.7 M0 (9b): a link as a sentence about its two types, the same words as the app's overview (app.py `says`):
+    "each order has one café", "customer visited cafés"; never a column, never a cardinality. `one`/`many`: the
+    types' singular and plural names by ID."""
+    a, b, nm = one[ln["from"]].lower(), one[ln["to"]].lower(), str(ln.get("name") or "").lower()
+    single = cardinality.endswith("one")
+    if nm in (b, many[ln["to"]].lower()):
+        return f"each {a} has one {b}" if single else f"{many[ln['from']].lower()} have {many[ln['to']].lower()}"
+    return f"{a} {ln['name']} {b if single else many[ln['to']].lower()}"
+
+
 def objects(o: dict, model: dict) -> str:
     """1.2.6 M7: the object-type graph of model/ontology.json as `diagram` draws it: each type a box by its plural
     name (as the app's canvas and lists say it), each link an arc with its name and cardinality.
     ponytail: types are told apart by their display names; two types of one name would share a box."""
     name, table = {x["id"]: x["plural"] for x in o.get("objects", [])}, {x["id"]: x["table"] for x in o.get("objects", [])}
+    one = {x["id"]: x["name"] for x in o.get("objects", [])}
     rels = [{"from": {"table": name[ln["from"]], "columns": [ln["name"]]}, "to": {"table": name[ln["to"]], "columns": [ln.get("inverse") or ""]},
-             "name": ln["name"], "cardinality": _cardinality(model, table[ln["from"]], ln["via"])}
+             "name": ln["name"], "cardinality": (c := _cardinality(model, table[ln["from"]], ln["via"])), "label": says(ln, c, one, name)}
             for ln in o.get("links", []) if ln["from"] in name and ln["to"] in name]
     return diagram({"relationships": rels, "objects": True}, dict.fromkeys(name.values()))
 

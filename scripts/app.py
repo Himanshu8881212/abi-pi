@@ -1652,7 +1652,8 @@ function objBar(box,on){const bar=h('div','row bar lead seg');[...(PAGES.objects
 function objTable(box,T,fixed,n){n=n||50;const bar=h('div','row obar'),q=h('input','f'),out=h('div','pick olist'),foot=h('div','row pager'),head=h('span','row pager'),st={offset:0,flt:{},n:0};let tm;
  q.type='search';q.placeholder=`Search ${T.plural.toLowerCase()}`;q.setAttribute('aria-label',q.placeholder);if(!fixed&&PENDING.osearch){q.value=PENDING.osearch;PENDING.osearch=null}bar.append(q);
  const own=T.properties.filter(p=>!p.column.includes('.')&&p.column!==T.title),named=own.filter(p=>(p.name||p.meaning)&&!T.key.includes(p.column)),P=c=>T.properties.find(p=>p.column===c)||{column:c},
-  cols=[T.title,...(named.length?named:own.filter(p=>!T.key.includes(p.column))).map(p=>p.column)].slice(0,MOBILE?2:6),ms=fixed?[]:(T.measures||[]).slice(0,MOBILE?1:3),m0=(T.measures||[])[0]||D.measures[0]?.id;
+  fkc=(D.ontology.links||[]).filter(l=>l.from===T.id&&l.via.length===1&&otype(l.to)&&!(fixed||[]).some(f=>f.link===l.id)).map(l=>(D.model?.relationships||[]).find(r=>r.id===l.via[0]&&r.from.table===T.table&&r.from.columns.length===1)?.from.columns[0]).filter(c=>c&&!T.key.includes(c)),
+  cols=[...new Set([T.title,...fkc,...(named.length?named:own.filter(p=>!T.key.includes(p.column))).map(p=>p.column)])].slice(0,MOBILE?2:6),ms=fixed?[]:(T.measures||[]).slice(0,MOBILE?1:3),m0=(T.measures||[])[0]||D.measures[0]?.id;
  // a filter per category: its members as the model counts them, for this person
  if(!fixed&&m0)own.filter(p=>p.meaning==='category'||p.meaning==='flag').slice(0,3).forEach(p=>{const s=sel([['',`${pname(p,T)}: all`]]);s.setAttribute('aria-label',pname(p,T));s.onchange=()=>{st.flt[p.column]=s.value;st.offset=0;load()};bar.append(s);
   api('semantic_query',{measures:[m0],dimensions:[`${T.table}.${p.column}`],limit:200}).then(r=>r.rows.forEach(x=>{if(x[0]!==null)s.append(new Option(String(x[0]),JSON.stringify(x[0])))})).catch(()=>s.remove())});
@@ -1683,7 +1684,7 @@ function objTable(box,T,fixed,n){n=n||50;const bar=h('div','row obar'),q=h('inpu
   // after each draw (a sort draws again): no column id in a header's tooltip, a row reachable by keyboard
   const mark=()=>{out.querySelectorAll('th').forEach(th=>th.removeAttribute('title'));out.querySelectorAll('tr[data-r]').forEach(tr=>{tr.tabIndex=0;tr.setAttribute('role','link');
     Object.entries(to).forEach(([c,Z])=>{const j=d.columns.indexOf(c),td=tr.children[j],v=d.rows[tr.dataset.r]?.[j];if(!td||td.dataset.o||v===null||v===undefined)return;td.dataset.o=1;
-     const nm=tt[c][String(v)],b=h('button','flink oopen',nm===undefined||nm===null?`${Z.name} ${v}`:String(nm));b.onclick=e=>{e.stopPropagation();openObj(Z.id,[v])};td.replaceChildren(b)})})};
+     const nm=tt[c][String(v)];if(v===MASK||nm===undefined||nm===null)return;const b=h('button','flink oopen',String(nm));b.onclick=e=>{e.stopPropagation();openObj(Z.id,[v])};td.replaceChildren(b)})})};
   mark();new MutationObserver(mark).observe(out.querySelector('table'),{childList:true,subtree:true});
   // the pages: under the table, and for a whole list (50 rows a page) above it too, in reach without scrolling
   if(st.offset||r.more){const b=(t,on,fn)=>{const x=h('button','btn',t);x.disabled=!on;x.onclick=fn;return x};
@@ -1746,7 +1747,7 @@ function objectsHome(box){if(!OT().length){box.append(emptyBox('objects','No obj
  ids.forEach(t=>{const T=otype(t),b=h('div','tbl dim'),hd=h('div','th'),go=h('button','badge','Open'),cs=h('div','cols');b.style.left=pos[t].x+'px';b.style.top=pos[t].y+'px';go.title=`List the ${T.plural.toLowerCase()}`;go.onclick=()=>show('obj:'+t);
   hd.append(h('span','',T.plural),go);const cell=k=>{const r=h('div','col'),l=h('span','',k),v=h('span','file','…');l.style.gridColumn='1 / 3';v.style.cssText='grid-column:3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px';r.append(l,v);cs.append(r);return [r,v]};
   facts(T).forEach(([kind,id])=>{if(kind==='n'){const [r,v]=cell(T.event?'Recorded':'How many');r.dataset.f='n';api('list_objects',{type:t,limit:1,count:true}).then(x=>v.textContent=fmt(x.total)).catch(()=>v.textContent='—')}
-   else if(kind==='m'){const [r,v]=cell((D.measures.find(m=>m.id===id)||{}).name||colName(id));r.dataset.f='m';r.dataset.m=id}
+   else if(kind==='m'){const [r,v]=cell(((D.measures.find(m=>m.id===id)||{}).name||colName(id))+' in all');r.dataset.f='m';r.dataset.m=id}
    else{const as=OA().filter(a=>a.object===t).map(a=>a.name),[r,v]=cell('You can');r.dataset.f='a';v.textContent=as.slice(0,2).join(', ')+(as.length>2?` +${as.length-2}`:'');v.title=as.join(', ')}});
   if((T.measures||[]).length)api('visual_data',{query:{measures:T.measures.slice(0,4)},type:'kpi'}).then(d=>T.measures.slice(0,4).forEach((id,i)=>{const v=cs.querySelector(`[data-m="${id}"] .file`);if(v)v.textContent=d.rows[0]?.[i]==null?'—':fmt(d.rows[0][i],d.format?.[id])})).catch(()=>cs.querySelectorAll('[data-f=m] .file').forEach(v=>v.textContent='—'));
   b.append(hd,cs);stage.append(b);boxes[t]=b;
