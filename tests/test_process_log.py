@@ -1161,6 +1161,33 @@ def test_a_build_overtaken_by_a_change_writes_no_model_entries(built):
     assert out["events"] == shown("desk")["build"]["events"]
 
 
+LATER = r"""
+import json, sys
+import abi.app  # noqa: F401
+from abi import db, security
+from abi.project import bundle, git, imports
+P = json.loads(sys.stdin.read())["project"]
+runs = lambda c: c.execute("SELECT count(*) AS n FROM analysis_runs WHERE project = %s AND name = 'desk'", [P]).fetchone()["n"]
+before = bundle.bundle(git.path(P))
+with db.connect() as c:
+    owner, n = security.user(c, c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"]), runs(c)
+    try:
+        with git.change(P, owner, "import_project"):  # as an action that does more after the import, and fails there
+            imports.apply(c, owner, P, before | {"processes/desk.json": before["processes/desk.json"] | {"description": "Changed."}})
+            raise RuntimeError("a later step fails")
+    except RuntimeError:
+        c.rollback()
+    print(json.dumps({"queued": runs(c) - n, "restored": bundle.bundle(git.path(P)) == before}))
+"""
+
+
+def test_no_build_is_queued_for_a_change_that_is_rolled_back(built):
+    r = engine(LATER, timeout=300, stdin=json.dumps({"project": P}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert json.loads(r.stdout.splitlines()[-1]) == {"queued": 0, "restored": True}, "the import itself queues nothing: whoever changed the files does, last"
+    idle()
+
+
 def test_an_instant_reads_as_the_projects_time_zone(built):
     was = abi.call("project_locale", project=P)["time_zone"]
     abi.call("set_project_locale", project=P, time_zone="Europe/Berlin")
