@@ -174,7 +174,7 @@ AREAS = {  # area: (what it holds, action module or module.action prefixes (long
              ("load|upload|file|csv|parquet|excel|json|source|connect|database|postgres|mysql|clickhouse|s3|api|endpoint|step|clean|"
               "transform|dedup|rename|column|refresh|reload|table|import|fresh|quality|restore")),
     "model": ("semantic model: tables, keys, relationships, measures, glossary, datasets, date/rates tables, row-level rules",
-              ("abi.semantic", "abi.project.imports"),
+              ("abi.semantic", "abi.project.imports", "abi.process"),  # 1.2.7 M1: a process's file, until its own group (M5)
               ("model|measure|relationship|join|glossary|term|dataset|date table|calendar|currency|rate|key|row-level|rls|"
                "define|definition|formula|kpi|metric|margin|build")),
     "reports": ("reports, visuals, snapshots, exports, sharing",
