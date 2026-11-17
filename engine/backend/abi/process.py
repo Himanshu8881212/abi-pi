@@ -44,7 +44,7 @@ MADE = {*EVENT, "ord", "seq", "next_activity", "wait_seconds"}  # the column nam
 WHY = ("no_timestamp", "no_activity", "filtered", "activity", "no_object", "duplicate")  # why a row is dropped, in the order tried
 TIME = re.compile(r"DATE$|TIMESTAMP")
 FAULT = "The event log could not be built because something went wrong on ABI's side. Save the process again; if it happens again, tell whoever looks after ABI for you."
-STALE = "The build did not finish. Save the process again, or refresh one of its tables."
+STALE = "The build did not finish. Save the process again, or refresh a table its events come from."
 # MiB of DuckDB memory a build uses at most (less where the server's limit is lower); above it DuckDB spills to disk. With
 # the server's own 1500MB a build of 5 million events took the heavy worker to 1.7 GB; with this it stays under 1.5 GB for
 # a few seconds more (bench/RESULTS.md, 1.2.7 M1: the worker's memory varied by 300 MB from run to run at 600, not at 400).
