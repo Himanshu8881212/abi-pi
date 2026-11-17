@@ -418,8 +418,8 @@ def check(project: str) -> list[str]:
     gaps += [f"Table '{t}' holds the predictions of an ML model that is gone; restricted Viewers see none of"
              " its rows until it gets a row rule of its own (set_rls_rule)." if gone(t) else
              f"Table '{t}' holds the events of a process that is gone, or of an object type it is no longer about; restricted Viewers see none"
-             " of its rows. Give it a row rule of its own (set_rls_rule) to keep it; to archive it, save the process as it was (save_process),"
-             " then delete the process (delete_process) or take the type out of it." if t in lost else
+             " of its rows. To archive it, save the process as it was (save_process), then delete the process (delete_process) or take the"
+             " type out of it." if t in lost else
              # a process's table: a relationship of its own to a filtered source would be the build's again at the next build
              f"Table '{t}' holds events of a process made from tables that security rules filter, or hide columns of; restricted Viewers see"
              " none of its rows until it has a rule of its own: a row rule (set_rls_rule) where a row rule filters one of those tables, a column"

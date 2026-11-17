@@ -292,7 +292,7 @@ def _gate(conn, project: str, p: Path, why: str, extra: dict) -> None:
     project's contents signed in its preview (D-04.1)."""
     from abi import process  # not at top: process imports this module
 
-    process.sweep(conn, project)  # 1.2.7 M1: a build whose job was lost holds up nothing for good
+    process.sweep(conn, project)  # 1.2.7 M1: a build whose job was lost holds up nothing for good (every process's: the project goes)
     busy = conn.execute("SELECT (SELECT count(*) FROM flow_runs WHERE project = %(p)s AND status IN ('queued', 'running'))"
                         " + (SELECT count(*) FROM ml_runs WHERE project = %(p)s AND status IN ('queued', 'running'))"
                         " + (SELECT count(*) FROM load_runs WHERE project = %(p)s AND status IN ('queued', 'running'))"
@@ -529,14 +529,16 @@ class Locale(ProjectRef):
 def set_project_locale(conn, user: User, args: Locale) -> dict:
     """Sets the project's time zone (day boundaries and time intelligence, SE-13) and display currency in project.json
     settings, over its tenant's; an omitted field stays as it is, an empty one removes the project's own value."""
+    from abi import process  # not at top: process imports this module
     from abi.semantic import model  # not at top: semantic imports git
 
-    f = path(args.project) / "project.json"
+    f, old = path(args.project) / "project.json", bundle.bundle(path(args.project))
     doc = json.loads(f.read_text())
     s = doc.get("settings", {}) | {k: v for k, v in (("time_zone", args.time_zone), ("currency", args.currency)) if v is not None}
     doc["settings"] = {k: v for k, v in s.items() if v != ""}
     f.write_bytes(dumps(doc).encode())
     model.extend_calendars(args.project, user.name)
+    process.changed(conn, args.project, old, bundle.bundle(path(args.project)), user)  # 1.2.7 M1, last (it commits): event logs hold times of the zone
     return {k: doc["settings"].get(k) for k in ("time_zone", "currency")}
 
 
@@ -611,7 +613,10 @@ def _confirm(conn, project: str, old: dict, files: dict, gone, what: str, why: l
             return False
 
     removed = {t for t in gone if not reads_itself(t)}
-    why = [*why, *([f"It removes table(s) {', '.join(sorted(removed))}; their data is archived for 30 days."] if removed else [])]
+    from abi import process  # not at top: process imports this module
+
+    named = removed | process.dropped(old, files)  # 1.2.7 M1: with the tables of a process's build that go with it (process.changed)
+    why = [*why, *([f"It removes table(s) {', '.join(sorted(named))}; their data is archived for 30 days."] if named else [])]
     why += imports._publishing(project, old, files)[1]
     gate_why, preview = imports.gate(conn, project, old, files, bool(why))  # signs the exact role diff (D-1) and API tools (D-35)
     why += gate_why

@@ -127,6 +127,9 @@ ZONE = {"id": "zone", "name": "Zones", "case": "ticket", "events": [
     {"table": "zoned", "id": "zid", "activity": "activity", "start": "at_instant", "objects": [{"type": "ticket", "columns": ["about"]}]},
     {"table": "naps", "activity": "activity", "start": "happened", "objects": [{"type": "ticket", "columns": ["about"]}]}],
     "clean": {"where": [{"column": "at_instant", "op": ">=", "value": "2025-03-01"}]}}
+ZONED = {"id": "zoned", "name": "Zoned", "case": "ticket", "events": [  # the same instants in a column named like the log's own, filtered on it
+    {"table": "zoned", "id": "zid", "activity": "activity", "start": "started_at", "objects": [{"type": "ticket", "columns": ["about"]}]}],
+    "clean": {"where": [{"column": "started_at", "op": ">=", "value": "2025-03-01 00:40:00"}]}}
 PINGS = 300_000  # rows of pings, every one at the same second and without an id: row n is about ticket T<n % 3 + 1>
 TIES = {"id": "ties", "name": "Ties", "case": "ticket", "events": [
     {"table": "pings", "activity": "activity", "start": "started_at", "attributes": ["n"], "objects": [{"type": "ticket", "columns": ["about"]}]}]}
@@ -265,8 +268,8 @@ def log(tmp_path_factory):
     (d / "ticket_events.csv").write_text(EVENTS)
     for f, text in (("calls", CALLS), ("chats", CHATS), ("chat_tickets", CHAT_TICKETS), ("naps", NAPS), ("trips", TRIPS)):
         (d / f"{f}.csv").write_text(text)
-    duckdb.sql(f"""COPY (SELECT * FROM (VALUES (1, 'T1', 'Ping', TIMESTAMPTZ '2025-03-01 00:30:00+01'), (2, 'T1', 'Pong', TIMESTAMPTZ '2025-02-28 23:45:00+00'))
-      t(zid, about, activity, at_instant)) TO '{d}/zoned.parquet' (FORMAT parquet)""")
+    duckdb.sql(f"""COPY (SELECT *, at_instant AS started_at FROM (VALUES (1, 'T1', 'Ping', TIMESTAMPTZ '2025-03-01 00:30:00+01'),
+      (2, 'T1', 'Pong', TIMESTAMPTZ '2025-02-28 23:45:00+00')) t(zid, about, activity, at_instant)) TO '{d}/zoned.parquet' (FORMAT parquet)""")
     duckdb.sql(f"""COPY (SELECT i AS n, 'T' || (i % 3 + 1) AS about, CASE WHEN i % 2 = 0 THEN 'Ping' ELSE 'Pong' END AS activity,
       TIMESTAMP '2025-03-05 12:00:00' AS started_at FROM range(1, {PINGS + 1}) t(i)) TO '{d}/pings.parquet' (FORMAT parquet)""")
     if P in {x["project"] for x in abi.call("list_projects")["projects"]}:
@@ -825,7 +828,10 @@ def test_tables_left_by_a_revert_stay_denied(built):
     ghost = {"id": "ghost", "name": "Ghost", "case": "ticket", "events": [DESK["events"][0]]}  # the tickets' own times (no column of theirs is hidden)
     assert save(ghost)["status"] == "ok"
     assert viewer(built, "sql_query", sql="SELECT count(DISTINCT ticket_id) FROM pm_ghost_ticket")["rows"] == [[2]] and none_for(built, "pm_ghost_events")
-    # back to the very files of before (the process was never there): a revert takes its tables to the archive with it
+    # back to the very files of before (the process was never there): a revert takes its tables to the archive with it, and asks first
+    with pytest.raises(abi.ActionError) as e:
+        abi.call("revert", project=P, to=head)
+    assert e.value.status == 409 and "It removes table(s) pm_ghost_events, pm_ghost_ticket; their data is archived for 30 days." in e.value.body["message"]
     sure("revert", project=P, to=head)
     assert shown("ghost") is None, "the process is gone with the revert"
     with pytest.raises(abi.ActionError):
@@ -1035,9 +1041,9 @@ with db.connect() as c:
         out["got"] = [process._queue(c, P, N, None), process._queue(c, P, N, a.get("user"), "snapshot-0")]
         out["user"] = c.execute("SELECT user_id FROM analysis_runs WHERE id = %s", [out["run"]]).fetchone()["user_id"]
     elif a["do"] == "dead":  # a run queued and one running since 31 minutes: their job is lost, their outcome never written
-        for key, status in (("waiting", "queued"), ("old-running", "running")):
-            c.execute("INSERT INTO analysis_runs (id, project, kind, name, key, status, created, started) VALUES (%s, %s, 'process', 'desk', %s, %s,"
-                      " now() - interval '32 minutes', CASE WHEN %s = 'running' THEN now() - interval '31 minutes' END)", [str(uuid.uuid4()), P, key, status, status])
+        for name, key, status in (("desk", "waiting", "queued"), ("desk", "old-running", "running"), ("supply", "old-other", "queued")):
+            c.execute("INSERT INTO analysis_runs (id, project, kind, name, key, status, created, started) VALUES (%s, %s, 'process', %s, %s, %s,"
+                      " now() - interval '32 minutes', CASE WHEN %s = 'running' THEN now() - interval '31 minutes' END)", [str(uuid.uuid4()), P, name, key, status, status])
     elif a["do"] == "no queue":  # the job can't be queued: the action fails and its transaction rolls back
         from abi import worker
         def no(*x, **k):
@@ -1101,6 +1107,8 @@ def test_one_build_waits_at_a_time_and_twenty_runs_are_kept(built):
         assert save(DESK | {"description": "After a lost job."})["status"] == "ok"
         # (ended failed; with twenty newer runs they are no longer kept at all)
         assert {r["status"] for r in state()["runs"] if r["key"] in ("waiting", "old-running")} <= {"failed"}
+        # another process's run that waits as long (behind a long load, say) is left alone: its job is still to come, and nobody would queue it again
+        assert [r["status"] for r in state()["runs"] if r["key"] == "old-other"] == ["queued"]
     finally:
         queue("clear")
     got = queue("no queue")
@@ -1224,3 +1232,30 @@ def test_propose_drafts_stamps_beside_free_text_and_only_what_a_save_takes(built
     finally:
         for r in rels:
             sure("remove_relationship", project=P, id=r)
+
+
+def test_a_change_of_the_time_zone_builds_the_log_again(built):
+    was = abi.call("project_locale", project=P)["time_zone"]
+    abi.call("set_project_locale", project=P, time_zone="UTC")
+    try:
+        # in UTC both instants are the evening of 28 February: before the filter's 00:40 on 1 March
+        b = save(ZONED)
+        assert b["status"] == "ok" and b["events"] == 0 and b["dropped"]["filtered"] == 2, b
+        # the project moves to Berlin: nobody saves the process, its log is built again and holds Berlin's wall-clock times
+        # (00:30 and 00:45 on 1 March; the filter, on the column named like the log's own, keeps the second)
+        abi.call("set_project_locale", project=P, time_zone="Europe/Berlin")
+        assert shown("zoned")["build"]["run"] != b["run"], "another time zone queues the build"
+        again = build_of("zoned", after=b["run"])
+        assert again["status"] == "ok" and again["events"] == 1 and again["dropped"]["filtered"] == 1, again
+        assert sql("SELECT activity, strftime(started_at, '%Y-%m-%d %H:%M') FROM pm_zoned_events") == [["Pong", "2025-03-01 00:45"]]
+        # a filter's value for an instant is that wall-clock time: one with an offset is refused, not read without it
+        for v in ("2025-03-01 00:40:00+01", "2025-03-01T00:40:00Z", ["2025-03-01 00:40:00-05:00"]):
+            late = copy.deepcopy(ZONED)
+            late["clean"]["where"][0] |= {"value": v, "op": "in" if isinstance(v, list) else ">="}
+            [e] = refused(422, "save_process", process=late)["errors"]
+            assert (e["file"], e["path"]) == ("processes/zoned.json", "$.clean.where[0].value") and "has an offset" in e["error"] and e["fix"], e
+    finally:
+        abi.call("set_project_locale", project=P, time_zone=was or "")
+        idle()
+        if shown("zoned"):
+            sure("delete_process", project=P, process="zoned")

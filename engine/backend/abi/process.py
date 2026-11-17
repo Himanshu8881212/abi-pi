@@ -45,6 +45,7 @@ EVENT = ("event_id", "activity", "started_at", "ended_at", "duration_seconds")  
 MADE = {*EVENT, "ord", "seq", "next_activity", "wait_seconds"}  # the column names a build makes itself
 WHY = ("no_timestamp", "no_activity", "filtered", "activity", "no_object", "duplicate")  # why a row is dropped, in the order tried
 TIME = re.compile(r"DATE$|TIMESTAMP")
+OFFSET = re.compile(r'\d\d:\d\d(:\d\d(\.\d+)?)? ?(Z|[+-]\d\d(:?\d\d)?)"')  # a time with an offset, as the last thing of a (JSON) string
 FAULT = "The event log could not be built because something went wrong on ABI's side. Save the process again; if it happens again, tell whoever looks after ABI for you."
 STALE = "The build did not finish. Save the process again, or refresh a table its events come from."
 # MiB of DuckDB memory a build uses at most (less where the server's limit is lower); above it DuckDB spills to disk. With
@@ -56,8 +57,12 @@ KEEP = 20  # runs kept per process: the latest ones
 # Minutes after which a run still queued or running is one nobody works on (`sweep`). A build of 5 million events takes
 # 35 s (bench/RESULTS.md) and a killed worker's run is failed within two minutes (worker.retry_stalled_runs: no heartbeat
 # for 30 s, looked for every minute), so after 30 minutes its job was lost or its outcome could not be written. A run
-# that only waits that long behind a load is failed too: its job then finds it no longer queued and does nothing, and
-# whoever asked (`_queue` sweeps first) has a new run.
+# of the process being queued that only waits that long behind a load is failed too: its job then finds it no longer
+# queued and does nothing, and whoever asked has a new run (`_queue` sweeps that process's runs only: nobody would
+# queue another process's again).
+# ponytail: a build that really runs for more than 30 minutes (some fifty times the 35 s of 5 million events) is failed
+# here while it writes: a delete of its process or project then goes through, the tables it writes afterwards are left
+# in the lake (denied to restricted readers: `leftover`) and its run ends ok. A heartbeat on the run if builds get there.
 DEAD = 30
 
 
@@ -230,6 +235,9 @@ def references(project: str, files: dict) -> list[dict]:
             elif all(t in lake for t in mine) and not any(fc in lake[t] for t in mine):
                 e(f"$.clean.where[{j}].column", f"No source table has a column '{fc}'.",
                   f"Use a column of {', '.join(mine)}: {', '.join(dict.fromkeys(c for t in mine for c in lake[t]))}.")
+            elif any(lake.get(t, {}).get(fc) == "TIMESTAMP WITH TIME ZONE" for t in mine) and OFFSET.search(json.dumps(f["value"])):
+                e(f"$.clean.where[{j}].value", f"'{fc}' is an instant, read as wall-clock time in the project's time zone; this value has an offset.",
+                  "Write the time as the project's time zone reads it, without an offset or Z (2025-03-01 00:00:00).")
         ids = [x["id"] for x in p.get("sla", [])]
         for j, x in enumerate(ids):
             if x in ids[:j]:
@@ -438,11 +446,13 @@ def _model(project: str, p: dict, keys: dict) -> None:
 
 # ---------- runs: in the worker, kept in analysis_runs ----------
 
-def sweep(conn, project: str) -> None:
-    """The project's builds nobody works on any more (queued or running for DEAD minutes: a lost job, an outcome that
-    could not be written) end failed, so none holds up the next build, a delete of its process or of the project."""
+def sweep(conn, project: str, pid: str | None = None) -> None:
+    """The builds nobody works on any more (queued or running for DEAD minutes: a lost job, an outcome that could not
+    be written) end failed, so none holds up the next build or a delete: process `pid`'s, or the whole project's
+    (None: before the project is deleted or renamed)."""
     conn.execute("UPDATE analysis_runs SET status = 'failed', finished = now(), error = %s WHERE project = %s AND kind = 'process'"
-                 " AND status IN ('queued', 'running') AND coalesce(started, created) < now() - make_interval(mins => %s)", [STALE, project, DEAD])
+                 " AND (%s::text IS NULL OR name = %s) AND status IN ('queued', 'running')"
+                 " AND coalesce(started, created) < now() - make_interval(mins => %s)", [STALE, project, pid, pid, DEAD])
 
 
 def _queue(conn, project: str, pid: str, user_id: int | None, key: str | None = None) -> str | None:
@@ -450,7 +460,7 @@ def _queue(conn, project: str, pid: str, user_id: int | None, key: str | None = 
     build (it reads the file and the tables when it starts): nothing more is queued, and it runs for whoever asked
     last (`user_id`, if given). None when the run `key` exists (one per refresh snapshot). The latest KEEP runs of a
     process stay."""
-    sweep(conn, project)
+    sweep(conn, project, pid)
     if wait := conn.execute("UPDATE analysis_runs SET user_id = coalesce(%s, user_id) WHERE id = (SELECT id FROM analysis_runs WHERE project = %s"
                             " AND kind = 'process' AND name = %s AND status = 'queued' ORDER BY created DESC LIMIT 1) RETURNING id::text",
                             [user_id, project, pid]).fetchone():
@@ -474,16 +484,26 @@ def _queue(conn, project: str, pid: str, user_id: int | None, key: str | None = 
     return run_id
 
 
+def dropped(old: dict, files: dict) -> set[str]:
+    """The tables no build writes any more when the project's files go from `old` to `files`: a removed process's, a
+    dropped type's; never one that has a file of its own."""
+    was, now = ({t for rel, p in x.items() if imports._kind(rel) == "process" for t in tables(p)} for x in (old, files))
+    return {t for t in was - now if f"sources/{t}.json" not in files and f"tables/{t}.json" not in files}
+
+
 def changed(conn, project: str, old: dict, files: dict, user: User) -> dict[str, str]:
     """What follows a change of the project's files from `old` to `files`, as the last step of whatever made it (a save
-    or a delete here, an import, a pull, a revert, an undo: it commits): the tables no build writes any more (a removed
-    process's, a dropped type's; never one that has a file of its own) go to the 30-day archive, and every added or
-    changed process gets a build queued as `user`: {process ID: its run}. Until that build ends `process` shows it, not
-    the build of the definition before."""
-    was, now = ({t for rel, p in x.items() if imports._kind(rel) == "process" for t in tables(p)} for x in (old, files))
-    git._archive(conn, user, project, {t for t in was - now if f"sources/{t}.json" not in files and f"tables/{t}.json" not in files})
+    or a delete here, an import, a pull, a revert, an undo, set_project_locale): the tables no build writes any more
+    (`dropped`) go to the 30-day archive, and every added or changed process gets a build queued as `user`: {process
+    ID: its run}; every process does when the project's time zone changed (instants are read in it: `_time`). Until
+    that build ends `process` shows it, not the build of the definition before.
+    ponytail: it commits (`_queue`: the run before its job), so when queuing fails here (worker.defer, or the second of
+    two processes) the files go back and what the action wrote to Postgres before stays; builds queued after the
+    action's own commit (an outbox) if that ever shows up."""
+    git._archive(conn, user, project, dropped(old, files))
+    zone = lambda x: ((x.get("project.json") or {}).get("settings") or {}).get("time_zone")  # noqa: E731
     return {p["id"]: _queue(conn, project, p["id"], user.id) for rel, p in sorted(files.items())
-            if imports._kind(rel) == "process" and old.get(rel) != p}
+            if imports._kind(rel) == "process" and (old.get(rel) != p or zone(old) != zone(files))}
 
 
 NO_EDITOR = ("The tables' entries in the data model were not written: the person this build runs for is no longer an Editor of the project"
@@ -671,7 +691,7 @@ def _change(conn, user: User, project: str, pid: str, new: dict | None) -> dict:
     was, now = (tables(x) if x else {} for x in (old, new))
     # the tables that go: its own, never one a person loaded under that name since (it has a file)
     gone = sorted(t for t in was.keys() - now.keys() if f"sources/{t}.json" not in files and f"tables/{t}.json" not in files)
-    sweep(conn, project)
+    sweep(conn, project, pid)
     if gone and conn.execute("SELECT 1 FROM analysis_runs WHERE project = %s AND kind = 'process' AND name = %s AND status IN ('queued', 'running')",
                              [project, pid]).fetchone():  # its build would write the tables after they went
         raise ActionFailed(409, f"The event log of “{old['name']}” is being built right now" + ("" if new is None else f", and this change takes"
