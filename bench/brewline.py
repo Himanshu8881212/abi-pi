@@ -14,12 +14,21 @@ known_answers.json beside the data (revenue by region per year to the cent, the 
 that moved most, its share of the change and its orders in both months) comes from a fresh DuckDB query over the
 written files, not from the generator's own tables.
 
-    .venv/bin/python bench/brewline.py OUT [--scale 0.01] [--seed 42] [--csv] [--plant north|retail]
+--supply (1.2.7) adds a supply process, from a café's purchase order to the paid invoice: 8 suppliers, purchase
+orders with the times they were placed, approved and (a few) cancelled, deliveries (one delivery carries several
+orders of its supplier), and supply_events with supply_event_orders saying which orders an event is about. --scale 1
+is about 1.05M purchase orders and 5.1M events. Nothing is written at or after 1 January 2026, so the latest orders
+are still open. Planted, and in known_answers.json under "supply" from a fresh query: one supplier is slow between
+"Order approved" and "Goods received", some invoices come twice (rework on "Invoice received"), three deviations
+(paid before the goods came, never approved, delivered after it was cancelled) and the happy path's share.
+
+    .venv/bin/python bench/brewline.py OUT [--scale 0.01] [--seed 42] [--csv] [--plant north|retail] [--supply]
 
     OUT/cafes/cafes.parquet, customers/customers.parquet, products/products.parquet, orders/orders_2023_01.parquet ...
     OUT/known_answers.json
     OUT/brewline.csv   (--csv) every order with its café, region and product, the product note quoted over several
                        lines with "" inside, as exports from real tools come
+    OUT/suppliers/, purchase_orders/, deliveries/, supply_events/, supply_event_orders/   (--supply) one Parquet file each
 """
 import argparse
 import json
@@ -52,13 +61,23 @@ PLANTS = {  # the "why": (dimension, member, month, factor) the member's orders 
     "retail": ("category", "Retail", "2025-12", 0.5),  # every café's Retail orders halve in December 2025
 }
 MEMBERS = {"region": sorted({r for _, r in CITIES}), "category": sorted({p[2] for p in PRODUCTS})}  # a plant's dimension
+PURCHASE_ORDERS = 1_050_000  # --supply at --scale 1: about 5.1M events
+SUPPLIERS = [  # id, name, what it supplies, country
+    ("S01", "Nordbohne Rösterei", "Coffee beans", "Germany"), ("S02", "Molkerei Wiesengrund", "Milk", "Germany"),
+    ("S03", "Backhaus Lindner", "Bakery", "Germany"), ("S04", "Haferquell", "Oat drinks", "Austria"),
+    ("S05", "Van Dijk Thee", "Tea", "Netherlands"), ("S06", "Becherwerk", "Cups and packaging", "Germany"),
+    ("S07", "Sirop Lumière", "Syrups", "France"), ("S08", "Frischekiste", "Fruit and vegetables", "Germany"),
+]
+SLOW = "S04"  # planted: its deliveries take 9 to 20 days after the approval, the others' 2 to 6
+HAPPY = ["Order placed", "Order approved", "Goods received", "Invoice received", "Invoice paid"]
+SUPPLY = ("suppliers", "purchase_orders", "deliveries", "supply_events", "supply_event_orders")
 
 
 def q(path) -> str:
     return str(path).replace("'", "''")
 
 
-def generate(out, scale: float = 0.01, seed: int = 42, csv: bool = False, plant: str = "north") -> dict:
+def generate(out, scale: float = 0.01, seed: int = 42, csv: bool = False, plant: str = "north", supply: bool = False) -> dict:
     if not scale >= 0.005:
         raise SystemExit("--scale must be 0.005 (about 37,000 orders) or more for the planted change to stand out")
     out = Path(out)
@@ -126,12 +145,109 @@ def generate(out, scale: float = 0.01, seed: int = 42, csv: bool = False, plant:
           p.product_name, p.category, p.note AS product_note, o.quantity, o.unit_price, o.discount, o.revenue
           FROM read_parquet('{q(out)}/orders/*.parquet') o JOIN cafes c USING (cafe_id) JOIN products p USING (product_id)
           ORDER BY o.order_id) TO '{q(out)}/brewline.csv' (HEADER)""")
+    if supply:
+        _supply(db, out, scale)
     db.close()
     known = {"seed": int(seed), "scale": float(scale), **answers(out, dim)}
     if (known["latest_complete_month"], known["why"]["member"]) != (month, member):
         raise SystemExit(f"the planted change did not show at seed {seed}, scale {scale}")
+    if supply and known["supply"]["slow"]["supplier"] != SLOW:
+        raise SystemExit(f"the planted slow supplier did not show at seed {seed}, scale {scale}")
     (out / "known_answers.json").write_text(json.dumps(known, indent=1) + "\n")
     return known
+
+
+def _supply(db, out: Path, scale: float) -> None:
+    """--supply: the five tables of the supply process, after the others (their bytes stay as they were). Every time is
+    a hash of (seed, row, field), in whole minutes; a step comes at least an hour after the one before."""
+    for t in SUPPLY:
+        (out / t).mkdir(parents=True, exist_ok=True)
+    db.execute("CREATE TABLE suppliers(supplier_id VARCHAR, supplier_name VARCHAR, supplies VARCHAR, country VARCHAR)")
+    db.executemany("INSERT INTO suppliers VALUES (?, ?, ?, ?)", SUPPLIERS)
+    # a purchase order: placed, approved 30 minutes to 2 days later, ready to ship then. `plant` picks the planted
+    # deviation: below 0.010 paid before the goods come, to 0.016 never approved, to 0.020 cancelled and delivered anyway.
+    # A delivery (`trip`) carries the orders of one supplier that became ready one after another: 2.5 on average
+    db.execute(f"""CREATE TABLE po AS
+     WITH a AS (SELECT i, printf('S%02d', 1 + floor(u(20, i, 1, 0) * {len(SUPPLIERS)})::INT) AS supplier_id,
+        printf('CF%03d', 1 + floor(u(20, i, 2, 0) * 120)::INT) AS cafe_id,
+        TIMESTAMP '2023-01-02 06:00:00' + to_minutes(floor(u(20, i, 3, 0) * 1560000)::BIGINT) AS placed_at,
+        round(40 + u(20, i, 4, 0) * 960, 2)::DECIMAL(10,2) AS amount, u(20, i, 5, 0) AS plant
+       FROM range({round(PURCHASE_ORDERS * float(scale))}) r(i)),
+     b AS (SELECT *, CASE WHEN plant >= 0.010 AND plant < 0.016 THEN NULL
+        ELSE placed_at + to_minutes(30 + floor(u(21, i, 1, 0) * 2850)::BIGINT) END AS approved_at FROM a),
+     c AS (SELECT *, coalesce(approved_at, placed_at) AS ready_at, CASE WHEN plant >= 0.016 AND plant < 0.020
+        THEN approved_at + to_minutes(60 + floor(u(21, i, 2, 0) * 1380)::BIGINT) END AS cancelled_at FROM b)
+     SELECT *, printf('PO%07d', row_number() OVER (ORDER BY placed_at, i)) AS po_id,
+      sum((u(22, i, 1, 0) < 0.4)::INT) OVER (PARTITION BY supplier_id ORDER BY ready_at, i) AS trip FROM c""")
+    # a delivery leaves 4 to 40 hours before it arrives; unloading takes 10 to 59 minutes
+    db.execute(f"""CREATE TABLE dl AS
+     WITH g AS (SELECT supplier_id, trip, max(ready_at) AS ready_at, sum(amount)::DECIMAL(12,2) AS amount FROM po GROUP BY 1, 2),
+     t AS (SELECT *, ready_at + to_minutes((CASE WHEN supplier_id = '{SLOW}' THEN 12960 + floor(u(23, supplier_id, trip, 1) * 15840)
+        ELSE 2880 + floor(u(23, supplier_id, trip, 1) * 5760) END)::BIGINT) AS received_at FROM g)
+     SELECT *, received_at - to_minutes(240 + floor(u(23, supplier_id, trip, 2) * 2160)::BIGINT) AS dispatched_at,
+      received_at + to_minutes(10 + floor(u(23, supplier_id, trip, 3) * 50)::BIGINT) AS unloaded_at,
+      (['Road', 'Rail', 'Courier'])[1 + floor(u(23, supplier_id, trip, 4) * 3)::INT] AS transport,
+      printf('D%07d', row_number() OVER (ORDER BY received_at, supplier_id, trip)) AS delivery_id FROM t""")
+    # the invoice comes 1 hour to 5 days after unloading, for 6 % a corrected one 1 to 4 days later (the rework), and is
+    # paid 1 to 20 days after the last one; a prepaid order (planted) is paid within a day of its approval
+    db.execute("""CREATE TABLE pt AS
+     WITH a AS (SELECT p.i, p.po_id, p.amount, p.plant, p.ready_at, d.delivery_id,
+        d.unloaded_at + to_minutes(60 + floor(u(24, p.i, 1, 0) * 7140)::BIGINT) AS invoice_at
+       FROM po p JOIN dl d USING (supplier_id, trip)),
+     b AS (SELECT *, CASE WHEN u(24, i, 2, 0) < 0.06 THEN invoice_at + to_minutes(1440 + floor(u(24, i, 3, 0) * 4320)::BIGINT) END AS invoice2_at FROM a)
+     SELECT *, CASE WHEN plant < 0.010 THEN ready_at + to_minutes(60 + floor(u(24, i, 4, 0) * 1380)::BIGINT)
+      ELSE coalesce(invoice2_at, invoice_at) + to_minutes(1440 + floor(u(24, i, 4, 0) * 27360)::BIGINT) END AS paid_at FROM b""")
+    who = "(['Mara', 'Jonas', 'Elif', 'Tomasz', 'Aylin', 'Ben'])[1 + floor(u(25, kind, started_at, n) * 6)::INT]"
+    db.execute(f"""CREATE TABLE ev AS
+     SELECT printf('E%08d', row_number() OVER (ORDER BY started_at, kind, n)) AS event_id, *, {who} AS done_by FROM (
+      SELECT 1 AS kind, 'Delivery dispatched' AS activity, dispatched_at AS started_at, NULL::TIMESTAMP AS ended_at, delivery_id,
+       NULL AS po_id, NULL::DECIMAL(12,2) AS amount, delivery_id AS n FROM dl
+      UNION ALL SELECT 2, 'Goods received', received_at, unloaded_at, delivery_id, NULL, amount, delivery_id FROM dl
+      UNION ALL SELECT 3, 'Invoice received', invoice_at, NULL, NULL, po_id, amount, po_id FROM pt
+      UNION ALL SELECT 4, 'Invoice received', invoice2_at, NULL, NULL, po_id, amount, po_id FROM pt WHERE invoice2_at IS NOT NULL
+      UNION ALL SELECT 5, 'Invoice paid', paid_at, NULL, NULL, po_id, amount, po_id FROM pt)
+     WHERE started_at < TIMESTAMP '2026-01-01'""")
+    copy = lambda t, sql: db.execute(f"COPY ({sql}) TO '{q(out)}/{t}/{t}.parquet' (FORMAT parquet)")  # noqa: E731
+    copy("suppliers", "SELECT * FROM suppliers ORDER BY supplier_id")
+    copy("purchase_orders", "SELECT po_id, cafe_id, supplier_id, placed_at, approved_at, cancelled_at, amount FROM po ORDER BY po_id")
+    copy("deliveries", "SELECT delivery_id, supplier_id, transport FROM dl WHERE dispatched_at < TIMESTAMP '2026-01-01' ORDER BY delivery_id")
+    copy("supply_events", "SELECT event_id, activity, started_at, ended_at, delivery_id, done_by, amount FROM ev ORDER BY event_id")
+    copy("supply_event_orders", """SELECT e.event_id, coalesce(e.po_id, p.po_id) AS po_id FROM ev e LEFT JOIN pt p
+      ON e.kind = 2 AND p.delivery_id = e.delivery_id WHERE e.kind > 1 ORDER BY 1, 2""")
+
+
+def _supply_answers(out) -> dict:
+    """The planted answers of --supply, from the written files: each purchase order's steps in order (its own three
+    times and the events about it), then what they say."""
+    db = duckdb.connect()
+    for t in SUPPLY:
+        db.execute(f"CREATE VIEW {t} AS SELECT * FROM read_parquet('{q(out)}/{t}/*.parquet')")
+    s, po, _, ev, eo = SUPPLY
+    db.execute(f"""CREATE TABLE log AS SELECT po_id, 'Order placed' AS activity, placed_at AS t, 0 AS o FROM {po}
+     UNION ALL SELECT po_id, 'Order approved', approved_at, 1 FROM {po} WHERE approved_at IS NOT NULL
+     UNION ALL SELECT po_id, 'Order cancelled', cancelled_at, 2 FROM {po} WHERE cancelled_at IS NOT NULL
+     UNION ALL SELECT b.po_id, e.activity, e.started_at, 3 FROM {ev} e JOIN {eo} b USING (event_id)""")
+    db.execute("""CREATE TABLE trace AS SELECT po_id, list(activity ORDER BY t, o) AS steps,
+      min(t) FILTER (activity = 'Order approved') AS approved, min(t) FILTER (activity = 'Order cancelled') AS cancelled,
+      min(t) FILTER (activity = 'Goods received') AS received, min(t) FILTER (activity = 'Invoice paid') AS paid,
+      count(*) FILTER (activity = 'Invoice received') AS invoices FROM log GROUP BY 1""")
+    one = lambda sql: db.execute(sql).fetchone()  # noqa: E731
+    rows = {t: one(f"SELECT count(*) FROM {t}")[0] for t in SUPPLY}
+    stamps = one(f"SELECT count(placed_at) + count(approved_at) + count(cancelled_at) FROM {po}")[0]
+    happy, rework, prepaid, unapproved, cancelled = one(f"""SELECT count(*) FILTER (steps = {HAPPY}), count(*) FILTER (invoices > 1),
+      count(*) FILTER (paid < received), count(*) FILTER (approved IS NULL AND received IS NOT NULL),
+      count(*) FILTER (cancelled < received) FROM trace""")
+    lead = db.execute(f"""SELECT supplier_id, any_value(supplier_name), median(date_diff('minute', approved, received)) / 1440 AS days
+     FROM trace JOIN {po} USING (po_id) JOIN {s} USING (supplier_id) WHERE received IS NOT NULL GROUP BY 1 ORDER BY days DESC, 1""").fetchall()
+    several, most = one(f"""SELECT count(*) FILTER (n > 1), max(n) FROM (SELECT count(*) AS n FROM {eo} JOIN {ev} USING (event_id)
+     WHERE activity = 'Goods received' GROUP BY event_id)""")
+    return {"rows": rows, "events": stamps + rows["supply_events"],
+            "slow": {"supplier": lead[0][0], "name": lead[0][1], "from": "Order approved", "to": "Goods received",
+                     "median_days": round(lead[0][2], 2), "next_slowest_median_days": round(lead[1][2], 2)},
+            "rework": {"activity": "Invoice received", "orders": rework, "share": round(rework / rows["purchase_orders"], 4)},
+            "deviations": {"paid_before_goods": prepaid, "not_approved": unapproved, "delivered_after_cancel": cancelled},
+            "happy_path": {"steps": HAPPY, "orders": happy, "share": round(happy / rows["purchase_orders"], 4)},
+            "deliveries_with_several_orders": several, "most_orders_in_one_delivery": most}
 
 
 def answers(out, dim: str) -> dict:
@@ -155,7 +271,8 @@ def answers(out, dim: str) -> dict:
      GROUP BY ALL ORDER BY abs(b - a) DESC, {dim}""").fetchall()
     a, b = sum(r[1] for r in ch), sum(r[2] for r in ch)
     member, ma, mb, na, nb = ch[0]
-    return {"rows": rows, "revenue_by_region_year": by, "latest_complete_month": month,
+    return ({"supply": _supply_answers(out)} if (Path(out) / "supply_events").is_dir() else {}) | {
+            "rows": rows, "revenue_by_region_year": by, "latest_complete_month": month,
             "why": {"measure": "revenue", "month": month, "previous_month": prev, "revenue": {prev: float(a), month: float(b)},
                     "change": float(b - a), "change_pct": float(round((b - a) / a * 100, 2)), "dimension": dim, "member": member,
                     "member_revenue": {prev: float(ma), month: float(mb)}, "member_change": float(mb - ma),
@@ -169,9 +286,10 @@ if __name__ == "__main__":
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--csv", action="store_true", help="also write brewline.csv")
     ap.add_argument("--plant", choices=PLANTS, default="north", help="the why's planted change (default north)")
+    ap.add_argument("--supply", action="store_true", help="also write the supply process's tables (purchase orders to paid invoices)")
     a = ap.parse_args()
     t0 = time.time()
-    k = generate(a.out, a.scale, a.seed, a.csv, a.plant)
+    k = generate(a.out, a.scale, a.seed, a.csv, a.plant, a.supply)
     w = k["why"]
     print(f"{k['rows']['orders']:,} orders in {time.time() - t0:.1f} s; {w['month']} revenue {w['change_pct']:+}% on "
           f"{w['previous_month']}, {w['member']} {w['share_of_change']:.0%} of the change")

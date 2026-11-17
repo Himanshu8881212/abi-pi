@@ -113,6 +113,73 @@ def test_the_retail_plant_moves_a_product_category_and_the_default_data_stays(ru
         "North", {"2025-11": 3271.28, "2025-12": 1586.08}, {"2025-11": 14095.04, "2025-12": 12043.64})
 
 
+def test_process_data_known_answers(runs, tmp_path):
+    """--supply (1.2.7 item 15): suppliers, purchase orders, deliveries and supply_events with the orders each event
+    is about, the same bytes from the same seed, and nothing of it without the flag. known_answers.json's "supply"
+    equals what this test reads from the files in its own way (each order's steps as one text, by string_agg), and
+    what was planted shows: one slow supplier between "Order approved" and "Goods received", invoices that come twice,
+    the three deviations, the happy path's share, deliveries that carry several orders."""
+    sys.path.insert(0, str(ROOT / "bench"))
+    import brewline as gen  # bench/brewline.py: its constants (the generator itself runs in its own process, as above)
+
+    assert not any(f.split("/")[0] in gen.SUPPLY for f in runs["a"]), "the default data has no supply tables"
+    out = tmp_path / "a"
+    a, b = brewline(out, "--supply"), brewline(tmp_path / "b", "--supply")
+    assert a == b and {f for f in a if f.split("/")[0] in gen.SUPPLY} == {f"{t}/{t}.parquet" for t in gen.SUPPLY}
+    assert {f: h for f, h in a.items() if f.split("/")[0] not in (*gen.SUPPLY, "known_answers.json")} == {
+        f: h for f, h in runs["a"].items() if f not in ("brewline.csv", "known_answers.json")}, "the other tables keep their bytes"
+    k = json.loads((out / "known_answers.json").read_text())["supply"]
+    db = duckdb.connect()
+    for t in (*gen.SUPPLY, "cafes"):
+        db.execute(f"CREATE VIEW {t} AS SELECT * FROM read_parquet('{out}/{t}/*.parquet')")
+    s, po, dl, ev, eo = gen.SUPPLY
+    n = {t: db.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in gen.SUPPLY}
+    assert k["rows"] == n and n["suppliers"] == 8 and n["purchase_orders"] == round(gen.PURCHASE_ORDERS * 0.01)
+    # every key is one, every reference joins, and nothing happens in 2026: the latest orders are still open
+    assert db.execute(f"""SELECT (SELECT count(DISTINCT po_id) FROM {po}), (SELECT count(DISTINCT delivery_id) FROM {dl}),
+      (SELECT count(DISTINCT event_id) FROM {ev}), (SELECT count(DISTINCT (event_id, po_id)) FROM {eo})""").fetchone() == (
+        n["purchase_orders"], n["deliveries"], n["supply_events"], n["supply_event_orders"])
+    assert db.execute(f"""SELECT (SELECT count(*) FROM {po} p LEFT JOIN {s} x USING (supplier_id) LEFT JOIN cafes c
+       USING (cafe_id) WHERE x.supplier_id IS NULL OR c.cafe_id IS NULL), (SELECT count(*) FROM {ev} e LEFT JOIN {dl} d USING (delivery_id)
+       WHERE e.delivery_id IS NOT NULL AND d.delivery_id IS NULL), (SELECT count(*) FROM {eo} b LEFT JOIN {ev} e USING (event_id) LEFT JOIN {po} p
+       USING (po_id) WHERE e.event_id IS NULL OR p.po_id IS NULL), (SELECT count(*) FROM {ev} e WHERE e.delivery_id IS NULL AND NOT EXISTS
+       (SELECT 1 FROM {eo} b WHERE b.event_id = e.event_id)), (SELECT count(*) FROM {ev} WHERE started_at >= DATE '2026-01-01' OR ended_at < started_at),
+      (SELECT max(placed_at) < DATE '2026-01-01' FROM {po})""").fetchone() == (0, 0, 0, 0, 0, True)
+    # the event log as a process build reads it: the three times of an order, then the events
+    events = db.execute(f"SELECT count(placed_at) + count(approved_at) + count(cancelled_at) FROM {po}").fetchone()[0] + n["supply_events"]
+    assert k["events"] == events and 48_000 < events < 54_000, "about 5.1 million events at --scale 1"
+    assert [r[0] for r in db.execute(f"SELECT DISTINCT activity FROM {ev} ORDER BY 1").fetchall()] == [
+        "Delivery dispatched", "Goods received", "Invoice paid", "Invoice received"]
+    db.execute(f"""CREATE TABLE steps AS SELECT po_id, string_agg(activity, ' > ' ORDER BY t, o) AS path FROM (
+      SELECT po_id, 'Order placed' AS activity, placed_at AS t, 0 AS o FROM {po} UNION ALL
+      SELECT po_id, 'Order approved', approved_at, 1 FROM {po} WHERE approved_at IS NOT NULL UNION ALL
+      SELECT po_id, 'Order cancelled', cancelled_at, 2 FROM {po} WHERE cancelled_at IS NOT NULL UNION ALL
+      SELECT po_id, activity, started_at, 3 FROM {eo} JOIN {ev} USING (event_id)) GROUP BY 1""")
+    count = lambda where: db.execute(f"SELECT count(*) FROM steps WHERE {where}").fetchone()[0]  # noqa: E731
+    happy = count(f"path = '{' > '.join(gen.HAPPY)}'")
+    assert k["happy_path"] == {"steps": gen.HAPPY, "orders": happy, "share": round(happy / n["purchase_orders"], 4)} and 0.8 < k["happy_path"]["share"] < 0.95
+    rework = count("path LIKE '%Invoice received > Invoice received%'")  # the corrected invoice follows the first one directly
+    assert k["rework"] == {"activity": "Invoice received", "orders": rework, "share": round(rework / n["purchase_orders"], 4)} and 0.04 < k["rework"]["share"] < 0.08
+    assert k["deviations"] == {"paid_before_goods": count("path LIKE '%Invoice paid%Goods received%'"),
+                               "not_approved": count("path LIKE 'Order placed > Goods received%'"),
+                               "delivered_after_cancel": count("path LIKE '%Order cancelled%Goods received%'")}
+    assert all(0.002 * n["purchase_orders"] < v < 0.015 * n["purchase_orders"] for v in k["deviations"].values()), k["deviations"]
+    days = db.execute(f"""SELECT supplier_id, median(date_diff('minute', p.approved_at, e.started_at)) / 1440 FROM {po} p JOIN {eo} b USING (po_id)
+      JOIN {ev} e USING (event_id) WHERE e.activity = 'Goods received' GROUP BY 1 ORDER BY 2 DESC""").fetchall()
+    slow = k["slow"]
+    assert (slow["supplier"], slow["from"], slow["to"]) == (gen.SLOW, "Order approved", "Goods received") == (days[0][0], "Order approved", "Goods received")
+    assert (slow["median_days"], slow["next_slowest_median_days"]) == (round(days[0][1], 2), round(days[1][1], 2)) and days[0][1] > 2 * days[1][1]
+    assert slow["name"] == dict((x[0], x[1]) for x in gen.SUPPLIERS)[gen.SLOW]
+    per = db.execute(f"SELECT count(*) FILTER (n > 1), max(n), avg(n) FROM (SELECT count(*) AS n FROM {eo} JOIN {ev} USING (event_id)"
+                     " WHERE activity = 'Goods received' GROUP BY event_id)").fetchone()
+    assert (k["deliveries_with_several_orders"], k["most_orders_in_one_delivery"]) == per[:2] and per[1] >= 4 and 2 < per[2] < 3, per
+    # a delivery's amount is the sum of its orders': counted once per event it is that total, once per order it is more
+    once, per_order = db.execute(f"""SELECT (SELECT sum(amount) FROM {ev} WHERE activity = 'Goods received'),
+      (SELECT sum(e.amount) FROM {ev} e JOIN {eo} b USING (event_id) WHERE e.activity = 'Goods received')""").fetchone()
+    assert once == db.execute(f"SELECT sum(p.amount) FROM {po} p WHERE EXISTS (SELECT 1 FROM {eo} b JOIN {ev} e USING (event_id)"
+                              " WHERE b.po_id = p.po_id AND e.activity = 'Goods received')").fetchone()[0] and per_order > 2 * once
+
+
 J = "pi_journey"
 
 
