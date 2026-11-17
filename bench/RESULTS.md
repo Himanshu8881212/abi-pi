@@ -1800,9 +1800,35 @@ built in 36.6 s; a refresh of purchase_orders then started one more build (key s
 deliveries, an object type's table the build doesn't read, had started none in the earlier try, which is why the
 sentence no longer says "one of its tables".
 
+### After the second review: instants in the project's time zone
+
+17 Nov 2026, 18:03 UTC, the same container set up again from d97ae4b, the same command without `--keep`. Since e2f85a5
+a build reads a TIMESTAMP WITH TIME ZONE column as the project's time zone (the planner's rule) and a run nobody
+works on is failed before the next is queued; Brewline's times are wall-clock times, so its build's SQL is the same
+text as before.
+
+| code | build | build s | from its trigger to the run's end s | heavy worker's high-water mark MB | highest sample MB |
+|---|---|---|---|---|---|
+| d97ae4b | the first, after the save | 37.6 | 44.7 | 995.2 | 994.9 |
+| d97ae4b | after the refresh of supply_events (key snapshot-13) | 34.9 | 111.5 | 1,244.4 | 1,242.0 |
+
+- **Both met: at most 37.6 s (target 60 s); 1.04 GB for the first build and 1.30 GB for the load and the build in one
+  heavy worker (target 1.5 GB).** Over the three runs of this section and the one above, the first build took 34.5 to
+  37.6 s and 995 to 1,119 MB, the build after a refresh 33.2 to 34.9 s and 975 to 1,244 MB: the load before it leaves
+  a different amount resident from run to run, and 1,244 MB is 186 MB under the target.
+
+**What a source with a time zone reads as** (project time zone Europe/Berlin; `zoned` holds 2025-03-01 00:30+01 and
+2025-02-28 23:45+00 as TIMESTAMP WITH TIME ZONE, `naps` the wall-clock time 2025-03-01 00:40; one process over both,
+then the same with `clean.where` at_instant >= 2025-03-01):
+
+| code | pm_zone_events in order | with the filter |
+|---|---|---|
+| 595d1a8 | Ping 2025-02-28 23:30, Pong 2025-02-28 23:45, Nap 2025-03-01 00:40 | 1 event, 2 filtered |
+| e2f85a5 | Ping 2025-03-01 00:30, Nap 2025-03-01 00:40, Pong 2025-03-01 00:45 | 3 events, 0 filtered |
+
 ### A refresh that changed no source table starts 0 builds
 
-`.loop/abi127.sh test -q tests/test_process_log.py` on 69bd358 (`test_rebuild_after_refresh` among its 27): passed.
+`.loop/abi127.sh test -q tests/test_process_log.py` on ee15ea0 (`test_rebuild_after_refresh` among its 31): passed.
 In it a refresh of a table the process doesn't read (suppliers) starts 0 builds; a new load of a table it reads
 starts exactly 1, named after that load's snapshot; the worker's own check for changed tables, run right after with
 nothing changed, loads nothing and starts 0; the same check with a table to load that the process doesn't read
@@ -1811,11 +1837,11 @@ exactly 1, named after that load's snapshot.
 
 ### Golden
 
-`.loop/abi127.sh test -q tests/test_ontology_nobreak.py tests/test_127_nobreak.py` on 69bd358 (run together with
-tests/test_process_log.py and the Brewline test of the process data: 35 passed in 527 s): 7 passed, both files
+`.loop/abi127.sh test -q tests/test_ontology_nobreak.py tests/test_127_nobreak.py` on ee15ea0 (run together with
+tests/test_process_log.py and the Brewline test of the process data: 39 passed in 625 s): 7 passed, both files
 untouched since ab8e95d. The plans' SQL and the restricted views' text of a project without a process file are
 byte-identical to the recorded ones, and its bundle imports with no change.
 
-The whole suite on 69bd358 in a container set up anew (`.loop/abi127.sh test -q -rf tests`): 6 failed, 580 passed,
-24 skipped in 4,747 s; the six are the ones that fail in this container on every commit (two of tests/test_app.py,
+The whole suite on ee15ea0 in a container set up anew (`.loop/abi127.sh test -q -rf tests`): 6 failed, 584 passed,
+24 skipped in 4,767 s; the six are the ones that fail in this container on every commit (two of tests/test_app.py,
 one each of test_ground.py, test_guardrails.py, test_jobs.py and test_supervise.py).
