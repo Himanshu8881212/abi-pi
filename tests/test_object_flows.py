@@ -338,7 +338,7 @@ def test_state_per_object(w):
     assert r.returncode == 0, r.stderr[-2000:]
     out = json.loads(r.stdout.splitlines()[-1])
     assert out["rows"] == [["p", "low_stock", True, True, ""]] and out["key"] == "PRIMARY KEY (project, flow, object)", out
-    assert out["schema"] == out["number"] == 7
+    assert out["schema"] == out["number"] == 8
 
 
 def step(run: dict, sid: str) -> dict:

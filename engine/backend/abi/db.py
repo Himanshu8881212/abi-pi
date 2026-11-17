@@ -22,8 +22,8 @@ from psycopg_pool import ConnectionPool, PoolTimeout  # procrastinate's psycopg[
 VERSION = tomllib.loads((Path(__file__).parent.parent / "pyproject.toml").read_text())["project"]["version"]
 # H-03.2: bump with every change to SCHEMA (test_H03_schema_number_bumped pins SCHEMA's sha256 to it), so older code
 # refuses a database newer code has upgraded instead of running on it.
-# 7: 1.2.6 M8 (flow_conditions.object)
-SCHEMA_NUMBER = 7  # 3: ABI-PI 1.2 (flow_conditions.since); 4: load_runs (M3.2); 5: personal_tokens (M4.5); 6: 1.2.6 C1 (folded ALTERs, no sources.spec)
+# 7: 1.2.6 M8 (flow_conditions.object); 8: 1.2.7 M1 (analysis_runs)
+SCHEMA_NUMBER = 8  # 3: ABI-PI 1.2 (flow_conditions.since); 4: load_runs (M3.2); 5: personal_tokens (M4.5); 6: 1.2.6 C1 (folded ALTERs, no sources.spec)
 QUEUE = importlib.metadata.version("procrastinate")
 # The Procrastinate of ABI-PI 1.0 (schema 2), the oldest release we upgrade from (D-133); before H-03.2 none was recorded.
 QUEUE_BASELINE = "3.10.0"
@@ -397,8 +397,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS optimizer_runs_open ON optimizer_runs (project
 -- 1.2.7 M1: one row per build of a process's event log (kind 'process'; `name` its ID): who saved it (the build writes
 -- model.json as them), `key` naming the build after a refresh (snapshot-<n>, once per process), and in `result` the rows
 -- per table, the dropped rows by reason and the events about several objects of a type. The file is read when the build
--- runs. Not in Git. The schema number stays 7, as for optimizer_runs (a table only added): docs/plans/1.2.7.md asks for 8,
--- which three asserts pin to 7 (tests/test_upgrade_schema.py, tests/test_object_flows.py).
+-- runs. Not in Git.
 CREATE TABLE IF NOT EXISTS analysis_runs (
   id uuid PRIMARY KEY,
   project text NOT NULL,

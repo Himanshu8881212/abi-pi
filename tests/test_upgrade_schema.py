@@ -141,7 +141,7 @@ def test_a_1_0_database_upgrades_to_this_schema():
     assert r.returncode == 0, r.stderr[-2000:]
     out = json.loads(r.stdout.strip().splitlines()[-1])
     fresh, extra = out.pop("fresh"), out.pop("extra")
-    assert out.pop("schema")[1:] == [7, 7, 7], "the upgraded database records this code's schema number"
+    assert out.pop("schema")[1:] == [8, 8, 8], "the upgraded database records this code's schema number"
     assert fresh["columns"] > 300 and fresh["constraints"] > 100, fresh  # the comparison read the whole schema
     assert out == {"columns": [], "constraints": [], "indexes": [], "triggers": []}, out  # nothing a fresh one has is missing
     # and nothing more than a fresh one but the column C1 dropped: a fold that lost a column fails here
@@ -154,7 +154,7 @@ REF_125 = "d5496bd"  # the 1.2.5 code 1.2.6 is built on (1.2.5 has no tag of its
 @pytest.mark.skipif(not PY.exists() or engine("from abi import db; db.connect().close()").returncode, reason="engine's Postgres not running")
 def test_a_1_2_5_database_upgrades_to_this_schema(monkeypatch):
     """1.2.6 item 34: a database made exactly as 1.2.5's db.py makes it (schema 5), upgraded by this branch's init, has
-    every column, constraint, index and trigger a fresh one gets, records schema 7, keeps nothing more than the
+    every column, constraint, index and trigger a fresh one gets, records schema 8, keeps nothing more than the
     column C1 dropped from the schema, and every row a project left in it reads the same afterwards."""
     monkeypatch.setenv("ABI_UPGRADE_REF", REF_125)
     monkeypatch.setenv("ABI_UPGRADE_VERSION", "1.2.5")
@@ -163,7 +163,7 @@ def test_a_1_2_5_database_upgrades_to_this_schema(monkeypatch):
     assert r.returncode == 0, r.stderr[-2000:]
     out = json.loads(r.stdout.strip().splitlines()[-1])
     fresh, extra = out.pop("fresh"), out.pop("extra")
-    assert out.pop("schema") == [5, 7, 7, 7], "1.2.5's schema number, then this code's on both databases"
+    assert out.pop("schema") == [5, 8, 8, 8], "1.2.5's schema number, then this code's on both databases"
     assert out.pop("rows") == [True, 12], "every row the 1.2.5 database held reads the same after the upgrade"
     assert fresh["columns"] > 300 and out == {"columns": [], "constraints": [], "indexes": [], "triggers": []}, out
     assert extra == {"columns": ['["sources", "spec", "jsonb", "YES", null, "NO"]'], "constraints": [], "indexes": [], "triggers": []}, extra
