@@ -789,8 +789,8 @@ def process(a) -> dict:
         sure("save_ontology", project=p, ontology={"objects": [
             {"id": "purchase_order", "table": "purchase_orders", "name": "Purchase order", "plural": "Purchase orders", "title": "po_id"},
             {"id": "delivery", "table": "deliveries", "name": "Delivery", "plural": "Deliveries", "title": "delivery_id"}]})
-        copies(p)  # the model's query copies are the heavy worker's too, within a minute of the model: written before the build
-        fresh = until(lambda: heavy() is None, 400)  # and that worker stops when its queue has been empty a while
+        time.sleep(70)  # the worker's minute check has seen this model by now: the query copies it calls for are queued or written
+        fresh = until(lambda: heavy() is None, 600)  # they are the heavy worker's too; it stops when its queue has been empty a while
         t0, peak, hwm = time.perf_counter(), 0.0, None
         sure("save_process", project=p, process=SUPPLY)
         while (b := abi.call("process", project=p)["processes"][0]["build"])["status"] not in ("ok", "failed"):
