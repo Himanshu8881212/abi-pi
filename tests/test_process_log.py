@@ -1102,8 +1102,10 @@ def test_one_build_waits_at_a_time_and_twenty_runs_are_kept(built):
         # (ended failed; with twenty newer runs they are no longer kept at all)
         assert {r["status"] for r in state()["runs"] if r["key"] in ("waiting", "old-running")} <= {"failed"}
     finally:
-        n = queue("clear")["rows"]  # with that save's run
-    assert queue("no queue")["queued"] == 0, "a run whose job could not be queued is not left waiting"
+        queue("clear")
+    got = queue("no queue")
+    assert got["queued"] == 0, "a run whose job could not be queued is not left waiting"
+    n = got["rows"]  # the runs kept by now (at most twenty)
     try:
         assert queue("old")["rows"] == n + 30
         assert save(DESK | {"description": "Built once more."})["status"] == "ok"
