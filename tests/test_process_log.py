@@ -870,8 +870,8 @@ def test_refresh_build_for_someone_no_longer_an_editor_leaves_the_model(built):
         b = build_of("mine", after=first["run"])
         assert b["status"] == "ok" and b["events"] == first["events"] and "no longer an Editor" in b["note"] and "save_process" in b["note"], b
         assert rel() == [], "model.json is not written in the name of someone who may not write it"
-        audit = [(a["status"], a["user_name"], a["key"] is None) for a in state()["audit"] if a["process"] == "mine"]
-        assert audit == [(200, name, True), (403, name, False)], audit
+        audit = [(a["status"], a["key"] is None) for a in state()["audit"] if a["process"] == "mine" and a["user_name"] == name]
+        assert audit == [(200, True), (403, False)], audit  # (the audit log outlives a project: an earlier run's rows are another account's)
         # an Editor again: the next refresh's build writes it
         sure("set_role", project=P, user=name, role="editor")
         refresh()
