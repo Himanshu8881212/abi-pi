@@ -720,6 +720,7 @@ def test_rebuild_after_refresh(built):
     new = build_of("desk", after=b["run"])
     assert new["status"] == "ok" and new["events"] == b["events"] + 1 and new["dropped"] == b["dropped"]
     assert [(r["key"], r["status"]) for r in runs()[n:]] == [(f"snapshot-{snap}", "ok")], runs()
+    assert new["key"] == f"snapshot-{snap}" and b["key"] is None, "the read of the definitions says what started a build"
     assert sql("SELECT seq, activity, event_id FROM pm_desk_ticket WHERE ticket_id = 'T2' ORDER BY seq DESC LIMIT 1") == [[6, "Call", "14"]]
     # the check for changed tables (the worker's, run here) finds none changed: no load, so no build
     r = engine(f"from abi import ingest\nprint(ingest.refresh_changed(only='{P}'))", timeout=300)
@@ -794,8 +795,9 @@ def test_roundtrip_export_import_identical(built):
 # ---------- review round 1: what the first review found, each with the test that fails without its fix ----------
 
 def test_tables_left_by_a_revert_stay_denied(built):
-    # the running server has answered the Viewer with these files: it knows what they deny
+    # the running server has worked out what these files deny (readiness reads it), and answered the Viewer with them
     head, before = abi.call("history", project=P)["commits"][0]["id"], state()["files"]
+    assert not [g for g in abi.call("readiness", project=P)["missing"] if "pm_ghost" in g]
     assert viewer(built, "sql_query", sql="SELECT count(*) FROM tickets")["rows"] == [[2]]
     ghost = {"id": "ghost", "name": "Ghost", "case": "ticket", "events": [DESK["events"][0]]}  # the tickets' own times (no column of theirs is hidden)
     assert save(ghost)["status"] == "ok"
@@ -974,14 +976,14 @@ def test_what_a_person_set_on_a_built_table_stays(built):
     finally:
         abi.call("set_table", project=P, table="pm_desk_ticket", hidden=False)
     assert save(DESK)["status"] == "ok"
-    # a relationship a person adds from a build's table to another table (to a source, so its row rules filter the table) stays too
-    rid = abi.call("add_relationship", project=P, **{"from": "pm_supply_delivery.event_id", "to": "supply_events.event_id"})["id"]
+    # a relationship a person adds from an attribute's column of a build's table to another table stays too
+    rid = abi.call("add_relationship", project=P, **{"from": "pm_desk_ticket.minutes", "to": "pings.n"})["id"]
     try:
-        assert save(SUPPLY | {"description": "Built once more."})["status"] == "ok"
-        assert rid in {r["id"] for r in model_json()["relationships"]}
+        assert save(DESK | {"description": "Built once more."})["status"] == "ok"
+        assert [r["to"]["table"] for r in model_json()["relationships"] if r["id"] == rid] == ["pings"]
     finally:
         sure("remove_relationship", project=P, id=rid)
-    assert save(SUPPLY)["status"] == "ok"
+    assert save(DESK)["status"] == "ok"
 
 
 QUEUE = r"""

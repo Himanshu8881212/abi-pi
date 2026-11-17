@@ -389,8 +389,9 @@ OURS = " Written by its build."  # how a description this module wrote ends: a p
 def _model(project: str, p: dict, keys: dict) -> None:
     """Its tables in model.json, as ml._predictions puts ml_<id> there: each keyed and described (readiness asks for
     both), a type's table many-to-one to its object's table and to the events table. What a person set on one of the
-    tables since (hidden, a kind, a description of their own, a relationship to another table: the one readiness asks
-    for when a rule filters a source) stays. A build after a refresh finds them as they are and changes nothing."""
+    tables since (hidden, a kind, a description of their own, a relationship from an attribute's column to another
+    table) stays; a relationship's ID is its table and column, so one from a key column or event_id is the build's
+    again. A build after a refresh finds them as they are and changes nothing."""
     mj, ev, rels = model.load(project), table_of(p["id"]), []
 
     def put(t: str, key: list[str], text: str) -> None:
@@ -677,12 +678,12 @@ def delete_process(conn, user: User, args: Ref) -> dict:
 
 @action(Role.viewer)
 def process(conn, user: User, args: storage.ProjectRef) -> dict:
-    """The project's processes as saved, each with the tables its build writes and its latest build: status, events, rows dropped by reason, events about several objects of a type. A restricted reader gets the names and the status only."""
+    """The project's processes as saved, each with the tables its build writes and its latest build: status, what started it (key: a refresh's snapshot), events, rows dropped by reason, events about several objects of a type. A restricted reader gets the names and the status only."""
     ps = imports.objects(args.project, "processes")
     if not ps:  # a project without processes: no read
         return {"processes": []}
     runs = {r.pop("name"): r for r in conn.execute(
-        "SELECT DISTINCT ON (name) name, id::text AS run, status, created::text, started::text, finished::text, error, result FROM analysis_runs"
+        "SELECT DISTINCT ON (name) name, id::text AS run, key, status, created::text, started::text, finished::text, error, result FROM analysis_runs"
         " WHERE project = %s AND kind = 'process' ORDER BY name, created DESC", [args.project])}
     hide = rls.restricted(args.project, user.id)  # a build counts every row, and the file may quote data (a filter's value, a description)
     out = []

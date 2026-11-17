@@ -417,7 +417,11 @@ def check(project: str) -> list[str]:
     lost = process.leftover(project) if any(t.startswith("pm_") and t not in pm for t in denied) else set()  # what a build left behind
     gaps += [f"Table '{t}' holds the {'predictions of an ML model' if gone(t) else 'events of a process'} that is gone; restricted Viewers see none of"
              " its rows until it gets a row rule of its own (set_rls_rule)." if gone(t) or t in lost else
-             f"Table '{t}' {'holds ML predictions' if t.startswith('ml_') else 'holds events of a process' if t in pm else 'is built by steps'} made from rows that"
+             # a process's table: a relationship of its own to a filtered source would be the build's again at the next build
+             f"Table '{t}' holds events of a process made from tables that security rules filter, or hide columns of; restricted Viewers see"
+             " none of its rows until it has a rule of its own: a row rule (set_rls_rule) where a row rule filters one of those tables, a column"
+             " rule (set_column_rule) where a column rule hides a column of one." if t in pm else
+             f"Table '{t}' {'holds ML predictions' if t.startswith('ml_') else 'is built by steps'} made from rows that"
              " row-level security rules filter; restricted Viewers see none of its rows until a rule on it (or a"
              " relationship to each filtered table it is made from) filters it."
              for t in denied if pm.get(t, "") is not None]  # model tables or not: SQL and grids read them too

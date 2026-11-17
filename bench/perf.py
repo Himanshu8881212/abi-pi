@@ -58,7 +58,10 @@ machine's engine and app, or inside a docker install). Each run prints one JSON 
              them and the supply process saved; then, once the model's query copies are written and the heavy worker
              has stopped (so the build starts a new one and is measured alone), the first build: its seconds (the run's own, and from the save to the run's end), the events and rows
              it wrote, and the heavy worker's memory while it built (the highest RSS of 0.25 s samples, and on Linux
-             the process's own high-water mark when the run ended).
+             the process's own high-water mark when the run ended). Then, the heavy worker stopped again, the build a
+             refresh starts: the file of supply_events gets a new time, the worker's minute check loads it in a new
+             heavy worker and that load queues the build, which the same worker runs: the same figures, the memory
+             now the load's and the build's in one process (`after_refresh`; waited_s is from the file's new time).
   kill       kill -9 the engine or the worker (their pid files), then every second until --wait: does the engine's
              /api/ready answer, does the owner's page load, does the pid file name a running process again. Each change
              of those, and the seconds until all three hold (serving_s, null: not within --wait).
@@ -777,6 +780,31 @@ def process(a) -> dict:
             return pid
         return None
 
+    def watched(after: str | None) -> dict:
+        """The build that follows run `after`, once it has ended, and the heavy worker's memory until then."""
+        t0, peak, hwm, end = time.perf_counter(), 0.0, None, time.time() + 1800
+        while (b := abi.call("process", project=p)["processes"][0]["build"]).get("run") == after or b["status"] not in ("ok", "failed"):
+            if time.time() > end:
+                raise SystemExit(f"No build ended within 30 minutes: {b}")
+            procs, kids = ps(), defaultdict(list)
+            for pid, (parent, _, _) in procs.items():
+                kids[parent].append(pid)
+            tree = lambda pid: [pid, *(x for k in kids[pid] for x in tree(k))]  # noqa: E731
+            if pid := heavy():  # None in the second before the supervisor starts it
+                peak = max(peak, sum(procs[x][1] for x in tree(pid) if x in procs) / 1024)
+            time.sleep(0.25)
+        with contextlib.suppress(OSError, ValueError, StopIteration):  # Linux: the worker's own peak, read as the run ends
+            hwm = round(int(next(x for x in Path(f"/proc/{heavy()}/status").read_text().splitlines() if x.startswith("VmHWM")).split()[1]) / 1024, 1)
+        return {"run": b["run"], "key": b.get("key"), "status": b["status"], "error": b.get("error"), "events": b.get("events"), "tables": b.get("tables"),
+                "several": b.get("several"), "dropped": b.get("dropped"), "build_s": b.get("seconds"), "waited_s": round(time.perf_counter() - t0, 1),
+                "heavy_peak_mb": round(peak, 1), "heavy_hwm_mb": hwm}
+
+    def alone() -> bool:
+        """The worker's minute check has seen the model as it is (the query copies it calls for are queued or written;
+        they are the heavy worker's too), and the heavy worker has stopped, its queue empty a while."""
+        time.sleep(70)
+        return until(lambda: heavy() is None, 900)
+
     try:
         known = brewline.generate(d, a.scale, supply=True)["supply"]
         abi.call("create_project", project=p, name=f"perf {p}")
@@ -789,28 +817,20 @@ def process(a) -> dict:
         sure("save_ontology", project=p, ontology={"objects": [
             {"id": "purchase_order", "table": "purchase_orders", "name": "Purchase order", "plural": "Purchase orders", "title": "po_id"},
             {"id": "delivery", "table": "deliveries", "name": "Delivery", "plural": "Deliveries", "title": "delivery_id"}]})
-        time.sleep(70)  # the worker's minute check has seen this model by now: the query copies it calls for are queued or written
-        fresh = until(lambda: heavy() is None, 600)  # they are the heavy worker's too; it stops when its queue has been empty a while
-        t0, peak, hwm = time.perf_counter(), 0.0, None
+        fresh = alone()
         sure("save_process", project=p, process=SUPPLY)
-        while (b := abi.call("process", project=p)["processes"][0]["build"])["status"] not in ("ok", "failed"):
-            procs, kids = ps(), defaultdict(list)
-            for pid, (parent, _, _) in procs.items():
-                kids[parent].append(pid)
-            tree = lambda pid: [pid, *(x for k in kids[pid] for x in tree(k))]  # noqa: E731
-            if pid := heavy():  # None in the second before the supervisor starts it
-                peak = max(peak, sum(procs[x][1] for x in tree(pid) if x in procs) / 1024)
-            time.sleep(0.25)
-        wall = round(time.perf_counter() - t0, 1)
-        with contextlib.suppress(OSError, ValueError, StopIteration):  # Linux: the worker's own peak, read as the run ends
-            hwm = round(int(next(x for x in Path(f"/proc/{heavy()}/status").read_text().splitlines() if x.startswith("VmHWM")).split()[1]) / 1024, 1)
-        return {"project": p, "scale": a.scale, "load_s": took, "status": b["status"], "error": b.get("error"), "events": b.get("events"),
-                "known_events": known["events"], "tables": b.get("tables"), "several": b.get("several"), "dropped": b.get("dropped"),
-                "build_s": b.get("seconds"), "save_to_built_s": wall, "heavy_peak_mb": round(peak, 1), "heavy_hwm_mb": hwm, "new_worker": fresh}
+        first = watched(None)
+        # the build a refresh starts, in the heavy worker that has just loaded the table: the worker's own check finds the
+        # file of supply_events changed (its time is set to now), loads it and the load queues the build
+        again = alone()
+        (d / "supply_events" / "supply_events.parquet").touch()
+        after = watched(first["run"])
+        return {"project": p, "scale": a.scale, "known_events": known["events"], "load_s": took, "heavy_concurrency": int(os.environ.get("ABI_HEAVY_CONCURRENCY") or 1),
+                "first": first | {"new_worker": fresh}, "after_refresh": after | {"new_worker": again}}
     finally:
-        if not a.keep:
+        if not a.keep:  # kept: with its files (the worker's check for changed tables reads them every minute)
             gone(p)
-        shutil.rmtree(d, ignore_errors=True)
+            shutil.rmtree(d, ignore_errors=True)
 
 
 def kill(a) -> dict:
@@ -892,7 +912,7 @@ def main(argv=None) -> dict:
     x.add_argument("--way", choices=("1.2", "1.1"), default="1.2", help="silver and gold from the layer below (1.2) or each from the source (1.1)")
     x = sub.add_parser("process", parents=[common])
     x.add_argument("--scale", type=float, default=1, help="bench/brewline.py's (1: about 1.05M purchase orders, 5.1M events)")
-    x.add_argument("--keep", action="store_true", help="leave the project (for a second look); default: removed at the end")
+    x.add_argument("--keep", action="store_true", help="leave the project and its files (for a second look); default: removed at the end")
     x = sub.add_parser("kill", parents=[common, web])
     x.add_argument("--part", choices=("engine", "worker"), required=True)
     x.add_argument("--wait", type=float, default=300, help="seconds to watch for it serving again")
