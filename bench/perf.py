@@ -798,7 +798,8 @@ def process(a) -> dict:
             for pid, (parent, _, _) in procs.items():
                 kids[parent].append(pid)
             tree = lambda pid: [pid, *(x for k in kids[pid] for x in tree(k))]  # noqa: E731
-            peak = max(peak, sum(procs[x][1] for x in tree(heavy() or 0) if x in procs) / 1024)
+            if pid := heavy():  # None in the second before the supervisor starts it
+                peak = max(peak, sum(procs[x][1] for x in tree(pid) if x in procs) / 1024)
             time.sleep(0.25)
         wall = round(time.perf_counter() - t0, 1)
         with contextlib.suppress(OSError, ValueError, StopIteration):  # Linux: the worker's own peak, read as the run ends
