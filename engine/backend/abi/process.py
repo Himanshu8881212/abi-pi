@@ -15,8 +15,8 @@ in the worker (`job`) after save_process, after an import, a pull, a revert or a
 outcome is a row of Postgres `analysis_runs`, with the dropped rows by reason.
 
 Count once: an event about several objects is one row of pm_<id>_events and one row per object in a type's table. An
-event's own figures (an amount, its duration) are summed from pm_<id>_events; a measure that sums them over a type's
-table would count the event once per object and is refused at save (`references`).
+event's own figures (an amount, its duration) are summed from pm_<id>_events; a measure that sums, counts or averages
+them over a type's table would weigh the event by its objects and is refused at save (`references`; MIN and MAX may).
 """
 
 import json
