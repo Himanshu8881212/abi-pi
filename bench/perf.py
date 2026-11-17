@@ -55,8 +55,8 @@ machine's engine and app, or inside a docker install). Each run prints one JSON 
              worker's query copies, on its own minute), its snapshots, and revenue by region from gold exact.
   process    the build of a process's event log (1.2.7): Brewline's supply tables (brewline.py --supply; --scale 1 is
              about 5.1 million events) into a new project by the engine's add_data on a server path, an ontology over
-             them and the supply process saved; then, once the heavy worker has stopped (so the build starts a new one),
-             the first build: its seconds (the run's own, and from the save to the run's end), the events and rows
+             them and the supply process saved; then, once the model's query copies are written and the heavy worker
+             has stopped (so the build starts a new one and is measured alone), the first build: its seconds (the run's own, and from the save to the run's end), the events and rows
              it wrote, and the heavy worker's memory while it built (the highest RSS of 0.25 s samples, and on Linux
              the process's own high-water mark when the run ended).
   kill       kill -9 the engine or the worker (their pid files), then every second until --wait: does the engine's
@@ -789,7 +789,8 @@ def process(a) -> dict:
         sure("save_ontology", project=p, ontology={"objects": [
             {"id": "purchase_order", "table": "purchase_orders", "name": "Purchase order", "plural": "Purchase orders", "title": "po_id"},
             {"id": "delivery", "table": "deliveries", "name": "Delivery", "plural": "Deliveries", "title": "delivery_id"}]})
-        fresh = until(lambda: heavy() is None, 400)  # the loads' worker stops when its queue has been empty a while
+        copies(p)  # the model's query copies are the heavy worker's too, within a minute of the model: written before the build
+        fresh = until(lambda: heavy() is None, 400)  # and that worker stops when its queue has been empty a while
         t0, peak, hwm = time.perf_counter(), 0.0, None
         sure("save_process", project=p, process=SUPPLY)
         while (b := abi.call("process", project=p)["processes"][0]["build"])["status"] not in ("ok", "failed"):
