@@ -1677,3 +1677,92 @@ hours, read by the coordinator from the container's `/data/soak.out` on 17 Nov 2
 - The heavy worker was stopped in 233 of 246 idle parts; Postgres connections 15 at the start and 15 at the end.
 
 Still not run: the report bench (item 3's 10 of 10), which waits for the owner's choice of how the model's key reaches pve1.
+
+## 1.2.7 M1 (pve1)
+
+17 Nov 2026, 08:12 to 10:11 UTC, pve1 LXC 100 (6 cores, 10 GB), in the throwaway test container `abi-127-t` (the
+worktree's files copied in by `.loop/abi127.sh sync`, the engine started by `scripts/engine.sh start` with its
+defaults: DuckDB at most 1500MB and 3 threads in each process, one heavy job at a time). The live `abi` and `lake`
+containers were not touched. One run at a time.
+
+### The build of 5 million events
+
+Target: at most 60 s, and at most 1.5 GB in the heavy worker.
+
+    ssh pve1 "pct exec 100 -- docker exec abi-127-t sh -c 'cd /app && python3 bench/perf.py process --scale 1'"
+
+`perf.py process` writes Brewline with `--supply` at scale 1 (31 s: 1,050,000 purchase orders, 419,443 deliveries,
+2,992,343 rows of supply_events, 3,202,957 of supply_event_orders; with the orders' three times 5,090,255 events),
+loads the six tables into a new project by the engine's add_data (supply_events 13 s, supply_event_orders 22 s),
+builds the model, saves an ontology (purchase order, delivery) and the supply process (both sources, two attributes,
+no clean-up), and measures the first build: the run's own seconds (from reading the file to model.json written), the
+seconds from the save to the run's end (the heavy worker's start included), and the heavy worker's resident memory
+while the run is queued or running: the highest of 0.25 s samples (`ps`, the process with its children) and the
+process's own high-water mark (VmHWM) read as the run ends. MB here are MiB: 1.5 GB is 1,430 MB, 1.5 GiB 1,536 MB.
+
+Every run wrote pm_supply_events 5,090,255 rows (the generator's known count), pm_supply_purchase_order 5,300,869 and
+pm_supply_delivery 838,849, found 251,466 events about more than one purchase order, and dropped nothing.
+
+| code | the build's DuckDB memory | the bench waits before the build | build s | save to built s | heavy worker's high-water mark MB | highest sample MB |
+|---|---|---|---|---|---|---|
+| not committed (the first version: built on the worker's shared DuckDB instance) | the server's 1500MB | no | 20.7, 21.1 | 27.7, 27.5 | 1,714.9, 1,718.4 | 1,713.8, 1,717.2 |
+| 838c193 (an instance of the build's own) | 800 MiB | no | 23.8, 23.2 | 29.2, 29.2 | 1,325.6, 1,417.0 | 1,281.3, 1,413.4 |
+| 838c193 | 800 MiB | until the model's first query copies | 22.9 | 29.2 | 1,349.8 | 1,350.1 |
+| not committed | 600 MiB | no | 26.6 | 33.2 | 1,487.7 | 1,484.8 |
+| 19e0e7c | 600 MiB | until the model's first query copies | 25.4, 25.3 | 32.8, 31.6 | 1,173.3, 1,333.2 | 1,174.0, 1,333.7 |
+| df8428a | 600 MiB | a full minute check, then until the heavy worker has stopped | 25.5, 25.4, 25.2 | 32.6, 32.6, 31.5 | 1,254.1, 1,200.0, 1,159.2 | 1,254.5, 1,195.9, 1,152.6 |
+| **b9a095e (as built)** | **400 MiB** | the same | **32.2, 32.0, 32.1** | 38.3, 38.4, 39.1 | **1,080.3, 930.3, 1,107.0** | 1,080.4, (1,148.4), (1,114.2) |
+| **397a80c (the same engine code; the bench's sampling fixed)** | **400 MiB** | the same | **31.5, 32.4** | 37.8, 39.2 | **1,087.5, 1,014.3** | 1,086.1, 1,012.2 |
+
+- **As built, five runs: 31.5 to 32.4 s (target: at most 60 s) and a high-water mark of 930 to 1,107 MB, at most
+  1.16 GB (target: at most 1.5 GB). Both met.**
+- The two sample figures in brackets are not the worker's: until 397a80c the bench summed every process of the
+  container in the second before the supervisor had started the heavy worker (about 1,100 to 1,150 MB together). The
+  high-water mark is the kernel's own figure for the worker's process and is the one to read; in every other run the
+  two agree within 50 MB.
+- The first version, with DuckDB's memory as the server sets it, took the heavy worker to 1.7 GB: DuckDB uses what it
+  may. A build now runs on a DuckDB instance of its own that may use 400 MiB (`process.MEMORY`) and spills to disk
+  above it; the instance is closed when the build ends, so the memory goes back at once.
+- The worker's and the supervisor's logs show that in every run from the second row on the build was the first job
+  of a newly started heavy worker (the model's query copies were built by an earlier worker process, or after the
+  build); the first row's two runs were not checked. So the spread at 600 MiB (a high-water mark of 1,159 to 1,488 MB
+  over six runs with the same build and data) is the build's own, not another job's, and one of the six was above
+  1.5 GB (1,488 MB is 1.56 GB). That is why 600 MiB was not kept.
+
+**The same statements one after another** (a one-off script, not in the repository: `process._sql`'s statements for
+the same data in a process of its own, on a project kept with `--keep`, the transaction rolled back at the end;
+high-water mark of that process, which starts at 261 to 272 MB; each line is one run):
+
+| DuckDB memory limit | seconds | high-water mark MB |
+|---|---|---|
+| 1500MB (the server's) | 18.2 | 1,709 |
+| 1000MB | 19.9 | 1,428 |
+| 900MB | 19.9 | 1,244 |
+| 800MB | 20.8 | 1,161 |
+| 600MB | 23.2 | 977 |
+| 600MiB | 23.3, 22.5, 22.8, 23.5 | 1,317, 1,194, 1,239, 1,278 |
+| 500MiB | 26.8, 27.2 | 1,142, 1,131 |
+| 400MiB | 29.4, 28.9, 29.0 | 823, 832, 837 |
+| 300MiB | 40.3 | 730 |
+
+At 1500MB the statements took: the counts of dropped rows 1.6 s, the events table 6.3 s, the check that event IDs are
+unique 0.4 s, the deliveries' table 1.9 s, the purchase orders' table 8.1 s. At 600 MiB the peak differs by more
+than 100 MB between runs here (and by 330 MB in the worker, above); at 400 MiB it is the same within 14 MB, for 6 s
+more than at 600.
+
+Not measured: a build with `clean.duplicates: "drop"` (one more window over every candidate event), and a build in a
+heavy worker that has loaded tables before it in the same process (it then starts from what that left resident).
+
+### A refresh that changed no source table starts 0 builds
+
+`.loop/abi127.sh test -q tests/test_process_log.py` on df8428a (`test_rebuild_after_refresh` among its 18): passed.
+In it a refresh of a table the process doesn't read (suppliers) starts 0 builds; a new load of a table it reads
+starts exactly 1, named after that load's snapshot; and the worker's own check for changed tables, run right after
+with nothing changed, loads nothing and starts 0.
+
+### Golden
+
+`.loop/abi127.sh test -q tests/test_ontology_nobreak.py tests/test_127_nobreak.py` on df8428a (run together with the
+19 contract tests: 26 passed in 300 s): 7 passed, both files untouched since ab8e95d. The plans' SQL and the
+restricted views' text of a project without a process file are byte-identical to the recorded ones, and its bundle
+imports with no change.
