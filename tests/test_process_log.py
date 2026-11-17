@@ -21,6 +21,7 @@ from test_ontology_nobreak import ROUNDTRIP
 from test_pages import sure
 
 import abi
+import duckdb
 from pi_driver import ROOT
 
 sys.path.insert(0, str(ROOT / "bench"))
@@ -89,6 +90,31 @@ DESK = {
     "clean": {"rename": {"CALL": "Call"}, "drop": ["Heartbeat"], "where": [{"column": "started_at", "op": ">=", "value": "2025-01-01"}],
               "duplicates": "drop"},
 }
+# Two more sources of events about tickets, each with an id of its own (calls 1 to 3, chats 1 and 2: the same numbers),
+# the chats' tickets in a bridge table (chat 1 is about two tickets; its last row names a chat that doesn't exist, though
+# a call 3 does). calls also has columns named like the build's own (Seq, __rn) and its minutes are text
+CALLS = """call_id,about,activity,started_at,Seq,minutes,__rn
+1,T3,Call,2025-03-04 09:00:00,7,five,x
+2,T1,Call,2025-03-04 09:00:00,8,ten,y
+3,T2,Call,2025-03-04 10:00:00,9,two,z
+"""
+CHATS = """chat_id,activity,started_at
+1,Chat,2025-03-04 09:30:00
+2,Chat,2025-03-04 09:30:00
+"""
+CHAT_TICKETS = """chat,ticket
+1,T1
+1,T2
+2,T3
+3,T1
+"""
+TALK = {"id": "talk", "name": "Talk", "case": "ticket", "events": [
+    {"table": "calls", "id": "call_id", "activity": "activity", "start": "started_at", "objects": [{"type": "ticket", "columns": ["about"]}]},
+    {"table": "chats", "id": "chat_id", "activity": "activity", "start": "started_at",
+     "objects": [{"type": "ticket", "through": "chat_tickets", "event": "chat", "columns": ["ticket"]}]}]}
+PINGS = 300_000  # rows of pings, every one at the same second and without an id: row n is about ticket T<n % 3 + 1>
+TIES = {"id": "ties", "name": "Ties", "case": "ticket", "events": [
+    {"table": "pings", "activity": "activity", "start": "started_at", "attributes": ["n"], "objects": [{"type": "ticket", "columns": ["about"]}]}]}
 ONTO = {"objects": [
     {"id": "cafe", "table": "cafes", "name": "Café", "plural": "Cafés", "title": "cafe_name"},
     {"id": "supplier", "table": "suppliers", "name": "Supplier", "plural": "Suppliers", "title": "supplier_name"},
@@ -104,17 +130,19 @@ from abi.semantic import rls
 a = json.loads(sys.stdin.read())
 P = a["project"]
 with db.connect() as c:
-    runs = [dict(r) for r in c.execute("SELECT id::text AS run, name, key, status FROM analysis_runs WHERE project = %s ORDER BY created", [P])]
+    runs = [dict(r) for r in c.execute("SELECT id::text AS run, name, key, status, user_id FROM analysis_runs WHERE project = %s ORDER BY created", [P])]
+    audit = [dict(r) for r in c.execute("SELECT input->>'process' AS process, input->>'key' AS key, status, user_name, detail FROM audit_log"
+                                        " WHERE project = %s AND via = 'worker' AND action = 'build_process' ORDER BY id", [P])]
     reads = [r["query"] for r in c.execute("SELECT query FROM query_log WHERE project = %s AND user_id = %s AND query ? 'propose_process'"
                                            " ORDER BY id", [P, a.get("user", 0)])]
 print(json.dumps({"files": {k: hashlib.sha256(json.dumps(v, sort_keys=True).encode()).hexdigest() for k, v in bundle.bundle(git.path(P)).items()},
-                  "runs": runs, "reads": reads, "denied": rls.unfiltered_outputs(P), "filtered": sorted(rls.filtered(P))}))
+                  "runs": runs, "audit": audit, "reads": reads, "denied": rls.unfiltered_outputs(P), "filtered": sorted(rls.filtered(P))}))
 """
 
 
 def state(user: int = 0) -> dict:
-    """The project's files (path: sha256), its build runs, what row-level security denies and filters, and the
-    proposal's reads logged for `user`: read in the engine."""
+    """The project's files (path: sha256), its build runs and the worker's audit rows of them, what row-level security
+    denies and filters, and the proposal's reads logged for `user`: read in the engine."""
     r = engine(STATE, timeout=120, stdin=json.dumps({"project": P, "user": user}))
     assert r.returncode == 0, r.stderr[-2000:]
     return json.loads(r.stdout.splitlines()[-1])
@@ -184,6 +212,33 @@ def measures() -> list:
     return json.loads((Path(abi.ABI_PROJECTS) / P / "model/measures.json").read_text())["measures"]
 
 
+def idle(timeout: float = 900) -> None:
+    """Every build of the project has ended (a project with one queued or running is not deleted)."""
+    end = time.monotonic() + timeout
+    while busy := [r for r in state()["runs"] if r["status"] in ("queued", "running")]:
+        assert time.monotonic() < end, busy
+        time.sleep(2)
+
+
+def model_json() -> dict:
+    return json.loads((Path(abi.ABI_PROJECTS) / P / "model/model.json").read_text())
+
+
+def exported() -> dict:
+    """The project's files as a bundle."""
+    r = engine(f"import json\nfrom abi.project import bundle, git\nprint(json.dumps(bundle.bundle(git.path('{P}'))))", timeout=120)
+    assert r.returncode == 0, r.stderr[-2000:]
+    return json.loads(r.stdout.splitlines()[-1])
+
+
+def none_for(log, table: str) -> bool:
+    """The restricted Viewer reads no row of `table` in the running server: refused, or empty."""
+    try:
+        return viewer(log, "sql_query", sql=f"SELECT count(*) FROM {table}")["rows"] == [[0]]
+    except abi.ActionError:
+        return True
+
+
 @pytest.fixture(scope="module")
 def log(tmp_path_factory):
     """P: Brewline's cafés and its supply tables at the smallest scale, the helpdesk's two tables, an ontology over
@@ -193,9 +248,14 @@ def log(tmp_path_factory):
     known = brewline.generate(d, 0.005, supply=True)["supply"]
     (d / "tickets.csv").write_text(TICKETS)
     (d / "ticket_events.csv").write_text(EVENTS)
+    for f, text in (("calls", CALLS), ("chats", CHATS), ("chat_tickets", CHAT_TICKETS)):
+        (d / f"{f}.csv").write_text(text)
+    duckdb.sql(f"""COPY (SELECT i AS n, 'T' || (i % 3 + 1) AS about, CASE WHEN i % 2 = 0 THEN 'Ping' ELSE 'Pong' END AS activity,
+      TIMESTAMP '2025-03-05 12:00:00' AS started_at FROM range(1, {PINGS + 1}) t(i)) TO '{d}/pings.parquet' (FORMAT parquet)""")
     if P in {x["project"] for x in abi.call("list_projects")["projects"]}:
         drop([P])
-    abi.load("demo", P, [str(d / f"{t}/{t}.parquet") for t in ("cafes", *brewline.SUPPLY)] + parquet(d / "tickets.csv", d / "ticket_events.csv"))
+    abi.load("demo", P, [str(d / f"{t}/{t}.parquet") for t in ("cafes", *brewline.SUPPLY)] 
+             + parquet(d / "tickets.csv", d / "ticket_events.csv", d / "calls.csv", d / "chats.csv", d / "chat_tickets.csv") + [str(d / "pings.parquet")])
     for t, k in {"cafes": "cafe_id", "suppliers": "supplier_id", "purchase_orders": "po_id", "deliveries": "delivery_id",
                  "supply_events": "event_id", "tickets": "ticket_id"}.items():
         abi.call("set_table", project=P, table=t, key=[k])
@@ -216,6 +276,7 @@ def log(tmp_path_factory):
         yield {"viewer": abi.login(name, pw)[1]["token"], "uid": int(uid), "known": known, "dir": d}
     finally:
         sure("delete_user", name=name)
+        idle()
         drop([P])
 
 
@@ -431,6 +492,20 @@ def test_same_time_order_is_stable(built):
     again = save(DESK | {"description": "Built a second time."})
     assert again["status"] == "ok" and again["run"] != built["desk"]["run"] and order() == was, "the same order, build after build"
     assert save(DESK)["status"] == "ok"
+    # 300,000 rows at one second, with no id (a parallel scan of several row groups): every row is numbered once, so each
+    # event is about its own row's ticket, the order is the rows' own, and a second build numbers them the same
+    numbered = lambda: deep(  # noqa: E731
+        "SELECT count(*), count(*) FILTER (ord <> CAST(split_part(event_id, '.', 2) AS BIGINT)), sum(n * CAST(split_part(event_id, '.', 2) AS BIGINT))"
+        " FROM pm_ties_events",
+        "SELECT count(*), count(*) FILTER (t.ticket_id <> 'T' || (e.n % 3 + 1)), count(*) FILTER (t.seq <> (e.n + 2) // 3)"
+        " FROM pm_ties_ticket t JOIN pm_ties_events e USING (event_id)")
+    one = save(TIES)
+    assert one["status"] == "ok" and one["events"] == PINGS and one["dropped"] == dict.fromkeys(one["dropped"], 0), one
+    first = numbered()
+    assert first[0][0][:2] == [PINGS, 0] and first[1] == [[PINGS, 0, 0]], first
+    assert first[0][0][2] == sum(i * i for i in range(1, PINGS + 1)), "row n is event 0.n: the rows' own order"
+    assert save(TIES | {"description": "Built a second time."})["status"] == "ok" and numbered() == first
+    sure("delete_process", project=P, process="ties")
 
 
 # ---------- #13 object-centric: an event about several objects ----------
@@ -469,6 +544,12 @@ def test_double_counting_measure_refused(built):
     assert e["fix"] == "Use the events table: SUM(pm_supply_events.amount)."
     assert refuse("AVG(pm_supply_delivery.duration_seconds)")["fix"] == "Use the events table: AVG(pm_supply_events.duration_seconds)."
     assert refuse("DIVIDE(SUM(pm_supply_purchase_order.amount), COUNT(pm_supply_purchase_order.po_id))")["fix"].endswith("SUM(pm_supply_events.amount).")
+    # a median, a count and a distinct count weigh an event by its objects as a sum does; the smallest and the largest don't
+    for fn in ("MEDIAN", "COUNT", "DISTINCT_COUNT"):
+        assert refuse(f"{fn}(pm_supply_purchase_order.amount)")["fix"] == f"Use the events table: {fn}(pm_supply_events.amount)."
+    for i, x in {"largest": "MAX(pm_supply_purchase_order.amount)", "shortest": "MIN(pm_supply_delivery.duration_seconds)"}.items():
+        abi.call("set_measure", project=P, id=i, name=i, expression=x)
+        sure("delete_measure", project=P, id=i)
     assert "double" not in {m["id"] for m in measures()}
     # what it would have said: every delivery's amount once per order it carries, far more than was received
     once, per_order = sql("SELECT (SELECT sum(amount) FROM pm_supply_events), (SELECT sum(amount) FROM pm_supply_purchase_order)")[0]
@@ -645,6 +726,20 @@ def test_rebuild_after_refresh(built):
     assert r.returncode == 0, r.stderr[-2000:]
     time.sleep(3)
     assert len(runs()) == n + 1, "a refresh that changed no source table starts no build"
+    # the same check with something to load (a fingerprint it doesn't know is a changed file's): a table the process
+    # doesn't read is loaded again and no build starts; one it reads is, and its build starts from the check's own load
+    def check(table: str) -> int:
+        """The snapshot the check's own load of `table` made."""
+        r = engine(f"from abi import db, ingest\nwith db.connect() as c:\n    c.execute(\"UPDATE sources SET fingerprint = NULL WHERE project = '{P}'"
+                   f" AND table_name = '{table}'\")\nprint(ingest.refresh_changed(only='{P}'))", timeout=300)
+        assert r.returncode == 0, r.stderr[-2000:]
+        return max(x[0] for x in abi.call("list_snapshots", project=P, limit=20)["rows"] if x[3] == f"refresh {table}")
+
+    assert check("suppliers") > snap, "the check loaded suppliers again"
+    time.sleep(3)
+    assert len(runs()) == n + 1
+    loaded = check("tickets")
+    assert build_of("desk", after=new["run"])["status"] == "ok" and [r["key"] for r in runs()[n:]] == [f"snapshot-{snap}", f"snapshot-{loaded}"]
 
 
 def test_reserved_table_name_clash_named(built):
@@ -688,7 +783,272 @@ def test_roundtrip_export_import_identical(built):
     assert sure("import_project", project=P, bundle={k: v for k, v in files.items() if k != "processes/desk.json"})["changes"] == ["Removes process 'desk'."]
     # its tables are left in the lake with nothing saying what they were made from: denied to restricted readers until it is back
     assert {"pm_desk_events", "pm_desk_ticket"} <= set(state()["denied"])
+    assert none_for(built, "pm_desk_events") and none_for(built, "pm_desk_ticket"), "in the running server, while the file is gone"
     assert sure("import_project", project=P, bundle=files)["changes"] == ["Adds process 'desk'."]
     s = state()
     assert s["files"] == {k: hashlib.sha256(json.dumps(v, sort_keys=True).encode()).hexdigest() for k, v in files.items()}
     assert "pm_desk_events" in s["denied"] and viewer(built, "sql_query", sql="SELECT count(*) FROM pm_desk_events")["rows"] == [[0]]
+    assert build_of("desk")["status"] == "ok", "the file that came back builds again"
+
+
+# ---------- review round 1: what the first review found, each with the test that fails without its fix ----------
+
+def test_tables_left_by_a_revert_stay_denied(built):
+    # the running server has answered the Viewer with these files: it knows what they deny
+    head, before = abi.call("history", project=P)["commits"][0]["id"], state()["files"]
+    assert viewer(built, "sql_query", sql="SELECT count(*) FROM tickets")["rows"] == [[2]]
+    ghost = {"id": "ghost", "name": "Ghost", "case": "ticket", "events": [DESK["events"][0]]}  # the tickets' own times (no column of theirs is hidden)
+    assert save(ghost)["status"] == "ok"
+    assert viewer(built, "sql_query", sql="SELECT count(DISTINCT ticket_id) FROM pm_ghost_ticket")["rows"] == [[2]] and none_for(built, "pm_ghost_events")
+    # back to the very files of before (the process was never there), with its tables still in the lake
+    sure("revert", project=P, to=head)
+    assert state()["files"] == before and shown("ghost") is None and sql("SELECT count(DISTINCT ticket_id) FROM pm_ghost_ticket") == [[3]]
+    assert none_for(built, "pm_ghost_ticket") and none_for(built, "pm_ghost_events"), "nothing says what they were made from: no row for a restricted reader"
+    assert viewer(built, "sql_query", sql="SELECT count(*) FROM tickets")["rows"] == [[2]]
+    assert save(ghost)["status"] == "ok"  # saved again and deleted: its tables go to the archive
+    sure("delete_process", project=P, process="ghost")
+
+
+def test_a_definition_that_arrives_is_built(built):
+    path = Path(abi.ABI_PROJECTS) / P / "processes/desk.json"
+    head, was, files = abi.call("history", project=P)["commits"][0]["id"], build_of("desk"), exported()
+    owner = next(r["user_id"] for r in state()["runs"] if r["name"] == "supply")  # who saved it: the owner
+    quiet = copy.deepcopy(DESK)
+    quiet["clean"]["drop"] = ["Heartbeat", "Note"]  # one event less
+    fresh = DESK | {"id": "fresh", "name": "Fresh", "$schema": PLAN["$schema"]}
+    # an import changes one definition and brings another that no one saved here: both build, as the importer
+    out = sure("import_project", project=P, bundle=files | {"processes/desk.json": quiet | {"$schema": PLAN["$schema"]}, "processes/fresh.json": fresh})
+    assert set(out["builds"]) == {"desk", "fresh"}, out
+    assert shown("desk")["build"]["run"] == out["builds"]["desk"] != was["run"], "the build of the definition before is not this one's"
+    now, new = build_of("desk", after=was["run"]), build_of("fresh")
+    assert now["status"] == "ok" and now["events"] == was["events"] - 1 and now["dropped"]["activity"] == was["dropped"]["activity"] + 1, now
+    assert new["status"] == "ok" and new["run"] == out["builds"]["fresh"] and "note" not in new, new
+    by = {r["run"]: r["user_id"] for r in state()["runs"]}
+    assert owner is not None and by[now["run"]] == by[new["run"]] == owner
+    m = model_json()
+    assert {e["table"]: e["key"] for e in m["entities"] if e["table"].startswith("pm_fresh_")} == {
+        "pm_fresh_events": ["event_id"], "pm_fresh_ticket": ["ticket_id", "event_id"]}, "the importer is an Editor: the build wrote the model's entries"
+    assert {(r["from"]["columns"][0], r["to"]["table"]) for r in m["relationships"] if r["from"]["table"] == "pm_fresh_ticket"} == {
+        ("ticket_id", "tickets"), ("event_id", "pm_fresh_events")}
+    # a revert brings the definition of before back: it builds again
+    back = sure("revert", project=P, to=head)
+    assert set(back["builds"]) == {"desk"} and shown("desk")["build"]["run"] == back["builds"]["desk"] != now["run"], back
+    again = build_of("desk", after=now["run"])
+    assert again["status"] == "ok" and again["events"] == was["events"]
+    # and so does an undo
+    abi.call("set_auto_commit", project=P, on=False)
+    try:
+        assert save(quiet)["events"] == was["events"] - 1
+        last = shown("desk")["build"]["run"]
+        abi.call("undo", project=P)
+        assert json.loads(path.read_text()) == DESK | {"$schema": PLAN["$schema"]} and shown("desk")["build"]["run"] != last
+        undone = build_of("desk", after=last)
+        assert undone["status"] == "ok" and undone["events"] == was["events"]
+    finally:
+        abi.call("set_auto_commit", project=P, on=True)
+    assert save(DESK | {"id": "fresh", "name": "Fresh"})["status"] == "ok"  # the tables the revert left go with their process
+    sure("delete_process", project=P, process="fresh")
+
+
+def test_refresh_build_for_someone_no_longer_an_editor_leaves_the_model(built):
+    name, pw = f"pi_proc_e_{time.strftime('%H%M%S')}", secrets.token_urlsafe(16)
+    abi.call("create_user", name=name, password=pw)
+    rel = lambda: [r["id"] for r in model_json()["relationships"] if r["from"]["table"] == "pm_mine_ticket" and r["to"]["table"] == "tickets"]  # noqa: E731
+    refresh = lambda: abi.finished(P, abi.call("refresh", project=P, table="tickets"))  # noqa: E731
+    try:
+        sure("set_role", project=P, user=name, role="editor")
+        with abi.as_user(abi.login(name, pw)[1]["token"]):
+            assert sure("save_process", project=P, process=DESK | {"id": "mine", "name": "Mine"})["build"]
+        first = build_of("mine")
+        assert first["status"] == "ok" and "note" not in first and len(rel()) == 1
+        # they are a Viewer now, and the relationship their build wrote is gone: the refresh's build writes the tables, not the model
+        sure("set_role", project=P, user=name, role="viewer")
+        sure("remove_relationship", project=P, id=rel()[0])
+        refresh()
+        b = build_of("mine", after=first["run"])
+        assert b["status"] == "ok" and b["events"] == first["events"] and "no longer an Editor" in b["note"] and "save_process" in b["note"], b
+        assert rel() == [], "model.json is not written in the name of someone who may not write it"
+        audit = [(a["status"], a["user_name"], a["key"] is None) for a in state()["audit"] if a["process"] == "mine"]
+        assert audit == [(200, name, True), (403, name, False)], audit
+        # an Editor again: the next refresh's build writes it
+        sure("set_role", project=P, user=name, role="editor")
+        refresh()
+        c = build_of("mine", after=b["run"])
+        assert c["status"] == "ok" and "note" not in c and len(rel()) == 1, c
+    finally:
+        idle()
+        if shown("mine"):
+            sure("delete_process", project=P, process="mine")
+        sure("delete_user", name=name)
+
+
+def test_lineage_reads_like_a_model(built):
+    lineage = lambda node, way: set(abi.call("lineage", project=P, object=node, direction=way)["objects"])  # noqa: E731
+    # downstream of the process: the tables its build writes and what reads them; upstream: what it reads, never its own tables
+    assert {"table:pm_supply_events", "table:pm_supply_purchase_order", "table:pm_supply_delivery", "measure:received",
+            "measure:order_steps"} <= lineage("process:supply", "downstream")
+    up = lineage("process:supply", "upstream")
+    assert {"table:supply_events", "table:supply_event_orders", "table:purchase_orders", "object:purchase_order", "object:delivery"} <= up
+    assert not [n for n in up if n.startswith("table:pm_")], up
+    assert {"process:supply", "table:supply_events", "table:purchase_orders"} <= lineage("table:pm_supply_purchase_order", "upstream")
+    assert {"process:supply", "table:pm_supply_events", "measure:log_events"} <= lineage("table:supply_events", "downstream")
+
+
+LONG = r"""
+import json, sys
+import abi.app  # noqa: F401
+from abi import process
+from abi.project import bundle, git
+a = json.loads(sys.stdin.read())
+files = bundle.bundle(git.path(a["project"])) | {f"processes/{a['process']['id']}.json": a["process"]}
+print(json.dumps(process.references(a["project"], json.loads(json.dumps(files).replace('"ticket"', json.dumps(a["type"]))))))
+"""
+
+
+def test_names_are_checked_across_sources_and_against_the_builds_own(built):
+    def one(p: dict) -> dict:
+        [e] = refused(422, "save_process", process=p)["errors"]
+        assert e["file"] == "processes/talk.json" and e["fix"], e
+        return e
+
+    # one attribute, two types
+    e = one(TALK | {"events": [DESK["events"][1], TALK["events"][0] | {"attributes": ["minutes"]}]})
+    assert e["path"] == "$.events[1].attributes[0]" and "'minutes' is VARCHAR here and 'minutes' is BIGINT in events[0]" in e["error"] and "set_type" in e["fix"], e
+    # a name the log makes itself, in any case, and a name of the build's own
+    for a in ("Seq", "__rn"):
+        p = copy.deepcopy(TALK)
+        p["events"][0]["attributes"] = [a]
+        e = one(p)
+        assert e["path"] == "$.events[0].attributes[0]" and f"'{a}' is the name of a column the event log makes itself" in e["error"], e
+    # a table a build writes is no source: another process's, or its own
+    p = copy.deepcopy(TALK)
+    p["events"][0]["table"] = "pm_desk_events"
+    e = one(p)
+    assert e["path"] == "$.events[0].table" and e["error"].startswith("'pm_desk_events' is a table the build of process 'desk' writes") and "'desk' reads" in e["fix"], e
+    p = copy.deepcopy(TALK)
+    p["events"][1]["objects"][0]["through"] = "pm_talk_ticket"
+    assert one(p)["path"] == "$.events[1].objects[0].through"
+    # a hidden table is said to be hidden
+    abi.call("set_table", project=P, table="chats", hidden=True)
+    try:
+        e = one(TALK)
+        assert e["path"] == "$.events[1].table" and e["error"] == "Table 'chats' is hidden (staging), so it is out of the model." and "hidden=false" in e["fix"], e
+    finally:
+        abi.call("set_table", project=P, table="chats", hidden=False)
+    # names that would be cut: a process with an id of 31 characters about a type with a long id (the ticket's, renamed in the files checked)
+    pid = "p" + "x" * 30
+
+    def long(typ: str) -> list:
+        r = engine(LONG, timeout=120, stdin=json.dumps({"project": P, "type": typ, "process": DESK | {"id": pid, "$schema": PLAN["$schema"]}}))
+        assert r.returncode == 0, r.stderr[-2000:]
+        return [(e["path"], e["error"]) for e in json.loads(r.stdout.splitlines()[-1]) if e["file"] == f"processes/{pid}.json" and e["fix"]]
+
+    assert long("ticket") == []
+    got = long("ticket_of_the_desks")  # pm_<31>_<19>: 54 characters, and 64 with -ticket_id
+    assert [x[0] for x in got] == ["$.events[0].objects[0].type", "$.events[1].objects[0].type"] and "an ID longer than 63 characters" in got[0][1], got
+    got = long("ticket_of_the_desks2")
+    assert got[0][0] == "$.id" and "a name longer than 54 characters" in got[0][1], got
+
+
+def test_two_sources_with_ids_and_a_bridge_of_one(built):
+    b = save(TALK)
+    assert b["status"] == "ok" and b["events"] == 5 and b["dropped"] == dict.fromkeys(b["dropped"], 0) and b["several"] == {"ticket": 1}, b
+    # calls 1 to 3 and chats 1 and 2: each id says whose it is
+    assert sql("SELECT event_id, activity FROM pm_talk_events ORDER BY ord") == [
+        ["0:1", "Call"], ["0:2", "Call"], ["1:1", "Chat"], ["1:2", "Chat"], ["0:3", "Call"]]
+    # the bridge table names chats: chat 1 is about T1 and T2; its row for a chat 3 is about no event, not about call 3
+    assert sql("SELECT ticket_id, event_id FROM pm_talk_ticket ORDER BY 1, seq") == [
+        ["T1", "0:2"], ["T1", "1:1"], ["T2", "1:1"], ["T2", "0:3"], ["T3", "0:1"], ["T3", "1:2"]]
+    sure("delete_process", project=P, process="talk")
+
+
+def test_what_a_person_set_on_a_built_table_stays(built):
+    table = lambda t: next(x for x in model_json()["tables"] if x["table"] == t)  # noqa: E731
+    abi.call("set_table", project=P, table="pm_desk_ticket", description="The helpdesk, ticket by ticket.", hidden=True)
+    try:
+        assert save(DESK | {"description": "Built once more."})["status"] == "ok"
+        t = table("pm_desk_ticket")
+        assert (t["description"], t["hidden"]) == ("The helpdesk, ticket by ticket.", True), t
+        assert next(e["key"] for e in model_json()["entities"] if e["table"] == "pm_desk_ticket") == ["ticket_id", "event_id"]
+        assert table("pm_desk_events")["description"].endswith("Written by its build.")
+    finally:
+        abi.call("set_table", project=P, table="pm_desk_ticket", hidden=False)
+    assert save(DESK)["status"] == "ok"
+    # a relationship a person adds from a build's table to another table (to a source, so its row rules filter the table) stays too
+    rid = abi.call("add_relationship", project=P, **{"from": "pm_supply_delivery.event_id", "to": "supply_events.event_id"})["id"]
+    try:
+        assert save(SUPPLY | {"description": "Built once more."})["status"] == "ok"
+        assert rid in {r["id"] for r in model_json()["relationships"]}
+    finally:
+        sure("remove_relationship", project=P, id=rid)
+    assert save(SUPPLY)["status"] == "ok"
+
+
+QUEUE = r"""
+import json, sys, uuid
+import abi.app  # noqa: F401
+from abi import db, process
+a = json.loads(sys.stdin.read())
+P, out = a["project"], {}
+with db.connect() as c:
+    if a["do"] == "wait":  # a build that waits for the worker (no job behind it: it stays queued), then two more asked for
+        out["run"] = str(uuid.uuid4())
+        c.execute("INSERT INTO analysis_runs (id, project, kind, name, key, status) VALUES (%s, %s, 'process', 'desk', 'waiting', 'queued')", [out["run"], P])
+        c.commit()
+        out["got"] = [process._queue(c, P, "desk", None), process._queue(c, P, "desk", None, "snapshot-0")]
+    elif a["do"] == "old":  # thirty builds of days ago
+        for i in range(30):
+            c.execute("INSERT INTO analysis_runs (id, project, kind, name, key, status, created) VALUES (%s, %s, 'process', 'desk', %s, 'ok',"
+                      " now() - interval '1 day' * %s)", [str(uuid.uuid4()), P, f"old-{i}", i + 1])
+    else:
+        c.execute("DELETE FROM analysis_runs WHERE project = %s AND (key = 'waiting' OR key LIKE 'old-%%')", [P])
+    c.commit()
+    out["rows"] = c.execute("SELECT count(*) AS n FROM analysis_runs WHERE project = %s AND name = 'desk'", [P]).fetchone()["n"]
+print(json.dumps(out))
+"""
+
+
+def test_one_build_waits_at_a_time_and_twenty_runs_are_kept(built):
+    def queue(do: str) -> dict:
+        r = engine(QUEUE, timeout=120, stdin=json.dumps({"project": P, "do": do}))
+        assert r.returncode == 0, r.stderr[-2000:]
+        return json.loads(r.stdout.splitlines()[-1])
+
+    n = len([r for r in state()["runs"] if r["name"] == "desk"])
+    try:
+        got = queue("wait")
+        assert got["got"] == [got["run"]] * 2 and got["rows"] == n + 1, "a build that waits is the build asked for: nothing more is queued"
+        abi.finished(P, abi.call("refresh", project=P, table="suppliers"))
+        abi.finished(P, abi.call("refresh", project=P, table="tickets"))
+        time.sleep(3)
+        assert len([r for r in state()["runs"] if r["name"] == "desk"]) == n + 1 and shown("desk")["build"]["status"] == "queued"
+        # a project with a build queued is not deleted (and not renamed): refused, with no question to say yes to
+        with pytest.raises(abi.ActionError) as e:
+            abi.call("delete_project", project=P)
+        assert e.value.status == 409 and "confirm_token" not in e.value.body and "an event log being built" in e.value.body["message"], e.value.body
+    finally:
+        assert queue("clear")["rows"] == n
+    try:
+        assert queue("old")["rows"] == n + 30
+        assert save(DESK | {"description": "Built once more."})["status"] == "ok"
+        runs = [r for r in state()["runs"] if r["name"] == "desk"]
+        assert len(runs) == 20 and runs[-1]["run"] == shown("desk")["build"]["run"], "the latest twenty stay"
+    finally:
+        queue("clear")
+    assert save(DESK)["status"] == "ok"
+
+
+def test_propose_names_no_hidden_id_and_keeps_every_time(built):
+    source = lambda got: next(s for d in got["processes"] for s in d["events"] if s["table"] == "supply_events")  # noqa: E731
+    sure("set_column_rule", project=P, id="event", table="supply_events", columns=["event_id"])
+    try:
+        mine, full = source(viewer(built, "propose_process")), source(abi.call("propose_process", project=P))
+        # the event's id is hidden from the Viewer: their draft names none, and no bridge table that would join on it
+        assert full["id"] == "event_id" and "id" not in mine and "event_id" not in json.dumps(mine), mine
+        assert mine["objects"] == [{"type": "delivery", "columns": ["delivery_id"]}] and mine["activity"] == "activity"
+    finally:
+        sure("delete_rls_rule", project=P, id="event")
+    # two time columns that would get one activity name keep their own
+    r = engine("import abi.app\nfrom abi import process\nprint(process._stamps(['created_at', 'created_on', 'closed_at']))", timeout=120)
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert r.stdout.splitlines()[-1] == "{'Created': 'created_at', 'Created on': 'created_on', 'Closed': 'closed_at'}"

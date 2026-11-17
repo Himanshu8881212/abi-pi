@@ -10,8 +10,9 @@ pm_<id>_<type> per object type (the events of each object of that type in order:
 ml._predictions does). So a type's table is filtered by its object's row rules like any table pointing at a filtered
 one, and pm_<id>_events, which holds every event, shows restricted readers no rows once a rule filters something it
 is built from (lineage `_process`, rls.unfiltered_outputs: before model.json has the relationships too). A build runs
-in the worker (`job`) after save_process and after a refresh of a table the process reads (`after_refresh`, called by
-ingest as ml's is); its outcome is a row of Postgres `analysis_runs`, with the dropped rows by reason.
+in the worker (`job`) after save_process, after an import, a pull, a revert or an undo that brings another definition
+(`changed`) and after a refresh of a table the process reads (`after_refresh`, called by ingest as ml's is); its
+outcome is a row of Postgres `analysis_runs`, with the dropped rows by reason.
 
 Count once: an event about several objects is one row of pm_<id>_events and one row per object in a type's table. An
 event's own figures (an amount, its duration) are summed from pm_<id>_events; a measure that sums them over a type's
@@ -28,12 +29,12 @@ import duckdb
 from psycopg.types.json import Jsonb
 from pydantic import Field
 
-from abi import db, ml, security, semantic, storage
+from abi import actions, db, ml, security, semantic, storage
 from abi.actions import ActionFailed, action
 from abi.agent import notify_change
 from abi.project import SCHEMA, git, imports
 from abi.project.bundle import bundle
-from abi.security import Role, User
+from abi.security import Role, User, credentials, role_in
 from abi.semantic import lineage, live, mel, model, ontology, rls
 
 log = logging.getLogger(__name__)
@@ -46,8 +47,10 @@ FAULT = "The event log could not be built because something went wrong on ABI's 
 STALE = "The build did not finish. Save the process again, or refresh one of its tables."
 # MiB of DuckDB memory a build uses at most (less where the server's limit is lower); above it DuckDB spills to disk. With
 # the server's own 1500MB a build of 5 million events took the heavy worker to 1.7 GB; with this it stays under 1.5 GB for
-# a few seconds more (bench/RESULTS.md, 1.2.7 M1: the worker's memory varied by 300 MB from run to run at 600, not at 400)
+# a few seconds more (bench/RESULTS.md, 1.2.7 M1: the worker's memory varied by 300 MB from run to run at 600, not at 400).
 MEMORY = 400
+THREADS = 3  # DuckDB threads a build uses at most: each needs some of that memory to work in, and with 3 it was measured
+KEEP = 20  # runs kept per process: the latest ones
 
 
 # ---------- the file: what a build writes, and the import checks ----------
@@ -77,37 +80,48 @@ def generated(project: str) -> dict[str, str | None]:
     return {t: typ for p in imports.objects(project, "processes") for t, typ in tables(p).items()}
 
 
-def leftover(project: str, files: dict) -> set[str]:
+def leftover(project: str) -> set[str]:
     """The lake tables a build wrote whose process file is gone (an import, an undo, a revert took it): named pm_…,
-    written by no process of `files` and nobody's own table (a loaded, stepped or input table has a file). Row-level
-    security denies them (rls.unfiltered_outputs): nothing says any more what they were made from."""
-    made = {t for rel, p in files.items() if imports._kind(rel) == "process" for t in tables(p)}
-    return {t for t in model.lake_columns(project) if t.startswith("pm_") and t not in made
-            and f"sources/{t}.json" not in files and f"tables/{t}.json" not in files}
+    written by no process of the project and nobody's own table (a loaded, stepped or input table has a file).
+    Row-level security denies them (rls.unfiltered_outputs): nothing says any more what they were made from. Read from
+    the lake as it is now (its table names, kept per snapshot): the same files can come back with or without them."""
+    con = storage.lake(project)
+    pm = [t for t in semantic._model_columns(con, semantic._snapshot(con)) if t.startswith("pm_")]
+    made, root = generated(project) if pm else {}, git.path(project)
+    return {t for t in pm if t not in made and not any((root / d / f"{t}.json").is_file() for d in ("sources", "tables"))}
 
 
 def references(project: str, files: dict) -> list[dict]:
     """Import checks of the process files (imports._references, after the schema passed): tables and columns exist
     (columns once the table is loaded), timestamps are DATE or TIMESTAMP, the activity is text, each object type exists
     and the columns named for it have its key's types, a `through` table joins the event's id, SLA IDs are unique, the
-    tables a build writes are no one else's. And of the measures: none sums an event's own figure over a type's table."""
+    tables a build writes are no one else's and no build's source. And of the measures: none but MIN and MAX aggregates an
+    event's own figure over a type's table (a sum, a count, an average or a median would weigh the event by its objects)."""
     err, errs = imports._err, []
     some = {rel: p for rel, p in files.items() if imports._kind(rel) == "process"}
     if not some:  # a project without processes pays nothing
         return []
     onto, mj = files.get(ontology.FILE) or {}, files.get("model/model.json") or {}
     known = sorted(t["table"] for t in mj.get("tables", []) if not t.get("hidden"))
+    hidden = {t["table"] for t in mj.get("tables", []) if t.get("hidden")}
     lake, lv, makes = ontology._cols(project), live.columns(project), {}
+    built = {t: p["id"] for p in some.values() for t in tables(p)}  # what the builds write: no build reads it
+    made = {c.lower() for c in MADE}
     for rel, p in some.items():
         def e(at: str, error: str, fix: str, rel=rel) -> None:
             errs.append(err(rel, at, error, fix))
 
         def table(at: str, t: str) -> bool:
-            if t not in known:
+            if t in built:  # (its own: a lineage loop; another's: never rebuilt when that one is)
+                e(at, f"'{t}' is a table the build of process '{built[t]}' writes; an event log is built from loaded tables.",
+                  f"Name the tables process '{built[t]}' reads instead, or leave it out.")
+            elif t in hidden:
+                e(at, f"Table '{t}' is hidden (staging), so it is out of the model.", "Show it with set_table hidden=false, or use another table.")
+            elif t not in known:
                 e(at, f"Unknown model table '{t}'.", f"Use a table of model/model.json: {', '.join(known) or 'none yet (load data, then build_model)'}.")
             elif t in lv:
                 e(at, f"'{t}' is a live table; an event log is built from loaded tables.", "Load the table (a source that imports it), or leave it out.")
-            return t in known and t not in lv
+            return t in known and t not in lv and t not in built
 
         def column(at: str, t: str, c: str, want: str | None = None) -> str | None:
             """Column c of table t (checked once t is loaded), of kind `want` ("time", "text") if given; its type."""
@@ -125,13 +139,14 @@ def references(project: str, files: dict) -> list[dict]:
 
         if p["id"] != imports._id(rel):
             e("$.id", f"The id '{p['id']}' differs from the file name.", f"Set id to '{imports._id(rel)}' or rename the file.")
-        names, attrs = tables(p), {a for s in p["events"] for a in s.get("attributes", [])}
+        names, attrs, seen = tables(p), {a.lower() for s in p["events"] for a in s.get("attributes", [])}, {}
         if len(names) <= len(types(p)) or any(makes.setdefault(t, rel) != rel for t in names):
             e("$.id", f"Two tables a build writes would have one name (of {', '.join(names)}).",
               "Give the process another id, or the object type named 'events' (or one differing only by - and _) another id.")
         for t in names:
-            if len(t) > 63:
-                e("$.id", f"The build's table '{t}' would have a name longer than 63 characters.", "Give the process a shorter id.")
+            if len(t) > 63 - len("-event_id"):  # its relationships' IDs are <table>-<column>, at most 63 characters, one each
+                e("$.id", f"The build's table '{t}' would have a name longer than {63 - len('-event_id')} characters, too long for its relationships' IDs.",
+                  "Give the process a shorter id.")
             if own := next((f for f in (f"sources/{t}.json", f"tables/{t}.json") if f in files), None):
                 e("$.id", f"Table '{t}' is already a table of this project ({own}), and this process's build writes a table of that name.",
                   f"Rename that table, or give the process another id (its build writes {', '.join(names)}).")
@@ -146,12 +161,13 @@ def references(project: str, files: dict) -> list[dict]:
                     column(f"{at}.{k}", t, s[k], want)
             for a, c in s.get("stamps", {}).items():
                 column(f"{at}.stamps[{json.dumps(a, ensure_ascii=False)}]", t, c, "time")
-            for j, a in enumerate(s.get("attributes", [])):
-                if a in MADE:
-                    e(f"{at}.attributes[{j}]", f"'{a}' is the name of a column the event log makes itself.",
+            for j, a in enumerate(s.get("attributes", [])):  # DuckDB's names are the same whatever their case
+                if a.lower() in made or a.startswith("__"):
+                    e(f"{at}.attributes[{j}]", f"'{a}' is the name of a column the event log makes itself (names starting with __ are its own too).",
                       f"Leave it out, or rename the column in a step (set_steps). The log makes: {', '.join(sorted(MADE))}.")
-                else:
-                    column(f"{at}.attributes[{j}]", t, a)
+                elif (typ := column(f"{at}.attributes[{j}]", t, a)) and (was := seen.setdefault(a.lower(), (a, typ, i)))[:2] != (a, typ):
+                    e(f"{at}.attributes[{j}]", f"Attribute '{a}' is {typ} here and '{was[0]}' is {was[1]} in events[{was[2]}]: one attribute has one name and one type.",
+                      "Give both columns one type with a set_type step (set_steps) and write the name one way, or leave one out.")
             for k, x in enumerate(s["objects"]):
                 ax, got = f"{at}.objects[{k}]", ontology.keyed(onto, mj, x["type"])
                 if got is None:
@@ -159,9 +175,12 @@ def references(project: str, files: dict) -> list[dict]:
                       f"{', '.join(sorted(o['id'] for o in onto.get('objects', []))) or 'none yet (propose_ontology, then save_ontology)'}.")
                     continue
                 obj, key = got[0], [c.split(".", 1)[1] for c in got[1]]
-                if clash := sorted(set(key) & (MADE | attrs)):
+                if clash := sorted(k for k in key if k.lower() in made | attrs or k.startswith("__")):
                     e(f"{ax}.type", f"The key column '{clash[0]}' of object type '{x['type']}' has the name of an event's column or attribute.",
                       "Leave that attribute out, or rename the column in a step (set_steps).")
+                if len(f"{table_of(p['id'], x['type'])}-{'-'.join(key)}") > 63:
+                    e(f"{ax}.type", f"The relationship of table '{table_of(p['id'], x['type'])}' to its {obj['name']} would have an ID longer than 63 characters.",
+                      "Give the process a shorter id.")
                 if ("through" in x) != ("event" in x):
                     e(ax, "`through` and `event` go together: the table with one row per event and object, and its column holding the event's id.",
                       "Give both, or neither (then `columns` are columns of the source table).")
@@ -211,7 +230,7 @@ def references(project: str, files: dict) -> list[dict]:
             continue
         for n in tree:
             c = n.col.amount if type(n) is mel.Agg and type(n.col) is mel.Conv else getattr(n, "col", None)
-            if type(n) is mel.Agg and n.fn in ("SUM", "AVG") and (p := per.get(c.table)) and c.column in (
+            if type(n) is mel.Agg and n.fn not in ("MIN", "MAX") and (p := per.get(c.table)) and c.column in (
                     {"duration_seconds"} | {a for s in p["events"] for a in s.get("attributes", [])}):
                 what = ontology.keyed(onto, mj, tables(p)[c.table])
                 errs.append(err(imports.MEASURES, f"$.measures[{i}].expression",
@@ -230,9 +249,12 @@ def _keys(p: dict, onto: dict, mj: dict) -> dict[str, tuple[dict, list[str]]]:
 
 def _source(i: int, s: dict, p: dict, lake: dict) -> str:
     """Source i's candidate events, one row each: __src, __rn (its place in the source: rows in the table's order, a
-    row's stamps in its columns' order), __id (its own id, if the source names one), event_id, activity, started_at,
-    ended_at, its attributes, the key columns of the objects on its own row as __<type's place>_<n>, __where (it passes
-    clean.where) and __via (a bridge table names an object for it).
+    row's stamps in its columns' order), __id (its own id as text, if the source names one), event_id, activity,
+    started_at, ended_at, its attributes, the key columns of the objects on its own row as __<type's place>_<n>,
+    __where (it passes clean.where) and __via (a bridge table names an object for it). Only the columns the file names
+    are read, each under the build's own name, so no column of a source can clash with them. An event's id is the
+    source's own; with several sources naming one, each is told apart by its source's place ("0:17"); without one it
+    is the source's place and the row's ("0.17", a stamp's "1.17.2").
     ponytail: reads the loaded rows (lake.model), so a write-back edit of a source table is not in the log; read the
     effective tables (writeback.views) when an event table is edited by hand."""
     t, cols, order = s["table"], lake[s["table"]], types(p)
@@ -242,27 +264,31 @@ def _source(i: int, s: dict, p: dict, lake: dict) -> str:
         if ft in ("", t) and fc in cols:
             lits = [rls.cast_lit(v, cols[fc]) for v in (f["value"] if isinstance(f["value"], list) else [f["value"]])]
             conds.append(f"{_q(fc)} IN ({', '.join(lits)})" if f["op"] == "in" else f"{_q(fc)} {f['op']} {lits[0]}")
-    more = "".join(f", {_q(c)} AS __{order.index(x['type'])}_{j}" for x in s["objects"] if "through" not in x for j, c in enumerate(x["columns"]))
-    more += f", ({' AND '.join(conds) or 'TRUE'}) AS __where"
-    rows = f"(SELECT *, row_number() OVER () AS __rn FROM lake.model.{_q(t)})"
+    own = [(c, f"__{order.index(x['type'])}_{j}") for x in s["objects"] if "through" not in x for j, c in enumerate(x["columns"])]
+    read = "".join(f", {_q(c)} AS {k}" for c, k in own) + f", ({' AND '.join(conds) or 'TRUE'}) AS __where FROM lake.model.{_q(t)}"
+    kept = "".join(f", {k}" for _, k in own) + ", __where"
     if "stamps" in s:  # one struct per timestamp column, unnested: one scan however many stamps
         stamps = sorted(s["stamps"].items(), key=lambda x: list(cols).index(x[1]))
-        each = ", ".join(f"{{'k': {k}, 'a': '{_lit(a)}', 't': CAST({_q(c)} AS TIMESTAMP)}}" for k, (a, c) in enumerate(stamps))
-        return (f"SELECT {i} AS __src, __rn * {len(stamps)} + __u.k AS __rn, NULL::VARCHAR AS __id, concat('{i}.', __rn, '.', __u.k) AS event_id,"
-                f" __u.a AS activity, __u.t AS started_at, NULL::TIMESTAMP AS ended_at{more}, FALSE AS __via"
-                f" FROM (SELECT *, unnest([{each}]) AS __u FROM {rows}) WHERE __u.t IS NOT NULL")
-    ident = f"CAST(s.{_q(s['id'])} AS VARCHAR)" if "id" in s else "NULL::VARCHAR"
+        each = ", ".join(f"{{'k': {k}, 'a': '{_lit(a)}', 't': __t{k}}}" for k, (a, _) in enumerate(stamps))
+        rows = "SELECT row_number() OVER () AS __n" + "".join(f", CAST({_q(c)} AS TIMESTAMP) AS __t{k}" for k, (_, c) in enumerate(stamps)) + read
+        return (f"SELECT {i} AS __src, __n * {len(stamps)} + __u.k AS __rn, NULL::VARCHAR AS __id, concat('{i}.', __n, '.', __u.k) AS event_id,"
+                f" __u.a AS activity, __u.t AS started_at, NULL::TIMESTAMP AS ended_at{kept}, FALSE AS __via"
+                f" FROM (SELECT *, unnest([{each}]) AS __u FROM ({rows})) WHERE __u.t IS NOT NULL")
+    attrs = "".join(f", {_q(a)}" for a in s.get("attributes", []))
     end = f"CAST({_q(s['end'])} AS TIMESTAMP)" if "end" in s else "NULL::TIMESTAMP"
-    via = " OR ".join(f"EXISTS (SELECT 1 FROM lake.model.{_q(x['through'])} b WHERE b.{_q(x['event'])} = s.{_q(s['id'])}"
+    tag = f"'{i}:' || " if sum("id" in x for x in p["events"]) > 1 else ""
+    rows = (f"SELECT row_number() OVER () AS __rn, {_q(s['id']) if 'id' in s else 'NULL'} AS __raw, {_q(s['activity'])} AS activity,"
+            f" CAST({_q(s['start'])} AS TIMESTAMP) AS started_at, {end} AS ended_at" + attrs + read)
+    via = " OR ".join(f"EXISTS (SELECT 1 FROM lake.model.{_q(x['through'])} b WHERE b.{_q(x['event'])} = s.__raw"
                       + "".join(f" AND b.{_q(c)} IS NOT NULL" for c in x["columns"]) + ")" for x in s["objects"] if "through" in x)
-    return (f"SELECT {i} AS __src, __rn, {ident} AS __id, coalesce({ident}, concat('{i}.', __rn)) AS event_id, {_q(s['activity'])} AS activity,"
-            f" CAST({_q(s['start'])} AS TIMESTAMP) AS started_at, {end} AS ended_at"
-            + "".join(f", {_q(a)}" for a in s.get("attributes", [])) + f"{more}, ({via or 'FALSE'}) AS __via FROM {rows} s")
+    return (f"SELECT {i} AS __src, __rn, CAST(__raw AS VARCHAR) AS __id, coalesce({tag}CAST(__raw AS VARCHAR), concat('{i}.', __rn)) AS event_id,"
+            f" activity, started_at, ended_at{attrs}{kept}, ({via or 'FALSE'}) AS __via FROM ({rows}) s")
 
 
 def _sql(p: dict, keys: dict, lake: dict) -> tuple[str, str, dict[str, str]]:
-    """(every candidate event with why it is dropped as __why (NULL: kept), the events table's SELECT over it, {object
-    type: its table's SELECT over the events table})."""
+    """(every candidate event with why it is dropped as __why (NULL: kept): the build keeps it as temporary table
+    __pm, so every row is numbered once and everything after reads that; the events table's SELECT over __pm; {object
+    type: its table's SELECT over __pm, the bridge tables and the events table})."""
     clean, order, ev = p.get("clean") or {}, types(p), table_of(p["id"])
     attrs = list(dict.fromkeys(a for s in p["events"] for a in s.get("attributes", [])))
     own = {t: [f"__{order.index(t)}_{j}" for j in range(len(keys[t][1]))] for t in order
@@ -282,14 +308,15 @@ def _sql(p: dict, keys: dict, lake: dict) -> tuple[str, str, dict[str, str]]:
                    f" (SELECT *, row_number() OVER (PARTITION BY {same} ORDER BY __rn) AS __n FROM ({log_sql}))")
     events = ("SELECT event_id, activity, started_at, ended_at, epoch(ended_at - started_at) AS duration_seconds"
               + "".join(f", {_q(a)}" for a in attrs) + ", row_number() OVER (ORDER BY started_at, coalesce(ended_at, started_at), __src, __rn) AS ord"
-              f" FROM ({log_sql}) WHERE __why IS NULL")
+              " FROM __pm WHERE __why IS NULL")
     per = {}
     for t, (_, key) in keys.items():
         ks = ", ".join(map(_q, key))
-        links = [f"SELECT event_id, {', '.join(f'{c} AS {_q(k)}' for c, k in zip(own[t], key))} FROM ({_source(i, s, p, lake)})"
-                 for i, s in enumerate(p["events"]) if any(x["type"] == t and "through" not in x for x in s["objects"])]
-        links += [f"SELECT CAST({_q(x['event'])} AS VARCHAR) AS event_id, {', '.join(f'{_q(c)} AS {_q(k)}' for c, k in zip(x['columns'], key))}"
-                  f" FROM lake.model.{_q(x['through'])}" for s in p["events"] for x in s["objects"] if x["type"] == t and "through" in x]
+        # an event's objects: those on its own kept row, and those a bridge table names for a kept event of the bridge's own source
+        links = [f"SELECT event_id, {', '.join(f'{c} AS {_q(k)}' for c, k in zip(own[t], key))} FROM __pm WHERE __why IS NULL"] if t in own else []
+        links += [f"SELECT s.event_id, {', '.join(f'b.{_q(c)} AS {_q(k)}' for c, k in zip(x['columns'], key))} FROM lake.model.{_q(x['through'])} b"
+                  f" JOIN __pm s ON s.__src = {i} AND s.__id = CAST(b.{_q(x['event'])} AS VARCHAR) WHERE s.__why IS NULL"
+                  for i, s in enumerate(p["events"]) for x in s["objects"] if x["type"] == t and "through" in x]
         gap = "epoch(lead(e.started_at) OVER w - coalesce(e.ended_at, e.started_at))"
         per[t] = (f"SELECT {', '.join(f'l.{_q(k)}' for k in key)}, e.* EXCLUDE (ord), row_number() OVER w AS seq, lead(e.activity) OVER w AS next_activity,"
                   f" CASE WHEN {gap} < 0 THEN 0 ELSE {gap} END AS wait_seconds"
@@ -300,9 +327,10 @@ def _sql(p: dict, keys: dict, lake: dict) -> tuple[str, str, dict[str, str]]:
 
 
 def build(project: str, pid: str, user: User | None) -> dict:
-    """Writes process `pid`'s tables from the file and the lake as they are now, then (as `user`, who saved it) their
-    model.json entries. Returns the rows per table, the dropped rows by reason and, per object type, how many events
-    are about more than one object of it. Refuses (the run's error: file, field, fix) what the import check would."""
+    """Writes process `pid`'s tables from the file and the lake as they are now, then (as `user`, an Editor who saved
+    it; None: the data only) their model.json entries. Returns the rows per table, the dropped rows by reason and, per
+    object type, how many events are about more than one object of it. Refuses (the run's error: file, field, fix)
+    what the import check would."""
     start, files = time.monotonic(), bundle(git.path(project))
     p, rel = files.get(f"processes/{pid}.json"), f"processes/{pid}.json"
     if p is None:
@@ -318,7 +346,8 @@ def build(project: str, pid: str, user: User | None) -> dict:
     out = {"tables": {}, "dropped": {}, "several": {}}
 
     def write(cur) -> None:
-        n = dict(cur.execute(f"SELECT __why, count(*) FROM ({log_sql}) GROUP BY 1").fetchall())
+        cur.execute(f"CREATE OR REPLACE TEMP TABLE __pm AS {log_sql}")  # this cursor's own; the temp database takes writes beside the lake's
+        n = dict(cur.execute("SELECT __why, count(*) FROM __pm GROUP BY 1").fetchall())
         out["dropped"] = {w: n.get(w, 0) for w in WHY}
         cur.execute(f"CREATE OR REPLACE TABLE lake.model.{_q(ev)} AS {storage._ordered(events)}")
         rows, ids = cur.execute(f"SELECT count(*), count(DISTINCT event_id) FROM lake.model.{_q(ev)}").fetchone()
@@ -337,46 +366,67 @@ def build(project: str, pid: str, user: User | None) -> dict:
         size, unit = con.execute("SELECT current_setting('memory_limit')").fetchone()[0].split()  # as DuckDB says it: "1.3 GiB"
         if float(size) * 1024 ** ("KMGT".find(unit[0]) - 1) > MEMORY:
             con.execute(f"SET memory_limit = '{MEMORY}MiB'")
+        if storage.THREADS > THREADS:  # on a host with many cores (this instance runs nothing else: no query waits on the change)
+            con.execute(f"SET threads = {THREADS}")
         snap = storage._commit(con, write, user.name if user else "worker", f"build process {pid}")
     except duckdb.ConversionException:  # the one cast of a value the file gives: a filter's
         raise ActionFailed(422, f"{rel} $.clean.where: a value doesn't fit its column's type. Give each filter a value of its column's kind"
                                 " (a date as YYYY-MM-DD, a number for a number).") from None
-    except duckdb.Error as e:  # DuckDB's text holds SQL and values: the server log's
-        log.warning("Building the event log of %s/%s failed: %s", project, pid, e)
+    except duckdb.Error as e:  # DuckDB's text holds SQL and values: the server log's, scrubbed
+        log.warning("Building the event log of %s/%s failed: %s", project, pid, credentials.log_text(e))
         raise ActionFailed(400, f"{rel}: the build failed ({type(e).__name__}); the details are in the server log.") from None
     finally:
         con.close()
-    if user is not None:  # the definitions are the person's: nobody to write them as, they stay as they are
+    if user is not None:
         with git.change(project, user, "build_process"):
             _model(project, p, keys)
     return out | {"events": out["tables"][ev], "snapshot": snap, "seconds": round(time.monotonic() - start, 1)}
 
 
+OURS = " Written by its build."  # how a description this module wrote ends: a person's own stays
+
+
 def _model(project: str, p: dict, keys: dict) -> None:
     """Its tables in model.json, as ml._predictions puts ml_<id> there: each keyed and described (readiness asks for
-    both), a type's table many-to-one to its object's table and to the events table. A build after a refresh finds
-    them as they are and changes nothing."""
+    both), a type's table many-to-one to its object's table and to the events table. What a person set on one of the
+    tables since (hidden, a kind, a description of their own, a relationship to another table: the one readiness asks
+    for when a rule filters a source) stays. A build after a refresh finds them as they are and changes nothing."""
     mj, ev, rels = model.load(project), table_of(p["id"]), []
-    mj["tables"][ev] = {"kind": "fact", "key": ["event_id"], "description": f"Every event of process '{p['name']}', one row per event. Written by its build."}
+
+    def put(t: str, key: list[str], text: str) -> None:
+        was = mj["tables"].get(t) or {}
+        mine = not was.get("description") or was["description"].endswith(OURS)
+        mj["tables"][t] = {"kind": "fact"} | was | {"key": key, "description": text + OURS if mine else was["description"]}
+
+    put(ev, ["event_id"], f"Every event of process '{p['name']}', one row per event.")
     for typ, (x, key) in keys.items():
         t = table_of(p["id"], typ)
-        mj["tables"][t] = {"kind": "fact", "key": [*key, "event_id"], "description": (
-            f"The events of each {x['name']} in process '{p['name']}', in order; an event about several {x['plural']} is here once for each."
-            " Written by its build.")}
+        put(t, [*key, "event_id"], f"The events of each {x['name']} in process '{p['name']}', in order; an event about several {x['plural']} is here once for each.")
         rels += [{"id": model.slug(f"{t}-{'-'.join(key)}"), "from": {"table": t, "columns": key}, "to": {"table": x["table"], "columns": key}},
                  model._rel(f"{t}.event_id", f"{ev}.event_id")]
-    mj["relationships"] = ml._in_place(mj["relationships"], rels, lambda r: r["from"]["table"] in tables(p))
+    to = {ev, *(x["table"] for x, _ in keys.values())}  # the build's own relationships are those to these tables
+    mj["relationships"] = ml._in_place(mj["relationships"], rels, lambda r: r["from"]["table"] in tables(p) and r["to"]["table"] in to)
     model.save(project, mj)
 
 
 # ---------- runs: in the worker, kept in analysis_runs ----------
 
 def _queue(conn, project: str, pid: str, user_id: int | None, key: str | None = None) -> str | None:
-    """A build of process `pid` for the worker, its run's ID; None when the run `key` exists (one per refresh snapshot)."""
+    """A build of process `pid` for the worker, its run's ID. A run of it that waits for the worker already is that
+    build (it reads the file and the tables when it starts): nothing more is queued. None when the run `key` exists (one
+    per refresh snapshot). The latest KEEP runs of a process stay.
+    ponytail: a run whose job is lost (the engine killed between the commit and the defer below) stays queued and is
+    taken for the build asked for; a lease on the run if that ever shows up (its row deleted by hand until then)."""
+    if wait := conn.execute("SELECT id::text FROM analysis_runs WHERE project = %s AND kind = 'process' AND name = %s AND status = 'queued'"
+                            " ORDER BY created DESC LIMIT 1", [project, pid]).fetchone():
+        return wait["id"]
     run_id = str(uuid.uuid4())
     if not conn.execute("INSERT INTO analysis_runs (id, project, kind, name, user_id, key, status) VALUES (%s, %s, 'process', %s, %s, %s, 'queued')"
                         " ON CONFLICT DO NOTHING", [run_id, project, pid, user_id, key]).rowcount:
         return None
+    conn.execute("DELETE FROM analysis_runs WHERE project = %s AND kind = 'process' AND name = %s AND status IN ('ok', 'failed') AND id NOT IN"
+                 " (SELECT id FROM analysis_runs WHERE project = %s AND kind = 'process' AND name = %s ORDER BY created DESC LIMIT %s)",
+                 [project, pid, project, pid, KEEP])
     conn.commit()  # before the worker can pick the job up
     from abi import worker  # not at top: the worker imports every action module
 
@@ -388,18 +438,35 @@ def _queue(conn, project: str, pid: str, user_id: int | None, key: str | None = 
     return run_id
 
 
+def changed(conn, project: str, old: dict, files: dict, user: User) -> dict[str, str]:
+    """{process ID: the run of its build} for every process file that `files` adds or changes against `old`, queued as
+    `user`: the save's own, and an import, a pull, a revert or an undo that brings another definition (imports.apply,
+    git.undo). Until that build ends `process` shows it, not the build of the definition before."""
+    return {p["id"]: _queue(conn, project, p["id"], user.id) for rel, p in sorted(files.items())
+            if imports._kind(rel) == "process" and old.get(rel) != p}
+
+
+NO_EDITOR = ("The tables' entries in the data model were not written: the person this build runs for is no longer an Editor of the project"
+             " (or the account is gone). An Editor saves the process again (save_process) to write them.")
+
+
 def job(run_id: str) -> None:
     """The worker's job (abi.worker.build_process): a queued build; the outcome, or why it failed, stays on its run and
-    a failure goes to the feed once (and once when it builds again)."""
+    a failure goes to the feed once (and once when it builds again). model.json is written in the name of the person
+    the run was queued for only while they are an Editor of the project (as ml.after_refresh scores): else the tables
+    are built, the model is left as it is and the run says so. Audited either way (SC-6)."""
     with db.connect() as conn:
         r = conn.execute("UPDATE analysis_runs SET status = 'running', started = now() WHERE id = %s AND status = 'queued'"
-                         " RETURNING project, name, user_id", [run_id]).fetchone()
-        u = security.user(conn, r["user_id"]) if r and r["user_id"] else None
-    if r is None:
-        return
+                         " RETURNING project, name, user_id, key", [run_id]).fetchone()
+        if r is None:
+            return
+        u = security.user(conn, r["user_id"]) if r["user_id"] else None
+        may = u is not None and (role_in(conn, u, r["project"]) or Role.viewer) >= Role.editor
+        actions.audit(conn, u, "worker", "build_process", r["project"], {"project": r["project"], "process": r["name"], "key": r["key"]},
+                      200 if may else 403, f"run {run_id}" if may else "not an Editor of the project: the tables are built, model.json is not written")
     out = error = None
     try:
-        out = build(r["project"], r["name"], u)
+        out = build(r["project"], r["name"], u if may else None) | ({} if may else {"note": NO_EDITOR})
     except Exception as e:  # noqa: BLE001 - any failure is the run's outcome
         if not isinstance(e, ActionFailed):
             log.exception("process build %s failed", run_id)
@@ -437,6 +504,15 @@ def _label(c: str) -> str:
     return ontology._label(re.sub(r"_(at|on|date|time|ts)$", "", c))
 
 
+def _stamps(times: list[str]) -> dict[str, str]:
+    """{activity name: column} of a table's time columns; two that would get one name (created_at, created_on) keep
+    their columns' own."""
+    out = {}
+    for c in times:
+        out[_label(c) if _label(c) not in out else ontology._label(c)] = c
+    return out
+
+
 def propose(project: str, user_id: int | None) -> dict:
     """Draft processes, not saved, one per group of sources that share an object type. A source is a table that is no
     object type's own and has a timestamp, a text column with few values and a way to an object type (a relationship
@@ -461,13 +537,13 @@ def propose(project: str, user_id: int | None) -> dict:
             continue
         if t in objs:  # an object's own table: its timestamps are what happened to the object
             if len(times) >= 3 and set(keys[t]) <= set(tc):
-                events.append({"table": t, "stamps": {_label(c): c for c in times}, "objects": [{"type": objs[t]["id"], "columns": keys[t]}]})
+                events.append({"table": t, "stamps": _stamps(times), "objects": [{"type": objs[t]["id"], "columns": keys[t]}]})
                 found.append({"table": t, "activities": list(events[-1]["stamps"])})
             continue
-        key = keys.get(t) or []
+        key = [k for k in keys.get(t) or [] if k in tc] if len(keys.get(t) or []) == 1 else []  # an event's id: one column the caller may read
         # a bridge: a table pointing at this table's one-column key and at an object type's key
         bridged = [{"type": x["id"], "through": b, "event": r["from"]["columns"][0], "columns": cs} for r in m["relationships"]
-                   if r["to"]["table"] == t and len(key) == 1 and r["to"]["columns"] == key and (b := r["from"]["table"]) in cols
+                   if r["to"]["table"] == t and key and r["to"]["columns"] == key and (b := r["from"]["table"]) in cols
                    and r["from"]["columns"][0] in cols[b] for cs, x in points(b) if x["table"] != t]
         used = {c for x in direct for c in x["columns"]} | set(key)
         text = [c for c, ty in tc.items() if ty == "VARCHAR" and c not in used]
@@ -480,8 +556,8 @@ def propose(project: str, user_id: int | None) -> dict:
                 act = hint[0] if hint else few[0][1]
                 start = next((c for c in times if re.search(r"start|begin", c, re.I)), times[0])
                 end = next((c for c in times if c != start and re.search(r"end|finish|complet", c, re.I)), None)
-                s = {"table": t, **({"id": key[0]} if len(key) == 1 else {}), "activity": act, "start": start, **({"end": end} if end else {}),
-                     "attributes": [c for c in tc if c not in {act, *used, *times} and c not in MADE][:10], "objects": direct + (bridged if len(key) == 1 else [])}
+                s = {"table": t, **({"id": key[0]} if key else {}), "activity": act, "start": start, **({"end": end} if end else {}),
+                     "attributes": [c for c in tc if c not in {act, *used, *times} and c not in MADE][:10], "objects": direct + (bridged if key else [])}
                 seen = semantic.execute(project, f"SELECT {_q(act)}, count(*) FROM {_q(t)} WHERE {_q(act)} IS NOT NULL GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 50",
                                         {"propose_process": t, "activities": act}, user_id)
                 events.append({k: v for k, v in s.items() if v != []})
@@ -493,7 +569,7 @@ def propose(project: str, user_id: int | None) -> dict:
                 if rename := {a: first[" ".join(a.lower().split())] for a, _ in seen if first[" ".join(a.lower().split())] != a}:
                     found[-1]["rename"] = rename
         elif len(times) >= 3 and direct:
-            events.append({"table": t, "stamps": {_label(c): c for c in times}, "objects": direct})
+            events.append({"table": t, "stamps": _stamps(times), "objects": direct})
             found.append({"table": t, "activities": list(events[-1]["stamps"])})
     if not events:
         return {"processes": [], "found": [], "note": "No table looks like a source of events: none has a timestamp, a text column with few values"
@@ -571,13 +647,13 @@ def _change(conn, user: User, project: str, pid: str, new: dict | None) -> dict:
     preview = {"changes": changes, "tables": sorted(now), "removes": gone, "reads": read}
     why = (f"This changes the processes of project '{project}': {changes[0]}"
            + (f" Its build writes the tables {', '.join(sorted(now))} (every event once, and each object type's events in order)." if now else "")
-           + (f" It removes the table(s) {', '.join(gone)}; their data is archived for 30 days." if gone else ""))
-    out = imports.apply(conn, user, project, after, ask=(why, preview)) | {"process": preview}
+           + (f" It removes the table(s) {', '.join(gone)} from the data model; what a build has written of them is archived for 30 days." if gone else ""))
+    out = imports.apply(conn, user, project, after, ask=(why, preview)) | {"process": preview}  # queues the build of a changed file (`changed`)
     git._archive(conn, user, project, set(gone))
     if new is None:
         conn.execute("DELETE FROM analysis_runs WHERE project = %s AND kind = 'process' AND name = %s", [project, pid])
         return out
-    return out | {"build": _queue(conn, project, pid, user.id)}
+    return out | {"build": out["builds"][pid]}
 
 
 @action(Role.viewer)
@@ -595,7 +671,7 @@ def save_process(conn, user: User, args: Save) -> dict:
 
 @action(Role.editor, definition=True, confirms=True)
 def delete_process(conn, user: User, args: Ref) -> dict:
-    """Deletes a process and the tables its build wrote (archived for 30 days) after the person confirms a preview of what reads them. Refused while a measure or a report reads one of those tables."""
+    """Deletes a process and the tables its build wrote (their data is archived for 30 days) after the person confirms a preview of what reads them. Refused while a measure or a report reads one of those tables."""
     return _change(conn, user, args.project, args.process, None)
 
 

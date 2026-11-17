@@ -413,14 +413,14 @@ def check(project: str) -> list[str]:
     gone = lambda t: t.startswith("ml_") and not (git.path(project) / "ml" / f"{t[3:]}.json").is_file()  # noqa: E731
     from abi import process  # not at top: process imports this module
     pm = process.generated(project)  # 1.2.7 M1: a process's events table holds every event: denied by design, nothing to do
-    lost = lambda t: t.startswith("pm_") and t not in pm and not any(  # noqa: E731  what a build left behind (process.leftover)
-        (git.path(project) / d / f"{t}.json").is_file() for d in ("sources", "tables"))
+    denied = semantic.rls.unfiltered_outputs(project)
+    lost = process.leftover(project) if any(t.startswith("pm_") and t not in pm for t in denied) else set()  # what a build left behind
     gaps += [f"Table '{t}' holds the {'predictions of an ML model' if gone(t) else 'events of a process'} that is gone; restricted Viewers see none of"
-             " its rows until it gets a row rule of its own (set_rls_rule)." if gone(t) or lost(t) else
+             " its rows until it gets a row rule of its own (set_rls_rule)." if gone(t) or t in lost else
              f"Table '{t}' {'holds ML predictions' if t.startswith('ml_') else 'holds events of a process' if t in pm else 'is built by steps'} made from rows that"
              " row-level security rules filter; restricted Viewers see none of its rows until a rule on it (or a"
              " relationship to each filtered table it is made from) filters it."
-             for t in semantic.rls.unfiltered_outputs(project) if pm.get(t, "") is not None]  # model tables or not: SQL and grids read them too
+             for t in denied if pm.get(t, "") is not None]  # model tables or not: SQL and grids read them too
     from abi.semantic import ontology  # not at top: ontology imports this module
     gaps += ontology.gaps(project)  # 1.2.6: dangling references, only once an ontology exists
     from abi import ml  # not at top: ml imports this module

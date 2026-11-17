@@ -66,14 +66,14 @@ def row_rules(project: str) -> list[dict]:
 
 def digest(project: str) -> str:
     """M3.6: sha256 of the definition files a restricted user's filters and plans are made from (rules, model,
-    measures, datasets, ML models, sources, tables, project.json), once per read action."""
+    measures, datasets, ML models, sources, tables, processes, project.json), once per read action."""
     return actions.memo(("rls.digest", project), lambda: _digest(project))
 
 
 def _digest(project: str) -> str:
     root, h = git.path(project), hashlib.sha256()
     for f in [root / RLS, root / "project.json", *sorted(root.glob("model/*.json")), *sorted(root.glob("ml/*.json")),
-              *sorted(root.glob("sources/*.json")), *sorted(root.glob("tables/*.json"))]:
+              *sorted(root.glob("sources/*.json")), *sorted(root.glob("tables/*.json")), *sorted(root.glob("processes/*.json"))]:
         if f.is_file():
             h.update(f"{f.relative_to(root)}\0".encode() + f.read_bytes() + b"\0")
     return h.hexdigest()
@@ -605,7 +605,10 @@ def unfiltered_outputs(project: str) -> list[str]:
     doesn't hide the input's rows). D-110: also every table built from a table with a column rule unless it has a
     column rule of its own (its Owner chose what it hides). Restricted Viewers see none of their rows (default deny);
     readiness names them. ponytail: table-level lineage, so an output that never read a hidden column is denied too;
-    column lineage if that bites. M3.6: kept per bundle content (any change to the folder is a new key)."""
+    column lineage if that bites. M3.6: kept per bundle content (any change to the folder is a new key).
+    1.2.7 M1: and the tables a process's build left in the lake after its file went (`process.leftover`). Those are
+    read from the lake at every call, never kept with the files' result: an undo or a revert brings back the very files
+    of before, with tables in the lake that were not there then."""
     if not rules(project):
         return []
     sha = lambda: hashlib.sha256(dumps(bundle(git.path(project))).encode()).hexdigest()
@@ -616,7 +619,10 @@ def unfiltered_outputs(project: str) -> list[str]:
                 _outputs[key] = hit
             while len(_outputs) > 64:  # oldest first
                 del _outputs[next(iter(_outputs))]
-    return list(hit)
+    from abi import process  # not at top: it imports this module
+
+    left = process.leftover(project) - {r["table"] for r in row_rules(project)}
+    return sorted({*hit, *left}) if left else list(hit)
 
 
 def _unfiltered_outputs(project: str) -> list[str]:
@@ -626,8 +632,10 @@ def _unfiltered_outputs(project: str) -> list[str]:
     if not ruled | cols:
         return []
     _, rels, fl = _sources(project)
-    files = bundle(git.path(project))
-    g = lineage.graph(files)
+    g = lineage.graph(bundle(git.path(project)))
+    # 1.2.7 M1: a process's node is not walked: each table its build writes names the tables it is made from itself
+    # (lineage._process), so a type's table answers for its own sources, not for every source of the process
+    g = {n: {u: v for u, v in ups.items() if not u.startswith("process:")} for n, ups in g.items()}
 
     def roots(t: str, follow: bool) -> set[str]:
         """The ruled tables whose rules filter t: t itself if ruled, and every one its relationships reach; with
@@ -646,12 +654,9 @@ def _unfiltered_outputs(project: str) -> list[str]:
     # 1.2.6 M9: a predictions table whose model was deleted has no lineage left to say what it was made from: denied
     # (fail closed), as is any other model table named ml_<x> with no ml/<x>.json, until it gets a row rule of its own
     orphan = lambda t: t.startswith("ml_") and t not in ruled and not (git.path(project) / "ml" / f"{t[3:]}.json").is_file()  # noqa: E731
-    from abi import process  # not at top: it imports this module
-
-    # 1.2.7 M1: a table a process's build left behind (its file gone) has no lineage left either: denied, as `orphan`
-    return sorted(process.leftover(project, files) - ruled | {t for n in g if n.startswith("table:") and (
+    return sorted(t for n in g if n.startswith("table:") and (
         (t := n[6:]) not in ruled and set().union(*(roots(u, u != t) for u in ups(n))) - roots(t, False) or t not in cols and ups(n) & cols
-        or orphan(t))})
+        or orphan(t)))
 
 
 def explain(project: str, user_id: int) -> str:

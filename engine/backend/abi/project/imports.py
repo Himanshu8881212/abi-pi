@@ -904,6 +904,10 @@ def apply(conn, user: User, project: str, files: dict, dry_run: bool = False, as
     out["changes"] += schema_first(conn, project, old, files, user.name)
     if old.get(MEASURES) != files.get(MEASURES):  # V-02 MS-1: measure tests run on change; failures go to the feed
         out["readiness"] = model.report(project)
+    from abi import process  # not at top: process imports this module
+
+    if builds := process.changed(conn, project, old, files, user):  # 1.2.7 M1: an added or changed process builds (last: it commits)
+        out["builds"] = builds
     return out
 
 

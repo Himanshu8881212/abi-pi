@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schema.abi.invalid/v1/process.json",
   "title": "Process",
-  "description": "processes/<id>.json (1.2.7): a process as an event log over the ontology. `events` lists the tables the events come from and the objects each event is about; `clean` tidies them. A build (after save_process, and after each refresh of a table it reads) writes model table pm_<id>_events, one row per event, and one pm_<id>_<type> per object type, the events of each object of that type in order. An event on several objects is one row in pm_<id>_events and one per object in a type's table: an event's own figures (how many events, an amount, working time) are counted from pm_<id>_events; a type's table counts per object of that type. A type's table is filtered by its object's row-level security rules; pm_<id>_events holds every event, so restricted readers get no rows of it once a rule filters something it is built from. `reference` and `sla` are checked by conformance. Builds live in the registry, not in Git.",
+  "description": "processes/<id>.json (1.2.7): a process as an event log over the ontology. `events` lists the tables the events come from and the objects each event is about; `clean` tidies them. A build (after save_process, and after each refresh of a table it reads) writes model table pm_<id>_events, one row per event, and one pm_<id>_<type> per object type, the events of each object of that type in order. An event on several objects is one row in pm_<id>_events and one per object in a type's table: an event's own figures (how many events, an amount, working time) are counted from pm_<id>_events; a type's table counts per object of that type. A type's table is filtered by its object's row-level security rules; pm_<id>_events holds every event, so restricted readers get no rows of it once a rule filters something it is built from. A type's table made from a table with a column-level security rule shows them no rows either until it has a column rule of its own. Known limit: where a restricted reader sees a type's objects only through a link that row-level security follows (`rls: follow`), that type's table shows them no rows at all (it fails closed) instead of their objects' events. `reference`, `sla` and `refresh_minutes` are kept in the file and checked for their shape only: nothing reads them yet. Builds live in the registry, not in Git.",
   "type": "object",
   "required": ["$schema", "id", "name", "case", "events"],
   "additionalProperties": false,
@@ -67,7 +67,7 @@
     },
     "reference": {
       "type": "object", "required": ["start", "end", "flows"], "additionalProperties": false,
-      "description": "The allowed behaviour, checked by conformance",
+      "description": "The allowed behaviour, for a conformance check: kept in the file, nothing reads it yet",
       "properties": {
         "from": {"enum": ["variant", "drawn", "bpmn", "discovered"], "description": "Where it came from"},
         "start": {"$ref": "#/$defs/activities", "description": "Activities a case may start with"},
@@ -92,7 +92,7 @@
         }
       }
     },
-    "refresh_minutes": {"type": "integer", "minimum": 5, "maximum": 1440, "description": "How often open cases' ages are refreshed"}
+    "refresh_minutes": {"type": "integer", "minimum": 5, "maximum": 1440, "description": "How often open cases' ages are to be refreshed: kept in the file, nothing reads it yet"}
   },
   "$defs": {
     "name": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$"},

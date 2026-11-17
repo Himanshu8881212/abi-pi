@@ -243,21 +243,24 @@ def _ontology(files: dict):
 
 
 def _process(files: dict):
-    """1.2.7 processes/<id>.json: the tables its build writes come from the tables it reads: pm_<id>_events from every
-    source, bridge table and object type; pm_<id>_<type> from the sources and bridge tables naming that type. The
-    process reads those tables and its object types. The table nodes are there from the save on, built or not:
-    row-level security denies what is made from filtered rows by them (rls.unfiltered_outputs)."""
+    """1.2.7 processes/<id>.json: a process reads its sources, its bridge tables and its object types, and its build
+    writes pm_<id>_events and one pm_<id>_<type> per type (as an ML model its ml_<id>). Each of those tables also names
+    the tables it is made from itself: pm_<id>_events every source, bridge table and object type; pm_<id>_<type> the
+    sources and bridge tables naming that type. Row-level security takes its roots from those direct edges and does
+    not walk the process's node (rls._unfiltered_outputs), so a type's table is denied for what it is made from, not
+    for another type's source. The table nodes are there from the save on, built or not."""
     for pid, p in _ids(files, "processes").items():
         node, log = f"process:{pid}", f"table:pm_{pid}_events"
-        yield node, log, "event log"
+        yield log, node, "event log"
         for s in p.get("events", []):
             for x in s.get("objects", []):
                 per = f"table:pm_{pid}_{str(x.get('type')).replace('-', '_')}"
-                yield node, per, "events per object"
+                yield per, node, "events per object"
                 yield node, f"object:{x.get('type')}", "object"
                 yield log, f"object:{x.get('type')}", "object"
                 for up, via in ((s.get("table"), "events"), (x.get("through"), "through")):
                     if up:
+                        yield node, f"table:{up}", via
                         yield per, f"table:{up}", via
                         yield log, f"table:{up}", via
 

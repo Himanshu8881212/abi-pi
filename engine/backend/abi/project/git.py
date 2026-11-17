@@ -293,11 +293,12 @@ def _gate(conn, project: str, p: Path, why: str, extra: dict) -> None:
     busy = conn.execute("SELECT (SELECT count(*) FROM flow_runs WHERE project = %(p)s AND status IN ('queued', 'running'))"
                         " + (SELECT count(*) FROM ml_runs WHERE project = %(p)s AND status IN ('queued', 'running'))"
                         " + (SELECT count(*) FROM load_runs WHERE project = %(p)s AND status IN ('queued', 'running'))"
-                        " + (SELECT count(*) FROM optimizer_runs WHERE project = %(p)s AND status IN ('queued', 'running')) AS n",
+                        " + (SELECT count(*) FROM optimizer_runs WHERE project = %(p)s AND status IN ('queued', 'running'))"
+                        " + (SELECT count(*) FROM analysis_runs WHERE project = %(p)s AND status IN ('queued', 'running')) AS n",
                         {"p": project}).fetchone()["n"]
     if busy:
-        raise ActionFailed(409, f"Project '{project}' has {busy} flow, ML or load run(s) queued or running (a plan being worked out counts"
-                                " too); try again once they finish.")
+        raise ActionFailed(409, f"Project '{project}' has {busy} flow, ML or load run(s) queued or running (a plan being worked out and"
+                                " an event log being built count too); try again once they finish.")
     stems = lambda d: sorted(f.stem for f in (p / d).glob("*.json"))
     tables = {r["table_name"] for r in conn.execute("SELECT table_name FROM sources WHERE project = %s", [project])}
     roles = conn.execute("SELECT u.name, r.role FROM project_roles r JOIN users u ON u.id = r.user_id"
@@ -418,6 +419,10 @@ def undo(conn, user: User, args: ProjectRef) -> dict:
             _checkout(r, now.id)
             raise
         r.references.create(UNDO_REF, top.parents[0].id, force=True)
+        if not gated:  # 1.2.7 M1: a process file that came back or changed builds again (the import above queues its own)
+            from abi import process  # not at top: process imports this module
+
+            process.changed(conn, args.project, old, files, user)
         return {"undone": top.message}
 
 
