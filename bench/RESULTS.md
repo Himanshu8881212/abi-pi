@@ -1665,3 +1665,15 @@ errors and 0 dropped in every run. The live install's upgrade to 1.2.6 had ended
 Not run: the report bench (item 3's 10 of 10): it needs the model's key in the bench's environment, which the maker
 was not given a way to pass without reading it. Not finished here: the 24-hour soak (item 9), which is elapsed time.
 The bench volume and container were removed after this was written.
+
+### Item 9: 24 hours of bench/soak.py (13 Nov 19:04 to 14 Nov 19:08 UTC)
+
+pve1 LXC 100, throwaway container `abi-127-soak` (image `abi-127:soak`, built from b65b399), `bench/soak.py` for 24
+hours, read by the coordinator from the container's `/data/soak.out` on 17 Nov 2026.
+
+- **24.07 hours, 246 cycles, 0 failed**, 1,442 samples; compared over the last 11.99 hours.
+- **Engine: 460.8 MB then, 437.6 MB now: grew −23.2 MB** (highest 541.7 MB). Target: at most +10 MB. Met.
+- **Default worker: 378.0 MB then, 248.8 MB now: grew −129.2 MB** (highest 417.9 MB). Target: at most +10 MB. Met.
+- The heavy worker was stopped in 233 of 246 idle parts; Postgres connections 15 at the start and 15 at the end.
+
+Still not run: the report bench (item 3's 10 of 10), which waits for the owner's choice of how the model's key reaches pve1.
