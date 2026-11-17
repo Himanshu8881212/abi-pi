@@ -62,7 +62,7 @@
                                "description": "A column of a source table: `table.column`, or a bare name for every source that has that column"},
                     "op": {"enum": ["=", "<>", "<", "<=", ">", ">=", "in"]},
                     "value": {"type": ["string", "number", "boolean", "array"], "description": "One value; a list for `in`"}}}},
-        "duplicates": {"enum": ["keep", "drop"], "description": "Events of one source that are the same in every column: keep them all (default) or keep one"}
+        "duplicates": {"enum": ["keep", "drop"], "description": "Events of one source that are the same in every column: keep them all (default) or keep one. In a source that names an `id` such rows share that id and an event's id is its own, so the build refuses them: use `drop` there"}
       }
     },
     "reference": {

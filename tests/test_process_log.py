@@ -112,6 +112,21 @@ TALK = {"id": "talk", "name": "Talk", "case": "ticket", "events": [
     {"table": "calls", "id": "call_id", "activity": "activity", "start": "started_at", "objects": [{"type": "ticket", "columns": ["about"]}]},
     {"table": "chats", "id": "chat_id", "activity": "activity", "start": "started_at",
      "objects": [{"type": "ticket", "through": "chat_tickets", "event": "chat", "columns": ["ticket"]}]}]}
+# A source of instants (TIMESTAMP WITH TIME ZONE, written into its Parquet file in the fixture: 00:30 in Berlin on 1 March,
+# and 23:45 UTC the evening before, which is 00:45 in Berlin), one of wall-clock times between them, and a table with
+# three times, a ticket and a text column where no two rows say the same
+NAPS = """nap_id,about,activity,happened
+1,T1,Nap,2025-03-01 00:40:00
+"""
+TRIPS = """trip_id,ticket_ref,note,booked_at,left_at,back_at
+R1,T1,window seat,2025-03-06 08:00:00,2025-03-07 09:00:00,2025-03-08 10:00:00
+R2,T2,aisle,2025-03-06 08:30:00,2025-03-07 09:30:00,
+R3,T3,none,2025-03-06 09:00:00,,
+"""
+ZONE = {"id": "zone", "name": "Zones", "case": "ticket", "events": [
+    {"table": "zoned", "id": "zid", "activity": "activity", "start": "at_instant", "objects": [{"type": "ticket", "columns": ["about"]}]},
+    {"table": "naps", "activity": "activity", "start": "happened", "objects": [{"type": "ticket", "columns": ["about"]}]}],
+    "clean": {"where": [{"column": "at_instant", "op": ">=", "value": "2025-03-01"}]}}
 PINGS = 300_000  # rows of pings, every one at the same second and without an id: row n is about ticket T<n % 3 + 1>
 TIES = {"id": "ties", "name": "Ties", "case": "ticket", "events": [
     {"table": "pings", "activity": "activity", "start": "started_at", "attributes": ["n"], "objects": [{"type": "ticket", "columns": ["about"]}]}]}
@@ -248,14 +263,17 @@ def log(tmp_path_factory):
     known = brewline.generate(d, 0.005, supply=True)["supply"]
     (d / "tickets.csv").write_text(TICKETS)
     (d / "ticket_events.csv").write_text(EVENTS)
-    for f, text in (("calls", CALLS), ("chats", CHATS), ("chat_tickets", CHAT_TICKETS)):
+    for f, text in (("calls", CALLS), ("chats", CHATS), ("chat_tickets", CHAT_TICKETS), ("naps", NAPS), ("trips", TRIPS)):
         (d / f"{f}.csv").write_text(text)
+    duckdb.sql(f"""COPY (SELECT * FROM (VALUES (1, 'T1', 'Ping', TIMESTAMPTZ '2025-03-01 00:30:00+01'), (2, 'T1', 'Pong', TIMESTAMPTZ '2025-02-28 23:45:00+00'))
+      t(zid, about, activity, at_instant)) TO '{d}/zoned.parquet' (FORMAT parquet)""")
     duckdb.sql(f"""COPY (SELECT i AS n, 'T' || (i % 3 + 1) AS about, CASE WHEN i % 2 = 0 THEN 'Ping' ELSE 'Pong' END AS activity,
       TIMESTAMP '2025-03-05 12:00:00' AS started_at FROM range(1, {PINGS + 1}) t(i)) TO '{d}/pings.parquet' (FORMAT parquet)""")
     if P in {x["project"] for x in abi.call("list_projects")["projects"]}:
         drop([P])
     abi.load("demo", P, [str(d / f"{t}/{t}.parquet") for t in ("cafes", *brewline.SUPPLY)] 
-             + parquet(d / "tickets.csv", d / "ticket_events.csv", d / "calls.csv", d / "chats.csv", d / "chat_tickets.csv") + [str(d / "pings.parquet")])
+             + parquet(d / "tickets.csv", d / "ticket_events.csv", d / "calls.csv", d / "chats.csv", d / "chat_tickets.csv", d / "naps.csv",
+                       d / "trips.csv") + [str(d / "pings.parquet"), str(d / "zoned.parquet")])
     for t, k in {"cafes": "cafe_id", "suppliers": "supplier_id", "purchase_orders": "po_id", "deliveries": "delivery_id",
                  "supply_events": "event_id", "tickets": "ticket_id"}.items():
         abi.call("set_table", project=P, table=t, key=[k])
@@ -303,6 +321,7 @@ def test_schema_examples_valid():
     Draft202012Validator.check_schema(SCHEMA)
     v = Draft202012Validator(SCHEMA)
     assert SCHEMA["examples"] == [PLAN], "the schema's example is the plan's"
+    assert "the build refuses them" in SCHEMA["properties"]["clean"]["properties"]["duplicates"]["description"], "what `keep` means where a source names an id"
     assert not list(v.iter_errors(PLAN)) and all(not list(v.iter_errors({"$schema": PLAN["$schema"], **p})) for p in (SUPPLY, DESK))
     bad = copy.deepcopy(PLAN)
     del bad["events"][0]["start"]  # an event table without its time
@@ -544,10 +563,11 @@ def test_double_counting_measure_refused(built):
     assert e["fix"] == "Use the events table: SUM(pm_supply_events.amount)."
     assert refuse("AVG(pm_supply_delivery.duration_seconds)")["fix"] == "Use the events table: AVG(pm_supply_events.duration_seconds)."
     assert refuse("DIVIDE(SUM(pm_supply_purchase_order.amount), COUNT(pm_supply_purchase_order.po_id))")["fix"].endswith("SUM(pm_supply_events.amount).")
-    # a median, a count and a distinct count weigh an event by its objects as a sum does; the smallest and the largest don't
-    for fn in ("MEDIAN", "COUNT", "DISTINCT_COUNT"):
+    # a median and a count weigh an event by its objects as a sum does; the smallest, the largest and the number of different values don't
+    for fn in ("MEDIAN", "COUNT"):
         assert refuse(f"{fn}(pm_supply_purchase_order.amount)")["fix"] == f"Use the events table: {fn}(pm_supply_events.amount)."
-    for i, x in {"largest": "MAX(pm_supply_purchase_order.amount)", "shortest": "MIN(pm_supply_delivery.duration_seconds)"}.items():
+    for i, x in {"largest": "MAX(pm_supply_purchase_order.amount)", "shortest": "MIN(pm_supply_delivery.duration_seconds)",
+                 "different": "DISTINCT_COUNT(pm_supply_purchase_order.amount)"}.items():
         abi.call("set_measure", project=P, id=i, name=i, expression=x)
         sure("delete_measure", project=P, id=i)
     assert "double" not in {m["id"] for m in measures()}
@@ -782,12 +802,15 @@ def test_roundtrip_export_import_identical(built):
     files = json.loads(r.stdout.splitlines()[-1])
     assert files["processes/desk.json"] == DESK | {"$schema": PLAN["$schema"]}
     assert sure("import_project", project=P, bundle={k: v for k, v in files.items() if k != "processes/desk.json"})["changes"] == ["Removes process 'desk'."]
-    # its tables are left in the lake with nothing saying what they were made from: denied to restricted readers until it is back
-    assert {"pm_desk_events", "pm_desk_ticket"} <= set(state()["denied"])
+    # its tables went to the 30-day archive with it: nothing of them is left in the lake for anyone to read, or to deny
+    with pytest.raises(abi.ActionError):
+        sql("SELECT count(*) FROM pm_desk_ticket")
     assert none_for(built, "pm_desk_events") and none_for(built, "pm_desk_ticket"), "in the running server, while the file is gone"
+    assert not {"pm_desk_events", "pm_desk_ticket"} & set(state()["denied"]), "no table left behind"
     assert sure("import_project", project=P, bundle=files)["changes"] == ["Adds process 'desk'."]
     s = state()
     assert s["files"] == {k: hashlib.sha256(json.dumps(v, sort_keys=True).encode()).hexdigest() for k, v in files.items()}
+    build_of("desk")  # the file that came back builds again: its tables are there once more
     assert "pm_desk_events" in s["denied"] and viewer(built, "sql_query", sql="SELECT count(*) FROM pm_desk_events")["rows"] == [[0]]
     assert build_of("desk")["status"] == "ok", "the file that came back builds again"
 
@@ -802,13 +825,24 @@ def test_tables_left_by_a_revert_stay_denied(built):
     ghost = {"id": "ghost", "name": "Ghost", "case": "ticket", "events": [DESK["events"][0]]}  # the tickets' own times (no column of theirs is hidden)
     assert save(ghost)["status"] == "ok"
     assert viewer(built, "sql_query", sql="SELECT count(DISTINCT ticket_id) FROM pm_ghost_ticket")["rows"] == [[2]] and none_for(built, "pm_ghost_events")
-    # back to the very files of before (the process was never there), with its tables still in the lake
+    # back to the very files of before (the process was never there): a revert takes its tables to the archive with it
     sure("revert", project=P, to=head)
+    assert shown("ghost") is None, "the process is gone with the revert"
+    with pytest.raises(abi.ActionError):
+        sql("SELECT count(*) FROM pm_ghost_ticket")
+    # the net under that, for tables no file accounts for: saved and built again, then the files of before put back behind
+    # ABI's back (as a restored folder would be), with its tables still in the lake
+    assert save(ghost)["status"] == "ok" and viewer(built, "sql_query", sql="SELECT count(DISTINCT ticket_id) FROM pm_ghost_ticket")["rows"] == [[2]]
+    r = engine(f"from abi.project import git\nr = git.repo('{P}')\ngit._checkout(r, git._version(r, '{head}').tree_id)", timeout=120)
+    assert r.returncode == 0, r.stderr[-2000:]
     assert state()["files"] == before and shown("ghost") is None and sql("SELECT count(DISTINCT ticket_id) FROM pm_ghost_ticket") == [[3]]
+    assert [g for g in abi.call("readiness", project=P)["missing"] if "pm_ghost_ticket" in g and "delete_process" in g]
     assert none_for(built, "pm_ghost_ticket") and none_for(built, "pm_ghost_events"), "nothing says what they were made from: no row for a restricted reader"
     assert viewer(built, "sql_query", sql="SELECT count(*) FROM tickets")["rows"] == [[2]]
     assert save(ghost)["status"] == "ok"  # saved again and deleted: its tables go to the archive
     sure("delete_process", project=P, process="ghost")
+    with pytest.raises(abi.ActionError):  # as readiness said
+        sql("SELECT count(*) FROM pm_ghost_ticket")
 
 
 def test_a_definition_that_arrives_is_built(built):
@@ -837,6 +871,9 @@ def test_a_definition_that_arrives_is_built(built):
     assert set(back["builds"]) == {"desk"} and shown("desk")["build"]["run"] == back["builds"]["desk"] != now["run"], back
     again = build_of("desk", after=now["run"])
     assert again["status"] == "ok" and again["events"] == was["events"]
+    with pytest.raises(abi.ActionError):  # the process the import brought is gone with the revert, and its tables with it (to the archive)
+        sql("SELECT count(*) FROM pm_fresh_events")
+    assert "pm_fresh_ticket" not in state()["denied"], "nothing is left behind"
     # and so does an undo
     abi.call("set_auto_commit", project=P, on=False)
     try:
@@ -848,8 +885,6 @@ def test_a_definition_that_arrives_is_built(built):
         assert undone["status"] == "ok" and undone["events"] == was["events"]
     finally:
         abi.call("set_auto_commit", project=P, on=True)
-    assert save(DESK | {"id": "fresh", "name": "Fresh"})["status"] == "ok"  # the tables the revert left go with their process
-    sure("delete_process", project=P, process="fresh")
 
 
 def test_refresh_build_for_someone_no_longer_an_editor_leaves_the_model(built):
@@ -991,13 +1026,28 @@ import json, sys, uuid
 import abi.app  # noqa: F401
 from abi import db, process
 a = json.loads(sys.stdin.read())
-P, out = a["project"], {}
+P, N, out = a["project"], a.get("name", "desk"), {}
 with db.connect() as c:
     if a["do"] == "wait":  # a build that waits for the worker (no job behind it: it stays queued), then two more asked for
         out["run"] = str(uuid.uuid4())
-        c.execute("INSERT INTO analysis_runs (id, project, kind, name, key, status) VALUES (%s, %s, 'process', 'desk', 'waiting', 'queued')", [out["run"], P])
+        c.execute("INSERT INTO analysis_runs (id, project, kind, name, key, status) VALUES (%s, %s, 'process', %s, 'waiting', 'queued')", [out["run"], P, N])
         c.commit()
-        out["got"] = [process._queue(c, P, "desk", None), process._queue(c, P, "desk", None, "snapshot-0")]
+        out["got"] = [process._queue(c, P, N, None), process._queue(c, P, N, a.get("user"), "snapshot-0")]
+        out["user"] = c.execute("SELECT user_id FROM analysis_runs WHERE id = %s", [out["run"]]).fetchone()["user_id"]
+    elif a["do"] == "dead":  # a run queued and one running since 31 minutes: their job is lost, their outcome never written
+        for key, status in (("waiting", "queued"), ("old-running", "running")):
+            c.execute("INSERT INTO analysis_runs (id, project, kind, name, key, status, created, started) VALUES (%s, %s, 'process', 'desk', %s, %s,"
+                      " now() - interval '32 minutes', CASE WHEN %s = 'running' THEN now() - interval '31 minutes' END)", [str(uuid.uuid4()), P, key, status, status])
+    elif a["do"] == "no queue":  # the job can't be queued: the action fails and its transaction rolls back
+        from abi import worker
+        def no(*x, **k):
+            raise RuntimeError("no queue")
+        worker.defer = no
+        try:
+            process._queue(c, P, "desk", None)
+        except RuntimeError:
+            c.rollback()
+        out["queued"] = c.execute("SELECT count(*) AS n FROM analysis_runs WHERE project = %s AND name = 'desk' AND status = 'queued'", [P]).fetchone()["n"]
     elif a["do"] == "old":  # thirty builds of days ago
         for i in range(30):
             c.execute("INSERT INTO analysis_runs (id, project, kind, name, key, status, created) VALUES (%s, %s, 'process', 'desk', %s, 'ok',"
@@ -1005,21 +1055,23 @@ with db.connect() as c:
     else:
         c.execute("DELETE FROM analysis_runs WHERE project = %s AND (key = 'waiting' OR key LIKE 'old-%%')", [P])
     c.commit()
-    out["rows"] = c.execute("SELECT count(*) AS n FROM analysis_runs WHERE project = %s AND name = 'desk'", [P]).fetchone()["n"]
+    out["rows"] = c.execute("SELECT count(*) AS n FROM analysis_runs WHERE project = %s AND name = %s", [P, N]).fetchone()["n"]
 print(json.dumps(out))
 """
 
 
 def test_one_build_waits_at_a_time_and_twenty_runs_are_kept(built):
-    def queue(do: str) -> dict:
-        r = engine(QUEUE, timeout=120, stdin=json.dumps({"project": P, "do": do}))
+    def queue(do: str, **more) -> dict:
+        r = engine(QUEUE, timeout=120, stdin=json.dumps({"project": P, "do": do} | more))
         assert r.returncode == 0, r.stderr[-2000:]
         return json.loads(r.stdout.splitlines()[-1])
 
     n = len([r for r in state()["runs"] if r["name"] == "desk"])
+    owner = next(r["user_id"] for r in state()["runs"] if r["name"] == "supply")
     try:
-        got = queue("wait")
+        got = queue("wait", user=owner)
         assert got["got"] == [got["run"]] * 2 and got["rows"] == n + 1, "a build that waits is the build asked for: nothing more is queued"
+        assert got["user"] == owner, "and it runs for whoever asked last"
         abi.finished(P, abi.call("refresh", project=P, table="suppliers"))
         abi.finished(P, abi.call("refresh", project=P, table="tickets"))
         time.sleep(3)
@@ -1030,6 +1082,27 @@ def test_one_build_waits_at_a_time_and_twenty_runs_are_kept(built):
         assert e.value.status == 409 and "confirm_token" not in e.value.body and "an event log being built" in e.value.body["message"], e.value.body
     finally:
         assert queue("clear")["rows"] == n
+    # a save that takes a table away waits for the build that would write it, as a delete does
+    orders = copy.deepcopy(SUPPLY)
+    del orders["events"][0]["objects"][0]
+    try:
+        queue("wait", name="supply")
+        body = refused(409, "save_process", process=orders)
+        assert "is being built right now, and this change takes pm_supply_delivery away" in body["message"] and "confirm_token" not in body, body
+    finally:
+        queue("clear", name="supply")
+    # a run whose job is lost (queued, or running, for longer than a build takes) holds nothing up: the project can be deleted
+    # (asked, not done here), and the next save builds
+    try:
+        queue("dead")
+        with pytest.raises(abi.ActionError) as e:
+            abi.call("delete_project", project=P)
+        assert e.value.status == 409 and e.value.body["confirm_token"], e.value.body
+        assert save(DESK | {"description": "After a lost job."})["status"] == "ok"
+        assert [r["status"] for r in state()["runs"] if r["key"] in ("waiting", "old-running")] == ["failed", "failed"]
+    finally:
+        n = queue("clear")["rows"]  # with that save's run
+    assert queue("no queue")["queued"] == 0, "a run whose job could not be queued is not left waiting"
     try:
         assert queue("old")["rows"] == n + 30
         assert save(DESK | {"description": "Built once more."})["status"] == "ok"
@@ -1054,3 +1127,70 @@ def test_propose_names_no_hidden_id_and_keeps_every_time(built):
     r = engine("import abi.app\nfrom abi import process\nprint(process._stamps(['created_at', 'created_on', 'closed_at']))", timeout=120)
     assert r.returncode == 0, r.stderr[-2000:]
     assert r.stdout.splitlines()[-1] == "{'Created': 'created_at', 'Created on': 'created_on', 'Closed': 'closed_at'}"
+
+
+DURING = r"""
+import json, sys
+import abi.app  # noqa: F401
+from abi import db, process, security, storage
+from abi.project import git
+P = json.loads(sys.stdin.read())["project"]
+with db.connect() as c:
+    owner = security.user(c, c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"])
+f, commit, wrote = git.path(P) / "processes/desk.json", storage._commit, []
+was = f.read_bytes()
+assert b'"Helpdesk"' in was
+def during(*x, **k):  # the definition changes while the build writes its tables
+    snap = commit(*x, **k)
+    f.write_bytes(was.replace(b'"Helpdesk"', b'"Help desk"'))
+    return snap
+storage._commit, process._model = during, lambda *x: wrote.append(x)
+try:
+    out = process.build(P, "desk", owner)
+finally:
+    f.write_bytes(was)
+print(json.dumps({"note": out.get("note"), "model": len(wrote), "events": out["events"]}))
+"""
+
+
+def test_a_build_overtaken_by_a_change_writes_no_model_entries(built):
+    r = engine(DURING, timeout=300, stdin=json.dumps({"project": P}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    out = json.loads(r.stdout.splitlines()[-1])
+    assert out["model"] == 0 and out["note"].startswith("The process was changed or deleted while its event log was built"), out
+    assert out["events"] == shown("desk")["build"]["events"]
+
+
+def test_an_instant_reads_as_the_projects_time_zone(built):
+    was = abi.call("project_locale", project=P)["time_zone"]
+    abi.call("set_project_locale", project=P, time_zone="Europe/Berlin")
+    try:
+        # 00:30 in Berlin on 1 March is 23:30 UTC the evening before: on or after the filter's 1 March, and on 1 March in the log
+        b = save(ZONE)
+        assert b["status"] == "ok" and b["events"] == 3 and b["dropped"]["filtered"] == 0, b
+        assert sql("SELECT activity, strftime(started_at, '%Y-%m-%d %H:%M') FROM pm_zone_events ORDER BY ord") == [
+            ["Ping", "2025-03-01 00:30"], ["Nap", "2025-03-01 00:40"], ["Pong", "2025-03-01 00:45"]], "the wall-clock source between the two instants"
+        assert sql("SELECT activity, next_activity, wait_seconds FROM pm_zone_ticket ORDER BY seq") == [
+            ["Ping", "Nap", 600.0], ["Nap", "Pong", 300.0], ["Pong", None, None]]
+    finally:
+        if shown("zone"):
+            idle()
+            sure("delete_process", project=P, process="zone")
+        abi.call("set_project_locale", project=P, time_zone=was or "")
+
+
+def test_propose_drafts_stamps_beside_free_text_and_only_what_a_save_takes(built):
+    rels = [abi.call("add_relationship", project=P, **{"from": f, "to": "tickets.ticket_id"})["id"] for f in ("trips.ticket_ref", "calls.about")]
+    try:
+        by = {s["table"]: s for d in abi.call("propose_process", project=P)["processes"] for s in d["events"]}
+        # three times, a way to a ticket and a text column where no two rows say the same: the times are the steps
+        assert by["trips"] == {"table": "trips", "stamps": {"Booked": "booked_at", "Left": "left_at", "Back": "back_at"},
+                               "objects": [{"type": "ticket", "columns": ["ticket_ref"]}]}
+        # columns named like the log's own (Seq, __rn) are no attributes of a draft: the save takes it as it is
+        assert by["calls"]["activity"] == "activity" and by["calls"]["attributes"] == ["minutes"], by["calls"]
+        with pytest.raises(abi.ActionError) as e:
+            abi.call("save_process", project=P, process={"id": "drafted", "name": "Drafted", "case": "ticket", "events": [by["calls"]]})
+        assert e.value.status == 409 and e.value.body["confirm_token"], e.value.body
+    finally:
+        for r in rels:
+            sure("remove_relationship", project=P, id=r)

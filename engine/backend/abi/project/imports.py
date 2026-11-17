@@ -904,10 +904,6 @@ def apply(conn, user: User, project: str, files: dict, dry_run: bool = False, as
     out["changes"] += schema_first(conn, project, old, files, user.name)
     if old.get(MEASURES) != files.get(MEASURES):  # V-02 MS-1: measure tests run on change; failures go to the feed
         out["readiness"] = model.report(project)
-    from abi import process  # not at top: process imports this module
-
-    if builds := process.changed(conn, project, old, files, user):  # 1.2.7 M1: an added or changed process builds (last: it commits)
-        out["builds"] = builds
     return out
 
 
@@ -948,7 +944,14 @@ class Import(BaseModel):
 @action(Role.editor, definition=True)
 def import_project(conn, user: User, args: Import) -> dict:
     """Imports a project bundle: checks schemas, references, measures and tools, lists the changes in plain language and the tables they affect, then replaces the project's files in one undoable step. Rejected imports change nothing and list each error with file, JSON path and fix."""
-    return apply(conn, user, args.project, args.bundle, args.dry_run)
+    old = bundle.bundle(git.path(args.project))
+    out = apply(conn, user, args.project, args.bundle, args.dry_run)
+    if not args.dry_run:
+        from abi import process  # not at top: process imports this module
+
+        if builds := process.changed(conn, args.project, old, args.bundle, user):  # 1.2.7 M1, last: it commits
+            out["builds"] = builds
+    return out
 
 
 class MeasureRef(BaseModel):

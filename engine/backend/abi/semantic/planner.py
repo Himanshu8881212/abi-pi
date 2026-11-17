@@ -242,12 +242,15 @@ def local(model: dict, types: dict[str, dict[str, str]], zone: str) -> dict[tupl
     return out
 
 
-def day(e: exp.Expression, zone: str | None) -> exp.Expression:
-    """The local day of `e`: an instant's date in `zone` (whatever the session TimeZone), else `CAST(e AS DATE)`
+def wall(e: exp.Expression, zone: str | None) -> exp.Expression:
+    """`e` as wall-clock time: an instant's time in `zone` (whatever the session TimeZone); without a zone `e` itself
     (a naive TIMESTAMP is wall-clock time already: never shifted)."""
-    if zone:
-        e = exp.Anonymous(this="timezone", expressions=[exp.convert(zone), e])
-    return exp.Cast(this=e, to=exp.DataType.build("DATE"))
+    return exp.Anonymous(this="timezone", expressions=[exp.convert(zone), e]) if zone else e
+
+
+def day(e: exp.Expression, zone: str | None) -> exp.Expression:
+    """The local day of `e`: the date of its wall-clock time (`wall`)."""
+    return exp.Cast(this=wall(e, zone), to=exp.DataType.build("DATE"))
 
 
 def zoned(types: dict[str, dict[str, str]], zone: str) -> dict[tuple[str, str], str]:

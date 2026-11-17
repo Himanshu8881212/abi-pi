@@ -290,6 +290,9 @@ def _keyed(conn) -> list[str]:
 def _gate(conn, project: str, p: Path, why: str, extra: dict) -> None:
     """Refuse while runs whose jobs carry the project ID are queued or running, then the §5 #3 confirmation with the
     project's contents signed in its preview (D-04.1)."""
+    from abi import process  # not at top: process imports this module
+
+    process.sweep(conn, project)  # 1.2.7 M1: a build whose job was lost holds up nothing for good
     busy = conn.execute("SELECT (SELECT count(*) FROM flow_runs WHERE project = %(p)s AND status IN ('queued', 'running'))"
                         " + (SELECT count(*) FROM ml_runs WHERE project = %(p)s AND status IN ('queued', 'running'))"
                         " + (SELECT count(*) FROM load_runs WHERE project = %(p)s AND status IN ('queued', 'running'))"
@@ -419,10 +422,9 @@ def undo(conn, user: User, args: ProjectRef) -> dict:
             _checkout(r, now.id)
             raise
         r.references.create(UNDO_REF, top.parents[0].id, force=True)
-        if not gated:  # 1.2.7 M1: a process file that came back or changed builds again (the import above queues its own)
-            from abi import process  # not at top: process imports this module
+        from abi import process  # not at top: process imports this module
 
-            process.changed(conn, args.project, old, files, user)
+        process.changed(conn, args.project, old, files, user)  # 1.2.7 M1, last (it commits): a process that came back or changed builds again
         return {"undone": top.message}
 
 
@@ -665,7 +667,10 @@ def apply_tree(conn, user: User, project: str, files: dict, what: str, why: list
     _archive(conn, user, project, removed)
     conn.commit()  # as in add_data: loads run on their own connections
     ingest.refresh(conn, project, None, user.name, reload=set(gone) - removed)  # TR-4 order, now rather than on the next worker tick
-    return {**out, "archived": sorted(removed)}
+    from abi import process  # not at top: process imports this module
+
+    builds = process.changed(conn, project, old, files, user)  # 1.2.7 M1, last (it commits): an added or changed process builds
+    return {**out, "archived": sorted(removed)} | ({"builds": builds} if builds else {})
 
 
 def environment(project: str) -> str:
