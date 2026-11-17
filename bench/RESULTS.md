@@ -1753,16 +1753,69 @@ more than at 600.
 Not measured: a build with `clean.duplicates: "drop"` (one more window over every candidate event), and a build in a
 heavy worker that has loaded tables before it in the same process (it then starts from what that left resident).
 
+### After the first review: rows numbered once, and the build a refresh starts
+
+17 Nov 2026, 13:15 to 14:00 UTC, the same container set up again from the worktree (6 cores, DuckDB at most 1500MB
+and 3 threads in each process, `ABI_HEAVY_CONCURRENCY` not set: 1, one heavy job at a time).
+
+    ssh pve1 "pct exec 100 -- docker exec abi-127-t sh -c 'cd /app && python3 bench/perf.py process --scale 1 --keep'"
+
+Since 066a97a a build writes every candidate event once into a temporary table of its own DuckDB instance (so each
+row is numbered once) and the events table and the object types' tables read that. `perf.py process` now measures two
+builds of the same 5,090,255 events: the first, after the save, as above; then, once the heavy worker has stopped
+again, the build a refresh starts. For that the file of supply_events (2,992,343 rows) gets a new time; the default
+worker's minute check sees it and starts a heavy worker, which loads the table, and that load queues the build (its
+run's key is the load's snapshot), which the same heavy worker runs next. The high-water mark is that one process's,
+the load and the build together.
+
+| code | build | build s | from its trigger to the run's end s | heavy worker's high-water mark MB | highest sample MB |
+|---|---|---|---|---|---|
+| 066a97a | the first, after the save | 35.2 | 41.5 | 1,118.5 | 1,116.5 |
+| 066a97a | after the refresh of supply_events (audited by the worker 14 s after the load's snapshot) | 33.2 | 109.6 | 1,022.2 | 1,022.7 |
+| b554de9 | the first, after the save | 34.5 | 40.6 | 1,032.4 | 1,033.4 |
+| b554de9 | after the refresh of supply_events (key snapshot-13) | 33.4 | 111.1 | 974.9 | 975.7 |
+
+- **The first build: 34.5 and 35.2 s (target: at most 60 s), a high-water mark of 1,032 and 1,119 MB, at most 1.17 GB
+  (target: at most 1.5 GB). Both met.** Numbering the rows once costs about 3 s (31.5 to 32.4 s before).
+- **The build a refresh starts, in the heavy worker that has just loaded the table, with one heavy job at a time:
+  33.2 and 33.4 s, and 975 and 1,022 MB for the load and the build in one process, at most 1.07 GB. Both met.** The
+  110 s from the file's new time are the wait for the minute check, the heavy worker's start, the load and the
+  build.
+- Not measured: `ABI_HEAVY_CONCURRENCY` 2 (a load or a training beside the build in the same process).
+
+**Many DuckDB threads** (one-offs on the project kept by `--keep`, b554de9's build code; the same file saved again,
+so one more build of the 5,090,255 events; the heavy worker's high-water mark read while the run was running). A
+build's DuckDB instance uses at most 3 threads (`process.THREADS`), the number it was measured with: every thread
+needs some of the 400 MiB to work in.
+
+| engine started with | the build's threads | outcome |
+|---|---|---|
+| `ABI_DUCKDB_THREADS=16` | 3 (as built) | ok, 38.0 s, 884 MB |
+| `ABI_DUCKDB_THREADS=16` | 16 (the cap taken out in the container, not committed) | failed: OutOfMemoryException, 1,413 MB |
+
+**A build whose worker is killed** (the same kept project, 3c07deb's text): the same file saved again, the heavy
+worker killed with `kill -9` 5 s into the build. 79 s later (47 s in an earlier try) the run read failed with "The
+build did not finish. Save the process again, or refresh a table its events come from."; the same file saved again
+built in 36.6 s; a refresh of purchase_orders then started one more build (key snapshot-20), 35.7 s. A refresh of
+deliveries, an object type's table the build doesn't read, had started none in the earlier try, which is why the
+sentence no longer says "one of its tables".
+
 ### A refresh that changed no source table starts 0 builds
 
-`.loop/abi127.sh test -q tests/test_process_log.py` on df8428a (`test_rebuild_after_refresh` among its 18): passed.
+`.loop/abi127.sh test -q tests/test_process_log.py` on 69bd358 (`test_rebuild_after_refresh` among its 27): passed.
 In it a refresh of a table the process doesn't read (suppliers) starts 0 builds; a new load of a table it reads
-starts exactly 1, named after that load's snapshot; and the worker's own check for changed tables, run right after
-with nothing changed, loads nothing and starts 0.
+starts exactly 1, named after that load's snapshot; the worker's own check for changed tables, run right after with
+nothing changed, loads nothing and starts 0; the same check with a table to load that the process doesn't read
+(suppliers, its fingerprint forgotten) loads it and starts 0; and with one it reads (tickets) it loads it and starts
+exactly 1, named after that load's snapshot.
 
 ### Golden
 
-`.loop/abi127.sh test -q tests/test_ontology_nobreak.py tests/test_127_nobreak.py` on df8428a (run together with the
-19 contract tests: 26 passed in 300 s): 7 passed, both files untouched since ab8e95d. The plans' SQL and the
-restricted views' text of a project without a process file are byte-identical to the recorded ones, and its bundle
-imports with no change.
+`.loop/abi127.sh test -q tests/test_ontology_nobreak.py tests/test_127_nobreak.py` on 69bd358 (run together with
+tests/test_process_log.py and the Brewline test of the process data: 35 passed in 527 s): 7 passed, both files
+untouched since ab8e95d. The plans' SQL and the restricted views' text of a project without a process file are
+byte-identical to the recorded ones, and its bundle imports with no change.
+
+The whole suite on 69bd358 in a container set up anew (`.loop/abi127.sh test -q -rf tests`): 6 failed, 580 passed,
+24 skipped in 4,747 s; the six are the ones that fail in this container on every commit (two of tests/test_app.py,
+one each of test_ground.py, test_guardrails.py, test_jobs.py and test_supervise.py).
