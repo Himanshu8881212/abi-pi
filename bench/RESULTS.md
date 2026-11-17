@@ -1826,9 +1826,18 @@ then the same with `clean.where` at_instant >= 2025-03-01):
 | 595d1a8 | Ping 2025-02-28 23:30, Pong 2025-02-28 23:45, Nap 2025-03-01 00:40 | 1 event, 2 filtered |
 | e2f85a5 | Ping 2025-03-01 00:30, Nap 2025-03-01 00:40, Pong 2025-03-01 00:45 | 3 events, 0 filtered |
 
+Both rows are from one one-off pytest file, not in the repository, run in the container (`python3 -m pytest -s`): it
+uses the fixture of tests/test_process_log.py (its `zoned` and `naps` tables), sets the zone with set_project_locale,
+saves the process `ZONE` of that test file without its `clean` and then with it, and after each build prints the
+build's counts and `SELECT activity, strftime(started_at, '%Y-%m-%d %H:%M') FROM pm_zone_events ORDER BY ord`
+(sql_query). For the first row the container's engine code was that of 595d1a8 (`git checkout 595d1a8 --
+engine/backend/abi engine/schemas`, engine restarted), the tests' files those of the working tree; for the second
+the working tree that became e2f85a5 (`.loop/abi127.sh sync`). `test_an_instant_reads_as_the_projects_time_zone`
+holds the second row's answers.
+
 ### A refresh that changed no source table starts 0 builds
 
-`.loop/abi127.sh test -q tests/test_process_log.py` on ee15ea0 (`test_rebuild_after_refresh` among its 31): passed.
+`.loop/abi127.sh test -q tests/test_process_log.py` on 577e47e (`test_rebuild_after_refresh` among its 32): passed.
 In it a refresh of a table the process doesn't read (suppliers) starts 0 builds; a new load of a table it reads
 starts exactly 1, named after that load's snapshot; the worker's own check for changed tables, run right after with
 nothing changed, loads nothing and starts 0; the same check with a table to load that the process doesn't read
@@ -1837,11 +1846,11 @@ exactly 1, named after that load's snapshot.
 
 ### Golden
 
-`.loop/abi127.sh test -q tests/test_ontology_nobreak.py tests/test_127_nobreak.py` on ee15ea0 (run together with
-tests/test_process_log.py and the Brewline test of the process data: 39 passed in 625 s): 7 passed, both files
+`.loop/abi127.sh test -q tests/test_ontology_nobreak.py tests/test_127_nobreak.py` on 577e47e (run together with
+tests/test_process_log.py and the Brewline test of the process data: 40 passed in 652 s): 7 passed, both files
 untouched since ab8e95d. The plans' SQL and the restricted views' text of a project without a process file are
 byte-identical to the recorded ones, and its bundle imports with no change.
 
-The whole suite on ee15ea0 in a container set up anew (`.loop/abi127.sh test -q -rf tests`): 6 failed, 584 passed,
-24 skipped in 4,767 s; the six are the ones that fail in this container on every commit (two of tests/test_app.py,
+The whole suite on 577e47e in a container set up anew (`.loop/abi127.sh test -q -rf tests`): 6 failed, 585 passed,
+24 skipped in 4,871 s; the six are the ones that fail in this container on every commit (two of tests/test_app.py,
 one each of test_ground.py, test_guardrails.py, test_jobs.py and test_supervise.py).
