@@ -21,6 +21,7 @@ from abi import (
     ingest,
     ml,  # noqa: F401  registers the ML actions
     optimize,  # noqa: F401  registers the optimiser actions
+    process,  # noqa: F401  registers the process actions
     ops,
     reports,  # noqa: F401  registers the report actions
     semantic,

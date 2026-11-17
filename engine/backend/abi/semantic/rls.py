@@ -598,7 +598,9 @@ def _sources(project: str) -> tuple[dict[str, dict], list[dict], list[dict]]:
 def unfiltered_outputs(project: str) -> list[str]:
     """Tables built from rows a rule filters but not filtered by those same rules: TR-1 tables whose merge/append steps
     read a filtered table or whose source step loads a filtered table's source (`source:<t>`, any depth,
-    H-01.4-fix-1) and ML predictions tables (ml_<id>, ML-5; one whose model file is gone too, 1.2.6 M9). A table with no rule of its own counts as filtered only
+    H-01.4-fix-1), ML predictions tables (ml_<id>, ML-5; one whose model file is gone too, 1.2.6 M9) and a process's tables (1.2.7 M1:
+    pm_<id>_events, made from every source and object type, so denied once one of them is filtered; pm_<id>_<type> is
+    filtered through its relationship to the object's table). A table with no rule of its own counts as filtered only
     when its relationships reach every ruled table its inputs are filtered by (a relationship to another ruled table
     doesn't hide the input's rows). D-110: also every table built from a table with a column rule unless it has a
     column rule of its own (its Owner chose what it hides). Restricted Viewers see none of their rows (default deny);
@@ -624,7 +626,8 @@ def _unfiltered_outputs(project: str) -> list[str]:
     if not ruled | cols:
         return []
     _, rels, fl = _sources(project)
-    g = lineage.graph(bundle(git.path(project)))
+    files = bundle(git.path(project))
+    g = lineage.graph(files)
 
     def roots(t: str, follow: bool) -> set[str]:
         """The ruled tables whose rules filter t: t itself if ruled, and every one its relationships reach; with
@@ -643,9 +646,12 @@ def _unfiltered_outputs(project: str) -> list[str]:
     # 1.2.6 M9: a predictions table whose model was deleted has no lineage left to say what it was made from: denied
     # (fail closed), as is any other model table named ml_<x> with no ml/<x>.json, until it gets a row rule of its own
     orphan = lambda t: t.startswith("ml_") and t not in ruled and not (git.path(project) / "ml" / f"{t[3:]}.json").is_file()  # noqa: E731
-    return sorted(t for n in g if n.startswith("table:") and (
+    from abi import process  # not at top: it imports this module
+
+    # 1.2.7 M1: a table a process's build left behind (its file gone) has no lineage left either: denied, as `orphan`
+    return sorted(process.leftover(project, files) - ruled | {t for n in g if n.startswith("table:") and (
         (t := n[6:]) not in ruled and set().union(*(roots(u, u != t) for u in ups(n))) - roots(t, False) or t not in cols and ups(n) & cols
-        or orphan(t)))
+        or orphan(t))})
 
 
 def explain(project: str, user_id: int) -> str:

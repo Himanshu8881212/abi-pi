@@ -242,7 +242,27 @@ def _ontology(files: dict):
             yield node, f"flow:{a['flow']}", "starts"
 
 
-BUILDERS = [_tables, _model, _measures, _datasets, _glossary, _reports, _tools, _flows, _agents, _ml, _ontology]
+def _process(files: dict):
+    """1.2.7 processes/<id>.json: the tables its build writes come from the tables it reads: pm_<id>_events from every
+    source, bridge table and object type; pm_<id>_<type> from the sources and bridge tables naming that type. The
+    process reads those tables and its object types. The table nodes are there from the save on, built or not:
+    row-level security denies what is made from filtered rows by them (rls.unfiltered_outputs)."""
+    for pid, p in _ids(files, "processes").items():
+        node, log = f"process:{pid}", f"table:pm_{pid}_events"
+        yield node, log, "event log"
+        for s in p.get("events", []):
+            for x in s.get("objects", []):
+                per = f"table:pm_{pid}_{str(x.get('type')).replace('-', '_')}"
+                yield node, per, "events per object"
+                yield node, f"object:{x.get('type')}", "object"
+                yield log, f"object:{x.get('type')}", "object"
+                for up, via in ((s.get("table"), "events"), (x.get("through"), "through")):
+                    if up:
+                        yield per, f"table:{up}", via
+                        yield log, f"table:{up}", via
+
+
+BUILDERS = [_tables, _model, _measures, _datasets, _glossary, _reports, _tools, _flows, _agents, _ml, _ontology, _process]
 
 
 def graph(files: dict) -> dict[str, dict[str, set[str]]]:
@@ -278,7 +298,7 @@ class LineageInput(BaseModel):
     project: str = Field(pattern=git.ID)
     object: str = Field(description='"<kind>:<id>": kind is source, table, entity, relationship, measure, dataset, term,'
                                     ' report, page ("<report>/<page>"), visual ("<report>/<page>/<visual>"), tool, flow, agent, ml,'
-                                    ' object (an ontology object type), link or action (an ontology action type),'
+                                    ' object (an ontology object type), link or action (an ontology action type), process,'
                                     ' e.g. "table:orders" or "measure:sales" (measure IDs from semantic_model)')
     direction: Literal["downstream", "upstream"] = Field(
         "downstream", description="downstream: what breaks if it changes; upstream: where it comes from")

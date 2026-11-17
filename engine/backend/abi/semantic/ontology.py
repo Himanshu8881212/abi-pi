@@ -433,7 +433,10 @@ def propose(project: str, user_id: int | None) -> dict:
     # 1.2.7 M0 (9b): a type is a thing, not every table. A fact table records what happened: keyed by one column of
     # its own (an order's ID) it is a type marked `event`; keyed by what it points at and by dates (figures per café
     # and month: targets) it is left out, and said so
-    ours = lambda t, i: i["key"] and t != date and t in cols and not (  # noqa: E731  M9: a model's predictions table is no type itself
+    from abi import process  # not at top: it imports this module
+
+    made = process.generated(project)  # 1.2.7 M1: the tables a process's build writes are no types either
+    ours = lambda t, i: i["key"] and t != date and t in cols and t not in made and not (  # noqa: E731  M9: a model's predictions table is no type itself
         t.startswith("ml_") and (git.path(project) / "ml" / f"{t[3:]}.json").is_file())
     points = {(r["from"]["table"], c): r["to"]["table"] for r in m["relationships"] for c in r["from"]["columns"]}  # a column that points at a table
     # (review R6) and not a day or a time: daily totals are figures per day, not records of what happened

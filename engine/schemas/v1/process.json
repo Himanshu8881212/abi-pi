@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.abi.invalid/v1/process.json",
+  "title": "Process",
+  "description": "processes/<id>.json (1.2.7): a process as an event log over the ontology. `events` lists the tables the events come from and the objects each event is about; `clean` tidies them. A build (after save_process, and after each refresh of a table it reads) writes model table pm_<id>_events, one row per event, and one pm_<id>_<type> per object type, the events of each object of that type in order. An event on several objects is one row in pm_<id>_events and one per object in a type's table: an event's own figures (how many events, an amount, working time) are counted from pm_<id>_events; a type's table counts per object of that type. A type's table is filtered by its object's row-level security rules; pm_<id>_events holds every event, so restricted readers get no rows of it once a rule filters something it is built from. `reference` and `sla` are checked by conformance. Builds live in the registry, not in Git.",
+  "type": "object",
+  "required": ["$schema", "id", "name", "case", "events"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {"const": "https://schema.abi.invalid/v1/process.json"},
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,30}$", "description": "Equals the file name; part of the generated tables' names (pm_<id>_events, pm_<id>_<type>)"},
+    "name": {"type": "string", "minLength": 1, "maxLength": 200, "description": "Display name, shown to users"},
+    "description": {"type": "string", "maxLength": 2000},
+    "case": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$", "description": "The object type a view starts from; one of the types under `objects`"},
+    "events": {
+      "type": "array", "minItems": 1, "maxItems": 20,
+      "description": "Where the events come from. A source is an event table (`activity` and `start`, one event per row) or a table with several timestamp columns (`stamps`, one event per row and filled timestamp)",
+      "items": {
+        "type": "object", "required": ["table", "objects"], "additionalProperties": false,
+        "properties": {
+          "table": {"$ref": "#/$defs/name", "description": "A loaded model table"},
+          "id": {"$ref": "#/$defs/name", "description": "The column that identifies an event (needed for `through`); without it events are numbered by their row"},
+          "activity": {"$ref": "#/$defs/name", "description": "The text column naming what happened"},
+          "start": {"$ref": "#/$defs/name", "description": "The DATE or TIMESTAMP column saying when it happened (or began); a row without it is dropped"},
+          "end": {"$ref": "#/$defs/name", "description": "The DATE or TIMESTAMP column saying when it ended: gives the event its duration"},
+          "attributes": {"type": "array", "maxItems": 50, "uniqueItems": true, "items": {"$ref": "#/$defs/name"},
+                         "description": "Other columns kept on the event (who did it, an amount)"},
+          "stamps": {"type": "object", "minProperties": 1, "maxProperties": 50, "additionalProperties": {"$ref": "#/$defs/name"},
+                     "propertyNames": {"minLength": 1, "maxLength": 200},
+                     "description": "Activity name to the DATE or TIMESTAMP column holding when it happened: each row gives one event per filled column; events of one row at the same time keep the order of the table's columns"},
+          "objects": {
+            "type": "array", "minItems": 1, "maxItems": 20,
+            "description": "The objects an event is about. An event with none is dropped",
+            "items": {
+              "type": "object", "required": ["type", "columns"], "additionalProperties": false,
+              "properties": {
+                "type": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$", "description": "An object type ID of model/ontology.json"},
+                "columns": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"$ref": "#/$defs/name"},
+                            "description": "The columns holding the object's key, in key order: of the source table (at most one object of the type per event), or of the `through` table"},
+                "through": {"$ref": "#/$defs/name", "description": "A table with one row per event and object, for events about several objects of the type"},
+                "event": {"$ref": "#/$defs/name", "description": "The `through` table's column holding the event's `id` (given with `through`)"}
+              }
+            }
+          }
+        },
+        "if": {"required": ["stamps"]},
+        "then": {"not": {"anyOf": [{"required": ["id"]}, {"required": ["activity"]}, {"required": ["start"]}, {"required": ["end"]}, {"required": ["attributes"]}]}},
+        "else": {"required": ["activity", "start"]}
+      }
+    },
+    "clean": {
+      "type": "object", "additionalProperties": false,
+      "description": "Clean-up, in this order: a row without a timestamp or an activity is dropped; `where`; `rename`; `drop`; an event about no object is dropped; `duplicates`. Every dropped row is counted by its reason in the build's run",
+      "properties": {
+        "rename": {"type": "object", "maxProperties": 200, "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 200},
+                   "description": "Activity name as the data has it to the name to use"},
+        "drop": {"type": "array", "maxItems": 200, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 200},
+                 "description": "Activities left out (after `rename`)"},
+        "where": {"type": "array", "maxItems": 20, "description": "Row filters on the sources' columns; all must hold",
+                  "items": {"type": "object", "required": ["column", "op", "value"], "additionalProperties": false, "properties": {
+                    "column": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}(\\.[A-Za-z_][A-Za-z0-9_]{0,62})?$",
+                               "description": "A column of a source table: `table.column`, or a bare name for every source that has that column"},
+                    "op": {"enum": ["=", "<>", "<", "<=", ">", ">=", "in"]},
+                    "value": {"type": ["string", "number", "boolean", "array"], "description": "One value; a list for `in`"}}}},
+        "duplicates": {"enum": ["keep", "drop"], "description": "Events of one source that are the same in every column: keep them all (default) or keep one"}
+      }
+    },
+    "reference": {
+      "type": "object", "required": ["start", "end", "flows"], "additionalProperties": false,
+      "description": "The allowed behaviour, checked by conformance",
+      "properties": {
+        "from": {"enum": ["variant", "drawn", "bpmn", "discovered"], "description": "Where it came from"},
+        "start": {"$ref": "#/$defs/activities", "description": "Activities a case may start with"},
+        "end": {"$ref": "#/$defs/activities", "description": "Activities a case may end with"},
+        "flows": {"type": "array", "maxItems": 2000, "description": "Allowed pairs: one activity directly followed by another",
+                  "items": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/activity"}}},
+        "optional": {"$ref": "#/$defs/activities", "description": "Steps a case may skip"},
+        "any_order": {"type": "array", "maxItems": 200, "items": {"$ref": "#/$defs/activities"}, "description": "Sets of steps that may come in any order"},
+        "repeat": {"type": "object", "maxProperties": 200, "additionalProperties": {"type": "integer", "minimum": 1, "maximum": 1000},
+                   "description": "How often a step may happen in one case (default once)"}
+      }
+    },
+    "sla": {
+      "type": "array", "maxItems": 50,
+      "items": {
+        "type": "object", "required": ["id", "name", "from", "to", "within_hours"], "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,62}$"},
+          "name": {"type": "string", "minLength": 1, "maxLength": 200},
+          "from": {"$ref": "#/$defs/activity"}, "to": {"$ref": "#/$defs/activity"},
+          "within_hours": {"type": "number", "exclusiveMinimum": 0}
+        }
+      }
+    },
+    "refresh_minutes": {"type": "integer", "minimum": 5, "maximum": 1440, "description": "How often open cases' ages are refreshed"}
+  },
+  "$defs": {
+    "name": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$"},
+    "activity": {"type": "string", "minLength": 1, "maxLength": 200},
+    "activities": {"type": "array", "maxItems": 200, "uniqueItems": true, "items": {"$ref": "#/$defs/activity"}}
+  },
+  "examples": [
+    {
+      "$schema": "https://schema.abi.invalid/v1/process.json",
+      "id": "supply", "name": "Supply", "description": "From a café's purchase order to the paid invoice.",
+      "case": "purchase_order",
+      "events": [
+        {"table": "supply_events", "id": "event_id", "activity": "activity", "start": "started_at", "end": "ended_at",
+         "attributes": ["done_by", "amount"],
+         "objects": [{"type": "delivery", "columns": ["delivery_id"]},
+                     {"type": "purchase_order", "through": "supply_event_orders", "event": "event_id", "columns": ["po_id"]}]},
+        {"table": "purchase_orders", "stamps": {"Order placed": "placed_at", "Order approved": "approved_at"},
+         "objects": [{"type": "purchase_order", "columns": ["po_id"]}]}
+      ],
+      "clean": {"rename": {"GR": "Goods received"}, "drop": ["Heartbeat"],
+                "where": [{"column": "started_at", "op": ">=", "value": "2025-01-01"}], "duplicates": "drop"},
+      "reference": {"from": "variant", "start": ["Order placed"], "end": ["Invoice paid"],
+                    "flows": [["Order placed", "Order approved"], ["Order approved", "Goods received"],
+                              ["Goods received", "Invoice received"], ["Invoice received", "Invoice paid"]],
+                    "optional": ["Reminder sent"], "any_order": [["Goods received", "Invoice received"]],
+                    "repeat": {"Goods received": 2}},
+      "sla": [{"id": "delivered_in_5_days", "name": "Delivered within 5 days", "from": "Order approved",
+               "to": "Goods received", "within_hours": 120}],
+      "refresh_minutes": 60
+    }
+  ]
+}

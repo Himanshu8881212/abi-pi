@@ -23,7 +23,7 @@ from procrastinate.exceptions import AlreadyEnqueued, AppNotOpen
 from procrastinate.jobs import Status
 
 import abi.app  # noqa: F401  registers every action a flow step may run
-from abi import db, flows, ingest, ml, optimize, semantic, storage, tools
+from abi import db, flows, ingest, ml, optimize, process, semantic, storage, tools
 from abi.actions import ActionFailed
 from abi.agent import notify_change
 from abi.agents import runs
@@ -119,6 +119,13 @@ def run_optimizer(run_id: str) -> None:
 
 
 @app.task(queue="heavy")
+def build_process(run_id: str) -> None:
+    """1.2.7 M1: a queued build of a process's event log (after save_process, or a refresh of a table it reads); the
+    outcome is in analysis_runs."""
+    process.job(run_id)
+
+
+@app.task(queue="heavy")
 def load(run: str) -> None:
     """M3.2: a big add_data, set_steps or refresh, queued by the action; the outcome is in load_runs."""
     ingest.job(run)
@@ -179,9 +186,10 @@ async def retry_stalled_runs(timestamp: int) -> None:
     for job in await app.job_manager.get_stalled_jobs(task_name=load.name):  # a load isn't resumed: its run fails
         await asyncio.to_thread(ingest.interrupted, job.task_kwargs["run"])
         await app.job_manager.finish_job(job, Status.FAILED, delete_job=False)
-    for job in await app.job_manager.get_stalled_jobs(task_name=run_optimizer.name):  # nor an optimiser's run (1.2.6 M12)
-        await asyncio.to_thread(optimize.interrupted, job.task_kwargs["run_id"])
-        await app.job_manager.finish_job(job, Status.FAILED, delete_job=False)
+    for task, ended in ((run_optimizer, optimize.interrupted), (build_process, process.interrupted)):  # nor an optimiser's run
+        for job in await app.job_manager.get_stalled_jobs(task_name=task.name):  # (1.2.6 M12), nor a process build (1.2.7 M1)
+            await asyncio.to_thread(ended, job.task_kwargs["run_id"])
+            await app.job_manager.finish_job(job, Status.FAILED, delete_job=False)
     # M4 review: the other heavy jobs end failed, so `doing` holds no lock (a 1.2 M4.1 job's) and the next one runs
     for name in (refresh_changed.name, build_copies.name, train_model.name, score_model.name, purge_archive.name):
         for job in await app.job_manager.get_stalled_jobs(task_name=name):
@@ -287,7 +295,8 @@ def purge_archive(timestamp: int) -> None:
 
 
 OUTCOME = {load.name: ("load_runs", "run"), train_model.name: ("ml_runs", "run_id"), score_model.name: ("ml_runs", "run_id"),
-           run_flow.name: ("flow_runs", "run_id"), run_optimizer.name: ("optimizer_runs", "run_id")}  # where a job keeps its own outcome: (table, the argument naming the row)
+           run_flow.name: ("flow_runs", "run_id"), run_optimizer.name: ("optimizer_runs", "run_id"),
+           build_process.name: ("analysis_runs", "run_id")}  # where a job keeps its own outcome: (table, the argument naming the row)
 
 
 def run(job: int) -> int:

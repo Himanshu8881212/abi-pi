@@ -212,8 +212,8 @@ def _supply(db, out: Path, scale: float) -> None:
     copy("purchase_orders", "SELECT po_id, cafe_id, supplier_id, placed_at, approved_at, cancelled_at, amount FROM po ORDER BY po_id")
     copy("deliveries", "SELECT delivery_id, supplier_id, transport FROM dl WHERE dispatched_at < TIMESTAMP '2026-01-01' ORDER BY delivery_id")
     copy("supply_events", "SELECT event_id, activity, started_at, ended_at, delivery_id, done_by, amount FROM ev ORDER BY event_id")
-    copy("supply_event_orders", """SELECT e.event_id, coalesce(e.po_id, p.po_id) AS po_id FROM ev e LEFT JOIN pt p
-      ON e.kind = 2 AND p.delivery_id = e.delivery_id WHERE e.kind > 1 ORDER BY 1, 2""")
+    copy("supply_event_orders", """SELECT e.event_id, p.po_id FROM ev e JOIN pt p USING (delivery_id) WHERE e.kind = 2
+      UNION ALL SELECT event_id, po_id FROM ev WHERE kind > 2 ORDER BY 1, 2""")
 
 
 def _supply_answers(out) -> dict:

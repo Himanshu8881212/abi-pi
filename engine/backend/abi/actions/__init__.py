@@ -254,6 +254,7 @@ PRODUCTION_READS = frozenset({
     "get_object", "list_objects", "propose_ontology",  # 1.2.6 M6: objects as the caller sees them; a draft that saves nothing
     "find_same",  # 1.2.6 M11: proposes which objects look the same; merges nothing
     "optimizers",  # 1.2.6 M12: the optimisers and the caller's latest plans
+    "process", "propose_process",  # 1.2.7 M1: the processes as saved, with their builds; drafts that save nothing
     "project_locale", "readiness", "remote_branches", "remote_settings", "report_snapshot", "rls_rules", "run_agent",
     "run_tool", "semantic_model", "semantic_query", "sql_query", "visual_data",
 })

@@ -52,7 +52,7 @@ from pydantic import (
     ValidationError,
 )
 
-from abi import actions, db, flows, ml, security, semantic, storage, transform, writeback
+from abi import actions, db, flows, ml, process, security, semantic, storage, transform, writeback
 from abi.actions import ActionFailed, action, audit, current_user, production_refusal
 from abi.agent import notify_change
 from abi.project import SCHEMA, SCHEMAS, git, imports
@@ -847,6 +847,7 @@ def _landed(conn, project: str, table: str, author: str, fingerprint: str, snap:
     writeback.review(project, table)  # WB-6: the refresh may orphan edits or conflict with them
     flows.after_refresh(project, table, snap)  # FL-2
     ml.after_refresh(project, table, snap)  # ML-6: score the models reading it
+    process.after_refresh(project, table, snap)  # 1.2.7 M1: build the event logs reading it
     quality.capture(project, table)  # IN-8: this load's stats (never raises)
     return snap
 

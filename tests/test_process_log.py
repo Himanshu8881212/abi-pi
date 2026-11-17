@@ -1,0 +1,694 @@
+"""1.2.7 M1 (needs the engine and its worker at :8780, no LLM): the event log as code. processes/<id>.json is checked
+like an import (file, JSON path, fix), changes only after the person confirms a preview with the tables its build
+writes and what reads them, and is built in the worker by DuckDB SQL: pm_<id>_events (one row per event) and one
+pm_<id>_<type> per object type, in the model with keys and relationships, so a restricted Viewer reads only their own
+cases and never the whole log. Two logs: Brewline's supply process (bench/brewline.py --supply: an event about several
+purchase orders, known answers from the generator) and a helpdesk of three tickets written out below, where every
+count, order and duration is known by hand."""
+import copy
+import hashlib
+import json
+import secrets
+import sys
+import time
+from pathlib import Path
+
+import pytest
+from conftest import drop, parquet
+from jsonschema import Draft202012Validator
+from test_engine import engine
+from test_ontology_nobreak import ROUNDTRIP
+from test_pages import sure
+
+import abi
+from pi_driver import ROOT
+
+sys.path.insert(0, str(ROOT / "bench"))
+import brewline  # noqa: E402
+
+P = "pi_process"
+SCHEMA = json.loads((ROOT / "engine/schemas/v1/process.json").read_text())
+PLAN = {  # the plan's example (docs/plans/1.2.7.md §2.1), as written there
+    "$schema": "https://schema.abi.invalid/v1/process.json",
+    "id": "supply", "name": "Supply", "description": "From a café's purchase order to the paid invoice.",
+    "case": "purchase_order",
+    "events": [
+        {"table": "supply_events", "id": "event_id", "activity": "activity", "start": "started_at", "end": "ended_at",
+         "attributes": ["done_by", "amount"],
+         "objects": [{"type": "delivery", "columns": ["delivery_id"]},
+                     {"type": "purchase_order", "through": "supply_event_orders", "event": "event_id", "columns": ["po_id"]}]},
+        {"table": "purchase_orders", "stamps": {"Order placed": "placed_at", "Order approved": "approved_at"},
+         "objects": [{"type": "purchase_order", "columns": ["po_id"]}]},
+    ],
+    "clean": {"rename": {"GR": "Goods received"}, "drop": ["Heartbeat"],
+              "where": [{"column": "started_at", "op": ">=", "value": "2025-01-01"}], "duplicates": "drop"},
+    "reference": {"from": "variant", "start": ["Order placed"], "end": ["Invoice paid"],
+                  "flows": [["Order placed", "Order approved"], ["Order approved", "Goods received"],
+                            ["Goods received", "Invoice received"], ["Invoice received", "Invoice paid"]],
+                  "optional": ["Reminder sent"], "any_order": [["Goods received", "Invoice received"]],
+                  "repeat": {"Goods received": 2}},
+    "sla": [{"id": "delivered_in_5_days", "name": "Delivered within 5 days", "from": "Order approved",
+             "to": "Goods received", "within_hours": 120}],
+    "refresh_minutes": 60,
+}
+SUPPLY = {  # what this module saves for Brewline: the example's sources, with every time of an order and no clean-up
+    "id": "supply", "name": "Supply", "description": "From a café's purchase order to the paid invoice.", "case": "purchase_order",
+    "events": [PLAN["events"][0],
+               {"table": "purchase_orders", "stamps": {"Order placed": "placed_at", "Order approved": "approved_at", "Order cancelled": "cancelled_at"},
+                "objects": [{"type": "purchase_order", "columns": ["po_id"]}]}],
+}
+# The helpdesk. Three tickets with the times they were opened, assigned and closed (T2 is assigned the minute it is
+# opened and still open; T3 was never assigned), and fourteen rows of ticket_events
+TICKETS = """ticket_id,team,opened_at,assigned_at,closed_at
+T1,North,2025-03-01 09:00:00,2025-03-01 09:30:00,2025-03-02 10:00:00
+T2,North,2025-03-01 10:00:00,2025-03-01 10:00:00,
+T3,South,2025-03-03 08:00:00,,2025-03-03 09:00:00
+"""
+EVENTS = """event_id,ticket_id,activity,started_at,ended_at,agent,minutes
+1,T1,Call,2025-03-01 11:00:00,2025-03-01 11:20:00,Ada,20
+2,T1,Note,2025-03-01 11:00:00,,Ada,0
+3,T2,Reply,2025-03-02 09:00:00,,Bo,5
+4,T2,Call,2025-03-02 09:00:00,,Bo,7
+5,T2,Reply,2025-03-02 09:00:00,,Bo,3
+6,T3,Escalation,2025-03-03 08:00:00,,Di,2
+7,T1,CALL,2025-03-01 12:00:00,2025-03-01 12:10:00,Cy,10
+8,T1,Heartbeat,2025-03-01 12:30:00,,sys,0
+9,T1,Call,,,Cy,4
+10,,Call,2025-03-01 13:00:00,,Cy,6
+11,T3,Call,2024-12-31 10:00:00,,Cy,8
+12,T3,Call,2025-03-03 08:30:00,2025-03-03 08:45:00,Di,15
+12,T3,Call,2025-03-03 08:30:00,2025-03-03 08:45:00,Di,15
+13,T3,,2025-03-03 08:50:00,,Di,1
+"""
+DESK = {
+    "id": "desk", "name": "Helpdesk", "case": "ticket",
+    "events": [{"table": "tickets", "stamps": {"Opened": "opened_at", "Assigned": "assigned_at", "Closed": "closed_at"},
+                "objects": [{"type": "ticket", "columns": ["ticket_id"]}]},
+               {"table": "ticket_events", "id": "event_id", "activity": "activity", "start": "started_at", "end": "ended_at",
+                "attributes": ["minutes"], "objects": [{"type": "ticket", "columns": ["ticket_id"]}]}],
+    "clean": {"rename": {"CALL": "Call"}, "drop": ["Heartbeat"], "where": [{"column": "started_at", "op": ">=", "value": "2025-01-01"}],
+              "duplicates": "drop"},
+}
+ONTO = {"objects": [
+    {"id": "cafe", "table": "cafes", "name": "Café", "plural": "Cafés", "title": "cafe_name"},
+    {"id": "supplier", "table": "suppliers", "name": "Supplier", "plural": "Suppliers", "title": "supplier_name"},
+    {"id": "purchase_order", "table": "purchase_orders", "name": "Purchase order", "plural": "Purchase orders", "title": "po_id"},
+    {"id": "delivery", "table": "deliveries", "name": "Delivery", "plural": "Deliveries", "title": "delivery_id"},
+    {"id": "ticket", "table": "tickets", "name": "Ticket", "plural": "Tickets", "title": "ticket_id"}]}
+STATE = r"""
+import hashlib, json, sys
+import abi.app  # noqa: F401
+from abi import db
+from abi.project import bundle, git
+from abi.semantic import rls
+a = json.loads(sys.stdin.read())
+P = a["project"]
+with db.connect() as c:
+    runs = [dict(r) for r in c.execute("SELECT id::text AS run, name, key, status FROM analysis_runs WHERE project = %s ORDER BY created", [P])]
+    reads = [r["query"] for r in c.execute("SELECT query FROM query_log WHERE project = %s AND user_id = %s AND query ? 'propose_process'"
+                                           " ORDER BY id", [P, a.get("user", 0)])]
+print(json.dumps({"files": {k: hashlib.sha256(json.dumps(v, sort_keys=True).encode()).hexdigest() for k, v in bundle.bundle(git.path(P)).items()},
+                  "runs": runs, "reads": reads, "denied": rls.unfiltered_outputs(P), "filtered": sorted(rls.filtered(P))}))
+"""
+
+
+def state(user: int = 0) -> dict:
+    """The project's files (path: sha256), its build runs, what row-level security denies and filters, and the
+    proposal's reads logged for `user`: read in the engine."""
+    r = engine(STATE, timeout=120, stdin=json.dumps({"project": P, "user": user}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    return json.loads(r.stdout.splitlines()[-1])
+
+
+READ = r"""
+import json, sys
+from abi import semantic
+a = json.loads(sys.stdin.read())
+print(json.dumps([[list(r) for r in semantic.execute(a["project"], q, {"test": "process"})] for q in a["sql"]], default=str))
+"""
+MEASURES = {"received": "SUM(pm_supply_events.amount)", "log_events": "COUNT(pm_supply_events.event_id)",
+            "order_steps": "COUNT(pm_supply_purchase_order.event_id)"}  # an event's own figures, and steps per purchase order
+
+
+def sql(q: str) -> list:
+    """One read as the owner through sql_query (its fixed list of functions)."""
+    return abi.call("sql_query", project=P, sql=q)["rows"]
+
+
+def deep(*qs: str) -> list:
+    """Reads with any DuckDB function (string_agg, lead), run in the engine as a system read: one result per query."""
+    r = engine(READ, timeout=300, stdin=json.dumps({"project": P, "sql": qs}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    return json.loads(r.stdout.splitlines()[-1])
+
+
+def refused(status: int, action: str, token: str | None = None, **args) -> dict:
+    """The body of ABI's refusal; a question (409 with a token) is answered yes first, as the person would."""
+    with abi.as_user(token):
+        try:
+            sure(action, project=P, **args)
+        except abi.ActionError as e:
+            assert e.status == status, e.body
+            return e.body
+    raise AssertionError(f"{action} was not refused")
+
+
+def errors(p: dict) -> list:
+    """(file, JSON path) of every error save_process refuses process `p` with; each says what is wrong and the fix."""
+    body = refused(422, "save_process", process=p)
+    assert all(e["error"] and e["fix"] for e in body["errors"]), body
+    return [(e["file"], e["path"]) for e in body["errors"]]
+
+
+def shown(pid: str) -> dict | None:
+    return next((x for x in abi.call("process", project=P)["processes"] if x["id"] == pid), None)
+
+
+def build_of(pid: str, after: str | None = None, timeout: float = 600) -> dict:
+    """The latest build of process `pid` once it has ended (another one than run `after`)."""
+    end = time.monotonic() + timeout
+    while (b := shown(pid)["build"]).get("run") == after or b["status"] not in ("ok", "failed"):
+        assert time.monotonic() < end, b
+        time.sleep(1)
+    return b
+
+
+def save(p: dict) -> dict:
+    """save_process with the person's yes, then its build's outcome."""
+    was = (shown(p["id"]) or {"build": {}})["build"].get("run")
+    assert sure("save_process", project=P, process=p)["build"]
+    return build_of(p["id"], after=was)
+
+
+def measures() -> list:
+    return json.loads((Path(abi.ABI_PROJECTS) / P / "model/measures.json").read_text())["measures"]
+
+
+@pytest.fixture(scope="module")
+def log(tmp_path_factory):
+    """P: Brewline's cafés and its supply tables at the smallest scale, the helpdesk's two tables, an ontology over
+    them, and a Viewer who sees the North region's cafés and the North team's tickets (two row rules) and no agent
+    names (a column rule on ticket_events)."""
+    d = tmp_path_factory.mktemp("process")
+    known = brewline.generate(d, 0.005, supply=True)["supply"]
+    (d / "tickets.csv").write_text(TICKETS)
+    (d / "ticket_events.csv").write_text(EVENTS)
+    if P in {x["project"] for x in abi.call("list_projects")["projects"]}:
+        drop([P])
+    abi.load("demo", P, [str(d / f"{t}/{t}.parquet") for t in ("cafes", *brewline.SUPPLY)] + parquet(d / "tickets.csv", d / "ticket_events.csv"))
+    for t, k in {"cafes": "cafe_id", "suppliers": "supplier_id", "purchase_orders": "po_id", "deliveries": "delivery_id",
+                 "supply_events": "event_id", "tickets": "ticket_id"}.items():
+        abi.call("set_table", project=P, table=t, key=[k])
+    for a, b in (("purchase_orders.cafe_id", "cafes.cafe_id"), ("purchase_orders.supplier_id", "suppliers.supplier_id"),
+                 ("deliveries.supplier_id", "suppliers.supplier_id"), ("supply_events.delivery_id", "deliveries.delivery_id"),
+                 ("supply_event_orders.event_id", "supply_events.event_id"), ("supply_event_orders.po_id", "purchase_orders.po_id"),
+                 ("ticket_events.ticket_id", "tickets.ticket_id")):
+        abi.call("add_relationship", project=P, **{"from": a, "to": b})
+    sure("save_ontology", project=P, ontology=ONTO)
+    name, pw = f"pi_proc_v_{time.strftime('%H%M%S')}", secrets.token_urlsafe(16)
+    abi.call("create_user", name=name, password=pw)
+    try:
+        abi.call("set_role", project=P, user=name, role="viewer")
+        uid = {u["name"]: u["id"] for u in abi.call("rls_rules", project=P)["accounts"]}[name]
+        sure("set_rls_rule", project=P, id="region", table="cafes", column="region", users={uid: ["North"]})
+        sure("set_rls_rule", project=P, id="team", table="tickets", column="team", users={uid: ["North"]})
+        sure("set_column_rule", project=P, id="agent", table="ticket_events", columns=["agent"])
+        yield {"viewer": abi.login(name, pw)[1]["token"], "uid": int(uid), "known": known, "dir": d}
+    finally:
+        sure("delete_user", name=name)
+        drop([P])
+
+
+@pytest.fixture(scope="module")
+def built(log):
+    """Both processes saved (the person's yes given here) and built."""
+    for p in (SUPPLY, DESK):
+        b = save(p)
+        assert b["status"] == "ok", b
+        log[p["id"]] = b
+    for i, x in MEASURES.items():
+        abi.call("set_measure", project=P, id=i, name=i, expression=x)
+    return log
+
+
+def viewer(log, action: str, **args) -> dict:
+    with abi.as_user(log["viewer"]):
+        return abi.call(action, project=P, **args)
+
+
+# ---------- #10 the file: schema and import checks ----------
+
+def test_schema_examples_valid():
+    Draft202012Validator.check_schema(SCHEMA)
+    v = Draft202012Validator(SCHEMA)
+    assert SCHEMA["examples"] == [PLAN], "the schema's example is the plan's"
+    assert not list(v.iter_errors(PLAN)) and all(not list(v.iter_errors({"$schema": PLAN["$schema"], **p})) for p in (SUPPLY, DESK))
+    bad = copy.deepcopy(PLAN)
+    del bad["events"][0]["start"]  # an event table without its time
+    bad["events"][1]["activity"] = "status"  # stamps and an activity column are two kinds of source
+    bad["id"] = "my-supply"  # the id is part of the tables' names
+    bad["clean"]["duplicates"] = "merge"
+    assert {(e.validator, e.json_path) for e in v.iter_errors(bad)} == {
+        ("required", "$.events[0]"), ("not", "$.events[1]"), ("pattern", "$.id"), ("enum", "$.clean.duplicates")}
+
+
+def test_missing_timestamp_column_names_file_field_fix(log):
+    before = state()["files"]
+    p = copy.deepcopy(SUPPLY)
+    p["events"][0]["start"] = "happened_at"
+    body = refused(422, "save_process", process=p)
+    [e] = body["errors"]
+    assert (e["file"], e["path"]) == ("processes/supply.json", "$.events[0].start"), body
+    assert e["error"] == "Table 'supply_events' has no column 'happened_at'." and "started_at" in e["fix"] and e["fix"].startswith("Use one of:")
+    p["events"][0]["start"] = "done_by"  # there, and text
+    [e] = refused(422, "save_process", process=p)["errors"]
+    assert e["path"] == "$.events[0].start" and "is VARCHAR, not a date or a time" in e["error"] and "DATE or TIMESTAMP" in e["fix"]
+    p = copy.deepcopy(SUPPLY)
+    p["events"][0]["activity"], p["events"][0]["end"], p["events"][1]["stamps"]["Order placed"] = "amount", "nope", "amount"
+    assert errors(p) == [("processes/supply.json", "$.events[0].activity"), ("processes/supply.json", "$.events[0].end"),
+                         ("processes/supply.json", '$.events[1].stamps["Order placed"]')]
+    p = copy.deepcopy(SUPPLY)
+    p["events"][0]["table"], p["events"][0]["attributes"], p["case"] = "supply_log", ["done_by", "seq"], "supplier"
+    assert errors(p) == [("processes/supply.json", "$.case"), ("processes/supply.json", "$.events[0].table")]
+    p["events"][0]["table"] = "supply_events"
+    assert errors(p) == [("processes/supply.json", "$.case"), ("processes/supply.json", "$.events[0].attributes[1]")]
+    p = copy.deepcopy(DESK)
+    p["clean"]["where"] = [{"column": "opened", "op": ">=", "value": "2025-01-01"}, {"column": "started_at", "op": "in", "value": "2025-01-01"}]
+    p["sla"] = [{"id": "fast", "name": "Closed in a day", "from": "Opened", "to": "Closed", "within_hours": 24}] * 2
+    assert errors(p) == [("processes/desk.json", "$.clean.where[0].column"), ("processes/desk.json", "$.clean.where[1].value"),
+                         ("processes/desk.json", "$.sla[1].id")]
+    assert state()["files"] == before, "a refused save writes nothing"
+
+
+def test_object_type_key_mismatch_refused(log):
+    p = copy.deepcopy(SUPPLY)
+    p["events"][0]["objects"][0]["columns"] = ["amount"]  # a DECIMAL where the delivery's key is text
+    body = refused(422, "save_process", process=p)
+    [e] = body["errors"]
+    assert (e["file"], e["path"]) == ("processes/supply.json", "$.events[0].objects[0].columns[0]"), body
+    assert "'supply_events.amount' is DECIMAL(12,2)" in e["error"] and "'deliveries.delivery_id', the key of object type 'delivery', is VARCHAR" in e["error"]
+    assert "set_type" in e["fix"]
+    p = copy.deepcopy(SUPPLY)
+    p["events"][0]["objects"][0]["type"] = "truck"  # no such type
+    p["events"][0]["objects"][1]["columns"] = ["po_id", "event_id"]  # two columns for a key of one
+    p["events"][1]["objects"].append({"type": "purchase_order", "columns": ["po_id"]})  # the same type twice on one row
+    assert errors(p) == [("processes/supply.json", "$.events[0].objects[0].type"), ("processes/supply.json", "$.events[0].objects[1].columns"),
+                         ("processes/supply.json", "$.events[1].objects[1].type")]
+    # a bridge table chains: it needs the event's id, a column of the id's type, and both `through` and `event`
+    p = copy.deepcopy(SUPPLY)
+    p["events"][0]["objects"][1]["event"] = "po_id"
+    del p["events"][0]["id"]
+    assert errors(p) == [("processes/supply.json", "$.events[0].objects[1].through")]
+    p = copy.deepcopy(DESK)
+    p["events"][1]["objects"] = [{"type": "ticket", "through": "supply_event_orders", "event": "event_id", "columns": ["po_id"]},
+                                 {"type": "cafe", "through": "tickets", "columns": ["team"]}]
+    got = errors(p)
+    assert got == [("processes/desk.json", "$.events[1].objects[0].event"), ("processes/desk.json", "$.events[1].objects[1]")], got
+
+
+# ---------- #11 the build ----------
+
+TRACES = """SELECT po_id, string_agg(activity, ' > ' ORDER BY t, o) AS path FROM (
+  SELECT po_id, 'Order placed' AS activity, placed_at AS t, 0 AS o FROM purchase_orders UNION ALL
+  SELECT po_id, 'Order approved', approved_at, 1 FROM purchase_orders WHERE approved_at IS NOT NULL UNION ALL
+  SELECT po_id, 'Order cancelled', cancelled_at, 2 FROM purchase_orders WHERE cancelled_at IS NOT NULL UNION ALL
+  SELECT b.po_id, e.activity, e.started_at, 3 FROM supply_event_orders b JOIN supply_events e USING (event_id)) GROUP BY 1"""
+
+
+def test_build_writes_events_and_per_type_tables(built):
+    k, b = built["known"], built["supply"]
+    received = sql("SELECT count(*) FROM supply_events WHERE activity = 'Goods received'")[0][0]
+    assert b["tables"] == {"pm_supply_events": k["events"], "pm_supply_delivery": sql("SELECT count(delivery_id) FROM supply_events")[0][0],
+                           "pm_supply_purchase_order": k["events"] - k["rows"]["supply_events"] + k["rows"]["supply_event_orders"]}, b
+    assert b["events"] == k["events"] == sql("SELECT count(*) FROM pm_supply_events")[0][0] and b["dropped"] == dict.fromkeys(b["dropped"], 0)
+    # one snapshot for the three tables, made by the build
+    made = [r for r in abi.call("list_snapshots", project=P, limit=200)["rows"] if r[3] == "build process supply"]
+    assert [r[0] for r in made] == [b["snapshot"]], made
+    cols = lambda t: abi.call("sql_query", project=P, sql=f"SELECT * FROM {t} LIMIT 0")["columns"]  # noqa: E731
+    event = ["event_id", "activity", "started_at", "ended_at", "duration_seconds", "done_by", "amount"]
+    assert cols("pm_supply_events") == [*event, "ord"]
+    assert cols("pm_supply_purchase_order") == ["po_id", *event, "seq", "next_activity", "wait_seconds"]
+    assert cols("pm_supply_delivery") == ["delivery_id", *event, "seq", "next_activity", "wait_seconds"]
+    happy = " > ".join(k["happy_path"]["steps"])
+    same, on_path, order = deep(
+        # each order's steps in order are what the source tables say, read another way
+        f"""SELECT count(*), count(*) FILTER (a.path IS DISTINCT FROM b.path) FROM ({TRACES}) a FULL JOIN
+          (SELECT po_id, string_agg(activity, ' > ' ORDER BY seq) AS path FROM pm_supply_purchase_order GROUP BY 1) b USING (po_id)""",
+        f"""SELECT count(*) FROM (SELECT po_id FROM pm_supply_purchase_order GROUP BY 1
+          HAVING string_agg(activity, ' > ' ORDER BY seq) = '{happy}')""",
+        # seq counts from 1 without gaps, next_activity is the next row's activity, the wait runs to the next row's start
+        """SELECT count(*) FROM (SELECT *, row_number() OVER w AS n, lead(activity) OVER w AS nxt, lead(started_at) OVER w AS later
+          FROM pm_supply_purchase_order WINDOW w AS (PARTITION BY po_id ORDER BY seq)) WHERE seq <> n OR nxt IS DISTINCT FROM next_activity
+          OR wait_seconds IS DISTINCT FROM CASE WHEN later IS NOT NULL THEN greatest(date_diff('second', coalesce(ended_at, started_at), later), 0) END""")
+    assert same == [[k["rows"]["purchase_orders"], 0]] and on_path == [[k["happy_path"]["orders"]]] and order == [[0]]
+    # the planted answer shows: the slow supplier between the approval and the goods, to the generator's own figure
+    slow = sql("""SELECT o.supplier_id, median(date_diff('minute', a.started_at, g.started_at)) / 1440 FROM pm_supply_purchase_order a
+      JOIN pm_supply_purchase_order g USING (po_id) JOIN purchase_orders o USING (po_id)
+      WHERE a.activity = 'Order approved' AND g.activity = 'Goods received' GROUP BY 1 ORDER BY 2 DESC LIMIT 2""")
+    assert [(s, round(d, 2)) for s, d in slow][0] == (k["slow"]["supplier"], k["slow"]["median_days"]) and round(slow[1][1], 2) == k["slow"]["next_slowest_median_days"]
+    assert sql("SELECT activity, count(*) FROM pm_supply_delivery GROUP BY 1 ORDER BY 1") == [
+        ["Delivery dispatched", k["rows"]["deliveries"]], ["Goods received", received]]
+    # in the model: keyed, described, a type's table many-to-one to its object's table and to the events table
+    m = abi.call("semantic_model", project=P, all=True)
+    assert {t: m["tables"][t]["key"] for t in b["tables"]} == {"pm_supply_events": ["event_id"], "pm_supply_delivery": ["delivery_id", "event_id"],
+                                                               "pm_supply_purchase_order": ["po_id", "event_id"]}
+    assert all(m["tables"][t]["description"] for t in b["tables"])
+    rels = {(r["from"]["table"], *r["from"]["columns"], r["to"]["table"]) for r in m["relationships"] if r["from"]["table"].startswith("pm_supply_")}
+    assert rels == {("pm_supply_purchase_order", "po_id", "purchase_orders"), ("pm_supply_purchase_order", "event_id", "pm_supply_events"),
+                    ("pm_supply_delivery", "delivery_id", "deliveries"), ("pm_supply_delivery", "event_id", "pm_supply_events")}
+    assert not [g for g in abi.call("readiness", project=P)["missing"] if "pm_supply" in g], "keys and relationships hold; nothing is asked for them"
+    # the run is in the registry, and the read of the definitions shows it
+    got = shown("supply")
+    assert got["events"] == SUPPLY["events"] and got["tables"] == {"pm_supply_events": None, "pm_supply_delivery": "delivery",
+                                                                   "pm_supply_purchase_order": "purchase_order"}
+    assert got["build"]["status"] == "ok" and got["build"]["run"] in {r["run"] for r in state()["runs"] if r["name"] == "supply"}
+
+
+def test_cleanup_counts_dropped_rows_by_reason(built):
+    b = built["desk"]
+    # of fourteen rows: 9 has no time, 13 no activity, 11 is before 2025 (where), 8 a Heartbeat (drop), 10 about no
+    # ticket, the second 12 the same as the first; a ticket's missing time (T2 not closed, T3 not assigned) is no row
+    assert b["dropped"] == {"no_timestamp": 1, "no_activity": 1, "filtered": 1, "activity": 1, "no_object": 1, "duplicate": 1}, b
+    assert b["events"] == 7 + 14 - 6 == sql("SELECT count(*) FROM pm_desk_events")[0][0]
+    assert sql("SELECT event_id FROM pm_desk_events WHERE event_id NOT LIKE '0.%' ORDER BY CAST(event_id AS INTEGER)") == [[str(i)] for i in (1, 2, 3, 4, 5, 6, 7, 12)]
+    assert sql("SELECT activity, count(*) FROM pm_desk_events GROUP BY 1 ORDER BY 1") == [
+        ["Assigned", 2], ["Call", 4], ["Closed", 2], ["Escalation", 1], ["Note", 1], ["Opened", 3], ["Reply", 2]], "CALL is a Call, no Heartbeat"
+    # the same rows kept twice share an id: the build refuses, says where and how to fix it, and leaves the tables as they were
+    keep = copy.deepcopy(DESK)
+    keep["clean"]["duplicates"] = "keep"
+    bad = save(keep)
+    assert bad["status"] == "failed" and bad["error"].startswith("processes/desk.json $.events[1].id: 1 event(s) have the id of another event"), bad
+    assert 'clean.duplicates to "drop"' in bad["error"] and sql("SELECT count(*) FROM pm_desk_events")[0][0] == 15
+    # a filter's value that is no date: the build says which part of the file and what to give
+    typo = copy.deepcopy(DESK)
+    typo["clean"]["where"][0]["value"] = "last year"
+    bad = save(typo)
+    assert bad["status"] == "failed" and bad["error"].startswith("processes/desk.json $.clean.where: a value doesn't fit its column's type"), bad
+    again = save(DESK)
+    assert again["status"] == "ok" and again["dropped"] == b["dropped"]
+
+
+def test_unpivot_timestamp_columns(built):
+    # tickets has one row per ticket and three time columns: each filled one is an event, an empty one is none
+    got = sql("""SELECT t.ticket_id, e.activity, strftime(e.started_at, '%Y-%m-%d %H:%M'), e.ended_at, e.duration_seconds, e.minutes
+      FROM pm_desk_events e JOIN pm_desk_ticket t USING (event_id) WHERE e.event_id LIKE '0.%' ORDER BY 1, t.seq""")
+    assert got == [["T1", "Opened", "2025-03-01 09:00", None, None, None], ["T1", "Assigned", "2025-03-01 09:30", None, None, None],
+                   ["T1", "Closed", "2025-03-02 10:00", None, None, None],
+                   ["T2", "Opened", "2025-03-01 10:00", None, None, None], ["T2", "Assigned", "2025-03-01 10:00", None, None, None],
+                   ["T3", "Opened", "2025-03-03 08:00", None, None, None], ["T3", "Closed", "2025-03-03 09:00", None, None, None]]
+    # Brewline's orders: placed, approved and cancelled, as many events as filled times
+    assert sql("SELECT activity, count(*) FROM pm_supply_events WHERE activity LIKE 'Order %' GROUP BY 1 ORDER BY 1") == [
+        [a, n] for a, n in zip(("Order approved", "Order cancelled", "Order placed"),
+                               sql("SELECT count(approved_at), count(cancelled_at), count(placed_at) FROM purchase_orders")[0])]
+
+
+def test_start_and_end_give_duration(built):
+    # a call from 11:00 to 11:20 lasts 1,200 s; a note has no end and no duration
+    assert sql("SELECT event_id, duration_seconds FROM pm_desk_events WHERE event_id IN ('1', '2', '7', '12') ORDER BY CAST(event_id AS INTEGER)") == [
+        ["1", 1200.0], ["2", None], ["7", 600.0], ["12", 900.0]]
+    # T1 in order, with the wait to the next step measured from this one's end: the first call ends at 11:20, so the
+    # second, at 12:00, waited 40 minutes (not the hour since 11:00)
+    assert sql("SELECT seq, activity, next_activity, wait_seconds FROM pm_desk_ticket WHERE ticket_id = 'T1' ORDER BY seq") == [
+        [1, "Opened", "Assigned", 1800.0], [2, "Assigned", "Note", 5400.0], [3, "Note", "Call", 0.0], [4, "Call", "Call", 2400.0],
+        [5, "Call", "Closed", 78600.0], [6, "Closed", None, None]]
+    # Brewline: unloading a delivery (10 to 59 minutes) is the only step with an end
+    assert sql("""SELECT count(*) FILTER (p.duration_seconds IS DISTINCT FROM date_diff('second', s.started_at, s.ended_at)), count(p.duration_seconds),
+      min(p.duration_seconds), max(p.duration_seconds) FROM pm_supply_events p JOIN supply_events s USING (event_id)""") == [
+        [0, sql("SELECT count(*) FROM supply_events WHERE activity = 'Goods received'")[0][0], 600.0, 3540.0]]
+
+
+def test_same_time_order_is_stable(built):
+    order = lambda: sql("SELECT ticket_id, seq, activity, event_id FROM pm_desk_ticket ORDER BY 1, 2")  # noqa: E731
+    was = order()
+    by = lambda t: [(a, e) for x, _, a, e in was if x == t]  # noqa: E731
+    # T2: opened and assigned in the same minute stay in the table's column order; three events at 09:00 stay in the rows' order
+    assert by("T2") == [("Opened", "0.2.0"), ("Assigned", "0.2.1"), ("Reply", "3"), ("Call", "4"), ("Reply", "5")]
+    # T1: at 11:00 the note (no end) comes before the call that ends at 11:20, though the call's row is first
+    assert [a for a, _ in by("T1")] == ["Opened", "Assigned", "Note", "Call", "Call", "Closed"] and by("T1")[2:4] == [("Note", "2"), ("Call", "1")]
+    # T3: opened at 08:00 and escalated at 08:00: the first source of the file comes first
+    assert by("T3") == [("Opened", "0.3.0"), ("Escalation", "6"), ("Call", "12"), ("Closed", "0.3.2")]
+    assert sql("SELECT count(*), count(DISTINCT ord), min(ord), max(ord) FROM pm_desk_events") == [[15, 15, 1, 15]]
+    again = save(DESK | {"description": "Built a second time."})
+    assert again["status"] == "ok" and again["run"] != built["desk"]["run"] and order() == was, "the same order, build after build"
+    assert save(DESK)["status"] == "ok"
+
+
+# ---------- #13 object-centric: an event about several objects ----------
+
+def test_event_on_two_objects_counted_once(built):
+    k, b = built["known"], built["supply"]
+    # the delivery with the most orders: one event "Goods received", once per order in the orders' table, once in the deliveries'
+    [[event, orders]] = sql("""SELECT event_id, count(*) FROM supply_event_orders JOIN supply_events USING (event_id)
+      WHERE activity = 'Goods received' GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 1""")
+    assert orders == k["most_orders_in_one_delivery"] > 1
+    assert sql(f"""SELECT (SELECT count(*) FROM pm_supply_events WHERE event_id = '{event}'), (SELECT count(*) FROM pm_supply_purchase_order
+      WHERE event_id = '{event}'), (SELECT count(DISTINCT po_id) FROM pm_supply_purchase_order WHERE event_id = '{event}'),
+      (SELECT count(*) FROM pm_supply_delivery WHERE event_id = '{event}')""") == [[1, orders, orders, 1]]
+    # the build says how many events are about more than one object of a type
+    assert b["several"] == {"delivery": 0, "purchase_order": k["deliveries_with_several_orders"]}, b["several"]
+    # an event's own figures, from the events table: the amounts received are the source's total, each event once
+    once, received = sql("SELECT sum(amount), count(*) FROM supply_events WHERE activity = 'Goods received'")[0]
+    got = abi.call("semantic_query", project=P, measures=["received", "log_events"],
+                   filters=[{"column": "pm_supply_events.activity", "op": "=", "value": "Goods received"}])["rows"]
+    assert got == [[pytest.approx(float(once)), received]]
+    assert abi.call("semantic_query", project=P, measures=["log_events"])["rows"] == [[k["events"]]]
+    # a type's table counts per object of that type: steps per purchase order, by the order's own café
+    by_region = dict(abi.call("semantic_query", project=P, measures=["order_steps"], dimensions=["cafes.region"])["rows"])
+    assert sum(by_region.values()) == b["tables"]["pm_supply_purchase_order"] > k["events"] and len(by_region) == 4
+
+
+def test_double_counting_measure_refused(built):
+    def refuse(expression: str) -> dict:
+        body = refused(422, "set_measure", id="double", name="Double", expression=expression)
+        [e] = body["errors"]
+        assert (e["file"], e["path"]) == ("model/measures.json", f"$.measures[{len(measures())}].expression"), body
+        return e
+
+    e = refuse("SUM(pm_supply_purchase_order.amount)")
+    assert "an event's own figure" in e["error"] and "once per Purchase order" in e["error"]
+    assert e["fix"] == "Use the events table: SUM(pm_supply_events.amount)."
+    assert refuse("AVG(pm_supply_delivery.duration_seconds)")["fix"] == "Use the events table: AVG(pm_supply_events.duration_seconds)."
+    assert refuse("DIVIDE(SUM(pm_supply_purchase_order.amount), COUNT(pm_supply_purchase_order.po_id))")["fix"].endswith("SUM(pm_supply_events.amount).")
+    assert "double" not in {m["id"] for m in measures()}
+    # what it would have said: every delivery's amount once per order it carries, far more than was received
+    once, per_order = sql("SELECT (SELECT sum(amount) FROM pm_supply_events), (SELECT sum(amount) FROM pm_supply_purchase_order)")[0]
+    assert once == sql("SELECT sum(amount) FROM supply_events")[0][0] and float(per_order) > 1.5 * float(once)
+    # the fix it names is the measure the fixture saved, and what counts per object stays allowed: waiting time, objects
+    assert MEASURES["received"] == "SUM(pm_supply_events.amount)" and abi.call("semantic_query", project=P, measures=["received"])["rows"] == [
+        [pytest.approx(float(once))]]
+    for i, x in {"order_wait": "AVG(pm_supply_purchase_order.wait_seconds)", "orders_seen": "DISTINCT_COUNT(pm_supply_purchase_order.po_id)"}.items():
+        abi.call("set_measure", project=P, id=i, name=i, expression=x)
+        sure("delete_measure", project=P, id=i)
+
+
+# ---------- #12 in the model, under row rules ----------
+
+def test_restricted_viewer_reads_only_their_cases(built):
+    north = {r[0] for r in sql("SELECT po_id FROM purchase_orders JOIN cafes USING (cafe_id) WHERE region = 'North'")}
+    every = sql("SELECT count(DISTINCT po_id), count(*) FROM pm_supply_purchase_order")[0]
+    mine = viewer(built, "sql_query", sql="SELECT po_id, count(*) FROM pm_supply_purchase_order GROUP BY 1")["rows"]
+    assert {r[0] for r in mine} == north and 0 < len(north) < every[0], "the North Viewer's cases: the orders of North cafés, all of them"
+    assert sum(r[1] for r in mine) == sql("SELECT count(*) FROM pm_supply_purchase_order JOIN purchase_orders USING (po_id) JOIN cafes USING (cafe_id)"
+                                          " WHERE region = 'North'")[0][0] < every[1]
+    # through the semantic layer too: steps per purchase order, by region, is the North's alone
+    assert viewer(built, "semantic_query", measures=["order_steps"], dimensions=["cafes.region"])["rows"] == [["North", sum(r[1] for r in mine)]]
+    # a case they can't see reads like one that isn't there
+    far = sql("SELECT min(po_id) FROM purchase_orders JOIN cafes USING (cafe_id) WHERE region = 'South'")[0][0]
+    assert viewer(built, "sql_query", sql=f"SELECT count(*) FROM pm_supply_purchase_order WHERE po_id = '{far}'")["rows"] == [[0]]
+    assert sql(f"SELECT count(*) FROM pm_supply_purchase_order WHERE po_id = '{far}'")[0][0] > 0
+    # deliveries are under no rule: their events are theirs to read in full, as the deliveries are
+    assert viewer(built, "sql_query", sql="SELECT count(*) FROM pm_supply_delivery")["rows"] == sql("SELECT count(*) FROM pm_supply_delivery")
+    s = state()
+    assert "pm_supply_purchase_order" in s["filtered"] and not {"pm_supply_purchase_order", "pm_supply_delivery"} & set(s["denied"])
+
+
+def test_events_table_denied_to_restricted(built):
+    s = state()
+    assert {"pm_supply_events", "pm_desk_events"} <= set(s["denied"]), s["denied"]
+    assert sql("SELECT count(*) FROM pm_supply_events")[0][0] == built["known"]["events"]
+    for q in ("SELECT count(*) FROM pm_supply_events", "SELECT count(*) FROM pm_supply_events e JOIN pm_supply_purchase_order p USING (event_id)",
+              "SELECT count(*) FROM pm_desk_events"):
+        assert viewer(built, "sql_query", sql=q)["rows"] == [[0]], q
+    # a measure over the whole log is empty for them, not the log's
+    assert viewer(built, "semantic_query", measures=["log_events"])["rows"] == [[0]]
+    assert abi.call("semantic_query", project=P, measures=["log_events"])["rows"] == [[built["known"]["events"]]]
+    # denied by design: readiness asks nobody for a rule on it
+    assert not [g for g in abi.call("readiness", project=P)["missing"] if "pm_supply_events" in g or "pm_desk_events" in g]
+    # the read of the definitions: a restricted reader gets names and the status, no count made of every row, no filter value
+    got = viewer(built, "process")["processes"]
+    assert sorted(x["id"] for x in got) == ["desk", "supply"] and all(set(x) == {"id", "name", "case", "types", "build"} for x in got)
+    assert all(x["build"] == {"status": "ok"} for x in got), got
+
+
+# ---------- #14 proposal, save, delete ----------
+
+def test_propose_writes_nothing(log):
+    before = state()
+    got = abi.call("propose_process", project=P)
+    after = state()
+    assert before["files"] == after["files"] and before["runs"] == after["runs"], "drafts: no file, no build"
+    docs, found = {d["case"]: d for d in got["processes"]}, {f["table"]: f for f in got["found"]}
+    assert all(not list(Draft202012Validator(SCHEMA).iter_errors(d)) for d in docs.values()), docs
+    # one draft per group of sources that share an object type: the supply tables, and the helpdesk's
+    assert set(docs) == {"purchase_order", "ticket"} and "not saved" in got["note"]
+    by = {s["table"]: s for d in docs.values() for s in d["events"]}
+    assert [s["table"] for s in docs["purchase_order"]["events"]] == ["purchase_orders", "supply_events"] or [
+        s["table"] for s in docs["purchase_order"]["events"]] == ["supply_events", "purchase_orders"]
+    assert sorted(s["table"] for s in docs["ticket"]["events"]) == ["ticket_events", "tickets"]
+    # a table with a time, a text column of few values and a way to an object type (its own column, or a bridge table): an event table
+    assert by["supply_events"] == {"table": "supply_events", "id": "event_id", "activity": "activity", "start": "started_at", "end": "ended_at",
+                                   "attributes": ["done_by", "amount"],
+                                   "objects": [{"type": "delivery", "columns": ["delivery_id"]},
+                                               {"type": "purchase_order", "through": "supply_event_orders", "event": "event_id", "columns": ["po_id"]}]}
+    assert found["supply_events"]["rows"] == sql("SELECT count(*) FROM supply_events")[0][0]
+    assert sorted(found["supply_events"]["activities"]) == ["Delivery dispatched", "Goods received", "Invoice paid", "Invoice received"]
+    assert by["ticket_events"]["activity"] == "activity" and by["ticket_events"]["objects"] == [{"type": "ticket", "columns": ["ticket_id"]}]
+    # an object type's table with three or more time columns: stamps
+    assert by["purchase_orders"] == {"table": "purchase_orders", "stamps": {"Placed": "placed_at", "Approved": "approved_at", "Cancelled": "cancelled_at"},
+                                     "objects": [{"type": "purchase_order", "columns": ["po_id"]}]}
+    assert by["tickets"]["stamps"] == {"Opened": "opened_at", "Assigned": "assigned_at", "Closed": "closed_at"}
+    # the clean-up it can see: one activity written two ways
+    assert docs["ticket"]["clean"] == {"rename": {"CALL": "Call"}} and "clean" not in docs["purchase_order"]
+    # a draft is checked like any save and asks before anything is written
+    with pytest.raises(abi.ActionError) as e:
+        abi.call("save_process", project=P, process=docs["ticket"] | {"id": "drafted"})
+    assert e.value.status == 409 and e.value.body["confirm_token"] and state()["files"] == before["files"]
+
+
+def test_propose_respects_rls(log):
+    mine, full = viewer(log, "propose_process"), abi.call("propose_process", project=P)
+    f, m = ({x["table"]: x for x in got["found"]} for got in (full, mine))
+    desk = lambda got: next(s for d in got["processes"] for s in d["events"] if s["table"] == "ticket_events")  # noqa: E731
+    # the Viewer sees the North team's tickets: eight of the fourteen events (not the one without a ticket), and no escalation
+    assert (f["ticket_events"]["rows"], m["ticket_events"]["rows"]) == (14, 8)
+    assert "Escalation" in f["ticket_events"]["activities"] and "Escalation" not in m["ticket_events"]["activities"]
+    # a column hidden from them is no attribute of their draft, and is in the owner's
+    assert "agent" in desk(full)["attributes"] and "agent" not in desk(mine)["attributes"] and "minutes" in desk(mine)["attributes"]
+    assert "agent" not in json.dumps(mine)
+    # every read of the draft is in the query log as theirs
+    reads = state(log["uid"])["reads"]
+    assert reads and {r["propose_process"] for r in reads} == {"supply_events", "ticket_events"}, reads
+    assert "needs the editor role" in refused(403, "save_process", log["viewer"], process=mine["processes"][0])["message"]
+
+
+def test_save_asks_confirmation_with_lineage(built):
+    path = Path(abi.ABI_PROJECTS) / P / "processes/supply.json"
+    was, runs = path.read_text(), state()["runs"]
+    abi.call("set_measure", project=P, id="delivery_steps", name="Steps per delivery", expression="COUNT(pm_supply_delivery.event_id)")
+    p = SUPPLY | {"description": "Purchase orders, deliveries and invoices."}
+    with pytest.raises(abi.ActionError) as e:
+        abi.call("save_process", project=P, process=p)
+    ask = e.value.body
+    assert e.value.status == 409 and ask["confirm_token"] and path.read_text() == was and state()["runs"] == runs, "asked first: nothing saved, nothing built"
+    assert ask["preview"]["changes"] == ["Changes process 'supply' (Supply: 2 source(s) of events about delivery, purchase_order): description."]
+    assert ask["preview"]["tables"] == ["pm_supply_delivery", "pm_supply_events", "pm_supply_purchase_order"] and ask["preview"]["removes"] == []
+    assert all(t in ask["message"] for t in ask["preview"]["tables"]), ask["message"]
+    # the lineage downstream: what reads the tables its build writes
+    assert "measure:delivery_steps" in ask["preview"]["reads"]["table:pm_supply_delivery"]
+    assert {"measure:received", "measure:log_events"} <= set(ask["preview"]["reads"]["table:pm_supply_events"]), ask["preview"]["reads"]
+    last = shown("supply")["build"]["run"]
+    done = abi.call("save_process", confirm=ask["confirm_token"], project=P, process=p)
+    assert json.loads(path.read_text())["description"] == p["description"] and done["build"] != last
+    built_now = build_of("supply", after=last)
+    assert built_now["status"] == "ok"
+    # the same file saved again changes nothing and asks nothing: it builds again
+    again = abi.call("save_process", project=P, process=p)
+    assert again["changes"] == [] and build_of("supply", after=built_now["run"])["run"] == again["build"] and path.read_text() != was
+    # a change that takes a type away takes its table away: a measure reading it refuses the save, naming itself
+    orders = copy.deepcopy(SUPPLY)
+    del orders["events"][0]["objects"][0]
+    body = refused(422, "save_process", process=orders)
+    assert [(x["file"], x["path"]) for x in body["errors"]] == [
+        ("model/measures.json", f"$.measures[{[m['id'] for m in measures()].index('delivery_steps')}].expression")], body
+    sure("delete_measure", project=P, id="delivery_steps")
+    with pytest.raises(abi.ActionError) as e:
+        abi.call("save_process", project=P, process=orders)
+    assert e.value.body["preview"]["removes"] == ["pm_supply_delivery"] and "archived for 30 days" in e.value.body["message"]
+    assert save(orders)["status"] == "ok" and "pm_supply_delivery" not in abi.call("semantic_model", project=P, all=True)["tables"]
+    with pytest.raises(abi.ActionError):
+        sql("SELECT count(*) FROM pm_supply_delivery")
+    # deleting asks too, is refused while a measure reads one of its tables, and takes the file, the tables and the runs
+    assert {x["file"] for x in refused(422, "delete_process", process="supply")["errors"]} == {"model/measures.json"}
+    for mid in MEASURES:
+        sure("delete_measure", project=P, id=mid)
+    with pytest.raises(abi.ActionError) as e:
+        abi.call("delete_process", project=P, process="supply")
+    assert e.value.status == 409 and e.value.body["preview"]["removes"] == ["pm_supply_events", "pm_supply_purchase_order"] and path.exists()
+    abi.call("delete_process", confirm=e.value.body["confirm_token"], project=P, process="supply")
+    assert not path.exists() and [x["id"] for x in abi.call("process", project=P)["processes"]] == ["desk"]
+    assert not [r for r in state()["runs"] if r["name"] == "supply"]
+    assert not [t for t in abi.call("semantic_model", project=P, all=True)["tables"] if t.startswith("pm_supply")]
+    assert refused(404, "delete_process", process="supply")["message"] == f"No process 'supply' in project '{P}'."
+    # as it was, for the tests after this one
+    assert save(SUPPLY)["status"] == "ok"
+    for i, x in MEASURES.items():
+        abi.call("set_measure", project=P, id=i, name=i, expression=x)
+
+
+def test_rebuild_after_refresh(built):
+    b = build_of("desk")
+    runs = lambda: [r for r in state()["runs"] if r["name"] == "desk"]  # noqa: E731
+    n = len(runs())
+    # a table the process doesn't read, loaded again: no build
+    abi.finished(P, abi.call("refresh", project=P, table="suppliers"))
+    assert len(runs()) == n
+    # a table it reads, with one more event: one build, named after the load's snapshot, and the event is in the log
+    d = built["dir"]
+    (d / "ticket_events.csv").write_text(EVENTS + "14,T2,Call,2025-03-02 10:00:00,2025-03-02 10:05:00,Bo,5\n")
+    snap = abi.upload(P, "ticket_events", Path(parquet(d / "ticket_events.csv")[0]))["snapshot"]
+    new = build_of("desk", after=b["run"])
+    assert new["status"] == "ok" and new["events"] == b["events"] + 1 and new["dropped"] == b["dropped"]
+    assert [(r["key"], r["status"]) for r in runs()[n:]] == [(f"snapshot-{snap}", "ok")], runs()
+    assert sql("SELECT seq, activity, event_id FROM pm_desk_ticket WHERE ticket_id = 'T2' ORDER BY seq DESC LIMIT 1") == [[6, "Call", "14"]]
+    # the check for changed tables (the worker's, run here) finds none changed: no load, so no build
+    r = engine(f"from abi import ingest\nprint(ingest.refresh_changed(only='{P}'))", timeout=300)
+    assert r.returncode == 0, r.stderr[-2000:]
+    time.sleep(3)
+    assert len(runs()) == n + 1, "a refresh that changed no source table starts no build"
+
+
+def test_reserved_table_name_clash_named(built):
+    # a person's table already has the name a build would write: the save is refused and names the table, its file and the fix
+    sure("create_input_table", project=P, table="pm_late_events", key=["id"], columns=[{"name": "id", "type": "INTEGER"}])
+    late = DESK | {"id": "late", "name": "Late tickets"}
+    body = refused(422, "save_process", process=late)
+    [e] = body["errors"]
+    assert (e["file"], e["path"]) == ("processes/late.json", "$.id"), body
+    assert "Table 'pm_late_events' is already a table of this project (tables/pm_late_events.json)" in e["error"]
+    assert "pm_late_events, pm_late_ticket" in e["fix"] and not (Path(abi.ABI_PROJECTS) / P / "processes/late.json").exists()
+    sure("delete_table", project=P, table="pm_late_events")
+    # nothing is reserved without a process file: the name was the person's to take, and is free again for the process
+    assert save(late)["status"] == "ok" and sql("SELECT count(*) FROM pm_late_ticket") == sql("SELECT count(*) FROM pm_desk_ticket")
+    # a person loads a table of that name afterwards: the next build (a refresh of a table it reads) refuses, naming it,
+    # and writes nothing over it
+    abi.upload(P, "pm_late_ticket", Path(built["dir"] / "tickets.parquet"))
+    was = shown("late")["build"]["run"]
+    abi.finished(P, abi.call("refresh", project=P, table="tickets"))
+    bad = build_of("late", after=was)
+    assert bad["status"] == "failed" and bad["error"].startswith("processes/late.json $.id: Table 'pm_late_ticket' is already a table of this project"), bad
+    assert sql("SELECT count(*) FROM pm_late_ticket") == [[3]], "the person's table is as they loaded it"
+    build_of("desk", after=None)  # the same refresh rebuilt the helpdesk's log
+    sure("delete_process", project=P, process="late")
+    assert sql("SELECT count(*) FROM pm_late_ticket") == [[3]], "and stays theirs when the process goes"
+    sure("delete_table", project=P, table="pm_late_ticket")
+
+
+def test_roundtrip_export_import_identical(built):
+    assert (Path(abi.ABI_PROJECTS) / P / "processes/desk.json").exists()
+    r = engine(ROUNDTRIP, timeout=300, stdin=json.dumps({"project": P}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    out = json.loads(r.stdout.splitlines()[-1])
+    assert out["dry"] == [] and out["done"] == [] and out["same"], out
+    assert "processes/desk.json" in out["files"] and out["files"] == out["after_build"], "the bundle carries the process; nothing else appears"
+    # exported, imported without the file and with it again: back as it was, by the import alone
+    r = engine(f"import json\nfrom abi.project import bundle, git\nprint(json.dumps(bundle.bundle(git.path('{P}'))))", timeout=120)
+    assert r.returncode == 0, r.stderr[-2000:]
+    files = json.loads(r.stdout.splitlines()[-1])
+    assert files["processes/desk.json"] == DESK | {"$schema": PLAN["$schema"]}
+    assert sure("import_project", project=P, bundle={k: v for k, v in files.items() if k != "processes/desk.json"})["changes"] == ["Removes process 'desk'."]
+    # its tables are left in the lake with nothing saying what they were made from: denied to restricted readers until it is back
+    assert {"pm_desk_events", "pm_desk_ticket"} <= set(state()["denied"])
+    assert sure("import_project", project=P, bundle=files)["changes"] == ["Adds process 'desk'."]
+    s = state()
+    assert s["files"] == {k: hashlib.sha256(json.dumps(v, sort_keys=True).encode()).hexdigest() for k, v in files.items()}
+    assert "pm_desk_events" in s["denied"] and viewer(built, "sql_query", sql="SELECT count(*) FROM pm_desk_events")["rows"] == [[0]]

@@ -394,6 +394,27 @@ ALTER TABLE optimizer_runs ADD COLUMN IF NOT EXISTS rules text;
 CREATE INDEX IF NOT EXISTS optimizer_runs_latest ON optimizer_runs (project, optimizer, created DESC);
 -- one run at a time per person and optimiser: run_optimizer's INSERT ... ON CONFLICT DO NOTHING is its guard
 CREATE UNIQUE INDEX IF NOT EXISTS optimizer_runs_open ON optimizer_runs (project, optimizer, user_id) WHERE status IN ('queued', 'running');
+-- 1.2.7 M1: one row per build of a process's event log (kind 'process'; `name` its ID): who saved it (the build writes
+-- model.json as them), `key` naming the build after a refresh (snapshot-<n>, once per process), and in `result` the rows
+-- per table, the dropped rows by reason and the events about several objects of a type. The file is read when the build
+-- runs. Not in Git. The schema number stays 7, as for optimizer_runs (a table only added): docs/plans/1.2.7.md asks for 8,
+-- which three asserts pin to 7 (tests/test_upgrade_schema.py, tests/test_object_flows.py).
+CREATE TABLE IF NOT EXISTS analysis_runs (
+  id uuid PRIMARY KEY,
+  project text NOT NULL,
+  kind text NOT NULL,
+  name text NOT NULL,
+  user_id bigint REFERENCES users ON DELETE SET NULL,
+  key text,
+  status text NOT NULL CHECK (status IN ('queued', 'running', 'ok', 'failed')),
+  created timestamptz NOT NULL DEFAULT clock_timestamp(),
+  started timestamptz,
+  finished timestamptz,
+  result jsonb,
+  error text
+);
+CREATE INDEX IF NOT EXISTS analysis_runs_latest ON analysis_runs (project, kind, name, created DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS analysis_runs_key ON analysis_runs (project, kind, name, key);
 -- SC-7 (X-02.1): inbound channel senders → user accounts; kind slack 'team_id:user_id', teams aadObjectId, email address.
 CREATE TABLE IF NOT EXISTS channel_senders (
   kind text NOT NULL CHECK (kind IN ('slack', 'teams', 'email')),
