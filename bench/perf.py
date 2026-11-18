@@ -842,12 +842,13 @@ import json, sys, time
 import abi.app  # noqa: F401
 from abi import actions, db, security, semantic
 a = json.loads(sys.stdin.read())
+semantic.TIMEOUT = a["timeout"]  # a read's limit (the engine's own is 60 s)
 out = {}
 with db.connect() as c:
     u = security.user(c, a["user"] or c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"])
     for name in ("process_map", "process_variants"):
         act, ts = actions.ACTIONS[name], []
-        for _ in range(a["n"] + 1):  # the first warms this process's DuckDB instance: not counted
+        for _ in range(a["n"] + 1):  # the first warms this process's DuckDB instance (and builds a restricted reader's views): not counted
             semantic._caches.clear()
             t = time.perf_counter()
             act.fn(c, u, act.input(project=a["project"], process="supply"))
@@ -870,7 +871,8 @@ def process_reads(p: str, n: int) -> dict:
     - filtered warm (REST): each read made new by a filter that keeps every case (cases started from 2000-01-01
       00:00:<i>): the semi-join on every case is worked out too.
     - restricted (a Viewer who sees the North region's cafés, a row rule on cafes): their first read over REST (their
-      row-level security views built for it), then warm as above, as them."""
+      row-level security views built for it; the engine's 60 s limit stopping it is recorded), then three warm as above,
+      as them, with a limit of 900 s."""
     sh, py = str(ROOT / "scripts/engine.sh"), str(ROOT / "engine/backend/.venv/bin/python")
 
     def one(action: str, **args) -> float:
@@ -899,10 +901,10 @@ def process_reads(p: str, n: int) -> dict:
         if not until(ready, 300):
             raise SystemExit("The engine did not answer /api/ready within 300 s of its start.")
 
-    def warm(user: int | None) -> dict:
+    def warm(user: int | None, n: int = n, timeout: float = 60) -> dict:
         env = subprocess.run([sh, "env"], capture_output=True, text=True, check=True).stdout
         r = subprocess.run(["sh", "-c", f'{env}\nexec {py} -c "$0"', WARM], cwd=ROOT, capture_output=True, text=True, timeout=3600,
-                           input=json.dumps({"project": p, "user": user, "n": n}))
+                           input=json.dumps({"project": p, "user": user, "n": n, "timeout": timeout}))
         if r.returncode:
             raise SystemExit(f"The warm reads failed: {r.stderr[-2000:]}")
         return json.loads(r.stdout.splitlines()[-1])
@@ -929,9 +931,13 @@ def process_reads(p: str, n: int) -> dict:
         uid = int({u["name"]: u["id"] for u in abi.call("rls_rules", project=p)["accounts"]}[name])
         sure("set_rls_rule", project=p, id="region", table="cafes", column="region", users={str(uid): ["North"]})
         with abi.as_user(abi.login(name, pw)[1]["token"]):
-            first = {a: one(a) for a in out}
-        for action, xs in warm(uid).items():
-            out[action]["restricted"] = {"first_s": first[action], **stats(xs)}
+            for a in out:
+                try:
+                    out[a]["restricted"] = {"first_s": one(a)}
+                except abi.ActionError as e:  # the engine's 60 s limit: recorded, then timed without it below
+                    out[a]["restricted"] = {"first_error": f"{e.status}: {e.body.get('message')}"}
+        for action, xs in warm(uid, 3, 900).items():  # three, with a limit of 900 s (the engine's is 60 s)
+            out[action]["restricted"] |= stats(xs)
     finally:
         sure("delete_user", name=name)
     return out
