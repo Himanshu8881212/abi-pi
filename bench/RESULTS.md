@@ -1996,3 +1996,44 @@ All four targets met.
 |---|---|---|---|
 | process_map | 8.36 s | 2.17, 2.19, 2.27 s | stopped at 60 s; then 538 to 552 s |
 | process_variants | 1.15 s | 1.07, 1.08, 1.09 s | stopped at 60 s; then 333 to 368 s |
+
+### Review round 3: what splits a case, and the build's derived columns
+
+18 Nov 2026, 11:48 to 12:11 UTC, the same container set up anew (`.loop/abi127.sh up`) at 3585eae (engine and test
+code of 97038f1; 3585eae changes bench/RESULTS.md only), as above:
+
+    ssh pve1 "pct exec 100 -- docker exec abi-127-t sh -c 'cd /app && python3 bench/perf.py process --scale 1 --reads 20'"
+
+Round 3 changes which tables row-level security denies and which columns it hides, not the build or the reads' SQL.
+Two memory figures of the heavy worker per build, from the same run: the highest of its RSS samples (every 0.25 s
+while the build ran, `heavy_peak_mb`) and the process's own high-water mark read from /proc when the run ended
+(`heavy_hwm_mb`, VmHWM, which covers the worker's whole life up to then).
+
+| build | build s (target ≤ 60) | from its trigger s | highest RSS sample while building MB | VmHWM MB (target ≤ 1.5 GB) |
+|---|---|---|---|---|
+| the first, after the save | **47.5** | 53.6 | 1,058.5 | **1,057.9** |
+| after the refresh of supply_events | **50.2** | 128.1 | 1,085.9 | **1,085.4** |
+
+Both met. The two figures agree within 1 MB in each build, so the worker's peak is the build's. Round 2's 1,272 and
+1,250 MB (VmHWM only) were not seen again with the same build code: 1,058 and 1,086 MB here, near round 1's 1,041
+and 1,001 MB. Why round 2 was higher was not found.
+
+| read (p95 of 20) | cold (≤ 6 s) | warm, cache cleared (≤ 2 s) | warm REST, `top` 1–20 | filtered warm | cached |
+|---|---|---|---|---|---|
+| process_map | **3.32** (2.77 to 3.61) | **1.27** (1.18 to 1.36) | | 2.07 | 0.05 |
+| process_variants | **2.23** (1.86 to 2.32) | **0.27** (0.25 to 0.27) | 0.28 | 0.65 | 0.05 |
+
+All four targets met.
+
+**A restricted Viewer** (the North region's cafés), no target:
+
+| read | their first read over REST | three more, cache cleared | round 2 |
+|---|---|---|---|
+| process_map | 8.34 s | 2.09, 2.11, 2.19 s | 8.36 s; 2.17 to 2.27 s |
+| process_variants | 1.05 s | 1.10, 1.08, 1.06 s | 1.15 s; 1.07 to 1.09 s |
+
+**Tests on 97038f1** (3585eae: the same code): the contract's 18 tests of M2 with tests/test_process_mine.py and
+tests/test_process_log.py whole, tests/test_ontology_nobreak.py, tests/test_127_nobreak.py and tests/test_rls_links.py
+(the key-type tests): 110 passed in 1,223 s. The whole suite in a container set up anew at 3585eae
+(`.loop/abi127.sh test -q -rf tests`): 6 failed, 620 passed, 24 skipped in 5,038 s; the six are the known container
+ones (two of tests/test_app.py, one each of test_ground.py, test_guardrails.py, test_jobs.py and test_supervise.py).
