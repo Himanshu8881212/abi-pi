@@ -45,7 +45,7 @@ EVENT = ("event_id", "activity", "started_at", "ended_at", "duration_seconds")  
 MADE = {*EVENT, "ord", "seq", "next_activity", "wait_seconds"}  # the column names a build makes itself
 WHY = ("no_timestamp", "no_activity", "filtered", "activity", "no_object", "duplicate")  # why a row is dropped, in the order tried
 TIME = re.compile(r"DATE$|TIMESTAMP")
-OFFSET = re.compile(r'\d\d:\d\d(:\d\d(\.\d+)?)? ?(Z|[+-]\d\d(:?\d\d)?)"')  # a time with an offset, as the last thing of a (JSON) string
+OFFSET = re.compile(r'\d\d:\d\d(:\d\d(\.\d+)?)?\s*(Z|UTC|[+-]\d\d(:?\d\d){0,2})\s*"', re.I)  # a time with an offset, last in a (JSON) string
 FAULT = "The event log could not be built because something went wrong on ABI's side. Save the process again; if it happens again, tell whoever looks after ABI for you."
 STALE = "The build did not finish. Save the process again, or refresh a table its events come from."
 # MiB of DuckDB memory a build uses at most (less where the server's limit is lower); above it DuckDB spills to disk. With
@@ -498,8 +498,14 @@ def changed(conn, project: str, old: dict, files: dict, user: User) -> dict[str,
     ID: its run}; every process does when the project's time zone changed (instants are read in it: `_time`). Until
     that build ends `process` shows it, not the build of the definition before.
     ponytail: it commits (`_queue`: the run before its job), so when queuing fails here (worker.defer, or the second of
-    two processes) the files go back and what the action wrote to Postgres before stays; builds queued after the
-    action's own commit (an outbox) if that ever shows up."""
+    two processes) what the action wrote to Postgres before stays; the files go back (git.change), but an undo's stay
+    undone (it runs after the undo's own restore). In a pull (remote.pull, through git.apply_tree) it runs before HEAD
+    moves and before the pull's commit, so when one of those fails the files go back with builds queued for them: such
+    a build reads the file when it starts and builds the definition of before again (one the pull added fails: gone).
+    Builds queued after the action's own commit (an outbox) if that ever shows up.
+    ponytail: an undo, a revert or an import while a removed process's build runs archives its tables before that build
+    writes them again, so they stay in the lake as leftovers (`leftover`: where rules exist, denied to restricted readers
+    and named by readiness, with how to archive them); refuse such a change while the build runs, as _change does, if it bites."""
     git._archive(conn, user, project, dropped(old, files))
     zone = lambda x: ((x.get("project.json") or {}).get("settings") or {}).get("time_zone")  # noqa: E731
     return {p["id"]: _queue(conn, project, p["id"], user.id) for rel, p in sorted(files.items())
@@ -689,8 +695,7 @@ def _change(conn, user: User, project: str, pid: str, new: dict | None) -> dict:
     if old == new:  # nothing to confirm: the same file builds again
         return {"changes": [], "build": _queue(conn, project, pid, user.id)}
     was, now = (tables(x) if x else {} for x in (old, new))
-    # the tables that go: its own, never one a person loaded under that name since (it has a file)
-    gone = sorted(t for t in was.keys() - now.keys() if f"sources/{t}.json" not in files and f"tables/{t}.json" not in files)
+    gone = sorted(dropped(files, after))  # the tables that go: its own, never one a person loaded under that name since (it has a file)
     sweep(conn, project, pid)
     if gone and conn.execute("SELECT 1 FROM analysis_runs WHERE project = %s AND kind = 'process' AND name = %s AND status IN ('queued', 'running')",
                              [project, pid]).fetchone():  # its build would write the tables after they went

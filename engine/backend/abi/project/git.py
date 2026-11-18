@@ -293,6 +293,9 @@ def _gate(conn, project: str, p: Path, why: str, extra: dict) -> None:
     from abi import process  # not at top: process imports this module
 
     process.sweep(conn, project)  # 1.2.7 M1: a build whose job was lost holds up nothing for good (every process's: the project goes)
+    # ponytail: a rename sweeps every process of the project too, so a build that has waited over 30 minutes behind a long
+    # load (its job still to come) is failed here and nobody queues it again: the next save or refresh builds; sweep only
+    # lost jobs (no procrastinate job behind the run) if renames during long loads show up.
     busy = conn.execute("SELECT (SELECT count(*) FROM flow_runs WHERE project = %(p)s AND status IN ('queued', 'running'))"
                         " + (SELECT count(*) FROM ml_runs WHERE project = %(p)s AND status IN ('queued', 'running'))"
                         " + (SELECT count(*) FROM load_runs WHERE project = %(p)s AND status IN ('queued', 'running'))"
@@ -532,13 +535,16 @@ def set_project_locale(conn, user: User, args: Locale) -> dict:
     from abi import process  # not at top: process imports this module
     from abi.semantic import model  # not at top: semantic imports git
 
-    f, old = path(args.project) / "project.json", bundle.bundle(path(args.project))
+    f = path(args.project) / "project.json"
     doc = json.loads(f.read_text())
+    was = doc.get("settings", {}).get("time_zone")
     s = doc.get("settings", {}) | {k: v for k, v in (("time_zone", args.time_zone), ("currency", args.currency)) if v is not None}
     doc["settings"] = {k: v for k, v in s.items() if v != ""}
     f.write_bytes(dumps(doc).encode())
     model.extend_calendars(args.project, user.name)
-    process.changed(conn, args.project, old, bundle.bundle(path(args.project)), user)  # 1.2.7 M1, last (it commits): event logs hold times of the zone
+    if doc["settings"].get("time_zone") != was:  # 1.2.7 M1, last (it commits): event logs hold times of the zone
+        files = bundle.bundle(path(args.project))
+        process.changed(conn, args.project, files | {"project.json": {"settings": {"time_zone": was}}}, files, user)
     return {k: doc["settings"].get(k) for k in ("time_zone", "currency")}
 
 
@@ -614,8 +620,11 @@ def _confirm(conn, project: str, old: dict, files: dict, gone, what: str, why: l
 
     removed = {t for t in gone if not reads_itself(t)}
     from abi import process  # not at top: process imports this module
+    from abi.semantic import model  # not at top: semantic imports this module
 
-    named = removed | process.dropped(old, files)  # 1.2.7 M1: with the tables of a process's build that go with it (process.changed)
+    # 1.2.7 M1: with the tables of a process's build that go with it (process.changed): those in the lake (a failed or a
+    # queued first build wrote none)
+    named = removed | (built & set(model.lake_columns(project)) if (built := process.dropped(old, files)) else set())
     why = [*why, *([f"It removes table(s) {', '.join(sorted(named))}; their data is archived for 30 days."] if named else [])]
     why += imports._publishing(project, old, files)[1]
     gate_why, preview = imports.gate(conn, project, old, files, bool(why))  # signs the exact role diff (D-1) and API tools (D-35)

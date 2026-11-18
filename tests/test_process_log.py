@@ -1249,7 +1249,8 @@ def test_a_change_of_the_time_zone_builds_the_log_again(built):
         assert again["status"] == "ok" and again["events"] == 1 and again["dropped"]["filtered"] == 1, again
         assert sql("SELECT activity, strftime(started_at, '%Y-%m-%d %H:%M') FROM pm_zoned_events") == [["Pong", "2025-03-01 00:45"]]
         # a filter's value for an instant is that wall-clock time: one with an offset is refused, not read without it
-        for v in ("2025-03-01 00:40:00+01", "2025-03-01T00:40:00Z", ["2025-03-01 00:40:00-05:00"]):
+        for v in ("2025-03-01 00:40:00+01", "2025-03-01T00:40:00Z", ["2025-03-01 00:40:00-05:00"],
+                  "2025-03-01 00:40:00+01 ", "2025-03-01 00:40:00 UTC", "2025-03-01 00:40:00+01:00:00"):  # M2: a space after, a zone's name, seconds
             late = copy.deepcopy(ZONED)
             late["clean"]["where"][0] |= {"value": v, "op": "in" if isinstance(v, list) else ">="}
             [e] = refused(422, "save_process", process=late)["errors"]
@@ -1259,3 +1260,16 @@ def test_a_change_of_the_time_zone_builds_the_log_again(built):
         idle()
         if shown("zoned"):
             sure("delete_process", project=P, process="zoned")
+
+
+def test_a_revert_names_no_table_a_build_never_wrote(built):
+    # M2 (carried from M1's review): a process whose first build failed wrote no table, so taking it away by a revert
+    # names none of its tables as going to the archive (there was a question about them before), and asks nothing
+    head = abi.call("history", project=P)["commits"][0]["id"]
+    never = copy.deepcopy(DESK) | {"id": "never", "name": "Never built"}
+    never["clean"]["where"][0]["value"] = "last year"
+    assert save(never)["status"] == "failed"
+    with pytest.raises(abi.ActionError):
+        sql("SELECT count(*) FROM pm_never_events")
+    out = abi.call("revert", project=P, to=head)
+    assert shown("never") is None and out["archived"] == [], out
