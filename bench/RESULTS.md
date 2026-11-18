@@ -2043,3 +2043,14 @@ rerun): the 18 contract tests of M2 with the same files as round 3: 110 passed i
 container set up anew at a59dbf6: 7 failed, 619 passed, 24 skipped in 5,067 s; the six known container ones and
 tests/test_pages.py::test_report_click_opens_object_page (the object page asked for one key twice), which passed alone
 three times in a fresh container.
+
+**Review round 6** (a9b9e38: a column rule on one table of a process hides the events' columns on all of them; a hidden
+time denies the process's tables to restricted Viewers; the reads' refusal names a ruled column). The reads' row-level
+security path changed (one more file read per denial check), so the bench ran again in the round's container, same
+command, one run: the first build 53.4 s (VmHWM 1,034 MB), after the refresh 47.7 s (1,100 MB), both met (≤ 60 s,
+≤ 1.5 GB); process_map p95 of 20 cold 3.31 s, warm 1.25 s, filtered warm 1.95 s; process_variants cold 2.07 s, warm
+0.26 s (all four met); a restricted Viewer's map 8.19 s first, 2.17 to 2.28 s warm. Tests: the 18 contract tests of M2
+with the same files as round 3 and the new test: 111 passed in 1,247 s. The whole suite in a container set up anew at
+a9b9e38: 7 failed, 620 passed, 24 skipped in 5,078 s; the six known container ones and
+tests/test_pages.py::test_renamed_project_keeps_history (renaming back found the old ID taken: a record under it, in
+a project with no process or rule), which passed alone three times in a fresh container.
