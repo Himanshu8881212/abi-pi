@@ -447,12 +447,15 @@ def _typed(name: str, asked: str, members: set[str]) -> bool:
 def _flat(results: list) -> list:
     """1.2 final rerun: visual_data for a whole page answers {page, visuals: [{columns, rows}, ...]}, the rows one level
     down, so a report summary that read them was masked figure by figure (10 and 14 masked). Each visual counts as a
-    result of its own; nothing else changes."""
+    result of its own; nothing else changes. 1.2.7 M2: so does a table one level down under a key ({columns, rows}, as
+    a process read answers: activities, pairs, variants, waiting)."""
     out = []
     for r in results:
         out.append(r)
         if isinstance(r, dict) and isinstance(r.get("visuals"), list):
             out += [v for v in r["visuals"] if isinstance(v, dict)]
+        if isinstance(r, dict):
+            out += [v for v in r.values() if isinstance(v, dict) and isinstance(v.get("columns"), list) and isinstance(v.get("rows"), list)]
     return out
 
 

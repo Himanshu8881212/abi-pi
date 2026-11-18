@@ -11,7 +11,7 @@ machine's engine and app, or inside a docker install). Each run prints one JSON 
     .venv/bin/python bench/perf.py publish --project P [--url ...]
     .venv/bin/python bench/perf.py medallion --rows 1000000 [--way 1.2|1.1]
     .venv/bin/python bench/perf.py kill --part engine|worker --project P [--wait 300] [--url ...]
-    .venv/bin/python bench/perf.py process [--scale 1] [--keep]
+    .venv/bin/python bench/perf.py process [--scale 1] [--keep] [--reads 20]
 
   project    a bench project for pages and memory, made as the baselines' was: Brewline (bench/brewline.py, the
              orders' months in one file) loaded with abi.load: tables, model, starter measures, its Overview report.
@@ -62,6 +62,9 @@ machine's engine and app, or inside a docker install). Each run prints one JSON 
              refresh starts: the file of supply_events gets a new time, the worker's minute check loads it in a new
              heavy worker and that load queues the build, which the same worker runs: the same figures, the memory
              now the load's and the build's in one process (`after_refresh`; waited_s is from the file's new time).
+             Then (1.2.7 M2, --reads N, default 20) process_map and process_variants N times each: cold (the engine
+             and Postgres restarted, the lake's and Postgres's files out of the page cache), cached and warm
+             (`process_reads`), with each one's p95.
   kill       kill -9 the engine or the worker (their pid files), then every second until --wait: does the engine's
              /api/ready answer, does the owner's page load, does the pid file name a running process again. Each change
              of those, and the seconds until all three hold (serving_s, null: not within --wait).
@@ -826,11 +829,61 @@ def process(a) -> dict:
         (d / "supply_events" / "supply_events.parquet").touch()
         after = watched(first["run"])
         return {"project": p, "scale": a.scale, "known_events": known["events"], "load_s": took, "heavy_concurrency": int(os.environ.get("ABI_HEAVY_CONCURRENCY") or 1),
-                "first": first | {"new_worker": fresh}, "after_refresh": after | {"new_worker": again}}
+                "first": first | {"new_worker": fresh}, "after_refresh": after | {"new_worker": again}} | (
+                {"reads": process_reads(p, a.reads)} if a.reads else {})
     finally:
         if not a.keep:  # kept: with its files (the worker's check for changed tables reads them every minute)
             gone(p)
             shutil.rmtree(d, ignore_errors=True)
+
+
+def process_reads(p: str, n: int) -> dict:
+    """1.2.7 M2: process_map and process_variants of the supply process (per purchase order, no filter), n times each,
+    as the workspace owner over REST. cold: each read the first after scripts/engine.sh stop (the engine, its workers
+    and Postgres), the project's lake files and Postgres's files dropped from the OS page cache (posix_fadvise
+    DONTNEED, after a sync) and engine.sh start, once /api/ready answers: no DuckDB instance, buffer or result cache, no
+    page cache of the data. cached: the same read again (the engine's result cache answers). warm: each read made new
+    by a filter that keeps every case (cases started from 2000-01-01 00:00:<i>), so the engine works it out each time
+    on warm buffers; it does more than the read without the filter (the semi-join on every case)."""
+    sh = str(ROOT / "scripts/engine.sh")
+
+    def one(action: str, **args) -> float:
+        t = time.perf_counter()
+        abi.call(action, project=p, process="supply", **args)
+        return round(time.perf_counter() - t, 3)
+
+    def ready() -> bool:
+        try:
+            with urllib.request.urlopen(abi.URL + "/api/ready", timeout=5) as r:
+                return r.status == 200
+        except OSError:
+            return False
+
+    def restart() -> None:
+        subprocess.run([sh, "stop"], check=True, capture_output=True)
+        os.sync()
+        for f in (x for d in (LAKE / p, D / "pg") for x in d.rglob("*") if x.is_file()):
+            with contextlib.suppress(OSError):
+                fd = os.open(f, os.O_RDONLY)
+                try:
+                    os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+                finally:
+                    os.close(fd)
+        subprocess.run([sh, "start"], check=True, capture_output=True)
+        if not until(ready, 300):
+            raise SystemExit("The engine did not answer /api/ready within 300 s of its start.")
+
+    p95 = lambda xs: sorted(xs)[math.ceil(0.95 * len(xs)) - 1]  # noqa: E731
+    out = {}
+    for action in ("process_map", "process_variants"):
+        cold = []
+        for _ in range(n):
+            restart()
+            cold.append(one(action))
+        cached = [one(action) for _ in range(n)]
+        warm = [one(action, filters=[{"kind": "time", "when": "started", "from": f"2000-01-01 00:00:{i % 60:02d}"}]) for i in range(n)]
+        out[action] = {"cold_p95_s": p95(cold), "warm_p95_s": p95(warm), "cached_p95_s": p95(cached), "cold_s": cold, "warm_s": warm, "cached_s": cached}
+    return out
 
 
 def kill(a) -> dict:
@@ -913,6 +966,7 @@ def main(argv=None) -> dict:
     x = sub.add_parser("process", parents=[common])
     x.add_argument("--scale", type=float, default=1, help="bench/brewline.py's (1: about 1.05M purchase orders, 5.1M events)")
     x.add_argument("--keep", action="store_true", help="leave the project and its files (for a second look); default: removed at the end")
+    x.add_argument("--reads", type=int, default=20, help="then process_map and process_variants this many times each, cold, cached and warm (0: none)")
     x = sub.add_parser("kill", parents=[common, web])
     x.add_argument("--part", choices=("engine", "worker"), required=True)
     x.add_argument("--wait", type=float, default=300, help="seconds to watch for it serving again")

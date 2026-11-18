@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.abi.invalid/v1/process_filters.json",
+  "title": "Process filters",
+  "description": "The `filters` of a process read (process_map, process_variants, process_performance, discover_process), the one shape for every process read (1.2.7). Each filter keeps the cases it holds for (a case is one object of the type read) and all of them must hold. A time is a wall-clock time in the project's time zone, as the event log holds it: YYYY-MM-DD or YYYY-MM-DD HH:MM[:SS], without an offset; `from` is included, `to` is not.",
+  "type": "array",
+  "maxItems": 20,
+  "items": {
+    "type": "object",
+    "required": ["kind"],
+    "properties": {"kind": {"enum": ["time", "variant", "property", "attribute", "start", "end", "contains", "follows", "duration"]}},
+    "allOf": [
+      {"if": {"properties": {"kind": {"const": "time"}}, "required": ["kind"]},
+       "then": {"required": ["when"], "additionalProperties": false, "description": "Cases that started, ended (at their last event) or were open (started before `to`, ended at or after `from`) in the range",
+                "properties": {"kind": true, "when": {"enum": ["started", "ended", "open"]}, "from": {"$ref": "#/$defs/time"}, "to": {"$ref": "#/$defs/time"}}}},
+      {"if": {"properties": {"kind": {"const": "variant"}}, "required": ["kind"]},
+       "then": {"required": ["in"], "additionalProperties": false, "description": "Cases of these variants (their IDs, as process_variants gives them); with `not`, of none of them",
+                "properties": {"kind": true, "in": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"type": "string", "pattern": "^[0-9a-f]{12}$"}}, "not": {"type": "boolean"}}}},
+      {"if": {"properties": {"kind": {"const": "property"}}, "required": ["kind"]},
+       "then": {"required": ["column", "op", "value"], "additionalProperties": false, "description": "Cases whose object has this property value: a column of the object type's table",
+                "properties": {"kind": true, "column": {"$ref": "#/$defs/name"}, "op": {"$ref": "#/$defs/op"}, "value": {"$ref": "#/$defs/value"}}}},
+      {"if": {"properties": {"kind": {"const": "attribute"}}, "required": ["kind"]},
+       "then": {"required": ["column", "op", "value"], "additionalProperties": false, "description": "Cases with at least one event whose attribute (one the process keeps on its events) has this value",
+                "properties": {"kind": true, "column": {"$ref": "#/$defs/name"}, "op": {"$ref": "#/$defs/op"}, "value": {"$ref": "#/$defs/value"}}}},
+      {"if": {"properties": {"kind": {"enum": ["start", "end"]}}, "required": ["kind"]},
+       "then": {"required": ["activities"], "additionalProperties": false, "description": "Cases whose first (start) or last (end) activity is one of these; with `not`, none of them",
+                "properties": {"kind": true, "activities": {"type": "array", "minItems": 1, "maxItems": 200, "items": {"$ref": "#/$defs/activity"}}, "not": {"type": "boolean"}}}},
+      {"if": {"properties": {"kind": {"const": "contains"}}, "required": ["kind"]},
+       "then": {"required": ["activity"], "additionalProperties": false, "description": "Cases with this activity; with `not`, without it",
+                "properties": {"kind": true, "activity": {"$ref": "#/$defs/activity"}, "not": {"type": "boolean"}}}},
+      {"if": {"properties": {"kind": {"const": "follows"}}, "required": ["kind"]},
+       "then": {"required": ["from", "to"], "additionalProperties": false, "description": "Cases where activity `from` is directly followed by activity `to`; with `not`, never",
+                "properties": {"kind": true, "from": {"$ref": "#/$defs/activity"}, "to": {"$ref": "#/$defs/activity"}, "not": {"type": "boolean"}}}},
+      {"if": {"properties": {"kind": {"const": "duration"}}, "required": ["kind"]},
+       "then": {"required": ["op", "hours"], "additionalProperties": false, "description": "Cases whose cycle time (first event's start to last event's end, or start) compares so with `hours`",
+                "properties": {"kind": true, "op": {"enum": ["<", "<=", ">", ">="]}, "hours": {"type": "number", "minimum": 0}}}}
+    ]
+  },
+  "$defs": {
+    "name": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$"},
+    "activity": {"type": "string", "minLength": 1, "maxLength": 200},
+    "time": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}( \\d{2}:\\d{2}(:\\d{2})?)?$"},
+    "op": {"enum": ["=", "<>", "<", "<=", ">", ">=", "in"]},
+    "value": {"type": ["string", "number", "boolean", "array"], "maxItems": 1000, "items": {"type": ["string", "number", "boolean"]},
+              "description": "One value; a list for `in`"}
+  },
+  "examples": [
+    [{"kind": "time", "when": "started", "from": "2025-01-01", "to": "2025-04-01"},
+     {"kind": "property", "column": "supplier_id", "op": "=", "value": "S04"},
+     {"kind": "contains", "activity": "Order cancelled", "not": true},
+     {"kind": "follows", "from": "Order approved", "to": "Goods received"},
+     {"kind": "duration", "op": ">", "hours": 240}]
+  ]
+}

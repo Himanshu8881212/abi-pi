@@ -730,6 +730,39 @@ def test_object_title_grounds():
     assert (out["with"], out["without"]) == ([], ["Cafés"]), out
 
 
+PMAP = {"process": "supply", "type": "purchase_order", "per": "per Purchase order",  # process_map's answer, as the engine gives it
+        "totals": {"columns": ["cases", "events"], "rows": [[5250, 25790]]},
+        "activities": {"columns": ["activity", "cases", "events", "median_duration_hours"],
+                       "rows": [["Order placed", 5250, 5250, None], ["Goods received", 5163, 2071, 0.57], ["Invoice received", 5160, 5480, None]]},
+        "pairs": {"columns": ["from", "to", "cases", "count", "median_wait_hours", "p90_wait_hours"],
+                  "rows": [["Order approved", "Goods received", 5163, 5163, 76.53, 300.2], ["Invoice received", "Invoice paid", 5100, 5100, 252.0, 432.12]]},
+        "start": {"columns": ["activity", "cases"], "rows": [["Order placed", 5250]]}, "end": {"columns": ["activity", "cases"], "rows": [["Invoice paid", 5100]]},
+        "left_out": {"activities": 0, "pairs": 0}, "note": "Per Purchase order: a case is one Purchase order."}
+PVAR = {"process": "supply", "type": "purchase_order", "per": "per Purchase order", "totals": {"columns": ["cases", "variants"], "rows": [[5250, 13]]},
+        "variants": {"columns": ["variant", "id", "cases", "share_pct", "median_cycle_hours"],
+                     "rows": [["Order placed → Order approved → Goods received → Invoice received → Invoice paid", "3f2a9c1b7d4e", 4630, 88.19, 501.5],
+                              ["other variants (12)", None, 620, 11.81, 530.2]]}}
+PROC = ["In Supply, Goods received follows Order approved in 5,163 cases, after a median wait of 76.53 hours (300.2 hours for the slowest tenth).",
+        "Of the 5,250 purchase orders, 88.19% took the usual way, from Order placed to Invoice paid, in a median 501.5 hours; 12 other variants hold 620."]
+
+
+def test_process_activity_names_and_figures_ground():
+    """1.2.7 M2: a process read answers its tables one level down (activities, pairs, variants, ...): their activity
+    names and figures ground an answer as a query's rows do, in both copies; a figure or a step no row holds is flagged."""
+    from test_engine import engine
+    flagged = lambda o: o["numbers"] + o["names"]  # noqa: E731
+    invented = "In Supply, Customs cleared follows Goods received in 9,999 cases."
+    assert [flagged(ground.check(t, [PMAP, PVAR])) for t in PROC] == [[], []]
+    out = ground.check(invented, [PMAP, PVAR])
+    assert out["numbers"] == ["9,999"] and any("Customs" in n for n in out["names"]), out
+    r = engine("import json, sys\nfrom abi.agents import grounding_rules as g\na = json.load(sys.stdin)\n"
+               "print(json.dumps([(lambda o: o['numbers'] + o['names'])(g.check(t, a['results'])) for t in a['texts']]))",
+               stdin=json.dumps({"results": [PMAP, PVAR], "texts": [*PROC, invented]}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    *mine, bad = json.loads(r.stdout.strip().splitlines()[-1])
+    assert mine == [[], []] and "9,999" in bad and any("Customs" in n for n in bad), bad
+
+
 def test_object_value_number_grounds():
     """A property value (seats), a measure filtered to the object and a listed object's value ground figures as query
     rows do, in both copies; a figure no object row holds stays flagged."""

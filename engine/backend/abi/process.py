@@ -25,8 +25,10 @@ import logging
 import re
 import time
 import uuid
+from typing import Literal
 
 import duckdb
+from jsonschema.exceptions import best_match
 from psycopg.types.json import Jsonb
 from pydantic import Field
 from sqlglot import exp
@@ -759,3 +761,345 @@ def process(conn, user: User, args: storage.ProjectRef) -> dict:
         out.append({k: p[k] for k in ("id", "name", "case")} | {"types": types(p), "build": {"status": r["status"]}} if hide else
                    {k: v for k, v in p.items() if k != "$schema"} | {"tables": tables(p), "build": {k: v for k, v in r.items() if k != "result"} | (r.get("result") or {})})
     return {"processes": out}
+
+
+# ---------- reads (1.2.7 M2): the map, variants, performance and the usual way, as the person, one query each ----------
+# Each read is one SQL through semantic.execute as the caller (row rules, column rules, rls.check, the query log) over
+# one object type's table pm_<id>_<type>: a case is one object of that type. An event's own figures (how many events,
+# its duration) count each event once (DISTINCT event_id), also one about several objects of the type.
+
+ARROW = " → "  # between a variant's activities
+VID = "substring(md5({}), 1, 12)"  # a variant's ID: the first 12 hex digits of the MD5 of its text, the same wherever it is read
+# ponytail: an activity whose name holds " → " could make two variants one text; refuse such names in `clean` if one shows up
+FILTERS = ("Cases to keep, all must hold (schemas/v1/process_filters.json): {kind: time, when: started|ended|open, from?, to?},"
+           " {kind: variant, in: [IDs], not?}, {kind: property, column: of the case's object, op, value}, {kind: attribute,"
+           " column: an event attribute, op, value}, {kind: start|end, activities: [...], not?}, {kind: contains, activity, not?},"
+           " {kind: follows, from, to, not?}, {kind: duration, op, hours}; op = <> < <= > >= in; times YYYY-MM-DD[ HH:MM], from included, to not.")
+
+
+class Read(Ref):
+    type: str | None = Field(None, pattern=r"^[a-z][a-z0-9_-]{0,62}$",
+                             description="the object type a case is, one the process's events are about (default: its `case`)")
+    filters: list[dict] = Field([], max_length=20, description=FILTERS)
+
+
+def _h(s) -> float | None:
+    """Seconds as hours, to two places."""
+    return None if s is None else round(float(s) / 3600, 2)
+
+
+def _fits(lit: str) -> bool:
+    """A literal (rls.cast_lit) DuckDB can cast: checked on a constant, before any data is read."""
+    con = duckdb.connect()
+    try:
+        con.execute(f"SELECT {lit}")
+        return True
+    except duckdb.Error:
+        return False
+    finally:
+        con.close()
+
+
+def filter_errors(p: dict, x: dict, t: str, filters: list, cols: dict, hid: dict, file: str = "filters", at: str = "$") -> list[dict]:
+    """The errors of `filters` for a read of type table `t` of process `p` (object type `x`) as a reader with hidden
+    columns `hid`: the shape (schemas/v1/process_filters.json), then each column and value. Each names `file`, the JSON
+    path under `at` and the fix (saved views, app blocks and monitors pass their own file and path)."""
+    err, kind = imports._err, "process_filters"
+    if errs := [err(file, at + imports.json_path(b, kind)[1:], *imports._explain(b, kind))
+                for e in imports._validator(kind).iter_errors(filters) for b in [best_match([e])]]:
+        return errs
+    attrs = {a for s in p["events"] for a in s.get("attributes", []) if a.lower() not in hid.get(t, set())}
+    props = [c for c in cols.get(x["table"], {}) if c.lower() not in hid.get(x["table"], set())]
+    for i, f in enumerate(filters):
+        here = f"{at}[{i}]"
+        if f["kind"] == "time":
+            if "from" not in f and "to" not in f:
+                errs.append(err(file, here, "A time filter needs `from`, `to` or both.", "Add `from` (included) and/or `to` (not included), as YYYY-MM-DD."))
+            errs += [err(file, f"{here}.{k}", f"'{f[k]}' is no date or time.", "Write it as YYYY-MM-DD or YYYY-MM-DD HH:MM.")
+                     for k in ("from", "to") if k in f and not _fits(rls.cast_lit(f[k], "TIMESTAMP"))]
+        elif f["kind"] in ("property", "attribute"):
+            c, prop = f["column"], f["kind"] == "property"
+            if c not in (props if prop else attrs):
+                errs.append(err(file, f"{here}.column", f"'{c}' is no {'property of a ' + x['name'] if prop else 'attribute of the events of process ' + repr(p['id'])} you can read.",
+                                f"Use one of: {', '.join(sorted(props if prop else attrs)) or 'none (the process keeps no attributes on its events)'}."))
+                continue
+            vals = f["value"] if isinstance(f["value"], list) else [f["value"]]
+            if (f["op"] == "in") != isinstance(f["value"], list) or not vals:
+                errs.append(err(file, f"{here}.value", "A list goes with op 'in', one value with any other op.", "Use op 'in' with a list of values, or give one value."))
+            elif bad := next((v for v in vals if not _fits(rls.cast_lit(v, cols[x["table"] if prop else t][c]))), None):
+                errs.append(err(file, f"{here}.value", f"'{bad}' doesn't fit '{c}', which is {cols[x['table'] if prop else t][c]}.",
+                                "Give a value of the column's kind (a date as YYYY-MM-DD, a number for a number)."))
+    return errs
+
+
+def _scope(p: dict, t: str, x: dict, key: list[str], filters: list, cols: dict) -> tuple[list[str], str]:
+    """(the CTEs, the FROM item c): type table `t` kept to the cases every filter holds for, by a semi-join on the case
+    key (each case once, whatever holds for it), worked out once; the table itself without filters."""
+    if not filters:
+        return [], f"{_q(t)} c"
+    ks = ", ".join(f"x.{_q(k)}" for k in key)
+    lit = lambda v, typ: rls.cast_lit(v, typ)  # noqa: E731
+    acts = lambda xs: ", ".join(f"'{_lit(a)}'" for a in xs)  # noqa: E731
+    first, last = "min(x.started_at)", "max(coalesce(x.ended_at, x.started_at))"
+    have, where = [], []
+    for f in filters:
+        k, no = f["kind"], f.get("not", False)
+        if k == "time":  # open: started before `to`, ended at or after `from`
+            lo, hi = (first, last) if f["when"] == "open" else ((first,) * 2 if f["when"] == "started" else (last,) * 2)
+            have += ([f"{hi} >= {lit(f['from'], 'TIMESTAMP')}"] if "from" in f else []) + ([f"{lo} < {lit(f['to'], 'TIMESTAMP')}"] if "to" in f else [])
+        elif k == "duration":
+            have.append(f"date_diff('second', {first}, {last}) {f['op']} {float(f['hours']) * 3600}")
+        elif k == "variant":
+            have.append(f"{VID.format(f'string_agg(x.activity, {chr(39)}{ARROW}{chr(39)} ORDER BY x.seq)')} {'NOT ' if no else ''}IN ({acts(f['in'])})")
+        elif k in ("property", "attribute"):
+            col, typ = (f"o.{_q(f['column'])}", cols[x["table"]][f["column"]]) if k == "property" else (f"x.{_q(f['column'])}", cols[t][f["column"]])
+            vals = f["value"] if isinstance(f["value"], list) else [f["value"]]
+            cond = f"{col} IN ({', '.join(lit(v, typ) for v in vals)})" if f["op"] == "in" else f"{col} {f['op']} {lit(vals[0], typ)}"
+            # a property is the case's own (each of its rows has it): its rows are kept or not; an attribute is any event's
+            (where if k == "property" else have).append(cond if k == "property" else f"count(CASE WHEN {cond} THEN 1 END) > 0")
+        else:
+            cond = {"start": lambda: f"x.seq = 1 AND x.activity IN ({acts(f['activities'])})",
+                    "end": lambda: f"x.next_activity IS NULL AND x.activity IN ({acts(f['activities'])})",
+                    "contains": lambda: f"x.activity = '{_lit(f['activity'])}'",
+                    "follows": lambda: f"x.activity = '{_lit(f['from'])}' AND x.next_activity = '{_lit(f['to'])}'"}[k]()
+            have.append(f"count(CASE WHEN {cond} THEN 1 END) {'=' if no else '>'} 0")
+    obj = f" JOIN {_q(x['table'])} o USING ({', '.join(map(_q, key))})" if where else ""
+    cases = (f"SELECT {ks} FROM {_q(t)} x{obj}" + (f" WHERE {' AND '.join(where)}" if where else "")
+             + f" GROUP BY {ks}" + (f" HAVING {' AND '.join(have)}" if have else ""))
+    made = ", ".join(f"x.{_q(c)}" for c in [*key, "event_id", "activity", "started_at", "ended_at", "duration_seconds", "seq", "next_activity", "wait_seconds"])
+    return [f"c AS MATERIALIZED (SELECT {made} FROM {_q(t)} x JOIN ({cases}) f USING ({', '.join(map(_q, key))}))"], "c"
+
+
+def _with(*ctes: str) -> str:
+    return f"WITH {', '.join(ctes)} " if ctes else ""
+
+
+def _read(project: str, args: Read, user: User, what: str, more: dict | None = None) -> tuple[dict, str, dict, list[str], tuple, dict]:
+    """(the process, the type read, the object type, its key, its cases (`_scope`), what was asked, for the query log),
+    once the arguments and the filters are checked and a type table row-level security denies the reader is refused
+    (never read as unfiltered rows, nor shown as an empty map). Each read then runs ONE query as the reader (`_run`)."""
+    f = git.path(project) / "processes" / f"{args.process}.json"
+    if not f.is_file():
+        raise ActionFailed(404, f"No process '{args.process}' in project '{project}': `process` lists them.")
+    p = json.loads(f.read_text())
+    typ = args.type or p["case"]
+    if typ not in types(p):
+        raise ActionFailed(400, f"`type`: the events of process '{p['id']}' are about {', '.join(types(p))}; use one of them.")
+    if (got := ontology.keyed(ontology.read(project), model._read(project, "model.json"), typ)) is None:
+        raise ActionFailed(409, f"Object type '{typ}' of process '{p['id']}' is no longer in the ontology with a key: put it back (save_ontology),"
+                                " or take it out of the process (save_process).")
+    x, key = got[0], [c.split(".", 1)[1] for c in got[1]]
+    t, cols = table_of(p["id"], typ), model.lake_columns(project)
+    if t not in cols:
+        raise ActionFailed(409, f"The event log of process '{p['name']}' isn't built yet: `process` shows its build.")
+    if rls.restricted(project, user.id) and t in rls.unfiltered_outputs(project):
+        raise ActionFailed(403, f"Row-level security: the events of each {x['name']} in process '{p['name']}' are made from tables that security"
+                                " rules filter, or hide columns of, and have no rule of their own, so you see none of them. An Owner of the project"
+                                " can add that rule (readiness names it).")
+    if errs := filter_errors(p, x, t, args.filters, cols, rls.hidden(project, user.id)):
+        raise ActionFailed(422, f"The filters were refused: {len(errs)} error(s); nothing was read.", errors=errs)
+    scope = _scope(p, t, x, key, args.filters, cols)
+    return p, typ, x, key, scope, {"process": p["id"], "type": typ, "filters": args.filters, what: True, **(more or {})}
+
+
+def _run(project: str, sql: str, asked: dict, user: User) -> list[tuple]:
+    try:
+        return [tuple(map(semantic.tidy, r)) for r in semantic.execute(project, sql, asked, user.id, timeout=semantic.TIMEOUT)]
+    except duckdb.Error as e:  # DuckDB's text holds SQL and values: the server log's
+        log.warning("A process read of %s failed: %s", project, credentials.log_text(e))
+        raise ActionFailed(400, f"The read failed ({type(e).__name__}); the details are in the server log.") from None
+
+
+def _per(x: dict) -> str:
+    return f"per {x['name']}"
+
+
+def _cut(rows: list, share: float, weight) -> list:
+    """The first rows (most frequent first) until those kept hold `share` of all rows' `weight`."""
+    total, kept, out = sum(map(weight, rows)), 0, []
+    for r in rows:
+        if out and kept >= share * total:
+            break
+        out.append(r)
+        kept += weight(r)
+    return out
+
+
+class MapRead(Read):
+    detail: float = Field(1, gt=0, le=1, description="keep the most frequent activities, and pairs among them, until they cover this share of the cases' visits (1: all)")
+
+
+@action(Role.viewer)
+def process_map(conn, user: User, args: MapRead) -> dict:
+    """A process's map as you may see it: activities (cases, events, median duration), pairs one directly after another (cases, count, median and p90 wait), start and end activities; per case of one object type, `filters` applied. Times in hours."""
+    p, typ, x, key, (ctes, scope), asked = _read(args.project, args, user, "process_map", {"detail": args.detail})
+    kd = _q(key[0]) if len(key) == 1 else f"({', '.join(map(_q, key))})"
+    dur = any("end" in s for s in p["events"])
+    rows = _run(args.project, _with(*ctes) + (
+        f"SELECT 'a' AS k, activity AS a, NULL::VARCHAR AS b, count(DISTINCT {kd}) AS n1, count(DISTINCT event_id) AS n2,"
+        " count(CASE WHEN seq = 1 THEN 1 END) AS n3, count(CASE WHEN next_activity IS NULL THEN 1 END) AS n4, NULL::DOUBLE AS x1,"
+        f" NULL::DOUBLE AS x2 FROM {scope} GROUP BY activity"
+        f" UNION ALL SELECT 'p', activity, next_activity, count(DISTINCT {kd}), count(*), NULL, NULL, median(wait_seconds),"
+        f" quantile_cont(wait_seconds, 0.9) FROM {scope} WHERE next_activity IS NOT NULL GROUP BY activity, next_activity"
+        + (" UNION ALL SELECT 'd', activity, NULL, NULL, NULL, NULL, NULL, median(duration_seconds), NULL FROM (SELECT DISTINCT"
+           f" event_id, activity, duration_seconds FROM {scope} WHERE duration_seconds IS NOT NULL) GROUP BY activity" if dur else "")),
+        asked, user)
+    took = {r[1]: _h(r[7]) for r in rows if r[0] == "d"}
+    acts = sorted(([a, n1, n2, took.get(a), n3, n4] for k, a, _, n1, n2, n3, n4, _, _ in rows if k == "a"), key=lambda r: (-r[1], -r[2], r[0]))
+    pairs = sorted(([a, b, n1, n2, _h(m), _h(q)] for k, a, b, n1, n2, _, _, m, q in rows if k == "p"), key=lambda r: (-r[2], -r[3], r[0], r[1]))
+    keep = _cut(acts, args.detail, lambda r: r[1])
+    names = {r[0] for r in keep}
+    near = [r for r in pairs if r[0] in names and r[1] in names]
+    shown = _cut(near, args.detail, lambda r: r[2]) if args.detail < 1 else near
+    out = {"process": p["id"], "type": typ, "per": _per(x),
+           "totals": {"columns": ["cases", "events"], "rows": [[sum(r[4] for r in acts), sum(r[2] for r in acts)]]},
+           "activities": {"columns": ["activity", "cases", "events", "median_duration_hours"], "rows": [r[:4] for r in keep]},
+           "pairs": {"columns": ["from", "to", "cases", "count", "median_wait_hours", "p90_wait_hours"], "rows": shown},
+           "start": {"columns": ["activity", "cases"], "rows": sorted(([r[0], r[4]] for r in keep if r[4]), key=lambda r: (-r[1], r[0]))},
+           "end": {"columns": ["activity", "cases"], "rows": sorted(([r[0], r[5]] for r in keep if r[5]), key=lambda r: (-r[1], r[0]))},
+           "left_out": {"activities": len(acts) - len(keep), "pairs": len(pairs) - len(shown)}}
+    note = (f"Per {x['name']}: a case is one {x['name']}. `cases` counts {x['plural']}; `events` counts each event once, also one about"
+            f" several {x['plural']}; a pair's `count` is how often one activity directly follows another in a case, its wait from the"
+            " first one's end (or start, without an end) to the next one's start (0 when they overlap).")
+    if out["left_out"]["activities"] or out["left_out"]["pairs"]:
+        note += (f" Detail {args.detail}: {len(keep)} of {len(acts)} activities and {len(shown)} of {len(pairs)} pairs are shown;"
+                 f" {out['left_out']['activities']} activities and {out['left_out']['pairs']} pairs are left out.")
+    return out | {"note": note}
+
+
+class VariantRead(Read):
+    top: int = Field(10, ge=1, le=100, description="the most frequent variants listed one by one; the others are one row")
+
+
+@action(Role.viewer)
+def process_variants(conn, user: User, args: VariantRead) -> dict:
+    """A process's variants (a case's activities in order) as you may see them: the `top` most frequent with cases, share and median cycle time, then one row for the other variants; each with an ID that is the same wherever it is read. Per case of one object type."""
+    p, typ, x, key, (ctes, scope), asked = _read(args.project, args, user, "process_variants", {"top": args.top})
+    ks = ", ".join(map(_q, key))
+    rows = _run(args.project, _with(
+        *ctes, f"cs AS MATERIALIZED (SELECT string_agg(activity, '{ARROW}' ORDER BY seq) AS v,"
+               f" date_diff('second', min(started_at), max(coalesce(ended_at, started_at))) AS s FROM {scope} GROUP BY {ks})",
+        "vs AS (SELECT v, count(*) AS n, median(s) AS m FROM cs GROUP BY v)",
+        "r AS MATERIALIZED (SELECT *, row_number() OVER (ORDER BY n DESC, v) AS rk FROM vs)") + (
+        f"SELECT rk, v, {VID.format('v')}, n, m, 1 FROM r WHERE rk <= {args.top}"
+        f" UNION ALL SELECT NULL, NULL, NULL, count(*), median(s), count(DISTINCT v) FROM cs WHERE v NOT IN (SELECT v FROM r WHERE rk <= {args.top})"),
+        asked, user)
+    top = sorted((r for r in rows if r[0] is not None), key=lambda r: r[0])
+    other = next((r for r in rows if r[0] is None and r[3]), None)
+    n = sum(r[3] for r in top) + (other[3] if other else 0)
+    share = lambda c: round(100 * c / n, 4) if n else None  # noqa: E731
+    out = [[v, i, c, share(c), _h(m)] for _, v, i, c, m, _ in top]
+    if other:
+        out.append([f"other variants ({other[5]})", None, other[3], share(other[3]), _h(other[4])])
+    return {"process": p["id"], "type": typ, "per": _per(x),
+            "totals": {"columns": ["cases", "variants"], "rows": [[n, len(top) + (other[5] if other else 0)]]},
+            "variants": {"columns": ["variant", "id", "cases", "share_pct", "median_cycle_hours"], "rows": out},
+            "note": f"Per {x['name']}: a variant is the activities of a {x['name']} in order, joined by →; its cycle time runs from its first"
+                    f" event's start to its last event's end (or start). Shares are of the {n} {x['plural']} read; an `id` filters by variant."}
+
+
+class PerfRead(Read):
+    period: Literal["day", "week", "month", "quarter", "year"] = Field("month", description="the period of the throughput")
+
+
+@action(Role.viewer)
+def process_performance(conn, user: User, args: PerfRead) -> dict:
+    """A process's performance as you may see it: cases started and ended per period, the cycle-time distribution, waiting time per pair (ranked by total wait: the bottlenecks, with their share) and working time per activity where events have an end. Per case of one object type; times in hours."""
+    p, typ, x, key, (ctes, scope), asked = _read(args.project, args, user, "process_performance", {"period": args.period})
+    ks, day = ", ".join(map(_q, key)), lambda c: f"strftime(date_trunc('{args.period}', {c}), '%Y-%m-%d')"  # noqa: E731
+    rows = _run(args.project, _with(
+        *ctes, f"cs AS MATERIALIZED (SELECT min(started_at) AS t0, max(coalesce(ended_at, started_at)) AS t1 FROM {scope} GROUP BY {ks})",
+        "cy AS (SELECT date_diff('second', t0, t1) AS s FROM cs)") + (
+        f"SELECT 's' AS k, {day('t0')} AS a, NULL::VARCHAR AS b, count(*) AS n, NULL::DOUBLE AS x1, NULL::DOUBLE AS x2, NULL::DOUBLE AS x3,"
+        f" NULL::DOUBLE AS x4, NULL::DOUBLE AS x5, NULL::DOUBLE AS x6, NULL::DOUBLE AS x7 FROM cs GROUP BY 2"
+        f" UNION ALL SELECT 'e', {day('t1')}, NULL, count(*), NULL, NULL, NULL, NULL, NULL, NULL, NULL FROM cs GROUP BY 2"
+        " UNION ALL SELECT 'c', NULL, NULL, count(*), avg(s), " + ", ".join(f"quantile_cont(s, {q})" for q in (0.1, 0.25, 0.5, 0.75, 0.9))
+        + ", max(s) FROM cy"
+        f" UNION ALL SELECT 'w', activity, next_activity, count(*), median(wait_seconds), quantile_cont(wait_seconds, 0.9), sum(wait_seconds),"
+        f" NULL, NULL, NULL, NULL FROM {scope} WHERE next_activity IS NOT NULL GROUP BY activity, next_activity"
+        " UNION ALL SELECT 'd', activity, NULL, count(*), median(duration_seconds), sum(duration_seconds), NULL, NULL, NULL, NULL, NULL"
+        f" FROM (SELECT DISTINCT event_id, activity, duration_seconds FROM {scope} WHERE duration_seconds IS NOT NULL) GROUP BY activity"),
+        asked, user)
+    by = {}
+    for r in rows:
+        if r[0] in ("s", "e"):
+            by.setdefault(r[1], [r[1], 0, 0])[1 if r[0] == "s" else 2] = r[3]
+    cyc = next((r for r in rows if r[0] == "c"), None)
+    waits = sorted((r for r in rows if r[0] == "w"), key=lambda r: (-(r[6] or 0), r[1], r[2]))
+    total = sum(r[6] or 0 for r in waits)
+    works = sorted(([a, n, _h(m), _h(t)] for k, a, _, n, m, t, *_ in rows if k == "d"), key=lambda r: (-(r[3] or 0), r[0]))
+    return {"process": p["id"], "type": typ, "per": _per(x),
+            "throughput": {"columns": ["period", "started", "ended"], "rows": [by[a] for a in sorted(by)]},
+            "cycle": {"columns": ["cases", "mean_hours", "p10_hours", "p25_hours", "median_hours", "p75_hours", "p90_hours", "max_hours"],
+                      "rows": [[cyc[3], *map(_h, cyc[4:11])]] if cyc and cyc[3] else []},
+            "waiting": {"columns": ["from", "to", "count", "median_wait_hours", "p90_wait_hours", "total_wait_hours", "share_pct"],
+                        "rows": [[a, b, n, _h(m), _h(q9), _h(t), round(100 * t / total, 2) if total and t is not None else None]
+                                 for _, a, b, n, m, q9, t, *_ in waits]},
+            "working": {"columns": ["activity", "events", "median_hours", "total_hours"], "rows": works},
+            "note": f"Per {x['name']}. A period is named by its first day. A case starts at its first event and ends at its last one (a case still"
+                    " running ends at its latest event so far). Waiting is from one activity's end (or start) to the next one's start; the"
+                    " pairs come by total waiting time, the most first, with their share of all waiting. Working time is each event's own,"
+                    " once per event" + ("." if works else "; no event of this process has an end, so there is none.")}
+
+
+def mine(cases: int, acts: dict, pairs: dict, twice: dict, starts: dict, ends: dict, threshold: float, min_share: float) -> tuple[dict, list, list]:
+    """The heuristic miner over the counts of one read: `acts` {activity: (cases with it, the most times in one case)},
+    `pairs` {(a, b): times a is directly followed by b}, `twice` {(a, b): times a, b, a come one after another},
+    `starts` and `ends` {activity: cases}. An activity, a pair, a start or an end below `min_share` of the cases is noise;
+    a pair is kept when its dependency reaches `threshold`: (a>b - b>a) / (a>b + b>a + 1), a loop of length one
+    a>a / (a>a + 1), and a loop of length two keeps both its pairs when (a>>b + b>>a) / (a>>b + b>>a + 1) does.
+    Returns (the reference-model shape of a process file, its pairs' rows, its activities' rows).
+    ponytail: no `optional` or `any_order`, and no rule keeps every activity connected (a kept activity can be left
+    without a kept pair); the flexible heuristic miner's all-connected heuristic if that bites."""
+    least = min_share * cases
+    keep = {a for a, (c, _) in acts.items() if c >= least}
+    rows, flows, loops = [], [], set()
+    for (a, b), ab in sorted(pairs.items()):
+        ba = pairs.get((b, a), 0)
+        d = ab / (ab + 1) if a == b else (ab - ba) / (ab + ba + 1)
+        if a != b and (aba := twice.get((a, b), 0) + twice.get((b, a), 0)) >= least and aba / (aba + 1) >= threshold:
+            d, loop = max(d, aba / (aba + 1)), True
+        else:
+            loop = a == b
+        ok = a in keep and b in keep and ab >= least and d >= threshold
+        rows.append([a, b, ab, round(d, 4), ok])
+        if ok:
+            flows.append([a, b])
+            loops |= {a, b} if loop else set()
+    reference = {"from": "discovered", "start": sorted(a for a, n in starts.items() if a in keep and n >= least),
+                 "end": sorted(a for a, n in ends.items() if a in keep and n >= least), "flows": flows}
+    if repeat := {a: acts[a][1] for a in sorted(loops) if acts[a][1] > 1}:
+        reference["repeat"] = repeat
+    return reference, rows, [[a, c, most, a in keep] for a, (c, most) in sorted(acts.items(), key=lambda i: (-i[1][0], i[0]))]
+
+
+class Discover(Read):
+    threshold: float = Field(0.9, ge=0, le=1, description="the dependency a pair needs to be kept (0 to 1)")
+    min_share: float = Field(0.02, ge=0, le=1, description="the share of cases below which an activity, a pair, a start or an end is noise")
+
+
+@action(Role.viewer)
+def discover_process(conn, user: User, args: Discover) -> dict:
+    """The usual way of a process, discovered from its log as you may see it (heuristic miner: dependency threshold, loops of length one and two), in the shape of a process's `reference`; saves nothing. Per case of one object type, `filters` applied."""
+    p, typ, x, key, (ctes, scope), asked = _read(args.project, args, user, "discover_process", {"threshold": args.threshold, "min_share": args.min_share})
+    ks = ", ".join(map(_q, key))
+    on = " AND ".join(f"y.{_q(k)} = x.{_q(k)}" for k in key)
+    rows = _run(args.project, _with(*ctes, f"l AS MATERIALIZED (SELECT {ks}, activity, next_activity, seq FROM {scope})") + (
+        "SELECT 'a' AS k, activity AS a, NULL::VARCHAR AS b, count(*) AS n, max(m) AS m FROM"
+        f" (SELECT activity, count(*) AS m FROM l GROUP BY {ks}, activity) GROUP BY activity"
+        " UNION ALL SELECT 'p', activity, next_activity, count(*), NULL FROM l WHERE next_activity IS NOT NULL GROUP BY activity, next_activity"
+        f" UNION ALL SELECT 'l', x.activity, x.next_activity, count(*), NULL FROM l x JOIN l y ON {on} AND y.seq = x.seq + 1"
+        " WHERE y.next_activity = x.activity AND x.activity <> x.next_activity GROUP BY x.activity, x.next_activity"
+        " UNION ALL SELECT 's', activity, NULL, count(*), NULL FROM l WHERE seq = 1 GROUP BY activity"
+        " UNION ALL SELECT 'e', activity, NULL, count(*), NULL FROM l WHERE next_activity IS NULL GROUP BY activity"),
+        asked, user)
+    got = lambda tag: {r[1] if r[2] is None else (r[1], r[2]): r[3] for r in rows if r[0] == tag}  # noqa: E731
+    starts = got("s")
+    reference, pairs, acts = mine(sum(starts.values()), {r[1]: (r[3], r[4]) for r in rows if r[0] == "a"}, got("p"), got("l"), starts,
+                                  got("e"), args.threshold, args.min_share)
+    return {"process": p["id"], "type": typ, "per": _per(x), "reference": reference,
+            "totals": {"columns": ["cases"], "rows": [[sum(starts.values())]]},
+            "pairs": {"columns": ["from", "to", "count", "dependency", "kept"], "rows": pairs},
+            "activities": {"columns": ["activity", "cases", "most_in_one_case", "kept"], "rows": acts},
+            "note": f"The usual way of process '{p['name']}', per {x['name']}, discovered from the log; nothing is saved. It has the shape of a"
+                    " process's `reference`: saved there (save_process) it is kept in the file, and nothing checks cases against it yet."}
