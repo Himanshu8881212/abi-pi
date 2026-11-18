@@ -348,6 +348,9 @@ def conditions(project: str, user_id: int, read, types: dict | None = None, keep
     denied = unfiltered_outputs(project)  # once per build: it hashes every file of the project
     hid = _hidden(project, user_id) if fl else {}  # once per build too (1.2.7 M0: `_blanks` read it again)
     blank = _blanks(project, user_id, types, denied, hid) if fl else None
+    from abi import process  # not at top: it imports this module
+
+    cased = {t for t, typ in process.generated(project).items() if typ}  # 1.2.7 M2: a process's per-type tables ({} without one)
 
     @functools.cache  # fixpoint rounds repeat unchanged reads: run each once
     def held(src: str, cols: tuple[str, ...], on: tuple[str, ...]) -> str:
@@ -423,7 +426,10 @@ def conditions(project: str, user_id: int, read, types: dict | None = None, keep
                 same = d not in lv and all((types or {}).get(t, {}).get(f, 1) == (types or {}).get(d, {}).get(k, 2) for f, k in zip(fk, key))
                 if t in lv:
                     cs.append((tag, ch(t, fk, src, key, reads)))
-                elif tag and keep and d not in lv:  # made from a follow link: d's visible keys are as many as the link's
+                # made from a follow link (d's visible keys are as many as the link's), or 1.2.7 M2 onto a process's
+                # per-type table (an event row per object: a list of the visible objects' keys, tested on each, took
+                # minutes at 5 million rows); a project with neither keeps its filters' text
+                elif (tag or t in cased) and keep and d not in lv:
                     on = " AND ".join(f"__d.{storage._q(k)} = {storage._q(t)}.{storage._q(f)}" for f, k in zip(fk, key))
                     # (never the type d's own filter tests: a foreign key that is no row of d is in no visible row's key)
                     cs.append((tag, held(src, key, fk) if same else held(f"{storage._q(t)} WHERE EXISTS (SELECT 1 FROM {src} WHERE {on})", fk, fk)))
@@ -654,9 +660,26 @@ def _unfiltered_outputs(project: str) -> list[str]:
     # 1.2.6 M9: a predictions table whose model was deleted has no lineage left to say what it was made from: denied
     # (fail closed), as is any other model table named ml_<x> with no ml/<x>.json, until it gets a row rule of its own
     orphan = lambda t: t.startswith("ml_") and t not in ruled and not (git.path(project) / "ml" / f"{t[3:]}.json").is_file()  # noqa: E731
-    return sorted(t for n in g if n.startswith("table:") and (
+    from abi import process  # not at top: it imports this module
+
+    # 1.2.7 M2: a process's per-type table carries each case's figures on each of its rows (variant_id, cycle_seconds,
+    # the flags, next_activity, wait_seconds), so a reader sees all of a case's rows or none: any part of its filter
+    # that is no case's own (a row rule on a column other than its key, its relationship from event_id to a filtered
+    # events table, a person's relationship from another column to a filtered table, a follow link from it) would
+    # show part of a case with figures of the rest. Denied then, fail closed: its key's own rules and relationships only.
+    from abi.semantic import model, ontology  # not at top: circular imports
+
+    keys = ontology._keys(model._read(project, "model.json"))
+
+    def splits(t: str) -> bool:
+        case = set(keys.get(t) or []) - {"event_id"}
+        return (any(r["table"] == t and r["column"] not in case for r in row_rules(project)) or any(f["from"] == t for f in fl)
+                or any(r["from"]["table"] == t and not set(r["from"]["columns"]) <= case and roots(r["to"]["table"], False) for r in rels))
+
+    split = {t for t, typ in process.generated(project).items() if typ and splits(t)}
+    return sorted(split | {t for n in g if n.startswith("table:") and (
         (t := n[6:]) not in ruled and set().union(*(roots(u, u != t) for u in ups(n))) - roots(t, False) or t not in cols and ups(n) & cols
-        or orphan(t)))
+        or orphan(t))})
 
 
 def explain(project: str, user_id: int) -> str:

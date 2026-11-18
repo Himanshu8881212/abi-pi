@@ -1909,9 +1909,10 @@ flags (`first_visit`, `first_pair`: one row per activity and per pair in a case)
 count cases from the flags and read variants from one row per case; filters semi-join on the case keys only. The text
 of a variant is read for the variants shown only, from one case of each. The first try (0512856: the variant's text
 by a grouped, ordered string_agg) ran out of the build's 400 MiB at 5 million events (OutOfMemoryException, also as
-`list`, also with one thread); the same text by a window took 49 s for the purchase orders' table alone. What each
-part of the purchase orders' table costs (a one-off script on a kept project, the build's own DuckDB settings,
-the statement alone): as in M1 14.0 s; with the case windows over one more sort 21.3 s; with each flag over a sort
+`list`, also with one thread); the same text by a window took 49 s for the purchase orders' table alone. Those two
+tries and the costs that follow come from one-off scripts run in the container on a kept project, not in the
+repository (`process._sql`'s statements with the build's own DuckDB settings, each statement alone). What each part
+of the purchase orders' table costs: as in M1 14.0 s; with the case windows over one more sort 21.3 s; with each flag over a sort
 of its own 36.4 s; as built (the flags and the variant's hash over one sort) 29.9 s.
 
 **The build of 5,090,255 events** (target: at most 60 s, at most 1.5 GB in the heavy worker), every table's rows as
@@ -1947,9 +1948,10 @@ purchase orders, 262,279 of 1,050,000, and their events are filtered through the
 | process_variants | stopped at the 60 s limit | 332.6, 345.8, 367.5 s |
 
 Where the time goes (EXPLAIN ANALYZE of the map's first part, the activities, as that Viewer on the kept project,
-a one-off script): 152.66 s in all, nearly all of it in the scan of pm_supply_purchase_order, whose row-level security
-filter is the relationship to purchase_orders written as a constant list of every purchase order key the Viewer may
-see (`po_id IN ('PO0000095', 'PO0000099', …)`, 262,279 keys), tested on each of its 5.3 million rows; the map
+a one-off script run in the container, not in the repository): 152.66 s in all, nearly all of it in the scan of
+pm_supply_purchase_order, whose row-level security filter is the relationship to purchase_orders written as a constant
+list of every purchase order key the Viewer may see, as the code writes it (`rls._in`: `list_contains([CAST('PO0000095'
+AS VARCHAR), …], "po_id")`, 262,279 keys), tested on each of its 5.3 million rows; the map
 scans the table three times. That filter is how row-level security writes a relationship into a filtered table today
 (`rls.conditions`, as for any table; M0 moved only follow links to a key type), not something of the process reads.
 Not changed here.

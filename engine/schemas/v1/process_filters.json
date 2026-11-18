@@ -33,7 +33,7 @@
                 "properties": {"kind": true, "from": {"$ref": "#/$defs/activity"}, "to": {"$ref": "#/$defs/activity"}, "not": {"type": "boolean"}}}},
       {"if": {"properties": {"kind": {"const": "duration"}}, "required": ["kind"]},
        "then": {"required": ["op", "hours"], "additionalProperties": false, "description": "Cases whose cycle time (first event's start to last event's end, or start) compares so with `hours`",
-                "properties": {"kind": true, "op": {"enum": ["<", "<=", ">", ">="]}, "hours": {"type": "number", "minimum": 0}}}}
+                "properties": {"kind": true, "op": {"enum": ["<", "<=", ">", ">="]}, "hours": {"type": "number", "minimum": 0, "maximum": 1000000}}}}
     ]
   },
   "$defs": {

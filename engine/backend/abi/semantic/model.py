@@ -421,9 +421,11 @@ def check(project: str) -> list[str]:
              " of its rows. To archive it, save the process as it was (save_process), then delete the process (delete_process) or take the"
              " type out of it." if t in lost else
              # a process's table: a relationship of its own to a filtered source would be the build's again at the next build
-             f"Table '{t}' holds events of a process made from tables that security rules filter, or hide columns of; restricted Viewers see"
-             " none of its rows until it has a rule of its own: a row rule (set_rls_rule) where a row rule filters one of those tables, a column"
-             " rule (set_column_rule) where a column rule hides a column of one." if t in pm else
+             f"Table '{t}' holds events of a process, each case's rows together; restricted Viewers see none of its rows while it is made"
+             " from tables that security rules filter, or hide columns of, without a rule of its own, or while a rule splits its cases. It"
+             " needs a row rule on its key column(s) (set_rls_rule) where a row rule filters one of those tables, a column rule"
+             " (set_column_rule) where a column rule hides a column of one, and none of these, which split its cases: a row rule on another"
+             " of its columns, a rule on the process's events table, a relationship from another of its columns to a filtered table." if t in pm else
              f"Table '{t}' {'holds ML predictions' if t.startswith('ml_') else 'is built by steps'} made from rows that"
              " row-level security rules filter; restricted Viewers see none of its rows until a rule on it (or a"
              " relationship to each filtered table it is made from) filters it."

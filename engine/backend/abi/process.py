@@ -47,8 +47,9 @@ EVENT = ("event_id", "activity", "started_at", "ended_at", "duration_seconds")  
 # 1.2.7 M2: a case's own figures, written on each of its rows of a type's table (its variant's ID and its cycle time;
 # the reads take them from there, so a read is one pass over one row per case or per row, and the text of a variant is
 # read for the variants shown only; M4 builds pm_<id>_<type>_cases from these columns), and two flags:
-# one row of each activity in a case, and one of each pair of activities one after the other (cases = the flagged rows). A
-# case's rows are visible together or not at all (its object's rules), so the flags hold for every reader.
+# one row of each activity in a case, and one of each pair of activities one after the other (cases = the flagged rows).
+# They hold for a reader who sees all of a case's rows or none: row-level security denies a type table any part of
+# whose filter could show part of a case (rls._unfiltered_outputs), so every reader sees whole cases.
 CASE = ("variant_id", "cycle_seconds")
 FLAGS = ("first_visit", "first_pair")
 MADE = {*EVENT, "ord", "seq", "next_activity", "wait_seconds", *CASE, *FLAGS}  # the column names a build makes itself
@@ -264,7 +265,14 @@ def references(project: str, files: dict) -> list[dict]:
             continue
         for n in tree:
             c = n.col.amount if type(n) is mel.Agg and type(n.col) is mel.Conv else getattr(n, "col", None)
-            if type(n) is mel.Agg and n.fn not in ("MIN", "MAX", "DISTINCT_COUNT") and (p := per.get(c.table)) and c.column in (*CASE, *FLAGS):
+            if type(n) is mel.Agg and n.fn not in ("MIN", "MAX", "DISTINCT_COUNT") and (p := per.get(c.table)) and c.column in FLAGS:
+                what = ontology.keyed(onto, mj, tables(p)[c.table])
+                name = what[0]["name"] if what else "case"
+                errs.append(err(imports.MEASURES, f"$.measures[{i}].expression",
+                                f"Measure '{m['id']}' takes {n.fn} of {c.table}.{c.column}, a flag the build sets on one row of each activity"
+                                f"{' pair' if c.column == 'first_pair' else ''} in a {name}, for the process reads: no figure of its own.",
+                                f"Count {what[0]['plural'] if what else 'cases'} with DISTINCT_COUNT of {c.table}'s key instead (by activity, as a dimension)."))
+            elif type(n) is mel.Agg and n.fn not in ("MIN", "MAX", "DISTINCT_COUNT") and (p := per.get(c.table)) and c.column in CASE:
                 what = ontology.keyed(onto, mj, tables(p)[c.table])
                 name = what[0]["name"] if what else "case"
                 errs.append(err(imports.MEASURES, f"$.measures[{i}].expression",
@@ -925,9 +933,12 @@ def _read(project: str, args: Read, user: User, what: str, more: dict | None = N
         raise ActionFailed(409, f"The event log of process '{p['name']}' was built before its {x['name']}'s key or this version of ABI: save"
                                 " the process again (save_process) to build it again; `process` shows the build.")
     if rls.restricted(project, user.id) and t in rls.unfiltered_outputs(project):
-        raise ActionFailed(403, f"Row-level security: the events of each {x['name']} in process '{p['name']}' are made from tables that security"
-                                " rules filter, or hide columns of, and have no rule of their own, so you see none of them. An Owner of the project"
-                                " can add that rule (readiness names it).")
+        raise ActionFailed(403, f"Row-level security: you see none of the events of each {x['name']} in process '{p['name']}'. Their table is made"
+                                " from tables that security rules filter, or hide columns of, without a rule of its own, or a rule splits its cases."
+                                " An Owner of the project can give it a row rule on its key column(s) and remove what splits it; readiness names which.")
+    if gone := sorted(c for c in {*key, *EVENT, *CASE, *FLAGS, "seq", "next_activity", "wait_seconds"} if c.lower() in rls.hidden(project, user.id).get(t, set())):
+        raise ActionFailed(403, f"A column rule hides '{gone[0]}' of the events of each {x['name']} in process '{p['name']}' from you, and the"
+                                " process reads need it, so they can't run for you. An Owner of the project decides which columns are hidden.")
     if errs := filter_errors(p, x, t, args.filters, cols, rls.hidden(project, user.id)):
         raise ActionFailed(422, f"The filters were refused: {len(errs)} error(s); nothing was read.", errors=errs)
     return p, typ, x, key, _scope(t, x, key, args.filters, cols), {"process": p["id"], "type": typ, "filters": args.filters, what: True, **(more or {})}
@@ -937,8 +948,9 @@ def _run(project: str, sql: str, asked: dict, user: User) -> list[tuple]:
     try:
         return [tuple(map(semantic.tidy, r)) for r in semantic.execute(project, sql, asked, user.id, timeout=semantic.TIMEOUT)]
     except duckdb.InterruptException:
-        raise ActionFailed(400, f"The read ran longer than the {semantic.TIMEOUT:g} s limit and was stopped. Read fewer cases: add a"
-                                " `time` filter (cases started in a shorter range) or a `property` filter.") from None
+        raise ActionFailed(400, f"The read ran longer than the {semantic.TIMEOUT:g} s limit and was stopped: this process's log is too large"
+                                " to read within it, as you may see it. Tell an Owner of the project; whoever looks after ABI for you can raise"
+                                " the limit (ABI_QUERY_TIMEOUT).") from None
     except duckdb.Error as e:  # DuckDB's text holds SQL and values: the server log's
         log.warning("A process read of %s failed: %s", project, credentials.log_text(e))
         raise ActionFailed(400, f"The read failed ({type(e).__name__}); the details are in the server log.") from None
@@ -1152,6 +1164,7 @@ def discover_process(conn, user: User, args: Discover) -> dict:
             "pairs": {"columns": ["from", "to", "count", "dependency", "kept"], "rows": pairs},
             "activities": {"columns": ["activity", "cases", "most_in_one_case", "kept"], "rows": acts},
             "note": f"The usual way of process '{p['name']}', per {x['name']}, discovered from the log; nothing is saved. It has the shape of a"
-                    " process's `reference`: saved there (save_process) it is kept in the file, and nothing checks cases against it yet."
+                    " process's `reference`: saved there (save_process), its `end` decides when a case has ended in process_performance;"
+                    " nothing checks cases against the rest of it yet."
                     + (f" To fit a reference ({REF[0]} start or end activities, {REF[1]:,} flows, a step repeated at most {REF[2]:,} times)"
                        f" it keeps only the most frequent of these: {', '.join(cut)}." if cut else "")}

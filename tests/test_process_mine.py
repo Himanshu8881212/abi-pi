@@ -142,8 +142,11 @@ def test_variants_by_string_agg_shares_sum_to_100(mined):
     assert v["variants"]["columns"] == ["variant", "id", "cases", "share_pct", "median_cycle_hours"] and v["totals"]["rows"] == [[3, 3]]
     # one ticket each, the text in order (ties by the text); the cycle from the first start to the last end: 25 h, 23 h, 1 h
     assert [[r[0], r[2], r[3], r[4]] for r in v["variants"]["rows"]] == [[T1, 1, 33.3333, 25.0], [T2, 1, 33.3333, 23.0], [T3, 1, 33.3333, 1.0]]
-    two = read("process_variants", process="desk", top=2)["variants"]["rows"]  # (review round 1: ties at the cut go by ID, not by text)
-    assert {r[0] for r in two[:2]} < {T1, T2, T3} and two[2][0] == "other variants (1)" and two[2][1:4] == [None, 1, 33.3333]
+    # ties at the cut go by ID (review rounds 1 and 2): the two tickets with the smallest IDs are listed, the third's
+    # cycle time is the other variants' row's
+    ids = sorted(v["variants"]["rows"], key=lambda r: r[1])
+    two = read("process_variants", process="desk", top=2)["variants"]["rows"]
+    assert {r[0] for r in two[:2]} == {r[0] for r in ids[:2]} and two[2] == ["other variants (1)", None, 1, 33.3333, ids[2][4]]
     # Brewline: the happy path first, as many orders as the generator planted; the shares of all rows make 100
     k = mined["known"]
     s = read("process_variants", process="supply", top=3)
@@ -160,7 +163,7 @@ def test_variant_id_is_stable(mined):
     # the same wherever, whoever and whenever it is read
     vid = lambda v: ("SELECT substring(md5(CAST(" + " + ".join(  # noqa: E731
         f"md5_number_lower('{i}:{a}')::HUGEINT" for i, a in enumerate(v.split(" → "), 1)) + " AS VARCHAR)), 1, 12)")
-    assert ids == {v: i for v, [[i]] in zip((T1, T2, T3), deep(*map(vid, (T1, T2, T3))))}
+    assert ids == {v: i for v, [[i]] in zip((T1, T2, T3), deep(*map(vid, (T1, T2, T3))))} and ids[T1] == "5187ae7879fb", ids  # pinned: DuckDB 1.5.6
     happy = " → ".join(mined["known"]["happy_path"]["steps"])
     mine = {r[0]: r[1] for r in read("process_variants", mined["viewer"], process="supply")["variants"]["rows"]}
     assert mine[happy] == deep(vid(happy))[0][0][0], "the restricted Viewer's id is the owner's"
@@ -440,6 +443,11 @@ def test_case_figures_count_once_and_are_the_builds_names(mined):
             abi.call("set_measure", project=P, id="cyc", name="cyc", expression=f"{fn}(pm_supply_purchase_order.cycle_seconds)")
         [x] = e.value.body["errors"]
         assert "a Purchase order's own figure written on each of its events" in x["error"] and x["fix"].startswith("Use MIN, MAX or DISTINCT_COUNT"), x
+    # a flag is on one row of each activity (or pair) in a case: no figure to sum (review round 2: a message of its own)
+    with pytest.raises(abi.ActionError) as e:
+        abi.call("set_measure", project=P, id="cyc", name="cyc", expression="COUNT(pm_supply_purchase_order.first_visit)")
+    [x] = e.value.body["errors"]
+    assert "a flag the build sets on one row of each activity in a Purchase order" in x["error"] and "DISTINCT_COUNT" in x["fix"], x
     for i, ex in {"longest": "MAX(pm_supply_purchase_order.cycle_seconds)", "kinds": "DISTINCT_COUNT(pm_supply_purchase_order.variant_id)"}.items():
         abi.call("set_measure", project=P, id=i, name=i, expression=ex)
         sure("delete_measure", project=P, id=i)
@@ -522,7 +530,8 @@ def test_a_read_stopped_at_the_time_limit_says_how_to_read_less(mined):
     r = engine(SLOW, timeout=120, stdin=json.dumps({"project": P}))
     assert r.returncode == 0, r.stderr[-2000:]
     status, msg = json.loads(r.stdout.splitlines()[-1])
-    assert status == 400 and "longer than the 0.5 s limit" in msg and "`time` filter" in msg, msg
+    # (review round 2: no longer "add a `time` filter", which makes a read heavier)
+    assert status == 400 and "longer than the 0.5 s limit" in msg and "too large to read within it" in msg and "ABI_QUERY_TIMEOUT" in msg, msg
 
 
 def test_a_hidden_column_reads_as_an_unknown_one(mined):
@@ -581,3 +590,54 @@ def test_a_case_with_a_key_of_two_columns(mined):
         assert read("discover_process", process="shifts", threshold=0.5)["reference"]["start"] == ["Open"]
     finally:
         sure("delete_process", project=P, process="shifts")
+
+
+# ---------- review round 2 ----------
+
+def test_a_rule_that_splits_cases_denies_the_type_table(mined):
+    # a reader sees all of a case's rows or none: a row rule on a column of the type table other than its key, a rule on
+    # the events table, and a person's relationship from another column to a filtered table each deny it (the reads
+    # refuse, sql_query reads nothing); a rule on its key column keeps it readable, with that rule's cases
+    t, uid = "pm_supply_purchase_order", str(mined["uid"])
+    some = [r[0] for r in sql("SELECT po_id FROM purchase_orders JOIN cafes USING (cafe_id) WHERE region = 'North' ORDER BY 1 LIMIT 3")]
+
+    def denied() -> bool:
+        e = refused("process_map", token=mined["viewer"], process="supply")
+        return e.status == 403 and "splits its cases" in e.body["message"] and viewer(mined, "sql_query", sql=f"SELECT count(*) FROM {t}")["rows"] == [[0]]
+
+    for rule in ({"table": t, "column": "activity", "users": {uid: ["Order placed"]}}, {"table": "pm_supply_events", "column": "activity",
+                                                                                         "users": {uid: ["Order placed"]}}):
+        sure("set_rls_rule", project=P, id="split", **rule)
+        try:
+            assert denied(), rule
+            assert [g for g in abi.call("readiness", project=P)["missing"] if t in g and "split its cases" in g]
+        finally:
+            sure("delete_rls_rule", project=P, id="split")
+    rid = abi.call("add_relationship", project=P, **{"from": f"{t}.done_by", "to": "tickets.ticket_id"})["id"]
+    try:
+        assert denied()
+    finally:
+        sure("remove_relationship", project=P, id=rid)
+    sure("set_rls_rule", project=P, id="cases", table=t, column="po_id", users={uid: some})
+    try:
+        mine = read("process_map", mined["viewer"], process="supply")
+        assert mine["totals"]["rows"][0][0] == 3 and mine == read("process_map", mined["viewer"], process="supply",
+                                                                  filters=[{"kind": "property", "column": "po_id", "op": "in", "value": some}])
+        assert mine["totals"]["rows"] == read("process_map", process="supply", filters=[{"kind": "property", "column": "po_id", "op": "in", "value": some}])["totals"]["rows"]
+    finally:
+        sure("delete_rls_rule", project=P, id="cases")
+
+
+def test_a_column_the_reads_need_hidden_is_said(mined):
+    sure("set_column_rule", project=P, id="waits", table="pm_supply_delivery", columns=["wait_seconds"])
+    try:
+        e = refused("process_map", token=mined["viewer"], process="supply", type="delivery")
+        assert e.status == 403 and "hides 'wait_seconds'" in e.body["message"] and "An Owner" in e.body["message"], e.body
+        assert read("process_map", process="supply", type="delivery")["totals"]
+    finally:
+        sure("delete_rls_rule", project=P, id="waits")
+
+
+def test_a_duration_beyond_the_limit_is_refused(mined):
+    e = refused("process_map", process="desk", filters=[{"kind": "duration", "op": ">", "hours": 1e306}])
+    assert e.status == 422 and e.body["errors"][0]["path"] == "$[0].hours", e.body
