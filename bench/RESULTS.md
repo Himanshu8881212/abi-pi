@@ -1854,3 +1854,42 @@ byte-identical to the recorded ones, and its bundle imports with no change.
 The whole suite on 577e47e in a container set up anew (`.loop/abi127.sh test -q -rf tests`): 6 failed, 585 passed,
 24 skipped in 4,871 s; the six are the ones that fail in this container on every commit (two of tests/test_app.py,
 one each of test_ground.py, test_guardrails.py, test_jobs.py and test_supervise.py).
+
+## 1.2.7 M2 (pve1)
+
+18 Nov 2026, 00:39 to 01:02 UTC, pve1 LXC 100 (6 cores, 10 GB), in the throwaway test container `abi-127-t` set up by
+`.loop/abi127.sh up` and `sync` from the worktree at e5ed6ed (the engine started by `scripts/engine.sh start` with its
+defaults: DuckDB at most 1500MB and 3 threads in each process). The live `abi` and `lake` containers were not touched.
+One run, nothing else running in the container.
+
+    ssh pve1 "pct exec 100 -- docker exec abi-127-t sh -c 'cd /app && python3 bench/perf.py process --scale 1 --reads 20'"
+
+`perf.py process` as in M1 (Brewline `--supply` at scale 1: 5,090,255 events; the first build 35.4 s, high-water mark
+968 MB; the build after a refresh 34.1 s, 1,023 MB), then `process_reads`: `process_map` and `process_variants` of
+the supply process per purchase order (pm_supply_purchase_order, 5,300,869 rows, 1,050,000 cases), no filter, as the
+workspace owner over the engine's REST door, 20 times each, timed from the request to the answer:
+
+- **cold**: before each read `scripts/engine.sh stop` (the engine, its workers and Postgres), a sync, the project's
+  lake files and Postgres's data files dropped from the OS page cache (`posix_fadvise(DONTNEED)` on every file), then
+  `engine.sh start` and the read once `/api/ready` answers: a new DuckDB instance with no buffers, no result cache, no
+  attached lake, and the data read from disk. (The page cache of the whole host is not dropped: that needs the
+  Proxmox host, which the live containers share.)
+- **cached**: the same read again: the engine's result cache (SE-7) answers.
+- **warm**: each read made new by a filter that keeps every case (cases started from 2000-01-01 00:00:<i>), so the
+  engine works it out each time on warm buffers. It does more than the read without a filter: the semi-join on every
+  case and the filtered cases materialized once. A warm read without a filter that the cache does not answer cannot
+  be made from outside (the same SQL is a cache hit).
+
+Target: p95 of 20 at most 2 s warm and at most 6 s cold.
+
+| read | cold p95 s (min to max) | warm p95 s (min to max) | cached p95 s |
+|---|---|---|---|
+| process_map | **4.60** (3.74 to 4.94) | **4.86** (3.79 to 5.17) | 0.03 |
+| process_variants | **5.45** (4.94 to 5.61) | **4.42** (3.90 to 4.83) | 0.03 |
+
+- **Cold: met for both (4.60 s and 5.45 s, target at most 6 s).**
+- **Warm, worked out each time: missed for both (4.86 s and 4.42 s, target at most 2 s).** A repeat of the same read
+  is answered from the result cache in 0.03 s. The cold unfiltered map (3.7 to 4.9 s) suggests the unfiltered read
+  itself takes about 3.5 to 4 s on warm buffers too, also above 2 s; that was not measured separately. Not measured
+  either: where the time goes inside the query (the distinct counts of cases and events per activity and pair; the
+  string_agg of a million cases). The target is left as it is.
