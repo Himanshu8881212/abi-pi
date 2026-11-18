@@ -1877,8 +1877,10 @@ workspace owner over the engine's REST door, 20 times each, timed from the reque
 - **cached**: the same read again: the engine's result cache (SE-7) answers.
 - **warm**: each read made new by a filter that keeps every case (cases started from 2000-01-01 00:00:<i>), so the
   engine works it out each time on warm buffers. It does more than the read without a filter: the semi-join on every
-  case and the filtered cases materialized once. A warm read without a filter that the cache does not answer cannot
-  be made from outside (the same SQL is a cache hit).
+  case and the filtered cases materialized once. (Corrected in review round 1: this said a warm read without a filter
+  that the cache does not answer cannot be made from outside. Untrue: `top` is in the variants' SQL, so each `top` is a
+  new cache key for the same work, and inside the container the result cache can be cleared before each read; both
+  are measured below.)
 
 Target: p95 of 20 at most 2 s warm and at most 6 s cold.
 
@@ -1893,3 +1895,61 @@ Target: p95 of 20 at most 2 s warm and at most 6 s cold.
   itself takes about 3.5 to 4 s on warm buffers too, also above 2 s; that was not measured separately. Not measured
   either: where the time goes inside the query (the distinct counts of cases and events per activity and pair; the
   string_agg of a million cases). The target is left as it is.
+
+### Review round 1: each case's figures in the build
+
+18 Nov 2026, 04:54 to 05:47 UTC, the same container (6 cores, DuckDB at most 1500MB and 3 threads in each process,
+one heavy job at a time), engine code f449fd6, bench eadb2ed (the same but for the restricted part's error handling;
+the run was made from that tree):
+
+    ssh pve1 "pct exec 100 -- docker exec abi-127-t sh -c 'cd /app && python3 bench/perf.py process --scale 1 --reads 20 --keep'"
+
+Since f449fd6 the build writes, on each row of a type's table, its case's `variant_id` and `cycle_seconds` and two
+flags (`first_visit`, `first_pair`: one row per activity and per pair in a case), by windows over two sorts. The reads
+count cases from the flags and read variants from one row per case; filters semi-join on the case keys only. The text
+of a variant is read for the variants shown only, from one case of each. The first try (0512856: the variant's text
+by a grouped, ordered string_agg) ran out of the build's 400 MiB at 5 million events (OutOfMemoryException, also as
+`list`, also with one thread); the same text by a window took 49 s for the purchase orders' table alone. What each
+part of the purchase orders' table costs (a one-off script on a kept project, the build's own DuckDB settings,
+the statement alone): as in M1 14.0 s; with the case windows over one more sort 21.3 s; with each flag over a sort
+of its own 36.4 s; as built (the flags and the variant's hash over one sort) 29.9 s.
+
+**The build of 5,090,255 events** (target: at most 60 s, at most 1.5 GB in the heavy worker), every table's rows as
+in M1 (pm_supply_purchase_order 5,300,869, pm_supply_delivery 838,849):
+
+| build | build s | from its trigger to the run's end s | heavy worker's high-water mark MB | highest sample MB |
+|---|---|---|---|---|
+| the first, after the save | **51.8** | 58.5 | **1,040.9** | 1,039.2 |
+| after the refresh of supply_events | **50.5** | 128.0 | **1,000.8** | 1,001.2 |
+
+**Both met** (M1 as built: 34.5 and 33.4 s, 1,032 and 975 MB): the build takes about 17 s more, the memory is the same.
+
+**The reads** (p95 of 20 unless said; how each is timed: `process_reads` in bench/perf.py):
+
+| read | cold (target ≤ 6 s) | warm, cache cleared (target ≤ 2 s) | warm over REST, `top` 1 to 20 | filtered warm (REST) | cached (REST) |
+|---|---|---|---|---|---|
+| process_map | **3.21** (2.83 to 3.69) | **1.25** (1.17 to 1.26) | | 2.02 (1.81 to 2.82) | 0.05 |
+| process_variants | **2.22** (1.94 to 2.23) | **0.28** (0.25 to 0.28) | 0.27 (0.05 to 0.27) | 0.80 (0.52 to 0.87) | 0.05 |
+
+- **All four targets met**: cold 3.21 s and 2.22 s (at most 6 s), warm 1.25 s and 0.28 s (at most 2 s).
+- warm, cache cleared: the actions' own functions in a process of the engine's code started for the bench, on the
+  same lake, the engine's result cache cleared before each read, after one read not counted (no REST in between).
+  warm over REST, `top` 1 to 20: each `top` is a new SQL for the same work (the one at 0.05 s is `top` 10, read by
+  the cold runs before). filtered warm: a time filter that keeps every case (2000-01-01 00:00:<i>), so the semi-join
+  on every case is worked out too, over REST. cold as before.
+
+**A restricted Viewer** (no target): a Viewer who sees the North region's cafés (a row rule on cafes, so their
+purchase orders, 262,279 of 1,050,000, and their events are filtered through the relationships).
+
+| read | their first read over REST | three more, cache cleared, with a limit of 900 s |
+|---|---|---|
+| process_map | stopped at the engine's 60 s limit ("The read ran longer than the 60 s limit and was stopped. Read fewer cases: …") | 538.0, 549.3, 551.9 s |
+| process_variants | stopped at the 60 s limit | 332.6, 345.8, 367.5 s |
+
+Where the time goes (EXPLAIN ANALYZE of the map's first part, the activities, as that Viewer on the kept project,
+a one-off script): 152.66 s in all, nearly all of it in the scan of pm_supply_purchase_order, whose row-level security
+filter is the relationship to purchase_orders written as a constant list of every purchase order key the Viewer may
+see (`po_id IN ('PO0000095', 'PO0000099', …)`, 262,279 keys), tested on each of its 5.3 million rows; the map
+scans the table three times. That filter is how row-level security writes a relationship into a filtered table today
+(`rls.conditions`, as for any table; M0 moved only follow links to a key type), not something of the process reads.
+Not changed here.
