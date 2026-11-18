@@ -53,9 +53,11 @@ EVENT = ("event_id", "activity", "started_at", "ended_at", "duration_seconds")  
 CASE = ("variant_id", "cycle_seconds")
 FLAGS = ("first_visit", "first_pair")
 MADE = {*EVENT, "ord", "seq", "next_activity", "wait_seconds", *CASE, *FLAGS}  # the column names a build makes itself
-# what a type table's build works out from each of these columns: a column rule hiding one hides them too (rls._hidden)
+# what a type table's build works out from each of these columns: a column rule hiding one hides them too (rls._hidden);
+# the times make the order (ord, then seq), and the order every column read along it (the next activity, the variant, the flags)
 DERIVED = {"activity": {"next_activity", "variant_id", "first_visit", "first_pair"},
-           **dict.fromkeys(("started_at", "ended_at"), {"duration_seconds", "wait_seconds", "cycle_seconds", "ord", "seq"})}
+           **dict.fromkeys(("started_at", "ended_at"), {"duration_seconds", "wait_seconds", "cycle_seconds", "ord", "seq",
+                                                         "next_activity", "variant_id", "first_visit", "first_pair"})}
 ARROW = " → "  # between a variant's activities
 # a variant's ID: the first 12 hex digits of the MD5 of the sum, over its steps, of the low 64 bits of the MD5 of "<place>:<activity>"
 # (the same activities in the same places give the same sum), so the same wherever and whenever it is read
@@ -938,8 +940,8 @@ def _read(project: str, args: Read, user: User, what: str, more: dict | None = N
     if rls.restricted(project, user.id) and t in rls.unfiltered_outputs(project):
         raise ActionFailed(403, f"Row-level security: you see none of the events of each {x['name']} in process '{p['name']}'. Their table is made"
                                 " from tables that security rules filter, or hide columns of, without a rule of its own, or a rule, a relationship"
-                                " or a link splits its cases. An Owner of the project can give it a row rule on its key column(s) and remove what"
-                                " splits it; readiness names what to do.")
+                                f" or a link splits its cases, or its key in the data model is not its {x['name']}'s key and event_id. An Owner of"
+                                " the project can give it a row rule on its key column(s) and remove what splits it; readiness names what to do.")
     if gone := sorted(c for c in {*key, *EVENT, *CASE, *FLAGS, "seq", "next_activity", "wait_seconds"} if c.lower() in rls.hidden(project, user.id).get(t, set())):
         raise ActionFailed(403, f"A column rule hides '{gone[0]}' of the events of each {x['name']} in process '{p['name']}' from you, and the"
                                 " process reads need it, so they can't run for you. An Owner of the project decides which columns are hidden.")

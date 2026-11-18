@@ -427,7 +427,8 @@ def check(project: str) -> list[str]:
              " of its rows. To archive it, save the process as it was (save_process), then delete the process (delete_process) or take the"
              " type out of it." if t in lost else
              f"Table '{t}' holds events of a process, each case's rows together; restricted Viewers see none of its rows, because"
-             f" {split[t][0]} would split its cases (show part of a case with figures of the whole). {split[t][1]}" if t in split else
+             f" {split[t][0]}" + (" would split its cases (show part of a case with figures of the whole)." if split[t][2]
+                                  else "; until that is fixed it is denied.") + f" {split[t][1]}" if t in split else
              # a process's table: a relationship of its own to a filtered source would be the build's again at the next build
              f"Table '{t}' holds events of a process, each case's rows together; restricted Viewers see none of its rows while it is made"
              " from tables that security rules filter, or hide columns of, without a rule of its own. It needs a row rule on its key"

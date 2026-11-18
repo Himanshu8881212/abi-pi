@@ -601,9 +601,11 @@ def denied(mined, t: str) -> bool:
     return e.status == 403 and "splits its cases" in e.body["message"] and viewer(mined, "sql_query", sql=f"SELECT count(*) FROM {t}")["rows"] == [[0]]
 
 
-def split_by(t: str) -> str:
-    """Readiness's gap for t, which names what splits its cases."""
-    [g] = [g for g in abi.call("readiness", project=P)["missing"] if f"Table '{t}'" in g and "would split its cases" in g]
+def split_by(t: str, splits: bool = True) -> str:
+    """Readiness's gap for t, which names what splits its cases (or, with `splits` False, what denies it without a split)."""
+    [g] = [g for g in abi.call("readiness", project=P)["missing"]
+           if g.startswith(f"Table '{t}' holds events of a process, each case's rows together; restricted Viewers see none of its rows, because ")]
+    assert ("would split its cases" in g) == splits, g
     return g
 
 
@@ -692,9 +694,27 @@ def test_the_case_key_is_the_object_types(mined):
     sure("import_project", project=P, bundle={**b, "model/model.json": m})
     try:
         assert denied(mined, t)
-        assert "its key in the data model (activity, event_id) is not its Purchase order's key (po_id) and event_id" in split_by(t)
+        # (review round 5: a key amiss splits nothing; it is said as a plain denial, and the reads' refusal names it)
+        assert split_by(t, splits=False) == (
+            f"Table '{t}' holds events of a process, each case's rows together; restricted Viewers see none of its rows, because its key in"
+            " the data model (activity, event_id) is not its Purchase order's key (po_id) and event_id; until that is fixed it is denied."
+            " Save the process again (save_process): its build writes the key.")
+        e = refused("process_map", token=mined["viewer"], process="supply")
+        assert "or its key in the data model is not its Purchase order's key and event_id." in e.body["message"], e.body
     finally:
         sure("import_project", project=P, bundle=b)
+    # a type with no key in the ontology (an action refuses that; a file restored from history need not) is denied the same way
+    r = engine("""import json, sys
+import abi.app  # noqa: F401
+from abi.semantic import model, ontology
+p, read = sys.stdin.read(), ontology.read
+ontology.read = lambda project: {**read(project), "objects": [x for x in read(project)["objects"] if x["id"] != "purchase_order"]}
+print(json.dumps(model.check(p)))""", timeout=120, stdin=P)
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert [g for g in json.loads(r.stdout.splitlines()[-1]) if g.startswith(f"Table '{t}'")] == [
+        f"Table '{t}' holds events of a process, each case's rows together; restricted Viewers see none of its rows, because its object"
+        " type 'purchase_order' has no key in the ontology; until that is fixed it is denied. Put the type back (save_ontology), or take"
+        " it out of the process (save_process)."]
     some = [r[0] for r in sql("SELECT po_id FROM purchase_orders JOIN cafes USING (cafe_id) WHERE region = 'North' ORDER BY 1 LIMIT 3")]
     sure("set_rls_rule", project=P, id="cases", table=t, column="PO_ID", users={uid: some})
     try:
@@ -714,14 +734,27 @@ def test_a_hidden_column_hides_what_the_build_made_of_it(mined):
                                                                 " 'Supply' from you, and the process reads need it"), e.body
     finally:
         sure("delete_rls_rule", project=P, id="acts")
-    sure("set_column_rule", project=P, id="times", table="pm_supply_events", columns=["ended_at"])
-    try:
-        assert "duration_seconds" in abi.call("sql_query", project=P, sql="SELECT * FROM pm_supply_events LIMIT 0")["columns"]
-        r = engine("import json, sys\nimport abi.app  # noqa: F401\nfrom abi.semantic import rls\nprint(json.dumps(sorted(rls._hidden(*json.loads(sys.stdin.read())).get('pm_supply_events', []))))",
-                   timeout=120, stdin=json.dumps([P, mined["uid"]]))
-        assert r.returncode == 0 and json.loads(r.stdout.splitlines()[-1]) == ["duration_seconds", "ended_at"], r.stderr[-2000:]
-    finally:
-        sure("delete_rls_rule", project=P, id="times")
+    # (review round 5) a time hidden hides the order and all read along it: on the type table the steps, the next activity,
+    # the variant, the flags and the times between; on the events table the duration and the order
+    for c in ("started_at", "ended_at"):
+        sure("set_column_rule", project=P, id="times", table=t, columns=[c])
+        try:
+            cols = viewer(mined, "sql_query", sql=f"SELECT * FROM {t} LIMIT 0")["columns"]
+            assert "activity" in cols and not {c, "seq", "ord", "next_activity", "variant_id", "first_visit", "first_pair", "duration_seconds",
+                                               "wait_seconds", "cycle_seconds"} & set(cols), (c, cols)
+        finally:
+            sure("delete_rls_rule", project=P, id="times")
+    for c in ("ended_at", "started_at"):
+        sure("set_column_rule", project=P, id="times", table="pm_supply_events", columns=[c])
+        try:
+            assert {"duration_seconds", "ord"} <= set(abi.call("sql_query", project=P, sql="SELECT * FROM pm_supply_events LIMIT 0")["columns"])
+            r = engine("import json, sys\nimport abi.app  # noqa: F401\nfrom abi.semantic import rls\nprint(json.dumps(sorted(rls._hidden(*json.loads(sys.stdin.read())).get('pm_supply_events', []))))",
+                       timeout=120, stdin=json.dumps([P, mined["uid"]]))
+            assert r.returncode == 0 and json.loads(r.stdout.splitlines()[-1]) == sorted(["duration_seconds", c, "ord"]), r.stderr[-2000:]
+            cols = viewer(mined, "sql_query", sql="SELECT * FROM pm_supply_events LIMIT 0")["columns"]
+            assert "activity" in cols and not {c, "duration_seconds", "ord"} & set(cols), (c, cols)
+        finally:
+            sure("delete_rls_rule", project=P, id="times")
 
 
 def test_a_restricted_reader_is_told_no_end_activity_by_name(mined):
