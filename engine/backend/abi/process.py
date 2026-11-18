@@ -44,17 +44,18 @@ from abi.semantic import lineage, live, mel, model, ontology, planner, rls
 log = logging.getLogger(__name__)
 _q, _lit = storage._q, storage._lit
 EVENT = ("event_id", "activity", "started_at", "ended_at", "duration_seconds")  # an event's columns, before its attributes
-# 1.2.7 M2: a case's own figures, written on each of its rows of a type's table (the variant's text on its first row
-# only, `seq` 1: a case of many events would hold it once per event; the reads take them from there, so a
-# read is one pass over one row per case or per row; M4 builds pm_<id>_<type>_cases from these columns), and two flags:
-# a case's first row of an activity, and of a pair of activities one after the other (cases = the flagged rows). A
+# 1.2.7 M2: a case's own figures, written on each of its rows of a type's table (its variant's ID and its cycle time;
+# the reads take them from there, so a read is one pass over one row per case or per row, and the text of a variant is
+# read for the variants shown only; M4 builds pm_<id>_<type>_cases from these columns), and two flags:
+# one row of each activity in a case, and one of each pair of activities one after the other (cases = the flagged rows). A
 # case's rows are visible together or not at all (its object's rules), so the flags hold for every reader.
-CASE = ("variant", "variant_id", "cycle_seconds")
+CASE = ("variant_id", "cycle_seconds")
 FLAGS = ("first_visit", "first_pair")
 MADE = {*EVENT, "ord", "seq", "next_activity", "wait_seconds", *CASE, *FLAGS}  # the column names a build makes itself
 ARROW = " → "  # between a variant's activities
-VID = "substring(md5({}), 1, 12)"  # a variant's ID: the first 12 hex digits of the MD5 of its text, the same wherever it is read
-# ponytail: an activity whose name holds " → " could make two variants one text; refuse such names in `clean` if one shows up
+# a variant's ID: the first 12 hex digits of the MD5 of the sum, over its steps, of the low 64 bits of the MD5 of "<place>:<activity>"
+# (the same activities in the same places give the same sum), so the same wherever and whenever it is read
+VID = "substring(md5({}), 1, 12)"
 WHY = ("no_timestamp", "no_activity", "filtered", "activity", "no_object", "duplicate")  # why a row is dropped, in the order tried
 TIME = re.compile(r"DATE$|TIMESTAMP")
 OFFSET = re.compile(r'\d\d:\d\d(:\d\d(\.\d+)?)?\s*(Z|UTC|[+-]\d\d(:?\d\d){0,2})\s*"', re.I)  # a time with an offset, last in a (JSON) string
@@ -367,20 +368,24 @@ def _sql(p: dict, keys: dict, lake: dict, zone: str) -> tuple[str, str, dict[str
                   f" JOIN __pm s ON s.__src = {i} AND s.__id = CAST(b.{_q(x['event'])} AS VARCHAR) WHERE s.__why IS NULL"
                   for i, s in enumerate(p["events"]) for x in s["objects"] if x["type"] == t and "through" in x]
         gap = "epoch(lead(e.started_at) OVER w - coalesce(e.ended_at, e.started_at))"
+        part = ", ".join(f"l.{_q(k)}" for k in key)
+        whole = f"OVER (PARTITION BY {part} ORDER BY e.ord ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)"  # w's sort, the whole case
         rows = (f"SELECT {', '.join(f'l.{_q(k)}' for k in key)}, e.* EXCLUDE (ord), row_number() OVER w AS seq, lead(e.activity) OVER w AS next_activity,"
-                f" CASE WHEN {gap} < 0 THEN 0 ELSE {gap} END AS wait_seconds"
+                f" CASE WHEN {gap} < 0 THEN 0 ELSE {gap} END AS wait_seconds, min(e.started_at) {whole} AS __t0,"
+                f" max(coalesce(e.ended_at, e.started_at)) {whole} AS __t1"
                 f" FROM (SELECT DISTINCT * FROM ({' UNION ALL '.join(links)}) WHERE {' AND '.join(f'{_q(k)} IS NOT NULL' for k in key)}) l"
                 f" JOIN lake.model.{_q(ev)} e USING (event_id) WINDOW w AS (PARTITION BY {', '.join(f'l.{_q(k)}' for k in key)} ORDER BY e.ord)")
-        # each case's own figures (CASE) on each of its rows, the variant's text on its first row only (a case of many
-        # events would write it once per event), and the first-visit flags (FLAGS). The text joins the first rows alone:
-        # joined to every row it would be carried through the join once per event, too much for a long case's
-        per[t] = (f"WITH r AS MATERIALIZED ({rows}), cs AS MATERIALIZED (SELECT {ks}, string_agg(activity, '{ARROW}' ORDER BY seq) AS variant,"
-                  f" date_diff('second', min(started_at), max(coalesce(ended_at, started_at))) AS cycle_seconds FROM r GROUP BY {ks})"
-                  f" SELECT r.*, v.variant, i.variant_id, i.cycle_seconds,"
-                  f" row_number() OVER (PARTITION BY {ks}, activity ORDER BY seq) = 1 AS first_visit,"
-                  f" row_number() OVER (PARTITION BY {ks}, activity, next_activity ORDER BY seq) = 1 AS first_pair"
-                  f" FROM r JOIN (SELECT {ks}, {VID.format('variant')} AS variant_id, cycle_seconds FROM cs) i USING ({ks})"
-                  f" LEFT JOIN (SELECT {ks}, 1 AS seq, variant FROM cs) v USING ({ks}, seq) ORDER BY {ks}, seq")
+        # each case's own figures (CASE) on each of its rows and the flags (FLAGS), by windows over the rows (no grouped
+        # aggregate: one of a million cases' ordered lists needed more than the build's memory). Two sorts in all, the
+        # order's (w: its first and last time too) and one by activity and next activity in a case, which flags one row
+        # of each activity and of each pair (the one of the earliest next activity, then place) and sums the variant's hash
+        by = f"OVER (PARTITION BY {ks} ORDER BY activity, next_activity, seq"
+        per[t] = (f"SELECT * EXCLUDE (__vk, __t0, __t1, first_visit, first_pair), {VID.format('CAST(__vk AS VARCHAR)')} AS variant_id,"
+                  " date_diff('second', __t0, __t1) AS cycle_seconds, first_visit, first_pair FROM (SELECT *,"
+                  f" sum(md5_number_lower(seq || ':' || activity)) {by} ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS __vk,"
+                  f" lag(activity) {by}) IS DISTINCT FROM activity AS first_visit,"
+                  f" lag(activity) {by}) IS DISTINCT FROM activity OR lag(next_activity) {by}) IS DISTINCT FROM next_activity AS first_pair"
+                  f" FROM ({rows})) ORDER BY {ks}, seq")
     return log_sql, events, per
 
 
@@ -1003,14 +1008,19 @@ class VariantRead(Read):
 def process_variants(conn, user: User, args: VariantRead) -> dict:
     """A process's variants (a case's activities in order) as you may see them: the `top` most frequent, each with its ID (the same wherever it is read), cases, share and median cycle time, then one row for the other variants. Per case of one object type."""
     p, typ, x, key, (ctes, src), asked = _read(args.project, args, user, "process_variants", {"top": args.top})
+    ks = ", ".join(map(_q, key))
+    # the text of the variants shown: the activities in order of one case of each (the first by key)
     rows = _run(args.project, _with(
-        *ctes, f"cs AS MATERIALIZED (SELECT variant_id AS i, variant AS v, cycle_seconds AS s FROM {src} WHERE seq = 1)",
-        "vs AS (SELECT i, min(v) AS v, count(*) AS n, median(s) AS m FROM cs GROUP BY i)",
-        "r AS MATERIALIZED (SELECT *, row_number() OVER (ORDER BY n DESC, v) AS rk FROM vs)") + (
-        f"SELECT rk, v, i, n, m, 1 FROM r WHERE rk <= {args.top}"
+        *ctes, f"cs AS MATERIALIZED (SELECT {ks}, variant_id AS i, cycle_seconds AS s FROM {src} WHERE seq = 1)",
+        "vs AS (SELECT i, count(*) AS n, median(s) AS m FROM cs GROUP BY i)",
+        "r AS MATERIALIZED (SELECT *, row_number() OVER (ORDER BY n DESC, i) AS rk FROM vs)",
+        f"one AS (SELECT {ks}, i FROM (SELECT {ks}, i, row_number() OVER (PARTITION BY i ORDER BY {ks}) AS nth FROM cs"
+        f" WHERE i IN (SELECT i FROM r WHERE rk <= {args.top})) WHERE nth = 1)",
+        f"tx AS (SELECT one.i, string_agg(activity, '{ARROW}' ORDER BY seq) AS v FROM {src} JOIN one USING ({ks}) GROUP BY one.i)") + (
+        f"SELECT r.rk, tx.v, r.i, r.n, r.m, 1 FROM r JOIN tx USING (i) WHERE r.rk <= {args.top}"
         f" UNION ALL SELECT NULL, NULL, NULL, count(*), median(s), count(DISTINCT i) FROM cs WHERE i NOT IN (SELECT i FROM r WHERE rk <= {args.top})"),
         asked, user)
-    top = sorted((r for r in rows if r[0] is not None), key=lambda r: r[0])
+    top = sorted((r for r in rows if r[0] is not None), key=lambda r: (-r[3], r[1]))  # the most cases first, then by the text
     other = next((r for r in rows if r[0] is None and r[3]), None)
     n = sum(r[3] for r in top) + (other[3] if other else 0)
     share = lambda c: round(100 * c / n, 4) if n else None  # noqa: E731

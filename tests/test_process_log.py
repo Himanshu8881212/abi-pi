@@ -409,7 +409,7 @@ def test_build_writes_events_and_per_type_tables(built):
     assert [r[0] for r in made] == [b["snapshot"]], made
     cols = lambda t: abi.call("sql_query", project=P, sql=f"SELECT * FROM {t} LIMIT 0")["columns"]  # noqa: E731
     event = ["event_id", "activity", "started_at", "ended_at", "duration_seconds", "done_by", "amount"]
-    CASE = ["variant", "variant_id", "cycle_seconds", "first_visit", "first_pair"]  # M2: each case's own figures and first-visit flags
+    CASE = ["variant_id", "cycle_seconds", "first_visit", "first_pair"]  # M2: each case's own figures and first-visit flags
     assert cols("pm_supply_events") == [*event, "ord"]
     assert cols("pm_supply_purchase_order") == ["po_id", *event, "seq", "next_activity", "wait_seconds", *CASE]
     assert cols("pm_supply_delivery") == ["delivery_id", *event, "seq", "next_activity", "wait_seconds", *CASE]

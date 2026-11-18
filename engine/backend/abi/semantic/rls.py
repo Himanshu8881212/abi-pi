@@ -785,7 +785,7 @@ ALLOWED = {"count", "sum", "avg", "min", "max", "median", "list_median", "abs", 
            "timezone",  # SE-13: an instant's local time in a named zone (planner.day)
            "error",  # SE-13: raises its own text (a missing currency rate, planner._checked); reads nothing
            "approx_count_distinct",  # DC-1 docs table profile (docs._profile): a HyperLogLog aggregate; reads nothing
-           "quantile_cont"}  # 1.2.7 M2 process reads (process.py): a p90; reads nothing
+           "quantile_cont", "string_agg"}  # 1.2.7 M2 process reads (process.py): a p90, a variant's text; read nothing
 # the same names as sqlglot's expression names (date_trunc is timestamp_trunc), plus syntax it parses as functions
 _NODES = {"and", "or", "case", "cast", "try_cast", "array", "columns"} | {
     _name(f) for n in ALLOWED - {"cast", "try_cast"}

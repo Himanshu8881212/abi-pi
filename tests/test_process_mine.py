@@ -5,7 +5,6 @@ their query log. One `filters` shape for all of them, each a semi-join on the ca
 test_process_log's helpdesk (every figure known by hand), Brewline's supply process (known answers from the generator
 and from the source tables) and a log of jobs with a planted model below."""
 import copy
-import hashlib
 import json
 import statistics
 from pathlib import Path
@@ -143,8 +142,8 @@ def test_variants_by_string_agg_shares_sum_to_100(mined):
     assert v["variants"]["columns"] == ["variant", "id", "cases", "share_pct", "median_cycle_hours"] and v["totals"]["rows"] == [[3, 3]]
     # one ticket each, the text in order (ties by the text); the cycle from the first start to the last end: 25 h, 23 h, 1 h
     assert [[r[0], r[2], r[3], r[4]] for r in v["variants"]["rows"]] == [[T1, 1, 33.3333, 25.0], [T2, 1, 33.3333, 23.0], [T3, 1, 33.3333, 1.0]]
-    two = read("process_variants", process="desk", top=2)["variants"]["rows"]
-    assert [r[0] for r in two] == [T1, T2, "other variants (1)"] and two[2][1:] == [None, 1, 33.3333, 1.0]
+    two = read("process_variants", process="desk", top=2)["variants"]["rows"]  # (review round 1: ties at the cut go by ID, not by text)
+    assert {r[0] for r in two[:2]} < {T1, T2, T3} and two[2][0] == "other variants (1)" and two[2][1:4] == [None, 1, 33.3333]
     # Brewline: the happy path first, as many orders as the generator planted; the shares of all rows make 100
     k = mined["known"]
     s = read("process_variants", process="supply", top=3)
@@ -157,11 +156,14 @@ def test_variants_by_string_agg_shares_sum_to_100(mined):
 
 def test_variant_id_is_stable(mined):
     ids = {r[0]: r[1] for r in read("process_variants", process="desk")["variants"]["rows"]}
-    # the start of the MD5 of the variant's text: the same wherever, whoever and whenever it is read
-    assert ids == {v: hashlib.md5(v.encode()).hexdigest()[:12] for v in (T1, T2, T3)}
+    # a hash of the activities in their places, by MD5 (review round 1: worked out in the build, not from the text):
+    # the same wherever, whoever and whenever it is read
+    vid = lambda v: ("SELECT substring(md5(CAST(" + " + ".join(  # noqa: E731
+        f"md5_number_lower('{i}:{a}')::HUGEINT" for i, a in enumerate(v.split(" → "), 1)) + " AS VARCHAR)), 1, 12)")
+    assert ids == {v: i for v, [[i]] in zip((T1, T2, T3), deep(*map(vid, (T1, T2, T3))))}
     happy = " → ".join(mined["known"]["happy_path"]["steps"])
     mine = {r[0]: r[1] for r in read("process_variants", mined["viewer"], process="supply")["variants"]["rows"]}
-    assert mine[happy] == hashlib.md5(happy.encode()).hexdigest()[:12], "the restricted Viewer's id is the owner's"
+    assert mine[happy] == deep(vid(happy))[0][0][0], "the restricted Viewer's id is the owner's"
     assert save(DESK | {"description": "Built again."})["status"] == "ok" and save(DESK)["status"] == "ok"
     assert {r[0]: r[1] for r in read("process_variants", process="desk")["variants"]["rows"]} == ids, "a rebuild keeps the ids"
     assert cases(filters=[{"kind": "variant", "in": [ids[T2]]}]) == {T2}
@@ -442,7 +444,7 @@ def test_case_figures_count_once_and_are_the_builds_names(mined):
         abi.call("set_measure", project=P, id=i, name=i, expression=ex)
         sure("delete_measure", project=P, id=i)
     # and no attribute may have their names
-    for a in ("variant", "Cycle_Seconds", "first_pair"):
+    for a in ("variant_id", "Cycle_Seconds", "first_pair"):
         p = copy.deepcopy(JOBS)
         p["events"][0]["attributes"] = [a]
         with pytest.raises(abi.ActionError) as e:
