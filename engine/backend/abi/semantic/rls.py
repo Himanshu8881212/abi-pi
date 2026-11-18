@@ -97,6 +97,11 @@ def _hidden(project: str, user_id: int | None) -> dict[str, set[str]]:
             if t.startswith("ml_"):  # with its model or after it (a deleted model's table stays)
                 out.setdefault(t, set()).update(f.lower() for f, c in zip(r["from"]["columns"], r["to"]["columns"])
                                                 if c.lower() in out.get(r["to"]["table"], ()))
+        from abi import process  # not at top: it imports this module
+
+        for t, typ in process.generated(project).items():  # 1.2.7 M2: what a build works out from a hidden column is hidden with it
+            for c in [*out.get(t, ())]:
+                out[t] |= process.DERIVED.get(c, set()) if typ else process.DERIVED.get(c, set()) & {"duration_seconds"}  # events: its duration only
         out = {t: cs for t, cs in out.items() if cs}
     return out
 
@@ -637,7 +642,7 @@ def _unfiltered_outputs(project: str) -> list[str]:
     ruled, cols = {r["table"] for r in row_rules(project)}, {r["table"] for r in _file(project).get("columns", [])}
     if not ruled | cols:
         return []
-    _, rels, fl = _sources(project)
+    src, rels, fl = _sources(project)
     g = lineage.graph(bundle(git.path(project)))
     # 1.2.7 M1: a process's node is not walked: each table its build writes names the tables it is made from itself
     # (lineage._process), so a type's table answers for its own sources, not for every source of the process
@@ -660,26 +665,53 @@ def _unfiltered_outputs(project: str) -> list[str]:
     # 1.2.6 M9: a predictions table whose model was deleted has no lineage left to say what it was made from: denied
     # (fail closed), as is any other model table named ml_<x> with no ml/<x>.json, until it gets a row rule of its own
     orphan = lambda t: t.startswith("ml_") and t not in ruled and not (git.path(project) / "ml" / f"{t[3:]}.json").is_file()  # noqa: E731
-    from abi import process  # not at top: it imports this module
-
-    # 1.2.7 M2: a process's per-type table carries each case's figures on each of its rows (variant_id, cycle_seconds,
-    # the flags, next_activity, wait_seconds), so a reader sees all of a case's rows or none: any part of its filter
-    # that is no case's own (a row rule on a column other than its key, its relationship from event_id to a filtered
-    # events table, a person's relationship from another column to a filtered table, a follow link from it) would
-    # show part of a case with figures of the rest. Denied then, fail closed: its key's own rules and relationships only.
-    from abi.semantic import model, ontology  # not at top: circular imports
-
-    keys = ontology._keys(model._read(project, "model.json"))
-
-    def splits(t: str) -> bool:
-        case = set(keys.get(t) or []) - {"event_id"}
-        return (any(r["table"] == t and r["column"] not in case for r in row_rules(project)) or any(f["from"] == t for f in fl)
-                or any(r["from"]["table"] == t and not set(r["from"]["columns"]) <= case and roots(r["to"]["table"], False) for r in rels))
-
-    split = {t for t, typ in process.generated(project).items() if typ and splits(t)}
-    return sorted(split | {t for n in g if n.startswith("table:") and (
+    # 1.2.7 M2: a process's per-type table any part of whose filter is no case's own (`splits`)
+    return sorted(set(splits(project, (src, rels, fl))) | {t for n in g if n.startswith("table:") and (
         (t := n[6:]) not in ruled and set().union(*(roots(u, u != t) for u in ups(n))) - roots(t, False) or t not in cols and ups(n) & cols
         or orphan(t))})
+
+
+def splits(project: str, sources: tuple | None = None) -> dict[str, tuple[str, str]]:
+    """1.2.7 M2: {a process's per-type table: (what splits its cases, what to do)}. Each of its rows carries its case's
+    figures (variant_id, cycle_seconds, the flags, next_activity, wait_seconds), so a reader sees all of a case's rows or
+    none: a part of its filter that is no case's own would show part of a case with figures of the rest, and denies it
+    (`_unfiltered_outputs`, fail closed). Driven by what its filter is made of (`_sources`): a row rule on a column outside
+    the case key, a relationship from other columns into a filtered table (event_id's into a filtered events table too),
+    a follow link from it. The case key is its object type's in the ontology, as the reads take it; model.json's key of the
+    table (an Editor's to change before 1.2.7 M2) must be that and event_id.
+    ponytail: a table a step or an ML dataset makes from a per-type table carries the same figures, and a row rule on one
+    of its other columns shows part of a case with them (lineage sees it as ruled); deny such tables once that is used."""
+    from abi import process  # not at top: it imports this module
+    from abi.semantic import model, ontology  # not at top: circular imports
+
+    made = process.generated(project)
+    if not any(made.values()):
+        return {}
+    src, rels, fl = sources or _sources(project)
+    mj, onto = model._read(project, "model.json"), ontology.read(project)
+    keys, out = ontology._keys(mj), {}
+    for t, typ in made.items():
+        if not typ:
+            continue
+        if (got := ontology.keyed(onto, mj, typ)) is None:
+            out[t] = (f"its object type '{typ}' has no key in the ontology", "Put the type back (save_ontology), or take it out of the process (save_process).")
+            continue
+        x, case = got[0], [c.split(".", 1)[1] for c in got[1]]
+        low, by, ks = {c.lower() for c in case}, src.get(t, {}), ", ".join(case)
+        if (mk := keys.get(t)) is not None and {c.lower() for c in mk} - {"event_id"} != low:
+            out[t] = (f"its key in the data model ({', '.join(mk)}) is not its {x['name']}'s key ({ks}) and event_id",
+                      "Save the process again (save_process): its build writes the key.")
+        elif r := next((r for r in row_rules(project) if r["table"] == t and r["column"].lower() not in low), None):
+            out[t] = (f"row rule '{r['id']}' on its column '{r['column']}'",
+                      f"Delete it (delete_rls_rule); a row rule on its key column(s) ({ks}) shows whole cases.")
+        elif r := next((r for r in rels if r["from"]["table"] == t and ("rel", r["id"]) in by
+                        and not {c.lower() for c in r["from"]["columns"]} <= low), None):
+            d = r["to"]["table"]
+            out[t] = (f"relationship '{r['id']}' from its column(s) {', '.join(r['from']['columns'])} to table '{d}', which row-level security filters",
+                      f"Remove the rules and relationships that filter '{d}'." if d in made else "Remove the relationship (remove_relationship).")
+        elif f := next((f for f in fl if f["from"] == t and ("link", f["id"]) in by), None):
+            out[t] = (f"link '{f['id']}', which row-level security follows from it", "Take `rls: follow` off the link (save_ontology).")
+    return out
 
 
 def explain(project: str, user_id: int) -> str:

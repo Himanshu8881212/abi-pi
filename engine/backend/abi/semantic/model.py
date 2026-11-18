@@ -238,6 +238,11 @@ def set_table(conn, user: User, args: TableDef) -> dict:
         raise ActionFailed(400, f"Table '{args.table}' has no column {sorted(missing)}.")
     m = load(args.project)
     t = m["tables"].setdefault(args.table, {"kind": "fact", "key": None, "description": None})
+    from abi import process  # not at top: process imports this module
+
+    if args.key and args.key != t["key"] and args.table in process.generated(args.project):  # 1.2.7 M2: row-level security trusts it
+        raise ActionFailed(409, f"Table '{args.table}' is written by a process's build, which keeps its key (event_id; on a type's table its"
+                                " object type's key and event_id). It is not set here; its kind, description and hidden flag are.")
     from abi.semantic import ontology  # not at top: ontology imports this module
 
     if args.key and t["key"] and args.key != t["key"]:
@@ -415,17 +420,22 @@ def check(project: str) -> list[str]:
     pm = process.generated(project)  # 1.2.7 M1: a process's events table holds every event: denied by design, nothing to do
     denied = semantic.rls.unfiltered_outputs(project)
     lost = process.leftover(project) if any(t.startswith("pm_") and t not in pm for t in denied) else set()  # what a build left behind
+    split = semantic.rls.splits(project) if any(pm.get(t) for t in denied) else {}  # 1.2.7 M2: what shows part of a case
     gaps += [f"Table '{t}' holds the predictions of an ML model that is gone; restricted Viewers see none of"
              " its rows until it gets a row rule of its own (set_rls_rule)." if gone(t) else
              f"Table '{t}' holds the events of a process that is gone, or of an object type it is no longer about; restricted Viewers see none"
              " of its rows. To archive it, save the process as it was (save_process), then delete the process (delete_process) or take the"
              " type out of it." if t in lost else
+             f"Table '{t}' holds events of a process, each case's rows together; restricted Viewers see none of its rows, because"
+             f" {split[t][0]} would split its cases (show part of a case with figures of the whole). {split[t][1]}" if t in split else
              # a process's table: a relationship of its own to a filtered source would be the build's again at the next build
              f"Table '{t}' holds events of a process, each case's rows together; restricted Viewers see none of its rows while it is made"
-             " from tables that security rules filter, or hide columns of, without a rule of its own, or while a rule splits its cases. It"
-             " needs a row rule on its key column(s) (set_rls_rule) where a row rule filters one of those tables, a column rule"
-             " (set_column_rule) where a column rule hides a column of one, and none of these, which split its cases: a row rule on another"
-             " of its columns, a rule on the process's events table, a relationship from another of its columns to a filtered table." if t in pm else
+             " from tables that security rules filter, or hide columns of, without a rule of its own. It needs a row rule on its key"
+             " column(s) (set_rls_rule) where a row rule filters one of those tables, a column rule (set_column_rule) where a column rule"
+             " hides a column of one. With a row rule on its key column(s) a restricted Viewer sees every event of each case the rule"
+             " lets them see, also events from rows of those tables that their own rules filter. A row rule on another of its columns, a"
+             " rule on the process's events table or a relationship from another of its columns to a filtered table would split its"
+             " cases and deny it again." if t in pm else
              f"Table '{t}' {'holds ML predictions' if t.startswith('ml_') else 'is built by steps'} made from rows that"
              " row-level security rules filter; restricted Viewers see none of its rows until a rule on it (or a"
              " relationship to each filtered table it is made from) filters it."

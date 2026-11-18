@@ -14,13 +14,14 @@ from conftest import parquet
 from jsonschema import Draft202012Validator
 from test_engine import engine
 from test_pages import sure
-from test_process_log import DESK, ONTO, P, ROOT, SCHEMA, SUPPLY, TRACES, build_of, built, deep, log, save, shown, sql, viewer  # noqa: F401
+from test_process_log import DESK, ONTO, P, ROOT, SCHEMA, SUPPLY, TRACES, build_of, built, deep, exported, log, save, shown, sql, viewer  # noqa: F401
 
 import abi
 
 # The planted model: A then B then C, B repeated once in ten jobs (a loop of length one), D and E twice round (a loop of
 # length two: D E D), and one job going from A straight to C (a pair seen once)
 PLANTED = [("A B C", 10), ("A B B C", 10), ("A D E D C", 10), ("A C", 1)]
+JOB = {"id": "job", "table": "jobs", "name": "Job", "plural": "Jobs", "title": "job_id"}
 JOBS = {"id": "jobs", "name": "Jobs", "case": "job", "events": [
     {"table": "job_events", "id": "event_id", "activity": "activity", "start": "at", "objects": [{"type": "job", "columns": ["job_id"]}]}]}
 UNION = TRACES.split("FROM (", 1)[1].rsplit(") GROUP BY 1", 1)[0]  # each purchase order's steps in order, from the source tables
@@ -58,7 +59,7 @@ def mined(built):
         abi.upload(P, t, Path(parquet(d / f"{t}.csv")[0]))
     for t, k in (("jobs", "job_id"), ("job_events", "event_id")):  # into the model, keyed
         abi.call("set_table", project=P, table=t, key=[k])
-    sure("save_ontology", project=P, ontology={"objects": [*ONTO["objects"], {"id": "job", "table": "jobs", "name": "Job", "plural": "Jobs", "title": "job_id"}]})
+    sure("save_ontology", project=P, ontology={"objects": [*ONTO["objects"], JOB]})
     b = save(JOBS)
     assert b["status"] == "ok", b
     return built | {"jobs": dict(jobs)}
@@ -594,28 +595,37 @@ def test_a_case_with_a_key_of_two_columns(mined):
 
 # ---------- review round 2 ----------
 
+def denied(mined, t: str) -> bool:
+    """The reads refuse the restricted Viewer, saying a rule, a relationship or a link splits the cases, and sql_query reads no row of t."""
+    e = refused("process_map", token=mined["viewer"], process="supply")
+    return e.status == 403 and "splits its cases" in e.body["message"] and viewer(mined, "sql_query", sql=f"SELECT count(*) FROM {t}")["rows"] == [[0]]
+
+
+def split_by(t: str) -> str:
+    """Readiness's gap for t, which names what splits its cases."""
+    [g] = [g for g in abi.call("readiness", project=P)["missing"] if f"Table '{t}'" in g and "would split its cases" in g]
+    return g
+
+
 def test_a_rule_that_splits_cases_denies_the_type_table(mined):
     # a reader sees all of a case's rows or none: a row rule on a column of the type table other than its key, a rule on
     # the events table, and a person's relationship from another column to a filtered table each deny it (the reads
     # refuse, sql_query reads nothing); a rule on its key column keeps it readable, with that rule's cases
     t, uid = "pm_supply_purchase_order", str(mined["uid"])
     some = [r[0] for r in sql("SELECT po_id FROM purchase_orders JOIN cafes USING (cafe_id) WHERE region = 'North' ORDER BY 1 LIMIT 3")]
-
-    def denied() -> bool:
-        e = refused("process_map", token=mined["viewer"], process="supply")
-        return e.status == 403 and "splits its cases" in e.body["message"] and viewer(mined, "sql_query", sql=f"SELECT count(*) FROM {t}")["rows"] == [[0]]
-
-    for rule in ({"table": t, "column": "activity", "users": {uid: ["Order placed"]}}, {"table": "pm_supply_events", "column": "activity",
-                                                                                         "users": {uid: ["Order placed"]}}):
+    # (review round 3: readiness names what splits it)
+    for rule, cause in (({"table": t, "column": "activity", "users": {uid: ["Order placed"]}}, "row rule 'split' on its column 'activity'"),
+                        ({"table": "pm_supply_events", "column": "activity", "users": {uid: ["Order placed"]}},
+                         f"relationship '{t}-event_id' from its column(s) event_id to table 'pm_supply_events', which row-level security filters")):
         sure("set_rls_rule", project=P, id="split", **rule)
         try:
-            assert denied(), rule
-            assert [g for g in abi.call("readiness", project=P)["missing"] if t in g and "split its cases" in g]
+            assert denied(mined, t), rule
+            assert cause in split_by(t)
         finally:
             sure("delete_rls_rule", project=P, id="split")
     rid = abi.call("add_relationship", project=P, **{"from": f"{t}.done_by", "to": "tickets.ticket_id"})["id"]
     try:
-        assert denied()
+        assert denied(mined, t) and f"relationship '{rid}' from its column(s) done_by to table 'tickets'" in split_by(t)
     finally:
         sure("remove_relationship", project=P, id=rid)
     sure("set_rls_rule", project=P, id="cases", table=t, column="po_id", users={uid: some})
@@ -641,3 +651,97 @@ def test_a_column_the_reads_need_hidden_is_said(mined):
 def test_a_duration_beyond_the_limit_is_refused(mined):
     e = refused("process_map", process="desk", filters=[{"kind": "duration", "op": ">", "hours": 1e306}])
     assert e.status == 422 and e.body["errors"][0]["path"] == "$[0].hours", e.body
+
+
+# ---------- review round 3 ----------
+
+# suppliers seen through the cafés they supply (purchase orders between): a follow link filters suppliers, which no rule names
+SUPPLIES = {"id": "supplies", "from": "supplier", "to": "cafe", "name": "cafés supplied", "inverse": "suppliers",
+            "via": ["purchase_orders-supplier_id", "purchase_orders-cafe_id"], "rls": "follow"}
+
+
+def test_a_relationship_into_a_follow_filtered_table_denies_the_type_table(mined):
+    # a person's relationship from an attribute column of the type table into a table a follow link filters, directly
+    # (suppliers) or through another table (deliveries -> suppliers), carries that filter onto part of a case: denied,
+    # and readiness names the relationship
+    t = "pm_supply_purchase_order"
+    sure("save_ontology", project=P, ontology={"objects": [*ONTO["objects"], JOB], "links": [SUPPLIES]})
+    try:
+        assert read("process_map", mined["viewer"], process="supply")["totals"], "the link alone splits no case"
+        for to, d in (("suppliers.supplier_id", "suppliers"), ("deliveries.delivery_id", "deliveries")):
+            rid = abi.call("add_relationship", project=P, **{"from": f"{t}.done_by", "to": to})["id"]
+            try:
+                assert denied(mined, t), to
+                assert f"relationship '{rid}' from its column(s) done_by to table '{d}', which row-level security filters" in split_by(t)
+            finally:
+                sure("remove_relationship", project=P, id=rid)
+    finally:
+        sure("save_ontology", project=P, ontology={"objects": [*ONTO["objects"], JOB]})
+
+
+def test_the_case_key_is_the_object_types(mined):
+    # the build owns its tables' keys: set_table refuses; a key that arrives otherwise (an import) and differs from the
+    # object type's denies the table; a rule's column is compared without case (PO_ID is po_id: whole cases)
+    t, uid = "pm_supply_purchase_order", str(mined["uid"])
+    e = refused("set_table", table=t, key=["activity", "event_id"])
+    assert e.status == 409 and "written by a process's build, which keeps its key" in e.body["message"], e.body
+    b = exported()
+    assert next(x for x in b["model/model.json"]["entities"] if x["table"] == t)["key"] == ["po_id", "event_id"], "nothing set"
+    m = copy.deepcopy(b["model/model.json"])
+    next(x for x in m["entities"] if x["table"] == t)["key"] = ["activity", "event_id"]
+    sure("import_project", project=P, bundle={**b, "model/model.json": m})
+    try:
+        assert denied(mined, t)
+        assert "its key in the data model (activity, event_id) is not its Purchase order's key (po_id) and event_id" in split_by(t)
+    finally:
+        sure("import_project", project=P, bundle=b)
+    some = [r[0] for r in sql("SELECT po_id FROM purchase_orders JOIN cafes USING (cafe_id) WHERE region = 'North' ORDER BY 1 LIMIT 3")]
+    sure("set_rls_rule", project=P, id="cases", table=t, column="PO_ID", users={uid: some})
+    try:
+        assert read("process_map", mined["viewer"], process="supply")["totals"]["rows"][0][0] == 3
+    finally:
+        sure("delete_rls_rule", project=P, id="cases")
+
+
+def test_a_hidden_column_hides_what_the_build_made_of_it(mined):
+    t = "pm_supply_purchase_order"
+    sure("set_column_rule", project=P, id="acts", table=t, columns=["activity"])
+    try:
+        cols = viewer(mined, "sql_query", sql=f"SELECT * FROM {t} LIMIT 0")["columns"]
+        assert "seq" in cols and not {"activity", "next_activity", "variant_id", "first_visit", "first_pair"} & set(cols), cols
+        e = refused("process_map", token=mined["viewer"], process="supply")
+        assert e.status == 403 and e.body["message"].startswith("A column rule hides 'activity' of the events of each Purchase order in process"
+                                                                " 'Supply' from you, and the process reads need it"), e.body
+    finally:
+        sure("delete_rls_rule", project=P, id="acts")
+    sure("set_column_rule", project=P, id="times", table="pm_supply_events", columns=["ended_at"])
+    try:
+        assert "duration_seconds" in abi.call("sql_query", project=P, sql="SELECT * FROM pm_supply_events LIMIT 0")["columns"]
+        r = engine("import json, sys\nimport abi.app  # noqa: F401\nfrom abi.semantic import rls\nprint(json.dumps(sorted(rls._hidden(*json.loads(sys.stdin.read())).get('pm_supply_events', []))))",
+                   timeout=120, stdin=json.dumps([P, mined["uid"]]))
+        assert r.returncode == 0 and json.loads(r.stdout.splitlines()[-1]) == ["duration_seconds", "ended_at"], r.stderr[-2000:]
+    finally:
+        sure("delete_rls_rule", project=P, id="times")
+
+
+def test_a_restricted_reader_is_told_no_end_activity_by_name(mined):
+    ends = JOBS | {"id": "jobsend", "name": "Jobs ended", "reference": {"from": "drawn", "start": ["A"], "end": ["C"], "flows": []}}
+    assert save(ends)["status"] == "ok"
+    try:
+        owner, mine = (read("process_performance", tok, process="jobsend")["note"] for tok in (None, mined["viewer"]))
+        assert "an end activity of the process's reference (C):" in owner, owner
+        assert "an end activity of the process's reference:" in mine and "reference (" not in mine, mine
+    finally:
+        sure("delete_process", project=P, process="jobsend")
+
+
+def test_an_enumerated_column_is_not_spelled_out_in_a_refusal():
+    r = engine("""import json
+import abi.app  # noqa: F401
+from abi import process
+p, x = {"id": "x", "events": [{"attributes": ["kind"]}]}, {"table": "o", "name": "Thing"}
+print(json.dumps(process.filter_errors(p, x, "t", [{"kind": "attribute", "column": "kind", "op": "=", "value": "gamma"}],
+                                       {"t": {"kind": "ENUM('alpha', 'beta')"}, "o": {}}, {})))""", timeout=120)
+    assert r.returncode == 0, r.stderr[-2000:]
+    [e] = json.loads(r.stdout.splitlines()[-1])
+    assert e["error"] == "'gamma' doesn't fit 'kind', which is an enumerated text." and "alpha" not in json.dumps(e), e

@@ -53,6 +53,9 @@ EVENT = ("event_id", "activity", "started_at", "ended_at", "duration_seconds")  
 CASE = ("variant_id", "cycle_seconds")
 FLAGS = ("first_visit", "first_pair")
 MADE = {*EVENT, "ord", "seq", "next_activity", "wait_seconds", *CASE, *FLAGS}  # the column names a build makes itself
+# what a type table's build works out from each of these columns: a column rule hiding one hides them too (rls._hidden)
+DERIVED = {"activity": {"next_activity", "variant_id", "first_visit", "first_pair"},
+           **dict.fromkeys(("started_at", "ended_at"), {"duration_seconds", "wait_seconds", "cycle_seconds", "ord", "seq"})}
 ARROW = " → "  # between a variant's activities
 # a variant's ID: the first 12 hex digits of the MD5 of the sum, over its steps, of the low 64 bits of the MD5 of "<place>:<activity>"
 # (the same activities in the same places give the same sum), so the same wherever and whenever it is read
@@ -863,7 +866,7 @@ def filter_errors(p: dict, x: dict, t: str, filters: list, cols: dict, hid: dict
                 if (f["op"] == "in") != isinstance(f["value"], list) or not vals:
                     errs.append(err(f"{here}.value", "A list goes with op 'in', one value with any other op.", "Use op 'in' with a list of values, or give one value."))
                 elif bad := next((v for v in vals if not fits(rls.cast_lit(v, typ))), None):
-                    errs.append(err(f"{here}.value", f"'{bad}' doesn't fit '{c}', which is {typ}.",
+                    errs.append(err(f"{here}.value", f"'{bad}' doesn't fit '{c}', which is {'an enumerated text' if typ.startswith('ENUM') else typ}.",
                                     "Give a value of the column's kind (a date as YYYY-MM-DD, a number for a number)."))
     finally:
         con.close()
@@ -934,8 +937,9 @@ def _read(project: str, args: Read, user: User, what: str, more: dict | None = N
                                 " the process again (save_process) to build it again; `process` shows the build.")
     if rls.restricted(project, user.id) and t in rls.unfiltered_outputs(project):
         raise ActionFailed(403, f"Row-level security: you see none of the events of each {x['name']} in process '{p['name']}'. Their table is made"
-                                " from tables that security rules filter, or hide columns of, without a rule of its own, or a rule splits its cases."
-                                " An Owner of the project can give it a row rule on its key column(s) and remove what splits it; readiness names which.")
+                                " from tables that security rules filter, or hide columns of, without a rule of its own, or a rule, a relationship"
+                                " or a link splits its cases. An Owner of the project can give it a row rule on its key column(s) and remove what"
+                                " splits it; readiness names what to do.")
     if gone := sorted(c for c in {*key, *EVENT, *CASE, *FLAGS, "seq", "next_activity", "wait_seconds"} if c.lower() in rls.hidden(project, user.id).get(t, set())):
         raise ActionFailed(403, f"A column rule hides '{gone[0]}' of the events of each {x['name']} in process '{p['name']}' from you, and the"
                                 " process reads need it, so they can't run for you. An Owner of the project decides which columns are hidden.")
@@ -1080,7 +1084,8 @@ def process_performance(conn, user: User, args: PerfRead) -> dict:
     waits = sorted((r for r in rows if r[0] == "w"), key=lambda r: (-(r[6] or 0), r[1], r[2]))
     total = sum(r[6] or 0 for r in waits)
     works = sorted(([a, n, _h(m), _h(t)] for k, a, _, n, m, t, *_ in rows if k == "d"), key=lambda r: (-(r[3] or 0), r[0]))
-    flow = (f"A case has ended once its last activity is an end of the process's reference ({', '.join(ends)}): `ended` counts them in the"
+    names = "" if rls.restricted(args.project, user.id) else f" ({', '.join(ends or [])})"  # `process` hides the file from them
+    flow = (f"A case has ended once its last activity is an end activity of the process's reference{names}: `ended` counts them in the"
             " period of their last event, `running` the others in the period they started, and the cycle times are the ended cases'."
             if ends else "The process has no reference with end activities, so nothing says which cases have ended: `last_event` counts each"
             " case in the period of its last event so far, and the cycle times run to it, also for cases still running.")
