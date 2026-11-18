@@ -1954,7 +1954,8 @@ list of every purchase order key the Viewer may see, as the code writes it (`rls
 AS VARCHAR), …], "po_id")`, 262,279 keys), tested on each of its 5.3 million rows; the map
 scans the table three times. That filter is how row-level security writes a relationship into a filtered table today
 (`rls.conditions`, as for any table; M0 moved only follow links to a key type), not something of the process reads.
-Not changed here.
+Not changed here. (Review round 2, 4cd46e5, changed it for a process's per-type tables: their relationship filters test
+a key type instead of the list; see below.)
 
 **Tests on bd1eef3** (the engine and test code of f449fd6, the bench of eadb2ed): the contract's 18 tests of M2 with
 tests/test_process_mine.py whole, tests/test_ontology_nobreak.py and tests/test_127_nobreak.py in a container set up
