@@ -1961,3 +1961,37 @@ tests/test_process_mine.py whole, tests/test_ontology_nobreak.py and tests/test_
 anew: 33 passed in 227 s. The whole suite in a container set up anew (`.loop/abi127.sh test -q -rf tests`): 6
 failed, 612 passed, 24 skipped in 4,974 s; the six are the known container ones (two of tests/test_app.py, one each
 of test_ground.py, test_guardrails.py, test_jobs.py and test_supervise.py).
+
+### Review round 2: whole cases, and key types for a process's tables
+
+18 Nov 2026, 08:33 to 09:27 UTC, the same container set up anew and synced at 4cd46e5, as above:
+
+    ssh pve1 "pct exec 100 -- docker exec abi-127-t sh -c 'cd /app && python3 bench/perf.py process --scale 1 --reads 20'"
+
+Since 4cd46e5 a relationship filter of a process's per-type table in a person's view tests its columns against a key
+type (M0's `_key_type`: a hash lookup inside the scan) instead of holding the visible keys as a constant list; the
+same rows. Only those tables: every other table's filter keeps its text, so the views of a project without a process
+are byte-identical (tests/test_127_nobreak.py, green on 4cd46e5) and M0's page bench, which has no process, runs the
+same SQL as before; it was not run again. The build is the same code as in round 1.
+
+| build | build s (target ≤ 60) | from its trigger s | heavy worker's high-water mark MB (target ≤ 1.5 GB) |
+|---|---|---|---|
+| the first, after the save | **53.6** | 60.5 | **1,271.6** |
+| after the refresh of supply_events | **49.2** | 126.1 | **1,250.4** |
+
+Both met. The high-water mark is 230 to 250 MB above round 1's for the same build code (1,041 and 1,001 MB); not
+looked into.
+
+| read (p95 of 20) | cold (≤ 6 s) | warm, cache cleared (≤ 2 s) | warm REST, `top` 1–20 | filtered warm | cached |
+|---|---|---|---|---|---|
+| process_map | **3.54** | **1.28** | | 2.13 | 0.05 |
+| process_variants | **2.10** | **0.27** | 0.26 | 0.70 | 0.05 |
+
+All four targets met.
+
+**A restricted Viewer** (the North region's cafés, 262,279 of 1,050,000 purchase orders), no target:
+
+| read | their first read over REST (their views and key types built) | three more, cache cleared | round 1 |
+|---|---|---|---|
+| process_map | 8.36 s | 2.17, 2.19, 2.27 s | stopped at 60 s; then 538 to 552 s |
+| process_variants | 1.15 s | 1.07, 1.08, 1.09 s | stopped at 60 s; then 333 to 368 s |
