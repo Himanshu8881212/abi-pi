@@ -2037,3 +2037,9 @@ tests/test_process_log.py whole, tests/test_ontology_nobreak.py, tests/test_127_
 (the key-type tests): 110 passed in 1,223 s. The whole suite in a container set up anew at 3585eae
 (`.loop/abi127.sh test -q -rf tests`): 6 failed, 620 passed, 24 skipped in 5,038 s; the six are the known container
 ones (two of tests/test_app.py, one each of test_ground.py, test_guardrails.py, test_jobs.py and test_supervise.py).
+
+**Review round 5** (a59dbf6: what a hidden time hides, a key amiss said as a plain denial; no read path changed, no bench
+rerun): the 18 contract tests of M2 with the same files as round 3: 110 passed in 1,262 s. The whole suite in a
+container set up anew at a59dbf6: 7 failed, 619 passed, 24 skipped in 5,067 s; the six known container ones and
+tests/test_pages.py::test_report_click_opens_object_page (the object page asked for one key twice), which passed alone
+three times in a fresh container.
