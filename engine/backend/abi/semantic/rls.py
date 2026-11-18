@@ -98,10 +98,15 @@ def _hidden(project: str, user_id: int | None) -> dict[str, set[str]]:
                 out.setdefault(t, set()).update(f.lower() for f, c in zip(r["from"]["columns"], r["to"]["columns"])
                                                 if c.lower() in out.get(r["to"]["table"], ()))
         from abi import process  # not at top: it imports this module
+        from abi.project import imports
 
-        for t, typ in process.generated(project).items():  # 1.2.7 M2: what a build works out from a hidden column is hidden with it
-            for c in [*out.get(t, ())]:
-                out[t] |= process.DERIVED.get(c, set()) if typ else process.DERIVED.get(c, set()) & {"duration_seconds", "ord"}  # events: its duration and order only
+        for p in imports.objects(project, "processes"):
+            ts = process.tables(p)  # round 6: the events' columns, on every table of a process, hidden on one are hidden on all
+            gone = process.shared(p) & set().union(*(out.get(t, ()) for t in ts))
+            for t, typ in ts.items():  # 1.2.7 M2: what a build works out from a hidden column is hidden with it
+                out[t] = out.get(t, set()) | gone
+                for c in [*out[t]]:
+                    out[t] |= process.DERIVED.get(c, set()) if typ else process.DERIVED.get(c, set()) & {"duration_seconds", "ord"}  # events: its duration and order only
         out = {t: cs for t, cs in out.items() if cs}
     return out
 
@@ -606,7 +611,23 @@ def _sources(project: str) -> tuple[dict[str, dict], list[dict], list[dict]]:
     return src, rels, fl
 
 
-def unfiltered_outputs(project: str) -> list[str]:
+def timed(project: str) -> dict[str, str]:
+    """1.2.7 M2 round 6: {each table of a process a column rule hides a time of, on any of its tables: the times
+    ('started_at', 'ended_at')}. Their rows are stored in the events' order (the events table's ord, a type table's
+    case and seq), so a restricted Viewer paging them without ORDER BY would see it: they see none of their rows
+    (`unfiltered_outputs`). Column rules hold for every restricted Viewer: one answer per project."""
+    from abi import process  # not at top: it imports this module
+    from abi.project import imports
+
+    ruled = {(r["table"], c.lower()) for r in _file(project).get("columns", []) for c in r["columns"]}
+    out = {}
+    for p in imports.objects(project, "processes"):
+        if hid := sorted({c for t, c in ruled if t in process.tables(p) and c in ("started_at", "ended_at")}):
+            out |= dict.fromkeys(process.tables(p), "', '".join(hid))
+    return out
+
+
+def unfiltered_outputs(project: str, times: bool = True) -> list[str]:
     """Tables built from rows a rule filters but not filtered by those same rules: TR-1 tables whose merge/append steps
     read a filtered table or whose source step loads a filtered table's source (`source:<t>`, any depth,
     H-01.4-fix-1), ML predictions tables (ml_<id>, ML-5; one whose model file is gone too, 1.2.6 M9) and a process's tables (1.2.7 M1:
@@ -619,7 +640,8 @@ def unfiltered_outputs(project: str) -> list[str]:
     column lineage if that bites. M3.6: kept per bundle content (any change to the folder is a new key).
     1.2.7 M1: and the tables a process's build left in the lake after its file went (`process.leftover`). Those are
     read from the lake at every call, never kept with the files' result: an undo or a revert brings back the very files
-    of before, with tables in the lake that were not there then."""
+    of before, with tables in the lake that were not there then. 1.2.7 M2 round 6: and a process's tables while a column
+    rule hides a time (`timed`; without `times`, the others only: what readiness says besides)."""
     if not rules(project):
         return []
     sha = lambda: hashlib.sha256(dumps(bundle(git.path(project))).encode()).hexdigest()
@@ -632,7 +654,7 @@ def unfiltered_outputs(project: str) -> list[str]:
                 del _outputs[next(iter(_outputs))]
     from abi import process  # not at top: it imports this module
 
-    left = process.leftover(project) - {r["table"] for r in row_rules(project)}
+    left = process.leftover(project) - {r["table"] for r in row_rules(project)} | (set(timed(project)) if times else set())
     return sorted({*hit, *left}) if left else list(hit)
 
 
@@ -737,7 +759,9 @@ def explain(project: str, user_id: int) -> str:
               f" ({f['to']} is restricted for you)" if not why(f) else
               f"-- {f['from']}: no rows (link '{f['id']}', which row-level security follows, {why(f)})"
               for f in sorted(fl, key=lambda f: (f["id"], f["from"])) if ("link", f["id"]) in src.get(f["from"], ())]
-    lines += [f"-- {t}: no rows (made from filtered rows; it needs a rule of its own)" for t in unfiltered_outputs(project)]
+    tm = timed(project)  # 1.2.7 M2 round 6
+    lines += [f"-- {t}: no rows (" + ("a column rule hides its times, and the order of its rows shows the order of the events" if t in tm
+                                     else "made from filtered rows; it needs a rule of its own") + ")" for t in unfiltered_outputs(project)]
     return "-- Row-level security (SE-6): every table below is read through these filters\n" + "\n".join(lines) + "\n"
 
 

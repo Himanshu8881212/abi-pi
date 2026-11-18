@@ -421,7 +421,13 @@ def check(project: str) -> list[str]:
     denied = semantic.rls.unfiltered_outputs(project)
     lost = process.leftover(project) if any(t.startswith("pm_") and t not in pm for t in denied) else set()  # what a build left behind
     split = semantic.rls.splits(project) if any(pm.get(t) for t in denied) else {}  # 1.2.7 M2: what shows part of a case
-    gaps += [f"Table '{t}' holds the predictions of an ML model that is gone; restricted Viewers see none of"
+    # round 6: a table denied only while its times are hidden is said so (otherwise its other cause first)
+    timed = semantic.rls.timed(project) if denied else {}
+    other = set(semantic.rls.unfiltered_outputs(project, times=False)) if timed else set(denied)
+    gaps += [f"Table '{t}' holds events of a process; restricted Viewers see none of its rows while a column rule hides its times"
+             f" ('{timed[t]}'), because the order of its rows shows the order of the events. To show it, take the times out of the"
+             " column rules on the process's tables (set_column_rule replaces a rule, delete_rls_rule deletes one)." if t not in other else
+             f"Table '{t}' holds the predictions of an ML model that is gone; restricted Viewers see none of"
              " its rows until it gets a row rule of its own (set_rls_rule)." if gone(t) else
              f"Table '{t}' holds the events of a process that is gone, or of an object type it is no longer about; restricted Viewers see none"
              " of its rows. To archive it, save the process as it was (save_process), then delete the process (delete_process) or take the"
@@ -440,7 +446,7 @@ def check(project: str) -> list[str]:
              f"Table '{t}' {'holds ML predictions' if t.startswith('ml_') else 'is built by steps'} made from rows that"
              " row-level security rules filter; restricted Viewers see none of its rows until a rule on it (or a"
              " relationship to each filtered table it is made from) filters it."
-             for t in denied if pm.get(t, "") is not None]  # model tables or not: SQL and grids read them too
+             for t in denied if pm.get(t, "") is not None or t not in other]  # model tables or not: SQL and grids read them too
     from abi.semantic import ontology  # not at top: ontology imports this module
     gaps += ontology.gaps(project)  # 1.2.6: dangling references, only once an ontology exists
     from abi import ml  # not at top: ml imports this module

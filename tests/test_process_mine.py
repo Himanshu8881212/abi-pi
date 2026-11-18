@@ -757,6 +757,42 @@ def test_a_hidden_column_hides_what_the_build_made_of_it(mined):
             sure("delete_rls_rule", project=P, id="times")
 
 
+# ---------- review round 6 ----------
+
+def test_a_column_hidden_on_one_table_of_a_process_is_hidden_on_all(mined):
+    # a process's tables all hold the events' columns: an attribute or a time a column rule hides on one is hidden on the
+    # others (no route round it by another table or a join on event_id). With a time hidden the tables show restricted
+    # Viewers no rows (rows stored in the events' order would show it), readiness says so, and the reads' refusal names
+    # the time, not a column the build made of it; the owner reads everything
+    t, ev, d = "pm_supply_purchase_order", "pm_supply_events", "pm_supply_delivery"
+    cols = lambda x: set(viewer(mined, "sql_query", sql=f"SELECT * FROM {x} LIMIT 0")["columns"])  # noqa: E731
+    count = lambda x, tok=None: (viewer(mined, "sql_query", sql=f"SELECT count(*) FROM {x}") if tok else  # noqa: E731
+                                 abi.call("sql_query", project=P, sql=f"SELECT count(*) FROM {x}"))["rows"][0][0]
+    sure("set_column_rule", project=P, id="amounts", table=ev, columns=["amount"])
+    try:
+        assert "amount" in abi.call("sql_query", project=P, sql=f"SELECT * FROM {t} LIMIT 0")["columns"]
+        assert not {"amount"} & (cols(t) | cols(d)) and "started_at" in cols(t) and count(t, True) > 0
+        assert read("process_map", mined["viewer"], process="supply")["totals"]
+    finally:
+        sure("delete_rls_rule", project=P, id="amounts")
+    owner, whole = {x: count(x) for x in (t, ev, d)}, read("process_map", process="supply")
+    for on in (ev, t):
+        sure("set_column_rule", project=P, id="times", table=on, columns=["started_at"])
+        try:
+            for x in (t, ev, d):
+                assert "started_at" not in cols(x) and count(x, True) == 0 and count(x) == owner[x] > 0, (on, x)
+            for typ in ("purchase_order", "delivery"):
+                e = refused("process_map", token=mined["viewer"], process="supply", type=typ)
+                assert e.status == 403 and e.body["message"].startswith("A column rule hides 'started_at' of the events of each"), (on, e.body)
+            assert [g for g in abi.call("readiness", project=P)["missing"] if g.startswith(f"Table '{t}'")] == [
+                f"Table '{t}' holds events of a process; restricted Viewers see none of its rows while a column rule hides its times"
+                " ('started_at'), because the order of its rows shows the order of the events. To show it, take the times out of the"
+                " column rules on the process's tables (set_column_rule replaces a rule, delete_rls_rule deletes one)."]
+            assert read("process_map", process="supply") == whole, on
+        finally:
+            sure("delete_rls_rule", project=P, id="times")
+
+
 def test_a_restricted_reader_is_told_no_end_activity_by_name(mined):
     ends = JOBS | {"id": "jobsend", "name": "Jobs ended", "reference": {"from": "drawn", "start": ["A"], "end": ["C"], "flows": []}}
     assert save(ends)["status"] == "ok"

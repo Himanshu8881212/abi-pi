@@ -107,6 +107,11 @@ def tables(p: dict) -> dict[str, str | None]:
     return {table_of(p["id"]): None} | {table_of(p["id"], t): t for t in types(p)}
 
 
+def shared(p: dict) -> set[str]:
+    """The columns every table its build writes holds (lower-cased): an event's own and its attributes (rls._hidden)."""
+    return {c.lower() for c in (*EVENT, *(a for s in p["events"] for a in s.get("attributes", [])))}
+
+
 def reads(p: dict) -> set[str]:
     """The tables a build reads: the sources and the bridge tables."""
     return {s["table"] for s in p["events"]} | {x["through"] for s in p["events"] for x in s["objects"] if "through" in x}
@@ -937,14 +942,17 @@ def _read(project: str, args: Read, user: User, what: str, more: dict | None = N
     if not {*key, *CASE, *FLAGS} <= cols[t].keys():
         raise ActionFailed(409, f"The event log of process '{p['name']}' was built before its {x['name']}'s key or this version of ABI: save"
                                 " the process again (save_process) to build it again; `process` shows the build.")
+    # first: a hidden time also denies the table (rls.timed), which the refusal below doesn't name
+    if gone := sorted(c for c in {*key, *EVENT, *CASE, *FLAGS, "seq", "next_activity", "wait_seconds"} if c.lower() in rls.hidden(project, user.id).get(t, set())):
+        # a column a rule names: what a build works out of a hidden column (DERIVED) is hidden only with that column, also in `gone`
+        say = next((c for c in gone if c not in set().union(*DERIVED.values())), gone[0])
+        raise ActionFailed(403, f"A column rule hides '{say}' of the events of each {x['name']} in process '{p['name']}' from you, and the"
+                                " process reads need it, so they can't run for you. An Owner of the project decides which columns are hidden.")
     if rls.restricted(project, user.id) and t in rls.unfiltered_outputs(project):
         raise ActionFailed(403, f"Row-level security: you see none of the events of each {x['name']} in process '{p['name']}'. Their table is made"
                                 " from tables that security rules filter, or hide columns of, without a rule of its own, or a rule, a relationship"
                                 f" or a link splits its cases, or its key in the data model is not its {x['name']}'s key and event_id. An Owner of"
                                 " the project can give it a row rule on its key column(s) and remove what splits it; readiness names what to do.")
-    if gone := sorted(c for c in {*key, *EVENT, *CASE, *FLAGS, "seq", "next_activity", "wait_seconds"} if c.lower() in rls.hidden(project, user.id).get(t, set())):
-        raise ActionFailed(403, f"A column rule hides '{gone[0]}' of the events of each {x['name']} in process '{p['name']}' from you, and the"
-                                " process reads need it, so they can't run for you. An Owner of the project decides which columns are hidden.")
     if errs := filter_errors(p, x, t, args.filters, cols, rls.hidden(project, user.id)):
         raise ActionFailed(422, f"The filters were refused: {len(errs)} error(s); nothing was read.", errors=errs)
     return p, typ, x, key, _scope(t, x, key, args.filters, cols), {"process": p["id"], "type": typ, "filters": args.filters, what: True, **(more or {})}
