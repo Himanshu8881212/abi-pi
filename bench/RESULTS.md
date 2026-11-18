@@ -1953,3 +1953,9 @@ see (`po_id IN ('PO0000095', 'PO0000099', …)`, 262,279 keys), tested on each o
 scans the table three times. That filter is how row-level security writes a relationship into a filtered table today
 (`rls.conditions`, as for any table; M0 moved only follow links to a key type), not something of the process reads.
 Not changed here.
+
+**Tests on bd1eef3** (the engine and test code of f449fd6, the bench of eadb2ed): the contract's 18 tests of M2 with
+tests/test_process_mine.py whole, tests/test_ontology_nobreak.py and tests/test_127_nobreak.py in a container set up
+anew: 33 passed in 227 s. The whole suite in a container set up anew (`.loop/abi127.sh test -q -rf tests`): 6
+failed, 612 passed, 24 skipped in 4,974 s; the six are the known container ones (two of tests/test_app.py, one each
+of test_ground.py, test_guardrails.py, test_jobs.py and test_supervise.py).
