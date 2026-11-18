@@ -15,7 +15,7 @@ from conftest import parquet
 from jsonschema import Draft202012Validator
 from test_engine import engine
 from test_pages import sure
-from test_process_log import DESK, ONTO, P, ROOT, SCHEMA, TRACES, build_of, built, deep, log, save, shown, sql, viewer  # noqa: F401
+from test_process_log import DESK, ONTO, P, ROOT, SCHEMA, SUPPLY, TRACES, build_of, built, deep, log, save, shown, sql, viewer  # noqa: F401
 
 import abi
 
@@ -214,8 +214,10 @@ def test_miner_keeps_short_loops(mined):
 
 def test_throughput_per_month_known(mined):
     p = read("process_performance", process="desk", period="day")
-    # T1 from 1 to 2 March, T2 from 1 to 2 March, T3 on 3 March
-    assert p["throughput"] == {"columns": ["period", "started", "ended"], "rows": [["2025-03-01", 2, 0], ["2025-03-02", 0, 2], ["2025-03-03", 1, 1]]}
+    # T1 from 1 to 2 March, T2 from 1 to 2 March, T3 on 3 March; with no reference nothing says a case has ended: each
+    # counts in the period of its last event so far (review round 1: no longer named `ended`)
+    assert p["throughput"] == {"columns": ["period", "started", "last_event"], "rows": [["2025-03-01", 2, 0], ["2025-03-02", 0, 2], ["2025-03-03", 1, 1]]}
+    assert "nothing says which cases have ended" in p["note"]
     # cycle times of 1, 23 and 25 hours, interpolated as quantile_cont
     assert p["cycle"]["rows"] == [[3, 16.33, 5.4, 12.0, 23.0, 24.0, 24.6, 25.0]]
     started, ended = deep(
@@ -226,6 +228,32 @@ def test_throughput_per_month_known(mined):
     s = read("process_performance", process="supply")["throughput"]["rows"]
     assert [[m, n] for m, n, _ in s if n] == started and [[m, n] for m, _, n in s if n] == ended
     assert sum(r[1] for r in s) == sum(r[2] for r in s) == mined["known"]["rows"]["purchase_orders"]
+    # with a reference, a case has ended once its last activity is one of its ends: T2 (last a reply) is running, counted
+    # where it started, and the cycle times are T1's and T3's (25 h and 1 h)
+    ref = {"from": "drawn", "start": ["Opened"], "end": ["Closed"], "flows": [["Opened", "Assigned"]]}
+    assert save(DESK | {"id": "deskend", "name": "Helpdesk ended", "reference": ref})["status"] == "ok"
+    e = read("process_performance", process="deskend", period="day")
+    assert e["throughput"] == {"columns": ["period", "started", "ended", "running"],
+                               "rows": [["2025-03-01", 2, 0, 1], ["2025-03-02", 0, 1, 0], ["2025-03-03", 1, 1, 0]]}
+    assert e["cycle"]["rows"] == [[2, 13.0, 3.4, 7.0, 13.0, 19.0, 22.6, 25.0]] and "running` the others" in e["note"]
+    # Brewline: an order has ended once paid (the planted prepaid ones end with an invoice: still running); the paid
+    # ones by the month of their last event, the others by the month they were placed
+    paid = SUPPLY | {"id": "paid", "name": "Paid", "reference": {"from": "drawn", "start": ["Order placed"], "end": ["Invoice paid"], "flows": []}}
+    assert save(paid)["status"] == "ok"
+    last = f"""(SELECT po_id, activity AS a, t, row_number() OVER (PARTITION BY po_id ORDER BY t DESC, o DESC) AS r
+      FROM ({UNION.replace('e.started_at, 3', 'coalesce(e.ended_at, e.started_at), 3')}))"""
+    ended, running, [[n]] = deep(
+        f"SELECT strftime(date_trunc('month', t), '%Y-%m-%d'), count(*) FROM {last} WHERE r = 1 AND a = 'Invoice paid' GROUP BY 1 ORDER BY 1",
+        f"""SELECT strftime(date_trunc('month', placed_at), '%Y-%m-%d'), count(*) FROM purchase_orders WHERE po_id IN
+          (SELECT po_id FROM {last} WHERE r = 1 AND a <> 'Invoice paid') GROUP BY 1 ORDER BY 1""",
+        f"SELECT count(*) FROM {last} WHERE r = 1 AND a <> 'Invoice paid'")
+    b = read("process_performance", process="paid")
+    s = b["throughput"]["rows"]
+    assert [[m, x] for m, _, x, _ in s if x] == ended and [[m, x] for m, _, _, x in s if x] == running
+    assert sum(r[3] for r in s) == n >= mined["known"]["deviations"]["paid_before_goods"] > 0
+    assert b["cycle"]["rows"][0][0] == sum(r[2] for r in s) == mined["known"]["rows"]["purchase_orders"] - n
+    for pid in ("deskend", "paid"):
+        sure("delete_process", project=P, process=pid)
 
 
 def test_waiting_and_working_time_known(mined):
@@ -398,3 +426,156 @@ def test_process_reads_are_viewer_reads():
     for f in (ROOT / ".pi/agents").glob("*.md"):
         head = f.read_text().split("---")[1]
         assert ("mcp__abi__process," in head) == all(f"mcp__abi__{t}" in head for t in new), f.name
+
+
+# ---------- review round 1 ----------
+
+def test_case_figures_count_once_and_are_the_builds_names(mined):
+    # each case's own figures and flags are on every one of its rows: a sum, an average, a count or a median over them is
+    # refused like an event's own figure; the smallest, the largest and the number of different values are not
+    for fn in ("SUM", "AVG", "COUNT", "MEDIAN"):
+        with pytest.raises(abi.ActionError) as e:
+            abi.call("set_measure", project=P, id="cyc", name="cyc", expression=f"{fn}(pm_supply_purchase_order.cycle_seconds)")
+        [x] = e.value.body["errors"]
+        assert "a Purchase order's own figure written on each of its events" in x["error"] and x["fix"].startswith("Use MIN, MAX or DISTINCT_COUNT"), x
+    for i, ex in {"longest": "MAX(pm_supply_purchase_order.cycle_seconds)", "kinds": "DISTINCT_COUNT(pm_supply_purchase_order.variant_id)"}.items():
+        abi.call("set_measure", project=P, id=i, name=i, expression=ex)
+        sure("delete_measure", project=P, id=i)
+    # and no attribute may have their names
+    for a in ("variant", "Cycle_Seconds", "first_pair"):
+        p = copy.deepcopy(JOBS)
+        p["events"][0]["attributes"] = [a]
+        with pytest.raises(abi.ActionError) as e:
+            abi.call("save_process", project=P, process=p)
+        assert e.value.status == 422 and "makes itself" in e.value.body["errors"][0]["error"], e.value.body
+
+
+STALE = r"""
+import json, sys
+from abi import storage
+p = json.loads(sys.stdin.read())["project"]
+storage._commit(storage.lake(p), lambda cur: cur.execute("ALTER TABLE lake.model.pm_jobs_job DROP COLUMN first_pair"), "test", "an older build")
+"""
+
+
+def test_a_build_older_than_the_file_or_the_reads_is_named(mined):
+    # an attribute in the file that its last build did not write (that build failed): answered as unknown, not a fault
+    odd = copy.deepcopy(DESK) | {"description": "Agents too, and a typo."}
+    odd["events"][1]["attributes"] = ["minutes", "agent"]
+    odd["clean"]["where"][0]["value"] = "last year"
+    assert save(odd)["status"] == "failed"
+    try:
+        e = refused("process_map", process="desk", filters=[{"kind": "attribute", "column": "agent", "op": "=", "value": "Ada"}])
+        assert e.status == 422 and e.body["errors"][0]["path"] == "$[0].column" and e.body["errors"][0]["fix"] == "Use one of: minutes.", e.body
+    finally:
+        assert save(DESK)["status"] == "ok"
+    # a table built before the reads' columns (as by an earlier version): the read says so and how to build it again
+    r = engine(STALE, timeout=120, stdin=json.dumps({"project": P}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    e = refused("process_map", process="jobs")
+    assert e.status == 409 and "save the process again (save_process)" in e.body["message"], e.body
+    assert save(JOBS | {"description": "Built again."})["status"] == "ok" and read("process_map", process="jobs")["totals"]["rows"] == [[31, 122]]
+
+
+MINE = r"""
+import json
+import abi.app  # noqa: F401
+from abi import process
+acts = {"A": (300, 1), "X": (300, 1500)} | {f"S{i}": (300, 1) for i in range(250)}
+pairs = {("X", "X"): 1499 * 300} | {(f"S{i}", f"S{j}"): 300 for i in range(70) for j in range(70) if i < j}
+ref, _, _, cut = process.mine(300, acts, pairs, {}, {f"S{i}": 300 for i in range(250)}, {f"S{i}": 300 for i in range(250)}, 0.9, 0)
+print(json.dumps({"ref": {k: len(v) if isinstance(v, list) else v for k, v in ref.items()}, "cut": cut}))
+"""
+
+
+def test_the_usual_way_fits_a_reference(mined):
+    # a step repeated 1,500 times in a case, 2,416 dependable pairs and 250 starts and ends: what save_process takes
+    # (repeat at most 1,000, at most 2,000 flows and 200 starts and ends), the most frequent kept, and the note says so
+    r = engine(MINE, timeout=120)
+    assert r.returncode == 0, r.stderr[-2000:]
+    got = json.loads(r.stdout.splitlines()[-1])
+    assert got["ref"] == {"from": "discovered", "start": 200, "end": 200, "flows": 2000, "repeat": {"X": 1000}}, got
+    assert got["cut"] == ["start activities", "end activities", "flows", "the repeats of X"], got
+    assert "keeps only the most frequent" not in read("discover_process", process="jobs")["note"]
+
+
+SLOW = r"""
+import json, sys
+import abi.app  # noqa: F401
+from abi import db, process, security, semantic
+from abi.actions import ActionFailed
+p = json.loads(sys.stdin.read())["project"]
+semantic.TIMEOUT = 0.5
+with db.connect() as c:
+    u = security.user(c, c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"])
+try:
+    process._run(p, "SELECT count(*) FROM range(100000000000) a", {"test": "slow"}, u)
+    print(json.dumps(None))
+except ActionFailed as e:
+    print(json.dumps([e.status, e.body["message"]]))
+"""
+
+
+def test_a_read_stopped_at_the_time_limit_says_how_to_read_less(mined):
+    r = engine(SLOW, timeout=120, stdin=json.dumps({"project": P}))
+    assert r.returncode == 0, r.stderr[-2000:]
+    status, msg = json.loads(r.stdout.splitlines()[-1])
+    assert status == 400 and "longer than the 0.5 s limit" in msg and "`time` filter" in msg, msg
+
+
+def test_a_hidden_column_reads_as_an_unknown_one(mined):
+    # a property of the delivery and an attribute of its events hidden from the Viewer (a column rule on the type's own
+    # table keeps its other columns readable): the same answer as for a column that isn't there, the fix lists only what they may read
+    sure("set_column_rule", project=P, id="transport", table="deliveries", columns=["transport"])
+    sure("set_column_rule", project=P, id="who", table="pm_supply_delivery", columns=["done_by"])
+    try:
+        def fix(**f) -> dict:
+            e = refused("process_map", token=mined["viewer"], process="supply", type="delivery", filters=[{"op": "=", "value": "x", **f}])
+            assert e.status == 422, e.body
+            [x] = e.body["errors"]
+            return x
+
+        hid, none = fix(kind="property", column="transport"), fix(kind="property", column="nope")
+        assert hid["fix"] == none["fix"] and "transport" not in hid["fix"] and "supplier_id" in hid["fix"]
+        assert hid["error"].replace("transport", "nope") == none["error"]
+        hid, none = fix(kind="attribute", column="done_by"), fix(kind="attribute", column="nope")
+        assert hid["fix"] == none["fix"] == "Use one of: amount." and hid["error"].replace("done_by", "nope") == none["error"]
+        # the owner reads them
+        assert read("process_map", process="supply", type="delivery", filters=[{"kind": "property", "column": "transport", "op": "<>", "value": "x"}])
+    finally:
+        for i in ("transport", "who"):
+            sure("delete_rls_rule", project=P, id=i)
+
+
+SHIFTS = {"id": "shifts", "name": "Shifts", "case": "shift", "events": [
+    {"table": "shift_events", "id": "event_id", "activity": "activity", "start": "at", "objects": [{"type": "shift", "columns": ["site", "shift_day"]}]}]}
+
+
+def test_a_case_with_a_key_of_two_columns(mined):
+    # a shift is a site and a day: S1 (A, 1 Jan) Open Serve Close, S2 (A, 2 Jan) Open Close, S3 (B, 1 Jan) Open Serve Serve Close
+    d = mined["dir"]
+    (d / "shifts.csv").write_text("site,shift_day,team\nA,2025-01-01,red\nA,2025-01-02,red\nB,2025-01-01,blue\n")
+    (d / "shift_events.csv").write_text("event_id,site,shift_day,activity,at\n1,A,2025-01-01,Open,2025-01-01 08:00:00\n"
+                                        "2,A,2025-01-01,Serve,2025-01-01 09:00:00\n3,A,2025-01-01,Close,2025-01-01 17:00:00\n"
+                                        "4,A,2025-01-02,Open,2025-01-02 08:00:00\n5,A,2025-01-02,Close,2025-01-02 12:00:00\n"
+                                        "6,B,2025-01-01,Open,2025-01-01 07:00:00\n7,B,2025-01-01,Serve,2025-01-01 08:00:00\n"
+                                        "8,B,2025-01-01,Serve,2025-01-01 10:00:00\n9,B,2025-01-01,Close,2025-01-01 15:00:00\n")
+    for t in ("shifts", "shift_events"):
+        abi.upload(P, t, Path(parquet(d / f"{t}.csv")[0]))
+    for t, k in (("shifts", ["site", "shift_day"]), ("shift_events", ["event_id"])):
+        abi.call("set_table", project=P, table=t, key=k)
+    sure("save_ontology", project=P, ontology={"objects": [*ONTO["objects"], {"id": "job", "table": "jobs", "name": "Job", "plural": "Jobs", "title": "job_id"},
+                                                           {"id": "shift", "table": "shifts", "name": "Shift", "plural": "Shifts", "title": "site"}]})
+    assert save(SHIFTS)["status"] == "ok"
+    try:
+        m = read("process_map", process="shifts")
+        assert m["totals"]["rows"] == [[3, 9]] and m["activities"]["rows"] == [["Close", 3, 3, None], ["Open", 3, 3, None], ["Serve", 2, 3, None]]
+        assert [r[:4] for r in m["pairs"]["rows"]] == [["Open", "Serve", 2, 2], ["Serve", "Close", 2, 2], ["Open", "Close", 1, 1], ["Serve", "Serve", 1, 1]]
+        v = {r[0]: r[2] for r in read("process_variants", process="shifts")["variants"]["rows"]}
+        assert v == {"Open → Serve → Close": 1, "Open → Close": 1, "Open → Serve → Serve → Close": 1}
+        red = [{"kind": "property", "column": "team", "op": "=", "value": "red"}, {"kind": "contains", "activity": "Serve"}]
+        assert read("process_map", process="shifts", filters=red)["totals"]["rows"] == [[1, 3]]
+        assert read("process_performance", process="shifts", filters=[{"kind": "duration", "op": ">=", "hours": 8}])["cycle"]["rows"][0][:2] == [2, 8.5]
+        assert read("discover_process", process="shifts", threshold=0.5)["reference"]["start"] == ["Open"]
+    finally:
+        sure("delete_process", project=P, process="shifts")

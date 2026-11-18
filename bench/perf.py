@@ -63,8 +63,8 @@ machine's engine and app, or inside a docker install). Each run prints one JSON 
              heavy worker and that load queues the build, which the same worker runs: the same figures, the memory
              now the load's and the build's in one process (`after_refresh`; waited_s is from the file's new time).
              Then (1.2.7 M2, --reads N, default 20) process_map and process_variants N times each: cold (the engine
-             and Postgres restarted, the lake's and Postgres's files out of the page cache), cached and warm
-             (`process_reads`), with each one's p95.
+             and Postgres restarted, the lake's and Postgres's files out of the page cache), warm (the result cache
+             cleared before each), cached, filtered warm, and as a restricted Viewer (`process_reads`), each with its p95.
   kill       kill -9 the engine or the worker (their pid files), then every second until --wait: does the engine's
              /api/ready answer, does the owner's page load, does the pid file name a running process again. Each change
              of those, and the seconds until all three hold (serving_s, null: not within --wait).
@@ -837,15 +837,41 @@ def process(a) -> dict:
             shutil.rmtree(d, ignore_errors=True)
 
 
+WARM = r"""
+import json, sys, time
+import abi.app  # noqa: F401
+from abi import actions, db, security, semantic
+a = json.loads(sys.stdin.read())
+out = {}
+with db.connect() as c:
+    u = security.user(c, a["user"] or c.execute("SELECT id FROM users WHERE workspace_owner ORDER BY id LIMIT 1").fetchone()["id"])
+    for name in ("process_map", "process_variants"):
+        act, ts = actions.ACTIONS[name], []
+        for _ in range(a["n"] + 1):  # the first warms this process's DuckDB instance: not counted
+            semantic._caches.clear()
+            t = time.perf_counter()
+            act.fn(c, u, act.input(project=a["project"], process="supply"))
+            ts.append(round(time.perf_counter() - t, 3))
+        out[name] = ts[1:]
+print(json.dumps(out))
+"""
+
+
 def process_reads(p: str, n: int) -> dict:
-    """1.2.7 M2: process_map and process_variants of the supply process (per purchase order, no filter), n times each,
-    as the workspace owner over REST. cold: each read the first after scripts/engine.sh stop (the engine, its workers
-    and Postgres), the project's lake files and Postgres's files dropped from the OS page cache (posix_fadvise
-    DONTNEED, after a sync) and engine.sh start, once /api/ready answers: no DuckDB instance, buffer or result cache, no
-    page cache of the data. cached: the same read again (the engine's result cache answers). warm: each read made new
-    by a filter that keeps every case (cases started from 2000-01-01 00:00:<i>), so the engine works it out each time
-    on warm buffers; it does more than the read without the filter (the semi-join on every case)."""
-    sh = str(ROOT / "scripts/engine.sh")
+    """1.2.7 M2: process_map and process_variants of the supply process (per purchase order), n times each, timed from
+    the call to the answer.
+    - cold (REST, the owner, no filter): each read the first after scripts/engine.sh stop (the engine, its workers and
+      Postgres), a sync, the project's lake files and Postgres's files dropped from the OS page cache (posix_fadvise
+      DONTNEED) and engine.sh start, once /api/ready answers: no DuckDB instance, buffer or result cache.
+    - warm (no filter, the result cache cleared before each read): the reads' own code (the action functions) in a
+      process of the engine's code started for it, on the same lake, after one read not counted that warms its DuckDB
+      instance; no REST in between. For variants also over REST with `top` 1 to n (each a new SQL, the same work).
+    - cached (REST): the same read again, answered by the engine's result cache.
+    - filtered warm (REST): each read made new by a filter that keeps every case (cases started from 2000-01-01
+      00:00:<i>): the semi-join on every case is worked out too.
+    - restricted (a Viewer who sees the North region's cafés, a row rule on cafes): their first read over REST (their
+      row-level security views built for it), then warm as above, as them."""
+    sh, py = str(ROOT / "scripts/engine.sh"), str(ROOT / "engine/backend/.venv/bin/python")
 
     def one(action: str, **args) -> float:
         t = time.perf_counter()
@@ -873,16 +899,41 @@ def process_reads(p: str, n: int) -> dict:
         if not until(ready, 300):
             raise SystemExit("The engine did not answer /api/ready within 300 s of its start.")
 
+    def warm(user: int | None) -> dict:
+        env = subprocess.run([sh, "env"], capture_output=True, text=True, check=True).stdout
+        r = subprocess.run(["sh", "-c", f'{env}\nexec {py} -c "$0"', WARM], cwd=ROOT, capture_output=True, text=True, timeout=3600,
+                           input=json.dumps({"project": p, "user": user, "n": n}))
+        if r.returncode:
+            raise SystemExit(f"The warm reads failed: {r.stderr[-2000:]}")
+        return json.loads(r.stdout.splitlines()[-1])
+
     p95 = lambda xs: sorted(xs)[math.ceil(0.95 * len(xs)) - 1]  # noqa: E731
-    out = {}
-    for action in ("process_map", "process_variants"):
+    stats = lambda xs: {"p95_s": p95(xs), "min_s": min(xs), "max_s": max(xs), "s": xs}  # noqa: E731
+    out = {a: {} for a in ("process_map", "process_variants")}
+    for action in out:
         cold = []
         for _ in range(n):
             restart()
             cold.append(one(action))
-        cached = [one(action) for _ in range(n)]
-        warm = [one(action, filters=[{"kind": "time", "when": "started", "from": f"2000-01-01 00:00:{i % 60:02d}"}]) for i in range(n)]
-        out[action] = {"cold_p95_s": p95(cold), "warm_p95_s": p95(warm), "cached_p95_s": p95(cached), "cold_s": cold, "warm_s": warm, "cached_s": cached}
+        out[action] |= {"cold": stats(cold), "cached": stats([one(action) for _ in range(n)]),
+                        "filtered_warm": stats([one(action, filters=[{"kind": "time", "when": "started", "from": f"2000-01-01 00:00:{i % 60:02d}"}])
+                                                for i in range(n)])}
+    out["process_variants"]["warm_rest_top"] = stats([one("process_variants", top=1 + i % 100) for i in range(n)])
+    for action, xs in warm(None).items():
+        out[action]["warm"] = stats(xs)
+    # a Viewer under a row rule (row-level security views built for them on their first read)
+    name, pw = f"perf_pm_v_{time.strftime('%H%M%S')}", secrets.token_urlsafe(16)
+    abi.call("create_user", name=name, password=pw)
+    try:
+        abi.call("set_role", project=p, user=name, role="viewer")
+        uid = int({u["name"]: u["id"] for u in abi.call("rls_rules", project=p)["accounts"]}[name])
+        sure("set_rls_rule", project=p, id="region", table="cafes", column="region", users={str(uid): ["North"]})
+        with abi.as_user(abi.login(name, pw)[1]["token"]):
+            first = {a: one(a) for a in out}
+        for action, xs in warm(uid).items():
+            out[action]["restricted"] = {"first_s": first[action], **stats(xs)}
+    finally:
+        sure("delete_user", name=name)
     return out
 
 
