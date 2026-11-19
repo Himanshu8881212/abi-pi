@@ -138,8 +138,18 @@ SETTLE = True  # `conditions` settles rules and relationships before the follow 
 
 
 def cast_lit(text, typ: str) -> str:
-    """The exact value of `text` (as DuckDB renders it) in DuckDB type `typ`: only ever a quoted, escaped literal."""
+    """The exact value of `text` (as DuckDB renders it) in DuckDB type `typ`: only ever a quoted, escaped literal. `typ`
+    goes into the text as it is: one from the files (a live table's, tables/<t>.json) must pass `plain` first."""
     return f"CAST('{storage._lit(str(text))}' AS {typ})"
+
+
+PLAIN = r"[A-Z0-9_ ]+(\(\d+(,\s*\d+)?\))?"  # a type's name as DuckDB writes a plain one: no quote, no bracket but its size
+
+
+def plain(typ: str) -> bool:
+    """1.2.7 M2 round 7: `typ` is a plain DuckDB type or an ENUM of quoted labels as DuckDB writes it (a quote in a label
+    doubled), so `cast_lit` may put it into SQL: nothing else can be read into it (a subquery, another statement)."""
+    return bool(re.fullmatch(PLAIN, typ) or re.fullmatch(r"ENUM\('([^']|'')*'(,\s*'([^']|'')*')*\)", typ))
 
 
 def _in(cols: list[str], keys: list[tuple]) -> str:
@@ -162,7 +172,7 @@ def _list_sql(col: str, src: str) -> str:
     the distinct non-NULL `col` values of DuckDB `FROM src` as `CAST('<text>' AS <type>), …`); (NULL, NULL) when there
     is none. The type's name goes into the text unquoted, so only names made of capitals, digits, spaces and a
     (precision[, scale]) count as plain; `conditions.listed` takes any other column the earlier way."""
-    return ("SELECT bool_and(regexp_full_match(typeof(c), '[A-Z0-9_ ]+(\\(\\d+(,\\s*\\d+)?\\))?')),"
+    return (f"SELECT bool_and(regexp_full_match(typeof(c), '{PLAIN}')),"
             " string_agg('CAST(''' || replace(CAST(c AS VARCHAR), '''', '''''') || ''' AS ' || typeof(c) || ')', ', '"
             f" ORDER BY CAST(c AS VARCHAR), typeof(c)) FROM (SELECT DISTINCT {storage._q(col)} AS c FROM {src}) WHERE c IS NOT NULL")
 
@@ -611,23 +621,28 @@ def _sources(project: str) -> tuple[dict[str, dict], list[dict], list[dict]]:
     return src, rels, fl
 
 
-def timed(project: str) -> dict[str, str]:
-    """1.2.7 M2 round 6: {each table of a process a column rule hides a time of, on any of its tables: the times
-    ('started_at', 'ended_at')}. Their rows are stored in the events' order (the events table's ord, a type table's
-    case and seq), so a restricted Viewer paging them without ORDER BY would see it: they see none of their rows
-    (`unfiltered_outputs`). Column rules hold for every restricted Viewer: one answer per project."""
+def hiding(project: str) -> dict[str, str]:
+    """1.2.7 M2 round 7 (fail closed): {each table of a process while a column rule names a table the process reads (a
+    source, a bridge table, an object type's table) or one of its own: that rule's 'table.column'}. A build carries a
+    column into its tables (an event's ID, a copy under its own name, the order of the rows: the events table's ord, a
+    type table's case and seq), so a restricted Viewer could read there what the rule hides: they see none of the rows
+    of any of its tables (`unfiltered_outputs`). Read from the files at every call, never kept with the bundle's result
+    (nothing to go stale); column rules hold for every restricted Viewer: one answer per project."""
     from abi import process  # not at top: it imports this module
     from abi.project import imports
+    from abi.semantic import ontology  # not at top: it imports the semantic package
 
-    ruled = {(r["table"], c.lower()) for r in _file(project).get("columns", []) for c in r["columns"]}
-    out = {}
-    for p in imports.objects(project, "processes"):
-        if hid := sorted({c for t, c in ruled if t in process.tables(p) and c in ("started_at", "ended_at")}):
-            out |= dict.fromkeys(process.tables(p), "', '".join(hid))
+    cr, out = _file(project).get("columns", []), {}
+    ps = imports.objects(project, "processes") if cr else []
+    of = {x["id"]: x["table"] for x in ontology.read(project).get("objects", [])} if ps else {}
+    for p in ps:
+        ts = process.tables(p)
+        if r := next((r for r in cr if r["table"] in {*ts, *process.reads(p), *(of[x] for x in process.types(p) if x in of)}), None):
+            out |= dict.fromkeys(ts, f"{r['table']}.{r['columns'][0]}")
     return out
 
 
-def unfiltered_outputs(project: str, times: bool = True) -> list[str]:
+def unfiltered_outputs(project: str) -> list[str]:
     """Tables built from rows a rule filters but not filtered by those same rules: TR-1 tables whose merge/append steps
     read a filtered table or whose source step loads a filtered table's source (`source:<t>`, any depth,
     H-01.4-fix-1), ML predictions tables (ml_<id>, ML-5; one whose model file is gone too, 1.2.6 M9) and a process's tables (1.2.7 M1:
@@ -640,8 +655,8 @@ def unfiltered_outputs(project: str, times: bool = True) -> list[str]:
     column lineage if that bites. M3.6: kept per bundle content (any change to the folder is a new key).
     1.2.7 M1: and the tables a process's build left in the lake after its file went (`process.leftover`). Those are
     read from the lake at every call, never kept with the files' result: an undo or a revert brings back the very files
-    of before, with tables in the lake that were not there then. 1.2.7 M2 round 6: and a process's tables while a column
-    rule hides a time (`timed`; without `times`, the others only: what readiness says besides)."""
+    of before, with tables in the lake that were not there then. 1.2.7 M2 round 7: and every table of a process while a
+    column rule names a table it reads or one of its own (`hiding`, read at every call too), a rule of their own included."""
     if not rules(project):
         return []
     sha = lambda: hashlib.sha256(dumps(bundle(git.path(project))).encode()).hexdigest()
@@ -654,7 +669,7 @@ def unfiltered_outputs(project: str, times: bool = True) -> list[str]:
                 del _outputs[next(iter(_outputs))]
     from abi import process  # not at top: it imports this module
 
-    left = process.leftover(project) - {r["table"] for r in row_rules(project)} | (set(timed(project)) if times else set())
+    left = process.leftover(project) - {r["table"] for r in row_rules(project)} | set(hiding(project))
     return sorted({*hit, *left}) if left else list(hit)
 
 
@@ -759,9 +774,10 @@ def explain(project: str, user_id: int) -> str:
               f" ({f['to']} is restricted for you)" if not why(f) else
               f"-- {f['from']}: no rows (link '{f['id']}', which row-level security follows, {why(f)})"
               for f in sorted(fl, key=lambda f: (f["id"], f["from"])) if ("link", f["id"]) in src.get(f["from"], ())]
-    tm = timed(project)  # 1.2.7 M2 round 6
-    lines += [f"-- {t}: no rows (" + ("a column rule hides its times, and the order of its rows shows the order of the events" if t in tm
-                                     else "made from filtered rows; it needs a rule of its own") + ")" for t in unfiltered_outputs(project)]
+    hid, split = hiding(project), splits(project)  # 1.2.7 M2 round 7: a process's table, the reason readiness gives
+    lines += [f"-- {t}: no rows (" + (f"a column rule hides a column of a table the process is made from or of one of its tables ('{hid[t]}')"
+                                     if t in hid else split[t][0] if t in split else "made from filtered rows; it needs a rule of its own") + ")"
+              for t in unfiltered_outputs(project)]
     return "-- Row-level security (SE-6): every table below is read through these filters\n" + "\n".join(lines) + "\n"
 
 

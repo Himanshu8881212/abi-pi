@@ -536,15 +536,19 @@ def test_a_read_stopped_at_the_time_limit_says_how_to_read_less(mined):
 
 
 def test_a_hidden_column_reads_as_an_unknown_one(mined):
-    # a property of the delivery and an attribute of its events hidden from the Viewer (a column rule on the type's own
-    # table keeps its other columns readable): the same answer as for a column that isn't there, the fix lists only what they may read
+    # a property of the delivery and an attribute of its events hidden from the Viewer: the filters' check answers as for
+    # a column that isn't there, the fix lists only what they may read. (Round 7, fail closed: while these rules stand the
+    # Viewer reads none of the process's rows, so the check is made directly, with what is hidden from them.)
+    before = owners()
     sure("set_column_rule", project=P, id="transport", table="deliveries", columns=["transport"])
     sure("set_column_rule", project=P, id="who", table="pm_supply_delivery", columns=["done_by"])
     try:
+        closed(mined, "deliveries.transport", before)
+
         def fix(**f) -> dict:
-            e = refused("process_map", token=mined["viewer"], process="supply", type="delivery", filters=[{"op": "=", "value": "x", **f}])
-            assert e.status == 422, e.body
-            [x] = e.body["errors"]
+            r = engine(CHECKED, timeout=120, stdin=json.dumps({"project": P, "uid": mined["uid"], "filters": [{"op": "=", "value": "x", **f}]}))
+            assert r.returncode == 0, r.stderr[-2000:]
+            [x] = json.loads(r.stdout.splitlines()[-1])
             return x
 
         hid, none = fix(kind="property", column="transport"), fix(kind="property", column="nope")
@@ -641,10 +645,10 @@ def test_a_rule_that_splits_cases_denies_the_type_table(mined):
 
 
 def test_a_column_the_reads_need_hidden_is_said(mined):
+    before = owners()
     sure("set_column_rule", project=P, id="waits", table="pm_supply_delivery", columns=["wait_seconds"])
     try:
-        e = refused("process_map", token=mined["viewer"], process="supply", type="delivery")
-        assert e.status == 403 and "hides 'wait_seconds'" in e.body["message"] and "An Owner" in e.body["message"], e.body
+        closed(mined, "pm_supply_delivery.wait_seconds", before)  # (round 7: the reads' refusal names the rule's column)
         assert read("process_map", process="supply", type="delivery")["totals"]
     finally:
         sure("delete_rls_rule", project=P, id="waits")
@@ -724,14 +728,13 @@ print(json.dumps(model.check(p)))""", timeout=120, stdin=P)
 
 
 def test_a_hidden_column_hides_what_the_build_made_of_it(mined):
-    t = "pm_supply_purchase_order"
+    # (round 7, fail closed: while any of these rules stands the Viewer reads no row of the process's tables at all)
+    t, before = "pm_supply_purchase_order", owners()
     sure("set_column_rule", project=P, id="acts", table=t, columns=["activity"])
     try:
         cols = viewer(mined, "sql_query", sql=f"SELECT * FROM {t} LIMIT 0")["columns"]
         assert "seq" in cols and not {"activity", "next_activity", "variant_id", "first_visit", "first_pair"} & set(cols), cols
-        e = refused("process_map", token=mined["viewer"], process="supply")
-        assert e.status == 403 and e.body["message"].startswith("A column rule hides 'activity' of the events of each Purchase order in process"
-                                                                " 'Supply' from you, and the process reads need it"), e.body
+        closed(mined, f"{t}.activity", before)
     finally:
         sure("delete_rls_rule", project=P, id="acts")
     # (review round 5) a time hidden hides the order and all read along it: on the type table the steps, the next activity,
@@ -742,6 +745,7 @@ def test_a_hidden_column_hides_what_the_build_made_of_it(mined):
             cols = viewer(mined, "sql_query", sql=f"SELECT * FROM {t} LIMIT 0")["columns"]
             assert "activity" in cols and not {c, "seq", "ord", "next_activity", "variant_id", "first_visit", "first_pair", "duration_seconds",
                                                "wait_seconds", "cycle_seconds"} & set(cols), (c, cols)
+            closed(mined, f"{t}.{c}", before)
         finally:
             sure("delete_rls_rule", project=P, id="times")
     for c in ("ended_at", "started_at"):
@@ -753,6 +757,7 @@ def test_a_hidden_column_hides_what_the_build_made_of_it(mined):
             assert r.returncode == 0 and json.loads(r.stdout.splitlines()[-1]) == sorted(["duration_seconds", c, "ord"]), r.stderr[-2000:]
             cols = viewer(mined, "sql_query", sql="SELECT * FROM pm_supply_events LIMIT 0")["columns"]
             assert "activity" in cols and not {c, "duration_seconds", "ord"} & set(cols), (c, cols)
+            closed(mined, f"pm_supply_events.{c}", before)
         finally:
             sure("delete_rls_rule", project=P, id="times")
 
@@ -761,34 +766,25 @@ def test_a_hidden_column_hides_what_the_build_made_of_it(mined):
 
 def test_a_column_hidden_on_one_table_of_a_process_is_hidden_on_all(mined):
     # a process's tables all hold the events' columns: an attribute or a time a column rule hides on one is hidden on the
-    # others (no route round it by another table or a join on event_id). With a time hidden the tables show restricted
-    # Viewers no rows (rows stored in the events' order would show it), readiness says so, and the reads' refusal names
-    # the time, not a column the build made of it; the owner reads everything
+    # others (no route round it by another table or a join on event_id). (Round 7, fail closed: while such a rule stands
+    # the tables show restricted Viewers no rows, the reads refuse them naming the rule's column, readiness says so;
+    # the owner reads everything)
     t, ev, d = "pm_supply_purchase_order", "pm_supply_events", "pm_supply_delivery"
     cols = lambda x: set(viewer(mined, "sql_query", sql=f"SELECT * FROM {x} LIMIT 0")["columns"])  # noqa: E731
-    count = lambda x, tok=None: (viewer(mined, "sql_query", sql=f"SELECT count(*) FROM {x}") if tok else  # noqa: E731
-                                 abi.call("sql_query", project=P, sql=f"SELECT count(*) FROM {x}"))["rows"][0][0]
+    before = owners()
     sure("set_column_rule", project=P, id="amounts", table=ev, columns=["amount"])
     try:
         assert "amount" in abi.call("sql_query", project=P, sql=f"SELECT * FROM {t} LIMIT 0")["columns"]
-        assert not {"amount"} & (cols(t) | cols(d)) and "started_at" in cols(t) and count(t, True) > 0
-        assert read("process_map", mined["viewer"], process="supply")["totals"]
+        assert not {"amount"} & (cols(t) | cols(d)) and "started_at" in cols(t)
+        closed(mined, f"{ev}.amount", before)
     finally:
         sure("delete_rls_rule", project=P, id="amounts")
-    owner, whole = {x: count(x) for x in (t, ev, d)}, read("process_map", process="supply")
     for on in (ev, t):
         sure("set_column_rule", project=P, id="times", table=on, columns=["started_at"])
         try:
             for x in (t, ev, d):
-                assert "started_at" not in cols(x) and count(x, True) == 0 and count(x) == owner[x] > 0, (on, x)
-            for typ in ("purchase_order", "delivery"):
-                e = refused("process_map", token=mined["viewer"], process="supply", type=typ)
-                assert e.status == 403 and e.body["message"].startswith("A column rule hides 'started_at' of the events of each"), (on, e.body)
-            assert [g for g in abi.call("readiness", project=P)["missing"] if g.startswith(f"Table '{t}'")] == [
-                f"Table '{t}' holds events of a process; restricted Viewers see none of its rows while a column rule hides its times"
-                " ('started_at'), because the order of its rows shows the order of the events. To show it, take the times out of the"
-                " column rules on the process's tables (set_column_rule replaces a rule, delete_rls_rule deletes one)."]
-            assert read("process_map", process="supply") == whole, on
+                assert "started_at" not in cols(x), (on, x)
+            closed(mined, f"{on}.started_at", before)
         finally:
             sure("delete_rls_rule", project=P, id="times")
 
@@ -814,3 +810,136 @@ print(json.dumps(process.filter_errors(p, x, "t", [{"kind": "attribute", "column
     assert r.returncode == 0, r.stderr[-2000:]
     [e] = json.loads(r.stdout.splitlines()[-1])
     assert e["error"] == "'gamma' doesn't fit 'kind', which is an enumerated text." and "alpha" not in json.dumps(e), e
+
+
+# ---------- review round 7 ----------
+
+SUPPLY_TABLES = ("pm_supply_events", "pm_supply_purchase_order", "pm_supply_delivery")
+WHY = "a column rule hides a column of a table the process is made from or of one of its tables ('{}')"
+EXPLAINED = ("import json, sys\nimport abi.app  # noqa: F401\nfrom abi.semantic import rls\n"
+             "print(json.dumps(rls.explain(*json.loads(sys.stdin.read())).splitlines()))")
+# the filters' check of a read of the supply's deliveries, with the columns hidden from the Viewer
+CHECKED = r"""
+import json, sys
+import abi.app  # noqa: F401
+from abi import process
+from abi.project import git
+from abi.semantic import model, ontology, rls
+a = json.loads(sys.stdin.read())
+p = json.loads((git.path(a["project"]) / "processes" / "supply.json").read_text())
+x = next(o for o in ontology.read(a["project"])["objects"] if o["id"] == "delivery")
+print(json.dumps(process.filter_errors(p, x, "pm_supply_delivery", a["filters"], model.lake_columns(a["project"]), rls.hidden(a["project"], a["uid"]))))
+"""
+
+
+def owners() -> tuple[dict, dict]:
+    """What the owner reads of process supply: each of its tables' rows, and its map."""
+    return {x: sql(f"SELECT count(*) FROM {x}")[0][0] for x in SUPPLY_TABLES}, read("process_map", process="supply")
+
+
+def explained(mined) -> list[str]:
+    """The restricted Viewer's "How is this calculated?" lines (rls.explain)."""
+    r = engine(EXPLAINED, timeout=120, stdin=json.dumps([P, mined["uid"]]))
+    assert r.returncode == 0, r.stderr[-2000:]
+    return json.loads(r.stdout.splitlines()[-1])
+
+
+def closed(mined, on: str, before: tuple) -> None:
+    """Round 7 (fail closed): while a column rule hides `on` (table.column), a column of a table process supply is made
+    from or of one of its own tables, the restricted Viewer reads no row of any of its tables and the reads refuse them
+    saying so; readiness and "How is this calculated?" say it of each table; the owner reads all of it as `before`."""
+    counts, whole = before
+    lines, gaps = explained(mined), abi.call("readiness", project=P)["missing"]
+    for x in SUPPLY_TABLES:
+        assert viewer(mined, "sql_query", sql=f"SELECT count(*) FROM {x}")["rows"] == [[0]], (on, x)
+        assert sql(f"SELECT count(*) FROM {x}")[0][0] == counts[x] > 0, (on, x)
+        assert [g for g in gaps if g.startswith(f"Table '{x}'")] == [
+            f"Table '{x}' holds events of a process; restricted Viewers see none of its rows while {WHY.format(on)}, because what its"
+            " build makes of a column (an event's ID, a copy under another name, the order of the rows) could show what the rule hides."
+            " An Owner can delete that rule (delete_rls_rule); while any column rule names one of those tables, restricted Viewers see"
+            " none of the process's rows."], (on, x)
+        assert f"-- {x}: no rows ({WHY.format(on)})" in lines, (on, x, lines)
+    for typ, name in (("purchase_order", "Purchase order"), ("delivery", "Delivery")):
+        e = refused("process_map", token=mined["viewer"], process="supply", type=typ)
+        assert e.status == 403 and e.body["message"] == (
+            f"Row-level security: you see none of the events of each {name} in process 'Supply' while {WHY.format(on)}. An Owner of"
+            " the project can delete that rule (delete_rls_rule); readiness names it."), (on, e.body)
+    assert read("process_map", process="supply") == whole, on
+
+
+def test_a_column_rule_on_a_table_the_process_reads_denies_all_its_tables(mined):
+    # a column rule on a source (its activity, a stamp's time) or on a bridge table: what the build made of the column
+    # (an event's ID, a copy under its own name, the order of the rows) would show it, so the restricted Viewer reads none
+    # of the process's rows while it stands; a process that reads none of those tables (the jobs') is not touched
+    before = owners()
+    for table, c in (("supply_events", "activity"), ("purchase_orders", "placed_at"), ("supply_event_orders", "po_id")):
+        sure("set_column_rule", project=P, id="source", table=table, columns=[c])
+        try:
+            closed(mined, f"{table}.{c}", before)
+            assert read("process_map", mined["viewer"], process="jobs")["totals"] == read("process_map", process="jobs")["totals"], table
+        finally:
+            sure("delete_rls_rule", project=P, id="source")
+    assert read("process_map", mined["viewer"], process="supply")["totals"], "without the rule the Viewer reads it again"
+
+
+def test_how_it_is_calculated_says_why_a_process_table_shows_no_rows(mined):
+    # "How is this calculated?" gives a denied process table the reason readiness gives: what splits its cases, or the
+    # column rule (the helpdesk's, under the fixture's rule on ticket_events.agent); never "it needs a rule of its own"
+    t, uid = "pm_supply_purchase_order", str(mined["uid"])
+    sure("set_rls_rule", project=P, id="split", table=t, column="activity", users={uid: ["Order placed"]})
+    try:
+        assert denied(mined, t) and "row rule 'split' on its column 'activity'" in split_by(t)
+        lines = explained(mined)
+        assert f"-- {t}: no rows (row rule 'split' on its column 'activity')" in lines, lines
+        for x in ("pm_desk_events", "pm_desk_ticket"):
+            assert f"-- {x}: no rows ({WHY.format('ticket_events.agent')})" in lines, lines
+        assert not [x for x in lines if x.startswith((f"-- {t}:", "-- pm_desk_")) and "rule of its own" in x], lines
+    finally:
+        sure("delete_rls_rule", project=P, id="split")
+
+
+CRAFTED = r"""
+import json
+import duckdb
+import abi.app  # noqa: F401
+from abi import process
+from abi.semantic.sql import SANDBOX
+ran, how, connect = [], [], duckdb.connect
+
+
+class Spy:  # what the check runs, and how its DuckDB is opened
+    def __init__(self, con):
+        self.con = con
+
+    def execute(self, q, *a):
+        ran.append(q)
+        return self.con.execute(q, *a)
+
+    def close(self):
+        self.con.close()
+
+
+def spied(*a, **k):
+    how.append(k.get("config") == SANDBOX)
+    return Spy(connect(*a, **k))
+
+
+duckdb.connect = spied
+typ = "VARCHAR) || (SELECT 1) || CAST('' AS VARCHAR"  # a live table's column type, as an import may write it in tables/<t>.json
+p, x = {"id": "x", "events": [{"attributes": []}]}, {"table": "o", "name": "Thing"}
+f = [{"kind": "time", "when": "started", "from": "2025-01-01"}, {"kind": "property", "column": "kind", "op": "=", "value": "a"}]
+print(json.dumps({"errors": process.filter_errors(p, x, "t", f, {"t": {}, "o": {"kind": typ}}, {}), "ran": ran, "how": how}))
+"""
+
+
+def test_a_column_type_from_a_file_is_never_put_into_sql():
+    # a filter's value is cast to its column's type to check it; a live table's types are its file's text, which an
+    # Editor's import could make SQL: only a plain type (or an ENUM as DuckDB writes it) is cast, another is refused with
+    # nothing of it run, and the check's DuckDB is the sandbox's, with no file access and its settings locked
+    r = engine(CRAFTED, timeout=120)
+    assert r.returncode == 0, r.stderr[-2000:]
+    out = json.loads(r.stdout.splitlines()[-1])
+    assert out["errors"] == [{"file": "filters", "path": "$[1].column", "error": "'kind' is of a type a filter can't compare values with, so it"
+                              " can't be filtered on.", "fix": "Filter on another column; an Owner can check the column's type in the table's definition."}], out
+    assert out["ran"] == ["SET enable_external_access = false; SET lock_configuration = true", "SELECT CAST('2025-01-01' AS TIMESTAMP)"], out
+    assert out["how"] == [True], out

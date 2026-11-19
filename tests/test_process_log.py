@@ -617,8 +617,15 @@ def test_events_table_denied_to_restricted(built):
     # a measure over the whole log is empty for them, not the log's
     assert viewer(built, "semantic_query", measures=["log_events"])["rows"] == [[0]]
     assert abi.call("semantic_query", project=P, measures=["log_events"])["rows"] == [[built["known"]["events"]]]
-    # denied by design: readiness asks nobody for a rule on it
-    assert not [g for g in abi.call("readiness", project=P)["missing"] if "pm_supply_events" in g or "pm_desk_events" in g]
+    # denied by design: readiness asks nobody for a rule on it. (1.2.7 M2 round 7: the helpdesk's is denied by the column
+    # rule on ticket_events, a table it is made from, too, and readiness says that)
+    gaps = abi.call("readiness", project=P)["missing"]
+    assert not [g for g in gaps if "pm_supply_events" in g]
+    assert [g for g in gaps if "pm_desk_events" in g] == [
+        "Table 'pm_desk_events' holds events of a process; restricted Viewers see none of its rows while a column rule hides a column of a"
+        " table the process is made from or of one of its tables ('ticket_events.agent'), because what its build makes of a column (an"
+        " event's ID, a copy under another name, the order of the rows) could show what the rule hides. An Owner can delete that rule"
+        " (delete_rls_rule); while any column rule names one of those tables, restricted Viewers see none of the process's rows."]
     # the read of the definitions: a restricted reader gets names and the status, no count made of every row, no filter value
     got = viewer(built, "process")["processes"]
     assert sorted(x["id"] for x in got) == ["desk", "supply"] and all(set(x) == {"id", "name", "case", "types", "build"} for x in got)

@@ -330,6 +330,9 @@ def _source(i: int, s: dict, p: dict, lake: dict, zone: str) -> str:
         if ft in ("", t) and fc in cols:
             # an instant is compared as the log holds it: a filter's "2025-01-01" is the project's midnight
             lhs, typ = (_time(fc, cols[fc], zone), "TIMESTAMP") if cols[fc] == "TIMESTAMP WITH TIME ZONE" else (_q(fc), cols[fc])
+            if not rls.plain(typ):  # round 7: never put a type into SQL that isn't plain (a live table's is its file's text)
+                raise ActionFailed(409, f"processes/{p['id']}.json $.clean.where: column '{t}.{fc}' is of a type the build can't compare"
+                                        " values with. Leave it out of clean.where.")
             lits = [rls.cast_lit(v, typ) for v in (f["value"] if isinstance(f["value"], list) else [f["value"]])]
             conds.append(f"{lhs} IN ({', '.join(lits)})" if f["op"] == "in" else f"{lhs} {f['op']} {lits[0]}")
     own = [(c, f"__{order.index(x['type'])}_{j}") for x in s["objects"] if "through" not in x for j, c in enumerate(x["columns"])]
@@ -846,7 +849,11 @@ def filter_errors(p: dict, x: dict, t: str, filters: list, cols: dict, hid: dict
         return errs
     attrs = {a for s in p["events"] for a in s.get("attributes", []) if a.lower() not in hid.get(t, set())} & cols[t].keys()
     props = [c for c in cols.get(x["table"], {}) if c.lower() not in hid.get(x["table"], set())]
-    con = duckdb.connect()  # literals are cast on constants here, before any data is read
+    from abi.semantic.sql import SANDBOX  # not at top: it imports the semantic package
+
+    # literals are cast on constants here, before any data is read, in a DuckDB of its own that can reach nothing else
+    con = duckdb.connect(config=SANDBOX)
+    con.execute("SET enable_external_access = false; SET lock_configuration = true")
 
     def fits(lit: str) -> bool:
         try:
@@ -872,6 +879,9 @@ def filter_errors(p: dict, x: dict, t: str, filters: list, cols: dict, hid: dict
                 vals, typ = f["value"] if isinstance(f["value"], list) else [f["value"]], cols[x["table"] if prop else t][c]
                 if (f["op"] == "in") != isinstance(f["value"], list) or not vals:
                     errs.append(err(f"{here}.value", "A list goes with op 'in', one value with any other op.", "Use op 'in' with a list of values, or give one value."))
+                elif not rls.plain(typ):  # round 7: a live table's type is its file's text: never put into SQL unless plain
+                    errs.append(err(f"{here}.column", f"'{c}' is of a type a filter can't compare values with, so it can't be filtered on.",
+                                    "Filter on another column; an Owner can check the column's type in the table's definition."))
                 elif bad := next((v for v in vals if not fits(rls.cast_lit(v, typ))), None):
                     errs.append(err(f"{here}.value", f"'{bad}' doesn't fit '{c}', which is {'an enumerated text' if typ.startswith('ENUM') else typ}.",
                                     "Give a value of the column's kind (a date as YYYY-MM-DD, a number for a number)."))
@@ -942,15 +952,15 @@ def _read(project: str, args: Read, user: User, what: str, more: dict | None = N
     if not {*key, *CASE, *FLAGS} <= cols[t].keys():
         raise ActionFailed(409, f"The event log of process '{p['name']}' was built before its {x['name']}'s key or this version of ABI: save"
                                 " the process again (save_process) to build it again; `process` shows the build.")
-    # first: a hidden time also denies the table (rls.timed), which the refusal below doesn't name
-    if gone := sorted(c for c in {*key, *EVENT, *CASE, *FLAGS, "seq", "next_activity", "wait_seconds"} if c.lower() in rls.hidden(project, user.id).get(t, set())):
-        # a column a rule names: what a build works out of a hidden column (DERIVED) is hidden only with that column, also in `gone`
-        say = next((c for c in gone if c not in set().union(*DERIVED.values())), gone[0])
-        raise ActionFailed(403, f"A column rule hides '{say}' of the events of each {x['name']} in process '{p['name']}' from you, and the"
-                                " process reads need it, so they can't run for you. An Owner of the project decides which columns are hidden.")
+    # round 7: a column rule on a table of the process or one it reads denies all of them (rls.hiding), so no column the
+    # reads need is ever hidden from a reader they run for (rls._hidden hides a process's columns only through such a rule)
+    if rls.restricted(project, user.id) and (r := rls.hiding(project).get(t)):
+        raise ActionFailed(403, f"Row-level security: you see none of the events of each {x['name']} in process '{p['name']}' while a column rule"
+                                f" hides a column of a table the process is made from or of one of its tables ('{r}'). An Owner of the project"
+                                " can delete that rule (delete_rls_rule); readiness names it.")
     if rls.restricted(project, user.id) and t in rls.unfiltered_outputs(project):
         raise ActionFailed(403, f"Row-level security: you see none of the events of each {x['name']} in process '{p['name']}'. Their table is made"
-                                " from tables that security rules filter, or hide columns of, without a rule of its own, or a rule, a relationship"
+                                " from tables that security rules filter, without a rule of its own, or that column rules hide columns of, or a rule, a relationship"
                                 f" or a link splits its cases, or its key in the data model is not its {x['name']}'s key and event_id. An Owner of"
                                 " the project can give it a row rule on its key column(s) and remove what splits it; readiness names what to do.")
     if errs := filter_errors(p, x, t, args.filters, cols, rls.hidden(project, user.id)):

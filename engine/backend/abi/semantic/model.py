@@ -421,12 +421,12 @@ def check(project: str) -> list[str]:
     denied = semantic.rls.unfiltered_outputs(project)
     lost = process.leftover(project) if any(t.startswith("pm_") and t not in pm for t in denied) else set()  # what a build left behind
     split = semantic.rls.splits(project) if any(pm.get(t) for t in denied) else {}  # 1.2.7 M2: what shows part of a case
-    # round 6: a table denied only while its times are hidden is said so (otherwise its other cause first)
-    timed = semantic.rls.timed(project) if denied else {}
-    other = set(semantic.rls.unfiltered_outputs(project, times=False)) if timed else set(denied)
-    gaps += [f"Table '{t}' holds events of a process; restricted Viewers see none of its rows while a column rule hides its times"
-             f" ('{timed[t]}'), because the order of its rows shows the order of the events. To show it, take the times out of the"
-             " column rules on the process's tables (set_column_rule replaces a rule, delete_rls_rule deletes one)." if t not in other else
+    # round 7: a process's table a column rule denies (rls.hiding), its events table too, is said so first
+    hid = semantic.rls.hiding(project) if denied else {}
+    gaps += [f"Table '{t}' holds events of a process; restricted Viewers see none of its rows while a column rule hides a column of a"
+             f" table the process is made from or of one of its tables ('{hid[t]}'), because what its build makes of a column (an event's"
+             " ID, a copy under another name, the order of the rows) could show what the rule hides. An Owner can delete that rule"
+             " (delete_rls_rule); while any column rule names one of those tables, restricted Viewers see none of the process's rows." if t in hid else
              f"Table '{t}' holds the predictions of an ML model that is gone; restricted Viewers see none of"
              " its rows until it gets a row rule of its own (set_rls_rule)." if gone(t) else
              f"Table '{t}' holds the events of a process that is gone, or of an object type it is no longer about; restricted Viewers see none"
@@ -437,16 +437,16 @@ def check(project: str) -> list[str]:
                                   else "; until that is fixed it is denied.") + f" {split[t][1]}" if t in split else
              # a process's table: a relationship of its own to a filtered source would be the build's again at the next build
              f"Table '{t}' holds events of a process, each case's rows together; restricted Viewers see none of its rows while it is made"
-             " from tables that security rules filter, or hide columns of, without a rule of its own. It needs a row rule on its key"
-             " column(s) (set_rls_rule) where a row rule filters one of those tables, a column rule (set_column_rule) where a column rule"
-             " hides a column of one. With a row rule on its key column(s) a restricted Viewer sees every event of each case the rule"
-             " lets them see, also events from rows of those tables that their own rules filter. A row rule on another of its columns, a"
+             " from tables that security rules filter, without a rule of its own, or from tables a column rule hides columns of. It"
+             " needs a row rule on its key column(s) (set_rls_rule) where a row rule filters one of those tables; where a column rule"
+             " hides columns of one, it shows them no rows while that rule stays (delete_rls_rule deletes it). With a row rule on its key"
+             " column(s) a restricted Viewer sees every event of each case the rule lets them see, also events from rows of those tables that their own rules filter. A row rule on another of its columns, a"
              " rule on the process's events table or a relationship from another of its columns to a filtered table would split its"
              " cases and deny it again." if t in pm else
              f"Table '{t}' {'holds ML predictions' if t.startswith('ml_') else 'is built by steps'} made from rows that"
              " row-level security rules filter; restricted Viewers see none of its rows until a rule on it (or a"
              " relationship to each filtered table it is made from) filters it."
-             for t in denied if pm.get(t, "") is not None or t not in other]  # model tables or not: SQL and grids read them too
+             for t in denied if pm.get(t, "") is not None or t in hid]  # model tables or not: SQL and grids read them too
     from abi.semantic import ontology  # not at top: ontology imports this module
     gaps += ontology.gaps(project)  # 1.2.6: dangling references, only once an ontology exists
     from abi import ml  # not at top: ml imports this module
