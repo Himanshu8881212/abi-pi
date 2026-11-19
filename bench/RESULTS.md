@@ -2054,3 +2054,14 @@ with the same files as round 3 and the new test: 111 passed in 1,247 s. The whol
 a9b9e38: 7 failed, 620 passed, 24 skipped in 5,078 s; the six known container ones and
 tests/test_pages.py::test_renamed_project_keeps_history (renaming back found the old ID taken: a record under it, in
 a project with no process or rule), which passed alone three times in a fresh container.
+
+**Review round 7** (4e614f0: fail closed: while a column rule names a table a process reads or one of its own, restricted
+Viewers see none of its tables' rows; a filter's check casts only a plain type, in the sandbox's DuckDB). The reads'
+row-level security path changed (`rls.hiding` reads rls.json, the processes and the ontology at each denial check), so
+the bench ran again in the round's container, same command, one run: the first build 49.1 s (VmHWM 1,097 MB), after the
+refresh 51.8 s (1,215 MB), both met (≤ 60 s, ≤ 1.5 GB); process_map p95 of 20 cold 3.29 s, warm 1.25 s, filtered warm
+1.99 s; process_variants cold 2.11 s, warm 0.27 s (all four met); a restricted Viewer's map 8.11 s first, 2.10 to
+2.24 s warm. Tests: the 18 contract tests of M2 with tests/test_rls_links.py, tests/test_127_nobreak.py and
+tests/test_ontology_nobreak.py: 61 passed in 627 s; tests/test_process_mine.py and tests/test_process_log.py whole: 70
+passed in 890 s (the round's 8 new or changed tests each failed on a29a836's engine: 8 failed). The whole suite in a
+container set up anew at 4e614f0: 6 failed, 624 passed, 24 skipped in 5,206 s; the six known container ones.
